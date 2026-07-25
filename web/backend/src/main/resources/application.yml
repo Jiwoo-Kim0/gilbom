@@ -1,6 +1,12 @@
+#common
 spring:
   application:
     name: gilbom-backend
+  # STS에서 직접 실행: 별도 지정 없이 local을 기본 프로필로 사용
+  # 로컬 Docker에서 실행: SPRING_PROFILES_ACTIVE=docker
+  # EC2의 Docker에서 실행: SPRING_PROFILES_ACTIVE=ec2,docker
+  profiles:
+    default: local
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/gilbom}
     username: ${SPRING_DATASOURCE_USERNAME:gilbom_app}
@@ -28,3 +34,13 @@ management:
 info:
   app:
     name: ${spring.application.name}
+
+mqtt:
+  # Select tls or mtls.
+  now-mqtt-security-strategy: tls
+  username: ${MQTT_USERNAME}
+  password: ${MQTT_PASSWORD}
+  # Comma-separated MQTT topic filters.
+  subscribe-topic: ${MQTT_SUBSCRIBE_TOPIC:robots/+/telemetry,robots/+/commands/ack}
+  publish-topic: ${MQTT_PUBLISH_TOPIC:robots/test-robot/commands}
+  qos: ${MQTT_QOS:1}

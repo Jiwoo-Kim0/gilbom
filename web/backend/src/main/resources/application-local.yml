@@ -6,3 +6,14 @@ spring:
 logging:
   level:
     com.gilbom: DEBUG
+
+mqtt:
+  broker: ${MQTT_BROKER:ssl://localhost:8883}
+  client-id: ${MQTT_CLIENT_ID:gilbom-local}
+  security:
+    # Public CA certificates can use the JVM default trust store by leaving this empty.
+    trust-certificate: ${MQTT_TRUST_CERTIFICATE:}
+    # Set absolute Windows paths when local mTLS is enabled.
+    # Example: C:/ssafy/SSAFY-TASK/mqtt/certs/client.pem
+    client-certificate: ${MQTT_CLIENT_CERTIFICATE:}
+    client-private-key: ${MQTT_CLIENT_PRIVATE_KEY:}

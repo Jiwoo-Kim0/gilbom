@@ -6,3 +6,10 @@ spring:
 logging:
   level:
     com.gilbom: INFO
+
+mqtt:
+  security:
+    # Paths inside the backend container. The host certificate directory must be mounted here.
+    trust-certificate: ${MQTT_TRUST_CERTIFICATE:}
+    client-certificate: ${MQTT_CLIENT_CERTIFICATE:/app/certs/client.pem}
+    client-private-key: ${MQTT_CLIENT_PRIVATE_KEY:/app/certs/client-key.pem}
