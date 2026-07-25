@@ -1,0 +1,18 @@
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Spring Boot / Gradle
+.gradle/
+backend/build/
+
+# React / Vite
+frontend/node_modules/
+frontend/dist/
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
