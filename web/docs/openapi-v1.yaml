@@ -3,9 +3,15 @@ info:
   title: 길봄 API
   version: 1.0.0
   description: |
-    길봄 REST API의 공통 성공 응답, 오류 코드, 예외 및 Validation 계약입니다.
+    길봄 REST API의 공통 응답·오류와 Day 1 인증·권한·보고서 상태 계약입니다.
     성공 응답은 공통 envelope 없이 실제 DTO를 직접 반환합니다.
-    세부 정책은 common-api-response-and-errors.md를 기준으로 합니다.
+    세부 정책은 docs의 주제별 Markdown 정본을 함께 기준으로 합니다.
+
+tags:
+  - name: Auth
+    description: 관리자 서버 세션·CSRF·TOTP 인증
+  - name: Reports
+    description: 보고서 생성·버전·검토·승인 상태 계약
 
 x-api-conventions:
   successResponse:
@@ -18,11 +24,910 @@ x-api-conventions:
     badRequest: 필드·파라미터·JSON 형식 오류
     conflict: 현재 리소스 상태 또는 기존 데이터와 충돌
     unprocessableEntity: 형식은 유효하지만 업무 규칙 위반
+  authentication:
+    type: server-session
+    productionCookie: __Host-GILBOM_SESSION
+    csrfHeader: X-CSRF-TOKEN
+    mfa: TOTP required for every administrator
+  authorization:
+    model: RBAC permission plus resource scope
+    default: deny
+    source: authorization-matrix.md
 
-paths: {}
+x-contract-sources:
+  common: common-api-response-and-errors.md
+  api: api-contract.md
+  authentication: admin-authentication-security.md
+  authorization: authorization-matrix.md
+  reportStatus: report-status-contract.md
+  environment: environment-configuration-strategy.md
+  endpointDtoBaseline: ../../docs/길봄_MQTT 통신_SWAGGER REST SSE_API 명세서.pdf
+  migrationRule: 구현하는 endpoint는 같은 변경에서 이 OpenAPI에 operation과 schema를 완성한다.
+
+paths:
+  /api/v1/auth/csrf-token:
+    get:
+      tags: [Auth]
+      operationId: issueCsrfToken
+      summary: 익명 또는 인증 세션의 CSRF 토큰 발급
+      description: |
+        로그인 전에도 호출할 수 있습니다. 세션에 토큰을 저장하고 응답은
+        Cache-Control: no-store로 전달합니다.
+      security: []
+      responses:
+        "200":
+          description: CSRF 토큰 발급
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CsrfTokenResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: 관리자 아이디·비밀번호 검증
+      description: |
+        성공해도 업무 권한을 부여하지 않고 MFA 다음 상태를 반환합니다.
+        익명 세션에 결합된 CSRF 토큰이 필요합니다.
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "202":
+          description: 비밀번호 검증 성공, MFA 등록 또는 검증 필요
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginChallengeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/auth/mfa/totp/enroll:
+    post:
+      tags: [Auth]
+      operationId: enrollTotp
+      summary: TOTP 등록 정보 일회성 발급
+      description: MFA_ENROLLMENT_REQUIRED 세션에서만 호출할 수 있습니다.
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: TOTP 등록 정보 발급
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TotpEnrollmentResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/auth/mfa/totp/confirm:
+    post:
+      tags: [Auth]
+      operationId: confirmTotpEnrollment
+      summary: 첫 TOTP 코드 확인 및 등록 완료
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpCodeRequest"
+      responses:
+        "200":
+          description: TOTP 등록과 인증 완료, 복구 코드 일회성 발급
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MfaEnrollmentConfirmationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/auth/mfa/totp/verify:
+    post:
+      tags: [Auth]
+      operationId: verifyTotp
+      summary: 로그인 TOTP 검증
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpCodeRequest"
+      responses:
+        "200":
+          description: MFA와 관리자 인증 완료
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthenticationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/auth/mfa/recovery:
+    post:
+      tags: [Auth]
+      operationId: verifyMfaRecoveryCode
+      summary: 일회용 복구 코드 검증
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpRecoveryRequest"
+      responses:
+        "200":
+          description: 복구 코드 소비 및 관리자 인증 완료
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthenticationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: 세션 폐기 및 로그아웃
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: 로그아웃 완료
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/auth/me:
+    get:
+      tags: [Auth]
+      operationId: getCurrentUser
+      summary: 현재 인증 관리자와 유효 권한 조회
+      security:
+        - serverSession: []
+      responses:
+        "200":
+          description: 현재 관리자
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthenticatedUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/my/mfa/totp/reset:
+    post:
+      tags: [Auth]
+      operationId: resetOwnTotp
+      summary: 본인 TOTP 교체 시작
+      description: |
+        현재 비밀번호와 현재 TOTP 또는 미사용 복구 코드를 검증합니다.
+        성공하면 기존 factor와 세션을 폐기하고 MFA_ENROLLMENT_REQUIRED 상태로 전환합니다.
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OwnMfaResetRequest"
+      responses:
+        "202":
+          description: 기존 MFA 폐기 및 재등록 필요
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginChallengeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/admin/users/{userId}/mfa/reset:
+    post:
+      tags: [Auth]
+      operationId: resetUserTotpAsAdmin
+      summary: 다른 관리자의 TOTP 긴급 초기화
+      description: ADMIN_SETTINGS_MANAGE와 작업자 자신의 비밀번호·TOTP 재검증이 필요합니다.
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminMfaResetRequest"
+      responses:
+        "204":
+          description: 대상 MFA와 활성 세션 폐기 완료
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/reports:
+    post:
+      tags: [Reports]
+      operationId: createReport
+      summary: DRAFT 보고서와 첫 버전 생성
+      x-required-permission: REPORT_CREATE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportCreateRequest"
+      responses:
+        "201":
+          description: 보고서 생성
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/v1/reports/{reportId}:
+    patch:
+      tags: [Reports]
+      operationId: updateReport
+      summary: DRAFT·REJECTED 보고서 새 버전 생성
+      x-required-permission: REPORT_UPDATE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/ReportId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportUpdateRequest"
+      responses:
+        "200":
+          description: 새 버전 생성 및 보고서 갱신
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      tags: [Reports]
+      operationId: deleteReport
+      summary: DRAFT·REJECTED 보고서 소프트 삭제
+      x-required-permission: REPORT_UPDATE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/ReportId"
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: 보고서 소프트 삭제
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/reports/{reportId}/submit:
+    post:
+      tags: [Reports]
+      operationId: submitReport
+      summary: DRAFT에서 IN_REVIEW로 전이
+      x-required-permission: REPORT_UPDATE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/ReportId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportTransitionRequest"
+      responses:
+        "200":
+          description: 검토 요청 완료
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/reports/{reportId}/approve:
+    post:
+      tags: [Reports]
+      operationId: approveReport
+      summary: IN_REVIEW에서 APPROVED로 전이
+      x-required-permission: REPORT_APPROVE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/ReportId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportDecisionRequest"
+      responses:
+        "200":
+          description: 보고서 승인
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/reports/{reportId}/reject:
+    post:
+      tags: [Reports]
+      operationId: rejectReport
+      summary: IN_REVIEW에서 REJECTED로 전이
+      x-required-permission: REPORT_APPROVE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/ReportId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportRejectionRequest"
+      responses:
+        "200":
+          description: 보고서 반려
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
 components:
+  securitySchemes:
+    serverSession:
+      type: apiKey
+      in: cookie
+      name: __Host-GILBOM_SESSION
+      description: |
+        운영 서버 세션 쿠키입니다. 쿠키 존재만으로 인증 완료를 뜻하지 않으며
+        서버의 ANONYMOUS, MFA 대기, AUTHENTICATED 상태를 함께 검사합니다.
+    robotApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: 로봇 이미지 업로드 전용 기기별 API Key
+
+  parameters:
+    CsrfToken:
+      name: X-CSRF-TOKEN
+      in: header
+      required: true
+      description: 현재 서버 세션에 결합된 CSRF 토큰
+      schema:
+        type: string
+        minLength: 1
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: 동일 생성 요청의 중복 처리를 막는 클라이언트 생성 UUID
+      schema:
+        type: string
+        format: uuid
+    ReportId:
+      name: reportId
+      in: path
+      required: true
+      description: 보고서 내부 식별자
+      schema:
+        type: string
+        format: uuid
+
   schemas:
+    PermissionCode:
+      type: string
+      enum:
+        - ROBOT_STATUS_VIEW
+        - ROBOT_REGISTER
+        - ROBOT_COMMAND_VIEW
+        - ROBOT_COMMAND_EXECUTE
+        - ROBOT_EVENT_ACKNOWLEDGE
+        - MISSION_VIEW
+        - MISSION_MANAGE
+        - DEFECT_STATUS_VIEW
+        - DEFECT_STATUS_UPDATE
+        - DEFECT_MERGE
+        - DEFECT_EXPORT
+        - REPORT_VIEW
+        - REPORT_CREATE
+        - REPORT_UPDATE
+        - REPORT_APPROVE
+        - AUDIT_LOG_VIEW
+        - ADMIN_SETTINGS_MANAGE
+        - SYSTEM_LOG_VIEW
+
+    CsrfTokenResponse:
+      type: object
+      required: [headerName, token]
+      properties:
+        headerName:
+          type: string
+          enum: [X-CSRF-TOKEN]
+        token:
+          type: string
+          minLength: 1
+          description: 세션 결합 불투명 토큰. 저장·로그 금지.
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      additionalProperties: false
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 50
+        password:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 128
+          writeOnly: true
+
+    LoginState:
+      type: string
+      enum:
+        - MFA_ENROLLMENT_REQUIRED
+        - MFA_REQUIRED
+
+    LoginChallengeResponse:
+      type: object
+      required: [loginState, challengeExpiresAt]
+      properties:
+        loginState:
+          $ref: "#/components/schemas/LoginState"
+        challengeExpiresAt:
+          type: string
+          format: date-time
+
+    TotpCodeRequest:
+      type: object
+      required: [code]
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          pattern: '^[0-9]{6}$'
+          writeOnly: true
+          description: 로그·오류 응답에 반사하지 않는 6자리 TOTP
+
+    TotpRecoveryRequest:
+      type: object
+      required: [recoveryCode]
+      additionalProperties: false
+      properties:
+        recoveryCode:
+          type: string
+          minLength: 1
+          maxLength: 100
+          writeOnly: true
+
+    OwnMfaResetRequest:
+      type: object
+      required: [currentPassword]
+      additionalProperties: false
+      description: totpCode와 recoveryCode 중 정확히 하나가 필요합니다.
+      properties:
+        currentPassword:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 128
+          writeOnly: true
+        totpCode:
+          type: string
+          pattern: '^[0-9]{6}$'
+          writeOnly: true
+        recoveryCode:
+          type: string
+          minLength: 1
+          maxLength: 100
+          writeOnly: true
+      oneOf:
+        - required: [totpCode]
+          not:
+            required: [recoveryCode]
+        - required: [recoveryCode]
+          not:
+            required: [totpCode]
+
+    AdminMfaResetRequest:
+      type: object
+      required: [currentPassword, totpCode, reason]
+      additionalProperties: false
+      properties:
+        currentPassword:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 128
+          writeOnly: true
+        totpCode:
+          type: string
+          pattern: '^[0-9]{6}$'
+          writeOnly: true
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    TotpEnrollmentResponse:
+      type: object
+      required: [otpauthUri, manualEntryKey, enrollmentExpiresAt]
+      properties:
+        otpauthUri:
+          type: string
+          format: uri
+          description: TOTP secret을 포함하는 일회성 등록 URI. 저장·로그 금지.
+        manualEntryKey:
+          type: string
+          description: 일회성 수동 입력키. 저장·로그 금지.
+        enrollmentExpiresAt:
+          type: string
+          format: date-time
+
+    RoleSummary:
+      type: object
+      required: [roleCode, roleName]
+      properties:
+        roleCode:
+          type: string
+          example: OPERATOR
+        roleName:
+          type: string
+          example: 운영자
+
+    AuthenticatedUser:
+      type: object
+      required: [userId, displayName, roles, permissions]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/RoleSummary"
+        permissions:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/PermissionCode"
+
+    AuthenticationResponse:
+      type: object
+      required: [user, csrfToken, sessionExpiresAt]
+      properties:
+        user:
+          $ref: "#/components/schemas/AuthenticatedUser"
+        csrfToken:
+          type: string
+          description: 인증 완료 후 교체된 CSRF 토큰
+        sessionExpiresAt:
+          type: string
+          format: date-time
+          description: 서버가 적용하는 세션 절대 만료 시각
+        recoveryCodeUsed:
+          type: boolean
+          default: false
+
+    MfaEnrollmentConfirmationResponse:
+      allOf:
+        - $ref: "#/components/schemas/AuthenticationResponse"
+        - type: object
+          required: [recoveryCodes]
+          properties:
+            recoveryCodes:
+              type: array
+              minItems: 10
+              maxItems: 10
+              description: 한 번만 노출되는 일회용 복구 코드. 저장·로그 금지.
+              items:
+                type: string
+
+    ReportStatus:
+      type: string
+      enum:
+        - DRAFT
+        - IN_REVIEW
+        - APPROVED
+        - REJECTED
+
+    ReportType:
+      type: string
+      enum:
+        - PERIODIC
+        - ISSUE
+
+    ReportCreateRequest:
+      type: object
+      required: [title, reportType, periodFrom, periodTo, content]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        summary:
+          type: string
+          maxLength: 255
+        reportType:
+          $ref: "#/components/schemas/ReportType"
+        periodFrom:
+          type: string
+          format: date-time
+        periodTo:
+          type: string
+          format: date-time
+        content:
+          type: string
+          minLength: 1
+        patrolAreaId:
+          type: string
+          format: uuid
+          nullable: true
+
+    ReportUpdateRequest:
+      type: object
+      required: [expectedVersionNo, content]
+      properties:
+        expectedVersionNo:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        summary:
+          type: string
+          maxLength: 255
+        content:
+          type: string
+          minLength: 1
+        changeNote:
+          type: string
+          maxLength: 500
+
+    ReportTransitionRequest:
+      type: object
+      required: [expectedVersionNo]
+      additionalProperties: false
+      properties:
+        expectedVersionNo:
+          type: integer
+          minimum: 1
+
+    ReportDecisionRequest:
+      type: object
+      required: [expectedVersionNo]
+      additionalProperties: false
+      properties:
+        expectedVersionNo:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+          maxLength: 500
+
+    ReportRejectionRequest:
+      type: object
+      required: [expectedVersionNo, reason]
+      additionalProperties: false
+      properties:
+        expectedVersionNo:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    ReportResponse:
+      type: object
+      required:
+        - reportId
+        - reportCode
+        - title
+        - reportType
+        - reportStatus
+        - currentVersionNo
+        - createdAt
+        - updatedAt
+      properties:
+        reportId:
+          type: string
+          format: uuid
+        reportCode:
+          type: string
+        title:
+          type: string
+        summary:
+          type: string
+          nullable: true
+        reportType:
+          $ref: "#/components/schemas/ReportType"
+        reportStatus:
+          $ref: "#/components/schemas/ReportStatus"
+        currentVersionNo:
+          type: integer
+          minimum: 1
+        approvedBy:
+          type: string
+          format: uuid
+          nullable: true
+        approvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
     ErrorCode:
       type: string
       description: 클라이언트 분기에 사용하는 안정적인 UPPER_SNAKE_CASE 오류 코드
@@ -41,6 +946,7 @@ components:
         - COMMON_METHOD_NOT_ALLOWED
         - COMMON_CONFLICT
         - COMMAND_STATE_CONFLICT
+        - REPORT_STATE_CONFLICT
         - IMAGE_TOO_LARGE
         - COMMON_UNSUPPORTED_MEDIA_TYPE
         - IMAGE_UNSUPPORTED_MEDIA_TYPE
@@ -157,7 +1063,7 @@ components:
                     reason: 제목은 필수입니다.
 
     Unauthorized:
-      description: 인증 필요
+      description: 인증정보 불일치, 인증 필요, 만료·폐기 세션 또는 MFA 미완료
       headers:
         X-Request-Id:
           $ref: "#/components/headers/RequestId"
@@ -165,9 +1071,17 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+          example:
+            timestamp: "2026-07-25T10:30:00Z"
+            status: 401
+            code: AUTH_UNAUTHENTICATED
+            message: 인증이 필요합니다.
+            path: /api/v1/auth/me
+            requestId: 18c88a89-7d89-4c17-97fa-a6e2253614d9
+            details: []
 
     Forbidden:
-      description: 권한 부족
+      description: 권한 부족 또는 CSRF 토큰 누락·불일치
       headers:
         X-Request-Id:
           $ref: "#/components/headers/RequestId"
@@ -175,6 +1089,14 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+          example:
+            timestamp: "2026-07-25T10:30:00Z"
+            status: 403
+            code: AUTH_FORBIDDEN
+            message: 요청을 수행할 권한이 없습니다.
+            path: /api/v1/admin/roles
+            requestId: 18c88a89-7d89-4c17-97fa-a6e2253614d9
+            details: []
 
     NotFound:
       description: 요청한 리소스 없음
@@ -241,10 +1163,23 @@ components:
       headers:
         X-Request-Id:
           $ref: "#/components/headers/RequestId"
+        Retry-After:
+          description: 다시 시도할 수 있을 때까지 남은 초
+          schema:
+            type: integer
+            minimum: 1
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+          example:
+            timestamp: "2026-07-25T10:30:00Z"
+            status: 429
+            code: COMMON_RATE_LIMIT_EXCEEDED
+            message: 잠시 후 다시 시도해 주세요.
+            path: /api/v1/auth/login
+            requestId: 18c88a89-7d89-4c17-97fa-a6e2253614d9
+            details: []
 
     InternalServerError:
       description: 예상하지 못한 서버 오류
