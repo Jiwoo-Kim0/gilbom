@@ -53,6 +53,14 @@ public class GlobalExceptionTestController {
         throw new BusinessException(ErrorCode.MQTT_UNAVAILABLE);
     }
 
+    @GetMapping("/test/mqtt-certificate")
+    void mqttCertificate() {
+        throw new BusinessException(
+                ErrorCode.MQTT_CERTIFICATE_NOT_X509,
+                "`TEST` 인증서는 X.509 형식이 아닙니다."
+        );
+    }
+
     @GetMapping("/test/too-large")
     void tooLarge() {
         throw new MaxUploadSizeExceededException(500_000);

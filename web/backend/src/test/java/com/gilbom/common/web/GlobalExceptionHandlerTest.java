@@ -134,6 +134,15 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void nonX509MqttCertificatesUseTheDedicatedErrorCode() throws Exception {
+        mockMvc.perform(get("/test/mqtt-certificate"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code", is("MQTT_CERTIFICATE_NOT_X509")))
+                .andExpect(jsonPath("$.message", is("`TEST` 인증서는 X.509 형식이 아닙니다.")))
+                .andExpect(jsonPath("$.details", hasSize(0)));
+    }
+
+    @Test
     void unsupportedMethodsUse405() throws Exception {
         mockMvc.perform(get("/test/validation"))
                 .andExpect(status().isMethodNotAllowed())

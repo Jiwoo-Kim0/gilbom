@@ -37,6 +37,7 @@ public enum ErrorCode {
     COMMON_SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "서비스를 일시적으로 사용할 수 없습니다."),
     DB_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "데이터베이스를 일시적으로 사용할 수 없습니다."),
     S3_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "파일 저장소를 일시적으로 사용할 수 없습니다."),
+    MQTT_CERTIFICATE_NOT_X509(HttpStatus.INTERNAL_SERVER_ERROR, "MQTT 인증서가 X.509 형식이 아닙니다."),
     MQTT_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "MQTT 서비스를 일시적으로 사용할 수 없습니다.");
 
     private final HttpStatus httpStatus;
