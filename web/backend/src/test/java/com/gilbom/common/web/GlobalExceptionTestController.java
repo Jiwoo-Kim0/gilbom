@@ -1,0 +1,80 @@
+package com.gilbom.common.web;
+
+import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+
+import com.gilbom.common.error.BusinessException;
+import com.gilbom.common.error.ErrorCode;
+
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+
+@RestController
+public class GlobalExceptionTestController {
+
+    @PostMapping(path = "/test/validation", consumes = MediaType.APPLICATION_JSON_VALUE)
+    ValidationRequest validate(@Valid @RequestBody ValidationRequest request) {
+        return request;
+    }
+
+    @PostMapping(path = "/test/secret", consumes = MediaType.APPLICATION_JSON_VALUE)
+    SecretRequest secret(@Valid @RequestBody SecretRequest request) {
+        return request;
+    }
+
+    @GetMapping("/test/method-validation")
+    int methodValidation(@RequestParam @Min(value = 1, message = "1 이상이어야 합니다.") int count) {
+        return count;
+    }
+
+    @GetMapping("/test/type")
+    int type(@RequestParam int count) {
+        return count;
+    }
+
+    @GetMapping("/test/conflict")
+    void conflict() {
+        throw new BusinessException(ErrorCode.COMMAND_STATE_CONFLICT);
+    }
+
+    @GetMapping("/test/business-rule")
+    void businessRule() {
+        throw new BusinessException(ErrorCode.REPORT_PERIOD_INVALID);
+    }
+
+    @GetMapping("/test/dependency")
+    void dependency() {
+        throw new BusinessException(ErrorCode.MQTT_UNAVAILABLE);
+    }
+
+    @GetMapping("/test/too-large")
+    void tooLarge() {
+        throw new MaxUploadSizeExceededException(500_000);
+    }
+
+    @GetMapping("/test/unexpected")
+    void unexpected() {
+        throw new IllegalStateException("database-password=must-not-leak");
+    }
+
+    @GetMapping("/test/error")
+    void error(@RequestParam ErrorCode code) {
+        throw new BusinessException(code);
+    }
+
+    public record ValidationRequest(
+            @NotBlank(message = "제목은 필수입니다.")
+            String title) {
+    }
+
+    public record SecretRequest(
+            @NotBlank(message = "비밀번호는 필수입니다.")
+            String password) {
+    }
+}

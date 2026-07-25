@@ -1,0 +1,267 @@
+openapi: 3.0.3
+info:
+  title: 길봄 API
+  version: 1.0.0
+  description: |
+    길봄 REST API의 공통 성공 응답, 오류 코드, 예외 및 Validation 계약입니다.
+    성공 응답은 공통 envelope 없이 실제 DTO를 직접 반환합니다.
+    세부 정책은 common-api-response-and-errors.md를 기준으로 합니다.
+
+x-api-conventions:
+  successResponse:
+    envelope: false
+    description: 성공 응답은 실제 DTO를 직접 반환한다.
+  errorResponse:
+    schema: "#/components/schemas/ErrorResponse"
+    requestIdHeader: X-Request-Id
+  validation:
+    badRequest: 필드·파라미터·JSON 형식 오류
+    conflict: 현재 리소스 상태 또는 기존 데이터와 충돌
+    unprocessableEntity: 형식은 유효하지만 업무 규칙 위반
+
+paths: {}
+
+components:
+  schemas:
+    ErrorCode:
+      type: string
+      description: 클라이언트 분기에 사용하는 안정적인 UPPER_SNAKE_CASE 오류 코드
+      enum:
+        - COMMON_INVALID_REQUEST
+        - COMMON_MALFORMED_JSON
+        - COMMON_VALIDATION_FAILED
+        - AUTH_UNAUTHENTICATED
+        - AUTH_FORBIDDEN
+        - COMMON_RESOURCE_NOT_FOUND
+        - ROBOT_NOT_FOUND
+        - DEFECT_NOT_FOUND
+        - COMMAND_NOT_FOUND
+        - REPORT_NOT_FOUND
+        - IMAGE_NOT_FOUND
+        - COMMON_METHOD_NOT_ALLOWED
+        - COMMON_CONFLICT
+        - COMMAND_STATE_CONFLICT
+        - IMAGE_TOO_LARGE
+        - COMMON_UNSUPPORTED_MEDIA_TYPE
+        - IMAGE_UNSUPPORTED_MEDIA_TYPE
+        - COMMON_BUSINESS_RULE_VIOLATION
+        - REPORT_PERIOD_INVALID
+        - COMMON_RATE_LIMIT_EXCEEDED
+        - COMMON_INTERNAL_ERROR
+        - COMMON_SERVICE_UNAVAILABLE
+        - DB_UNAVAILABLE
+        - S3_UNAVAILABLE
+        - MQTT_UNAVAILABLE
+
+    ValidationErrorDetail:
+      type: object
+      required:
+        - field
+        - reason
+      properties:
+        field:
+          type: string
+          description: 입력 필드·파라미터 경로. 객체 단위 오류는 $를 사용한다.
+          example: title
+        constraint:
+          type: string
+          nullable: true
+          description: 실패한 제약 식별자
+          example: NotBlank
+        rejectedValue:
+          type: string
+          nullable: true
+          maxLength: 200
+          description: |
+            안전하게 문자열화한 거부 값입니다. 비밀번호, token, secret, API Key,
+            Authorization, credential, cookie, session, 파일 및 복합 객체는 null입니다.
+          example: ""
+        reason:
+          type: string
+          description: 사용자에게 노출 가능한 필드별 검증 실패 이유
+          example: 제목은 필수입니다.
+
+    ErrorResponse:
+      type: object
+      required:
+        - timestamp
+        - status
+        - code
+        - message
+        - path
+        - requestId
+        - details
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: 오류 응답을 생성한 UTC 시각
+          example: "2026-07-25T10:30:00Z"
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+          description: 실제 HTTP 상태와 같은 값
+          example: 400
+        code:
+          $ref: "#/components/schemas/ErrorCode"
+        message:
+          type: string
+          description: 사용자에게 노출 가능한 전체 오류 요약
+          example: 요청 값 검증에 실패했습니다.
+        path:
+          type: string
+          description: query string을 제외한 요청 URI
+          example: /api/v1/reports
+        requestId:
+          type: string
+          format: uuid
+          description: X-Request-Id 응답 헤더 및 서버 로그와 동일한 요청 식별자
+          example: 18c88a89-7d89-4c17-97fa-a6e2253614d9
+        details:
+          type: array
+          description: Validation 상세. 해당 사항이 없으면 빈 배열이다.
+          items:
+            $ref: "#/components/schemas/ValidationErrorDetail"
+
+  headers:
+    RequestId:
+      description: 응답 본문 requestId 및 서버 로그와 동일한 요청 식별자
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: 요청 형식·타입·필수값 또는 Validation 오류
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            validationFailed:
+              value:
+                timestamp: "2026-07-25T10:30:00Z"
+                status: 400
+                code: COMMON_VALIDATION_FAILED
+                message: 요청 값 검증에 실패했습니다.
+                path: /api/v1/reports
+                requestId: 18c88a89-7d89-4c17-97fa-a6e2253614d9
+                details:
+                  - field: title
+                    constraint: NotBlank
+                    rejectedValue: ""
+                    reason: 제목은 필수입니다.
+
+    Unauthorized:
+      description: 인증 필요
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Forbidden:
+      description: 권한 부족
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    NotFound:
+      description: 요청한 리소스 없음
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    MethodNotAllowed:
+      description: 지원하지 않는 HTTP 메서드
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Conflict:
+      description: 중복 또는 현재 리소스 상태와 충돌
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    PayloadTooLarge:
+      description: 이미지 크기 상한 초과
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    UnsupportedMediaType:
+      description: 지원하지 않는 Content-Type 또는 콘텐츠 형식
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    UnprocessableEntity:
+      description: 형식은 유효하지만 업무 규칙을 충족하지 않음
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    TooManyRequests:
+      description: 요청 한도 초과
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    InternalServerError:
+      description: 예상하지 못한 서버 오류
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    ServiceUnavailable:
+      description: DB·S3·MQTT 등 주요 구성요소 장애
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"

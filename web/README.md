@@ -2,11 +2,10 @@
 
 ## Local infrastructure
 
-The Docker Compose setup runs PostgreSQL 16 with PostGIS and the Spring Boot
-backend for local development. The frontend service will be added after its
-project and Dockerfile are implemented.
+The Docker Compose setup runs PostgreSQL 16 with PostGIS, the Spring Boot
+backend, and the React frontend served by Nginx for local development.
 
-### Start the database and backend
+### Start the application
 
 1. Copy `.env.example` to `.env`.
 2. Replace `POSTGRES_PASSWORD` in `.env` with a local development password.
@@ -30,6 +29,9 @@ curl http://localhost:8080/api/health
 curl http://localhost:8080/actuator/health
 ```
 
+Open the frontend at `http://localhost:3000`. Requests under `/api` are
+forwarded by Nginx to the backend service.
+
 Stop the services while preserving database data:
 
 ```bash
@@ -45,7 +47,7 @@ docker compose down --volumes
 The database port is bound to `127.0.0.1` so it is not exposed on other host
 interfaces. PostgreSQL data is persisted in the `postgres_data` named volume.
 
-## Planned Compose services
+## Compose services
 
 - `db`: PostgreSQL 16 + PostGIS
 - `backend`: Spring Boot API
