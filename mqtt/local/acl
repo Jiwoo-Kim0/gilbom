@@ -1,0 +1,14 @@
+# Robot account: username must match robotId.
+pattern write robots/%u/telemetry
+pattern write robots/%u/status
+pattern write robots/%u/alerts
+pattern write robots/%u/commands/ack
+pattern read  robots/%u/commands
+
+# Spring backend service account.
+user gilbom
+topic read  robots/+/telemetry
+topic read  robots/+/status
+topic read  robots/+/alerts
+topic read  robots/+/commands/ack
+topic write robots/+/commands

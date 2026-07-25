@@ -1,0 +1,17 @@
+# Generated credentials and certificate material
+**/passwd
+**/certs/
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Broker runtime data, logs, and local-only settings
+**/data/
+**/log/
+**/dynamic-security.json
+**/mosquitto.local.conf
+**/*.pid
+**/*.db
+**/*.bak
