@@ -1,0 +1,35 @@
+name: gilbom-prod
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.1.2-alpine
+    container_name: gilbom-mosquitto
+    restart: unless-stopped
+    user: "1883:1883"
+
+    ports:
+      - "${MQTT_TLS_PORT:-8883}:8883"
+
+    volumes:
+      - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./infra/mosquitto/acl:/mosquitto/config/acl:ro
+      - ./infra/mosquitto/passwd:/mosquitto/config/passwd:ro
+      - ${MOSQUITTO_CERT_DIR:-/opt/gilbom/mosquitto/certs}:/mosquitto/certs:ro
+
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /mosquitto/data
+      - /mosquitto/log
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"

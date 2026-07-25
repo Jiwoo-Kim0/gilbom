@@ -1,0 +1,8 @@
+# 실제 비밀번호 파일이 아니다.
+#
+# EC2에서 README.md의 mosquitto_passwd 명령으로 `passwd` 파일을 생성한다.
+# 생성되는 실제 파일은 Git에 커밋하지 않는다.
+#
+# 필요한 최초 계정:
+# - robot-test : PC/IoT 통신 확인용
+# - gilbom     : 백엔드 MQTT Consumer/Publisher용

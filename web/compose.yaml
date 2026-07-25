@@ -1,6 +1,39 @@
 name: ${COMPOSE_PROJECT_NAME:-gilbom}
 
 services:
+  mosquitto:
+    image: eclipse-mosquitto:2.1.2-alpine
+    container_name: gilbom-mosquitto-local
+    restart: unless-stopped
+    user: "1883:1883"
+    depends_on:
+      mqtt-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${MQTT_TLS_PORT:-8883}:8883"
+    volumes:
+      # mqtt-init creates passwd in this directory when it is absent.
+      - ../mqtt/local:/mosquitto/config:ro
+      - ../mqtt/local/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ../mqtt/local/acl:/mosquitto/config/acl:ro
+      - ../mqtt/local/certs:/mosquitto/certs:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /mosquitto/data
+      - /mosquitto/log
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
   db:
     image: postgis/postgis:16-3.5
     restart: unless-stopped
@@ -41,16 +74,26 @@ services:
     image: gilbom-backend:local
     restart: unless-stopped
     environment:
-      SPRING_PROFILES_ACTIVE: docker
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker}
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-gilbom}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-gilbom_app}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      MQTT_BROKER: ${MQTT_BROKER:-ssl://mosquitto:8883}
+      MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-gilbom-local-docker}
+      MQTT_USERNAME: ${MQTT_USERNAME:-gilbom}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-gilbom}
+      MQTT_TRUST_CERTIFICATE: /app/mqtt-certs/server-local.pem
+      MQTT_SUBSCRIBE_TOPIC: ${MQTT_SUBSCRIBE_TOPIC:-robots/+/telemetry,robots/+/commands/ack}
       TZ: ${TZ:-UTC}
+    volumes:
+      - ../mqtt/local/certs:/app/mqtt-certs:ro
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
     depends_on:
       db:
         condition: service_healthy
+      mosquitto:
+        condition: service_started
     healthcheck:
       test:
         - CMD
@@ -104,6 +147,27 @@ services:
       options:
         max-size: 10m
         max-file: "3"
+
+  # Local MQTT assets only. Existing files are reused; missing files are generated.
+  mqtt-init:
+    build:
+      context: ../mqtt/local
+      dockerfile: Dockerfile.init
+    image: gilbom-mqtt-init:local
+    restart: "no"
+    user: "0:0"
+    environment:
+      MQTT_USERNAME: ${MQTT_USERNAME:-gilbom}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-gilbom}
+      MQTT_ROBOT_USERNAME: ${MQTT_ROBOT_USERNAME:-robot-test}
+      MQTT_ROBOT_PASSWORD: ${MQTT_ROBOT_PASSWORD:-gilbom}
+    volumes:
+      - ../mqtt/local:/mqtt-local
+    command:
+      - /bin/sh
+      - /mqtt-local/init-local-mqtt.sh
+    networks:
+      - backend
 
 volumes:
   postgres_data:

@@ -15,4 +15,33 @@ frontend/dist/
 .idea/
 .vscode/
 *.iml
+*.class
+backend/bin/
+backend/.classpath
+backend/.project
+backend/.settings/
 .DS_Store
+
+# Mosquitto
+# 실제 계정의 비밀번호 해시 파일
+infra/mosquitto/passwd
+
+# 서버·클라이언트 인증서와 개인키 보관 폴더
+infra/mosquitto/certs/
+
+# Broker 영속 메시지와 세션 데이터
+infra/mosquitto/data/
+
+# Broker 실행 로그
+infra/mosquitto/log/
+
+# Dynamic Security 플러그인의 사용자·역할·권한 데이터
+infra/mosquitto/dynamic-security.json
+
+# 개발자 PC 또는 서버별 로컬 설정 덮어쓰기
+infra/mosquitto/mosquitto.local.conf
+
+# 실행 중 생성되는 프로세스·DB·백업 파일
+infra/mosquitto/*.pid
+infra/mosquitto/*.db
+infra/mosquitto/*.bak
