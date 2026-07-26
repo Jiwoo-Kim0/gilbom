@@ -11,6 +11,8 @@
 - [Environment configuration strategy](./docs/environment-configuration-strategy.md)
 - [Report status contract](./docs/report-status-contract.md)
 - [Common API responses and errors](./docs/common-api-response-and-errors.md)
+- [Database migrations](./docs/database-migrations.md)
+- [TOTP Secret encryption](./docs/totp-secret-encryption.md)
 - [OpenAPI v1](./docs/openapi-v1.yaml)
 
 ## Local infrastructure
@@ -21,7 +23,8 @@ backend, and the React frontend served by Nginx for local development.
 ### Start the application
 
 1. Copy `.env.example` to `.env`.
-2. Replace `POSTGRES_PASSWORD` in `.env` with a local development password.
+2. Replace the three PostgreSQL password placeholders in `.env` with distinct
+   local development passwords.
 3. Build and start the services.
 
 ```bash
@@ -59,6 +62,8 @@ docker compose down --volumes
 
 The database port is bound to `127.0.0.1` so it is not exposed on other host
 interfaces. PostgreSQL data is persisted in the `postgres_data` named volume.
+Flyway migrations run with a schema-owner account that is separate from the
+backend runtime account. Spring Session JDBC tables are also managed by Flyway.
 
 ## Compose services
 
