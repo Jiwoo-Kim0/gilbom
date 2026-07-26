@@ -957,6 +957,8 @@ components:
         - COMMON_SERVICE_UNAVAILABLE
         - DB_UNAVAILABLE
         - S3_UNAVAILABLE
+        - MQTT_CERTIFICATE_NOT_X509
+        - MQTT_SECURITY_CONFIGURATION_INVALID
         - MQTT_UNAVAILABLE
 
     ValidationErrorDetail:

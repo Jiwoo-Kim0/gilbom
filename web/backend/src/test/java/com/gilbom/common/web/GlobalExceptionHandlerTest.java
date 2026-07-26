@@ -127,6 +127,13 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void reportStateConflictsUseTheDedicated409Code() throws Exception {
+        mockMvc.perform(get("/test/error").param("code", "REPORT_STATE_CONFLICT"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code", is("REPORT_STATE_CONFLICT")));
+    }
+
+    @Test
     void dependencyFailuresUse503() throws Exception {
         mockMvc.perform(get("/test/dependency"))
                 .andExpect(status().isServiceUnavailable())

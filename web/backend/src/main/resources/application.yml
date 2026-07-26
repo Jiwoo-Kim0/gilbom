@@ -37,6 +37,14 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
   shutdown: graceful
+  error:
+    # ControllerAdvice 밖에서 발생한 오류도 Spring 기본 응답에 내부 정보를 싣지 않는다.
+    include-exception: false
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: never
+    whitelabel:
+      enabled: false
 
 management:
   endpoints:

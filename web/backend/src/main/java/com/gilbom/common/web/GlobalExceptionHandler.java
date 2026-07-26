@@ -1,5 +1,7 @@
 package com.gilbom.common.web;
 
+import java.io.IOException;
+import java.sql.SQLException;
 import java.time.temporal.TemporalAccessor;
 import java.util.ArrayList;
 import java.util.List;
@@ -13,6 +15,7 @@ import org.springframework.context.MessageSourceResolvable;
 import org.springframework.core.MethodParameter;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindingResult;
@@ -176,13 +179,35 @@ public class GlobalExceptionHandler {
             Exception exception,
             HttpServletRequest request) {
         String requestId = requestId(request);
-        log.error("Unhandled exception. requestId={}", requestId, exception);
+        // 예외 객체·message·cause를 기록하면 SQL, bind 값, Secret이 함께 노출될 수 있다.
+        // 운영 로그에는 추적 가능한 requestId와 제한된 안전 분류만 남긴다.
+        log.error(
+                "Unhandled request failure. requestId={} category={}",
+                requestId,
+                exceptionCategory(exception));
         return respond(
                 ErrorCode.COMMON_INTERNAL_ERROR,
                 ErrorCode.COMMON_INTERNAL_ERROR.defaultMessage(),
                 List.of(),
                 request,
                 requestId);
+    }
+
+    private String exceptionCategory(Throwable exception) {
+        Throwable current = exception;
+        for (int depth = 0; current != null && depth < 16; depth++) {
+            if (current instanceof DataAccessException || current instanceof SQLException) {
+                return "DATABASE";
+            }
+            if (current instanceof IOException) {
+                return "IO";
+            }
+            if (current instanceof SecurityException) {
+                return "SECURITY";
+            }
+            current = current.getCause();
+        }
+        return "APPLICATION";
     }
 
     private List<ValidationErrorDetail> bindingDetails(BindingResult bindingResult) {

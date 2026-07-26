@@ -2,6 +2,9 @@ package com.gilbom.common.error;
 
 import org.springframework.http.HttpStatus;
 
+/**
+ * 클라이언트가 HTTP 상태와 별개로 안정적으로 분기할 수 있는 공개 오류 코드다.
+ */
 public enum ErrorCode {
 
     COMMON_INVALID_REQUEST(HttpStatus.BAD_REQUEST, "요청 값이 올바르지 않습니다."),
@@ -22,6 +25,7 @@ public enum ErrorCode {
 
     COMMON_CONFLICT(HttpStatus.CONFLICT, "요청이 현재 리소스 상태와 충돌합니다."),
     COMMAND_STATE_CONFLICT(HttpStatus.CONFLICT, "현재 명령 상태에서는 요청을 수행할 수 없습니다."),
+    REPORT_STATE_CONFLICT(HttpStatus.CONFLICT, "현재 보고서 상태에서는 요청을 수행할 수 없습니다."),
 
     IMAGE_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "이미지 크기가 허용된 상한을 초과했습니다."),
     COMMON_UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "지원하지 않는 Content-Type입니다."),

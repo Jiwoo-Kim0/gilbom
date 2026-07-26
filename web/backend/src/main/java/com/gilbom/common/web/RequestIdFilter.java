@@ -29,6 +29,7 @@ public class RequestIdFilter extends OncePerRequestFilter {
             FilterChain filterChain) throws ServletException, IOException {
         String requestId = resolveRequestId(request.getHeader(HEADER_NAME));
 
+        // 헤더·오류 body·로그 MDC가 같은 ID를 사용해 원문 예외 없이도 요청을 추적한다.
         request.setAttribute(ATTRIBUTE_NAME, requestId);
         response.setHeader(HEADER_NAME, requestId);
         MDC.put(MDC_KEY, requestId);
