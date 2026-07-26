@@ -2,11 +2,11 @@ import { NavLink, Outlet, useLocation } from 'react-router'
 import { NavigationBar } from '../features/navigationbar'
 
 const pageTitles: Record<string, string> = {
-  '/robots': 'Robot Status',
-  '/defects': 'Defect Status',
-  '/reports': 'Reports',
-  '/admin/roles': 'Admin Panel',
-  '/my': 'My Page',
+  '/robots': '로봇 상태 관리',
+  '/defects': '점자 보도블록 결함 관리',
+  '/reports': '리포트',
+  '/admin/roles': '관리자 패널',
+  '/my': '마이페이지',
 }
 
 // 인증 API 연결 전까지 사용하는 자리표시자 사용자 정보.

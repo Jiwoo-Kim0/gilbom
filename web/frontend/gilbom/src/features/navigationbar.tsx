@@ -1,5 +1,6 @@
 import { BarChart3, Bot, CircleDot, ShieldCheck, User } from 'lucide-react'
 import { NavLink } from 'react-router'
+import gilbomLogo from '../assets/gilbom_logo.png'
 
 export interface NavigationBarUser {
   name: string
@@ -13,11 +14,11 @@ interface NavigationBarProps {
 }
 
 const navigationItems = [
-  { to: '/defects', label: 'Defect Status', icon: CircleDot },
-  { to: '/robots', label: 'Robot Status', icon: Bot },
-  { to: '/reports', label: 'Reports', icon: BarChart3 },
-  { to: '/my', label: 'My Page', icon: User },
-  { to: '/admin/roles', label: 'Admin Panel', icon: ShieldCheck },
+  { to: '/defects', label: '점자 보도블록 결함 관리', icon: CircleDot },
+  { to: '/robots', label: '로봇 상태 관리', icon: Bot },
+  { to: '/reports', label: '리포트', icon: BarChart3 },
+  { to: '/my', label: '마이페이지', icon: User },
+  { to: '/admin/roles', label: '관리자 패널', icon: ShieldCheck },
 ] as const
 
 export function NavigationBar({ user }: NavigationBarProps) {
@@ -27,7 +28,7 @@ export function NavigationBar({ user }: NavigationBarProps) {
     <aside className="nb-sidebar">
       <NavLink className="nb-brand" to="/defects" aria-label="길봄 홈">
         <span className="nb-brand-badge" aria-hidden="true">
-          <Bot size={20} />
+          <img className="nb-brand-logo" src={gilbomLogo} alt="" />
         </span>
         <span className="nb-brand-text">
           <strong>길봄</strong>
