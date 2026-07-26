@@ -1,0 +1,24 @@
+# Copy this file to .env before running Docker Compose.
+# Never commit the real .env file.
+
+COMPOSE_PROJECT_NAME=gilbom
+
+POSTGRES_DB=gilbom
+POSTGRES_USER=gilbom_app
+POSTGRES_PASSWORD=ssafy
+POSTGRES_PORT=5432
+BACKEND_PORT=8080
+FRONTEND_PORT=3000
+
+# MQTT connection used by web/compose.yaml.
+MQTT_BROKER=ssl://mosquitto:8883
+MQTT_CLIENT_ID=gilbom-local-docker
+MQTT_USERNAME=gilbom
+MQTT_PASSWORD=gilbom
+MQTT_SUBSCRIBE_TOPIC=robots/+/telemetry,robots/+/commands/ack
+MQTT_PUBLISH_TOPIC=robots/test-robot/commands
+MQTT_QOS=1
+MQTT_TLS_PORT=8883
+
+# The database stores timestamps in UTC.
+TZ=UTC

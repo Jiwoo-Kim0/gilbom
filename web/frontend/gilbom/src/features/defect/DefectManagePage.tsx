@@ -1,6 +1,6 @@
-import { DefectFilter } from '../features/defect/DefectFilter'
-import { DefectList } from '../features/defect/DefectList'
-import { DefectMap } from '../features/defect/DefectMap'
+import { DefectFilter } from './DefectFilter'
+import { DefectList } from './DefectList'
+import { DefectMap } from './DefectMap'
 
 export function DefectManagePage() {
   return (

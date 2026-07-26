@@ -17,6 +17,9 @@
   --brand-soft: #e2f2e8;
   --focus: #f0a128;
   --shadow: 0 14px 40px rgba(28, 55, 39, 0.08);
+  --nb-gold: #b8863b;
+  --nb-gold-soft: #f5dfa0;
+  --nb-ink: #1a1a1a;
 }
 
 * {
