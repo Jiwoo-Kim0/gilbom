@@ -6,9 +6,9 @@ export function RouteErrorPage() {
     <main className="route-error" id="main-content">
       <p className="eyebrow">ROUTE ERROR</p>
       <h1>화면을 불러오지 못했습니다.</h1>
-      <p>잠시 후 다시 시도하거나 로봇 관리 화면으로 돌아가 주세요.</p>
-      <Link className="primary-button" to="/robots">
-        로봇 관리로 이동
+      <p>잠시 후 다시 시도하거나 결함 관리 화면으로 돌아가 주세요.</p>
+      <Link className="primary-button" to="/defects">
+        결함 관리로 이동
       </Link>
     </main>
   )
