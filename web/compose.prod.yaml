@@ -33,3 +33,10 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+=======
+# Reserved for a future production deployment implementation.
+# An empty or local Compose override is not a production configuration.
+# Follow docs/environment-configuration-strategy.md for the approved
+# prod profile, workload IAM role, Secrets Manager/KMS, network, cookie,
+# CORS, session, S3, MQTT, and LLM requirements.
+>>>>>>> chaeun

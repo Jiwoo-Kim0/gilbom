@@ -101,7 +101,7 @@ HTTP 상태와 응답 형식은 다음 원칙을 따른다.
 | `COMMON_MALFORMED_JSON` | 400 | JSON 파싱 실패 |
 | `COMMON_VALIDATION_FAILED` | 400 | Bean Validation 필드·파라미터 검증 실패 |
 | `AUTH_UNAUTHENTICATED` | 401 | 로그인 세션 또는 로봇 인증 없음 |
-| `AUTH_FORBIDDEN` | 403 | RBAC 또는 리소스 접근 권한 부족 |
+| `AUTH_FORBIDDEN` | 403 | RBAC 권한 부족 또는 CSRF 검증 실패 |
 | `COMMON_RESOURCE_NOT_FOUND` | 404 | 도메인을 특정할 수 없는 리소스 없음 |
 | `COMMON_METHOD_NOT_ALLOWED` | 405 | 지원하지 않는 HTTP 메서드 |
 | `COMMON_CONFLICT` | 409 | 도메인을 특정할 수 없는 중복·상태 충돌 |
@@ -121,6 +121,7 @@ HTTP 상태와 응답 형식은 다음 원칙을 따른다.
 | `REPORT_NOT_FOUND` | 404 | 보고서 없음 |
 | `IMAGE_NOT_FOUND` | 404 | 이미지 없음 |
 | `COMMAND_STATE_CONFLICT` | 409 | 현재 명령·로봇 상태와 요청 충돌 |
+| `REPORT_STATE_CONFLICT` | 409 | 보고서 상태 전이 또는 버전 경합 |
 | `IMAGE_TOO_LARGE` | 413 | 이미지 크기 상한 초과 |
 | `IMAGE_UNSUPPORTED_MEDIA_TYPE` | 415 | Content-Type은 유효하지만 지원하지 않는 이미지 형식 |
 | `REPORT_PERIOD_INVALID` | 422 | 보고서 시작·종료 기간 업무 규칙 위반 |
@@ -229,7 +230,7 @@ Spring Security 도입 후에는 필터 단계의 인증·인가 실패도 같�
 - 성공 응답에는 실제 DTO schema를 직접 연결한다.
 - 오류 응답에는 `#/components/schemas/ErrorResponse`를 연결한다.
 - 반복되는 HTTP 오류는 `#/components/responses/*`를 참조한다.
-- 새 오류 코드를 만들면 백엔드 `ErrorCode`, 이 문서, OpenAPI `ErrorCode.enum`, 관련 테스트를 같은 변경에서 갱신한다.
+- 런타임에 새 오류 코드를 구현하면 백엔드 `ErrorCode`, 이 문서, OpenAPI `ErrorCode.enum`, 관련 테스트를 같은 변경에서 갱신한다. Day 1에서 계약만 먼저 확정한 코드는 해당 기능 구현 작업에서 백엔드 enum과 테스트를 추가한다.
 - `openapi-v1.yaml`을 lint하고 Swagger UI에서 오류 예시와 필수 필드를 확인한다.
 
 ## 8. 완료 조건과 테스트

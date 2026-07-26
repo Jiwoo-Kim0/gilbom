@@ -1,5 +1,18 @@
 # Gilbom Web
 
+## API and Day 1 contracts
+
+- [Day 1 contract index](./docs/day1-contracts.md)
+- [API contract](./docs/api-contract.md)
+- [Administrator authentication and security](./docs/admin-authentication-security.md)
+- [Authorization matrix](./docs/authorization-matrix.md)
+- [Audit and sensitive data policy](./docs/audit-and-sensitive-data-policy.md)
+- [Threat model](./docs/threat-model.md)
+- [Environment configuration strategy](./docs/environment-configuration-strategy.md)
+- [Report status contract](./docs/report-status-contract.md)
+- [Common API responses and errors](./docs/common-api-response-and-errors.md)
+- [OpenAPI v1](./docs/openapi-v1.yaml)
+
 ## Local infrastructure
 
 The Docker Compose setup runs PostgreSQL 16 with PostGIS, the Spring Boot
