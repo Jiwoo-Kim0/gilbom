@@ -1,0 +1,37 @@
+# OrinCar 설정 — 구현 착수 시 값 채울 것. 코드에 하드코딩 금지.
+# 비밀값(MQTT 비번, API Key)은 Git 커밋 금지 — 환경변수나 별도 미추적 파일로.
+
+# robot:
+#   id: RBT-001
+#   firmware_version: 1.0.0
+
+# mqtt:
+#   host: <EC2 브로커 주소>
+#   port: 8883
+#   username: RBT-001
+#   password: <env 로>
+#   keepalive: 30
+
+# upload:
+#   url: https://<서버>/api/v1/images
+#   api_key: <env 로>
+
+# drive:
+#   i2c_bus: 7
+#   pca9685_addr: 0x60      # 조향 서보
+#   motorhat_addr: 0x40     # 구동 모터
+#   steer_center: 100
+#   steer_min: 60
+#   steer_max: 140
+
+# safety:
+#   lidar_port: /dev/ttyUSB0
+#   stop_distance_m: 0.5    # 팀 확정 필요
+
+# gps:
+#   port: /dev/ttyTHS1      # 실제 포트 확인 필요
+#   baud: 9600
+
+# detect:
+#   engine_path: models/<모델>.engine
+#   confidence_threshold: 0.5   # 팀 확정 필요

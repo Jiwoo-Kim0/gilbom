@@ -1,0 +1,17 @@
+# Python 버전: 미정 (TBD) — 팀 확정 후 .python-version 추가할 것.
+#   자유 선택이 아니라 보드에 플래싱된 JetPack 이미지가 강제한다
+#   (TensorRT·pycuda 를 JetPack 이 제공하므로):
+#     JetPack 6.x (Ubuntu 22.04) → Python 3.10
+#     JetPack 5.x (Ubuntu 20.04) → Python 3.8
+#   확인: 보드에서 `cat /etc/nv_tegra_release` 또는 `apt-cache show nvidia-jetpack`
+#   venv 사용 시 --system-site-packages 로 시스템 파이썬의 TensorRT 를 상속할 것
+#   (별도 파이썬을 새로 빌드하면 TensorRT 를 못 쓴다).
+
+# 의존성 — 구현 착수 시 아래 라이브러리 버전도 == 로 고정할 것
+paho-mqtt        # MQTT 클라이언트 (comms/mqtt_client.py)
+PyYAML           # config.yaml 로드
+requests         # 이미지 HTTP 업로드 (comms/uploader.py)
+pyserial         # GPS NMEA · LiDAR 시리얼
+opencv-python    # 카메라 캡처
+smbus2           # I2C 제어 (PCA9685 / MotorHat)
+# TensorRT · pycuda 는 JetPack 기본 제공 — pip 설치 대상 아님
