@@ -2,6 +2,18 @@
 .env
 .env.*
 !.env.example
+*.local
+
+# Private keys, keystores, credential exports and generated password files
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+**/passwd
+**/credentials.json
+**/service-account*.json
 
 # Spring Boot / Gradle
 .gradle/

@@ -1,5 +1,7 @@
 package com.gilbom.common.web;
 
+import java.io.IOException;
+import java.sql.SQLException;
 import java.time.temporal.TemporalAccessor;
 import java.util.ArrayList;
 import java.util.List;
@@ -13,8 +15,11 @@ import org.springframework.context.MessageSourceResolvable;
 import org.springframework.core.MethodParameter;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.validation.ObjectError;
@@ -171,18 +176,55 @@ public class GlobalExceptionHandler {
         return respond(exception.errorCode(), message, List.of(), request);
     }
 
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<ErrorResponse> handleAuthenticationException(
+            AuthenticationException exception,
+            HttpServletRequest request) {
+        return respond(ErrorCode.AUTH_UNAUTHENTICATED, List.of(), request);
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> handleAccessDeniedException(
+            AccessDeniedException exception,
+            HttpServletRequest request) {
+        // 메서드 보안(@PreAuthorize) 거부는 MVC 안에서 발생하므로 필터용 handler와 별도로 처리한다.
+        return respond(ErrorCode.AUTH_FORBIDDEN, List.of(), request);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpectedException(
             Exception exception,
             HttpServletRequest request) {
         String requestId = requestId(request);
-        log.error("Unhandled exception. requestId={}", requestId, exception);
+        // 예외 객체·message·cause를 기록하면 SQL, bind 값, Secret이 함께 노출될 수 있다.
+        // 운영 로그에는 추적 가능한 requestId와 제한된 안전 분류만 남긴다.
+        log.error(
+                "Unhandled request failure. requestId={} category={}",
+                requestId,
+                exceptionCategory(exception));
         return respond(
                 ErrorCode.COMMON_INTERNAL_ERROR,
                 ErrorCode.COMMON_INTERNAL_ERROR.defaultMessage(),
                 List.of(),
                 request,
                 requestId);
+    }
+
+    private String exceptionCategory(Throwable exception) {
+        Throwable current = exception;
+        for (int depth = 0; current != null && depth < 16; depth++) {
+            if (current instanceof DataAccessException || current instanceof SQLException) {
+                return "DATABASE";
+            }
+            if (current instanceof IOException) {
+                return "IO";
+            }
+            if (current instanceof SecurityException) {
+                return "SECURITY";
+            }
+            current = current.getCause();
+        }
+        return "APPLICATION";
     }
 
     private List<ValidationErrorDetail> bindingDetails(BindingResult bindingResult) {
@@ -273,10 +315,7 @@ public class GlobalExceptionHandler {
     }
 
     private String requestId(HttpServletRequest request) {
-        Object requestId = request.getAttribute(RequestIdFilter.ATTRIBUTE_NAME);
-        return requestId instanceof String value && !value.isBlank()
-                ? value
-                : UUID.randomUUID().toString();
+        return RequestIdFilter.getOrCreateRequestId(request);
     }
 
     private String parameterName(MethodParameter methodParameter) {

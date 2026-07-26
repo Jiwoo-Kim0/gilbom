@@ -92,8 +92,48 @@ BEGIN
 END;
 $$;
 
+-- ADMIN_SETTINGS_MANAGE는 사용자 정의 역할 또는 다른 시스템 역할에 부여할 수 없다.
+INSERT INTO auth.role (
+    role_id,
+    role_code,
+    role_name,
+    description,
+    is_system
+) VALUES (
+    '90000000-0000-4000-8000-000000000005',
+    'CUSTOM_SMOKE',
+    'Custom smoke role',
+    'Restricted permission verification role',
+    FALSE
+);
+
+DO $$
+DECLARE
+    restricted_permission_id UUID;
+BEGIN
+    SELECT permission_id
+      INTO restricted_permission_id
+      FROM auth.permission
+     WHERE permission_code = 'ADMIN_SETTINGS_MANAGE';
+
+    BEGIN
+        INSERT INTO auth.role_permission (role_id, permission_id)
+        VALUES (
+            '90000000-0000-4000-8000-000000000005',
+            restricted_permission_id
+        );
+
+        RAISE EXCEPTION 'restricted permission assignment was not blocked';
+    EXCEPTION
+        WHEN SQLSTATE '42501' THEN
+            NULL;
+    END;
+END;
+$$;
+
 SELECT
     'blocked' AS audit_update,
-    'blocked' AS report_version_update;
+    'blocked' AS report_version_update,
+    'blocked' AS restricted_permission_assignment;
 
 ROLLBACK;

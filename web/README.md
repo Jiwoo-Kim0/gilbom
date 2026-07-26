@@ -13,6 +13,8 @@
 - [Common API responses and errors](./docs/common-api-response-and-errors.md)
 - [Database migrations](./docs/database-migrations.md)
 - [TOTP Secret encryption](./docs/totp-secret-encryption.md)
+- [Jenkins pipeline](./docs/jenkins-pipeline.md)
+- [Runtime version baseline](./docs/runtime-versions.md)
 - [OpenAPI v1](./docs/openapi-v1.yaml)
 
 ## Local infrastructure
@@ -23,7 +25,7 @@ backend, and the React frontend served by Nginx for local development.
 ### Start the application
 
 1. Copy `.env.example` to `.env`.
-2. Replace the three PostgreSQL password placeholders in `.env` with distinct
+2. Fill the five blank PostgreSQL and MQTT passwords in `.env`; use distinct
    local development passwords.
 3. Build and start the services.
 

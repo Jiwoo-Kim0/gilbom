@@ -81,7 +81,7 @@ HTTP 상태와 응답 형식은 다음 원칙을 따른다.
 | `requestId` | UUID string | O | 요청·응답 헤더 `X-Request-Id` 및 서버 로그와 동일한 값 |
 | `details` | array | O | Validation 상세. 해당 사항이 없으면 `[]` |
 
-서버 내부 예외 메시지, SQL, 스택 트레이스, 저장소 경로, 인증정보는 응답에 포함하지 않는다. 예상하지 못한 오류는 `COMMON_INTERNAL_ERROR`의 고정 메시지를 반환하고 자세한 원인은 `requestId`와 함께 서버 로그에만 기록한다.
+서버 내부 예외 메시지, SQL, 스택 트레이스, 저장소 경로, 인증정보는 응답에 포함하지 않는다. 예상하지 못한 오류는 `COMMON_INTERNAL_ERROR`의 고정 메시지를 반환한다. 운영 로그에도 예외 객체를 통째로 기록하지 않고 `requestId`와 `DATABASE`, `IO`, `SECURITY`, `APPLICATION` 중 하나의 안전한 분류만 남긴다.
 
 ## 3. 애플리케이션 오류 코드
 
@@ -213,6 +213,16 @@ Validation 오류 하나는 다음 필드를 사용한다.
 | `GlobalExceptionHandler` | 프레임워크·Validation·업무·미처리 예외 변환 |
 | `RequestIdFilter` | 유효한 외부 UUID 수용 또는 신규 UUID 생성, 헤더·로그 MDC 연결 |
 
+미처리 예외 로그는 다음 원칙을 따른다.
+
+- 예외 message, cause, stack trace를 로깅 호출의 인자로 넘기지 않는다.
+- SQL·bind 값·테이블명·제약조건명 대신 `category=DATABASE`만 기록한다.
+- EC2 운영 profile은 `server.error.include-*`를 비활성화하고 전역 throwable
+  변환을 `%nopex`로 설정한다.
+- Hibernate SQL·bind·extract, JDBC core, Flyway SQL script logger는 운영에서
+  `OFF`로 고정한다.
+- 장애 상관관계는 응답 헤더·본문·로그에 공통으로 기록되는 `requestId`로 추적한다.
+
 도메인 서비스는 다음처럼 구체적인 오류 코드를 사용한다.
 
 ```java
@@ -242,6 +252,7 @@ Spring Security 도입 후에는 필터 단계의 인증·인가 실패도 같�
 - 응답 `X-Request-Id`, 응답 본문 `requestId`, 서버 로그 MDC가 동일하다.
 - Bean Validation과 메서드 파라미터 Validation이 필드별 상세를 반환한다.
 - 민감한 `rejectedValue`와 내부 예외 메시지가 노출되지 않는다.
+- 운영 로그에 예외 message, stack trace, SQL, bind 값, Secret이 노출되지 않는다.
 - `400`, `409`, `413`, `415`, `422`, `500`, `503` 매핑 테스트가 존재한다.
 - 오류 코드 이름 규칙과 기본 메시지를 테스트한다.
 - OpenAPI가 파싱되고 공통 schema·response 참조가 유효하다.

@@ -2,10 +2,30 @@ spring:
   config:
     activate:
       on-profile: ec2
+  jpa:
+    # 운영에서는 stdout SQL 출력이 실수로 활성화되지 않도록 명시적으로 차단한다.
+    show-sql: false
+
+server:
+  servlet:
+    session:
+      cookie:
+        # __Host- cookie는 Secure, Path=/, Domain 미설정을 함께 요구한다.
+        name: __Host-GILBOM_SESSION
+        secure: true
 
 logging:
+  # 예외를 넘긴 타 라이브러리 로그까지 stack trace를 출력하지 않는 운영 안전망이다.
+  exception-conversion-word: "%nopex"
   level:
     com.gilbom: INFO
+    # SQL 문, bind 값, DB 오류 원문을 출력할 수 있는 logger는 운영에서 비활성화한다.
+    org.hibernate.SQL: "OFF"
+    org.hibernate.orm.jdbc.bind: "OFF"
+    org.hibernate.orm.jdbc.extract: "OFF"
+    org.hibernate.engine.jdbc.spi.SqlExceptionHelper: "OFF"
+    org.springframework.jdbc.core: "OFF"
+    org.flywaydb.core.internal.sqlscript: "OFF"
 
 gilbom:
   security:

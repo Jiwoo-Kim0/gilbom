@@ -13,11 +13,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
-@WebMvcTest(controllers = GlobalExceptionTestController.class)
+@WebMvcTest(
+        controllers = GlobalExceptionTestController.class,
+        excludeAutoConfiguration = SecurityAutoConfiguration.class)
 @Import({GlobalExceptionHandler.class, RequestIdFilter.class})
 class GlobalExceptionHandlerTest {
 
@@ -124,6 +127,13 @@ class GlobalExceptionHandlerTest {
         mockMvc.perform(get("/test/business-rule"))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code", is("REPORT_PERIOD_INVALID")));
+    }
+
+    @Test
+    void reportStateConflictsUseTheDedicated409Code() throws Exception {
+        mockMvc.perform(get("/test/error").param("code", "REPORT_STATE_CONFLICT"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code", is("REPORT_STATE_CONFLICT")));
     }
 
     @Test
