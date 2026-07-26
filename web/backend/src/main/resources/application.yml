@@ -37,6 +37,16 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
   shutdown: graceful
+  servlet:
+    session:
+      # 로컬 HTTP용 이름이며 운영 profile은 __Host- prefix와 Secure를 강제한다.
+      cookie:
+        name: GILBOM_SESSION
+        http-only: true
+        secure: false
+        same-site: lax
+        path: /
+      tracking-modes: cookie
   error:
     # ControllerAdvice 밖에서 발생한 오류도 Spring 기본 응답에 내부 정보를 싣지 않는다.
     include-exception: false

@@ -22,6 +22,18 @@ public class RequestIdFilter extends OncePerRequestFilter {
     public static final String ATTRIBUTE_NAME = RequestIdFilter.class.getName() + ".requestId";
     private static final String MDC_KEY = "requestId";
 
+    public static String getOrCreateRequestId(HttpServletRequest request) {
+        Object requestId = request.getAttribute(ATTRIBUTE_NAME);
+        if (requestId instanceof String value && !value.isBlank()) {
+            return value;
+        }
+
+        // 필터 밖의 오류 dispatch에서도 공통 응답이 추적 ID를 잃지 않게 한다.
+        String generated = UUID.randomUUID().toString();
+        request.setAttribute(ATTRIBUTE_NAME, generated);
+        return generated;
+    }
+
     @Override
     protected void doFilterInternal(
             HttpServletRequest request,

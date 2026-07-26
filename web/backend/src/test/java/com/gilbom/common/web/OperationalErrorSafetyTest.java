@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Import;
@@ -21,7 +22,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 @ActiveProfiles("ec2")
-@WebMvcTest(controllers = GlobalExceptionTestController.class)
+@WebMvcTest(
+        controllers = GlobalExceptionTestController.class,
+        excludeAutoConfiguration = SecurityAutoConfiguration.class)
 @Import({GlobalExceptionHandler.class, RequestIdFilter.class})
 @ExtendWith(OutputCaptureExtension.class)
 class OperationalErrorSafetyTest {
@@ -78,6 +81,10 @@ class OperationalErrorSafetyTest {
                 .isEqualTo("%nopex");
         assertThat(environment.getProperty("spring.jpa.show-sql"))
                 .isEqualTo("false");
+        assertThat(environment.getProperty("server.servlet.session.cookie.name"))
+                .isEqualTo("__Host-GILBOM_SESSION");
+        assertThat(environment.getProperty("server.servlet.session.cookie.secure"))
+                .isEqualTo("true");
         assertThat(environment.getProperty("logging.level.org.hibernate.SQL"))
                 .isEqualTo("OFF");
         assertThat(environment.getProperty("logging.level.org.hibernate.orm.jdbc.bind"))

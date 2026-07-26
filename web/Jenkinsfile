@@ -1,0 +1,159 @@
+pipeline {
+    agent any
+
+    options {
+        // 동일 Job의 이전 빌드가 같은 로컬 image tag를 덮어쓰지 않게 한다.
+        disableConcurrentBuilds(abortPrevious: true)
+        skipDefaultCheckout(true)
+        timestamps()
+        timeout(time: 30, unit: 'MINUTES')
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    // 저장소 root가 common-proj인 경우와 web 자체인 경우를 모두 지원한다.
+                    env.APP_DIR = fileExists('web/compose.yaml') ? 'web' : '.'
+                    env.COMPOSE_PROJECT_NAME = (
+                            "gilbom-ci-${env.JOB_NAME}-${env.BUILD_NUMBER}"
+                                    .toLowerCase()
+                                    .replaceAll('[^a-z0-9_-]', '-')
+                                    .take(63)
+                    )
+                }
+            }
+        }
+
+        stage('Prepare ephemeral credentials') {
+            steps {
+                script {
+                    // CI 비밀번호는 빌드마다 메모리 환경 변수로 만들고 파일·artifact로 남기지 않는다.
+                    env.POSTGRES_ADMIN_PASSWORD = sh(
+                            script: 'openssl rand -hex 32',
+                            returnStdout: true
+                    ).trim()
+                    env.POSTGRES_FLYWAY_PASSWORD = sh(
+                            script: 'openssl rand -hex 32',
+                            returnStdout: true
+                    ).trim()
+                    env.POSTGRES_APP_PASSWORD = sh(
+                            script: 'openssl rand -hex 32',
+                            returnStdout: true
+                    ).trim()
+                    env.MQTT_PASSWORD = sh(
+                            script: 'openssl rand -hex 32',
+                            returnStdout: true
+                    ).trim()
+                    env.MQTT_ROBOT_PASSWORD = sh(
+                            script: 'openssl rand -hex 32',
+                            returnStdout: true
+                    ).trim()
+
+                    // 검증은 컨테이너 내부에서 하므로 host port는 임의 포트(0)를 사용해 충돌을 피한다.
+                    env.POSTGRES_PORT = '0'
+                    env.BACKEND_PORT = '0'
+                    env.FRONTEND_PORT = '0'
+                    env.MQTT_TLS_PORT = '0'
+                }
+            }
+        }
+
+        stage('Repository policy') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+
+                        # 실제 .env와 대표적인 개인키/keystore 확장자는 추적되면 즉시 실패시킨다.
+                        if git ls-files --full-name \
+                            | grep -E '(^|/)\\.env$|(-key\\.pem|\\.key|\\.p12|\\.pfx)$'; then
+                            echo 'Tracked secret file candidate detected.' >&2
+                            exit 1
+                        fi
+
+                        # 필수 환경 변수가 모두 해석되는지도 image build 전에 확인한다.
+                        docker compose config --quiet
+                    '''
+                }
+            }
+        }
+
+        stage('Build and test images') {
+            steps {
+                dir(env.APP_DIR) {
+                    // backend image는 Gradle test, frontend image는 lint와 production build를 포함한다.
+                    sh 'docker compose build backend frontend mqtt-init'
+                }
+            }
+        }
+
+        stage('Integration smoke test') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+
+                        # 단순 container 실행 여부가 아니라 모든 health dependency가 준비될 때까지 기다린다.
+                        docker compose up --detach --no-build --wait --wait-timeout 180
+
+                        # 프론트 Nginx -> 백엔드 API 경로를 호출해 실제 서비스 간 연결을 검증한다.
+                        docker compose exec -T frontend \
+                            wget -qO- http://127.0.0.1/api/health \
+                            | grep -F '"status":"UP"'
+
+                        # 전체 Actuator health에는 DB contributor가 포함돼 Backend -> DB 연결도 확인된다.
+                        docker compose exec -T frontend \
+                            wget -qO- http://backend:8080/actuator/health \
+                            | grep -F '"status":"UP"'
+
+                        # BrowserRouter deep link가 Nginx fallback을 통해 React 진입점으로 연결돼야 한다.
+                        docker compose exec -T frontend \
+                            wget -qO- http://127.0.0.1/robots \
+                            | grep -F '<div id="root"></div>'
+
+                        # 빈 DB에서 PostGIS, Flyway 전체 이력, Spring Session 테이블을 직접 확인한다.
+                        docker compose exec -T db sh -c '
+                            export PGPASSWORD="$POSTGRES_PASSWORD"
+                            psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+                                --no-password --tuples-only --no-align --command "
+                                    SELECT (
+                                        EXISTS (
+                                            SELECT 1
+                                            FROM pg_extension
+                                            WHERE extname = '\\''postgis'\\''
+                                        )
+                                        AND (
+                                            SELECT count(*) >= 3
+                                            FROM flyway_history.flyway_schema_history
+                                            WHERE success
+                                        )
+                                        AND to_regclass(
+                                            '\\''session_store.spring_session'\\''
+                                        ) IS NOT NULL
+                                    )::int;
+                                "
+                        ' | grep -qx '1'
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                if (env.APP_DIR) {
+                    dir(env.APP_DIR) {
+                        // CI DB와 생성된 MQTT 자산은 재사용하지 않아 매번 빈 환경을 검증한다.
+                        sh 'docker compose down --volumes --remove-orphans || true'
+                    }
+                }
+            }
+        }
+        cleanup {
+            deleteDir()
+        }
+    }
+}

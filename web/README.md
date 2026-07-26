@@ -13,6 +13,7 @@
 - [Common API responses and errors](./docs/common-api-response-and-errors.md)
 - [Database migrations](./docs/database-migrations.md)
 - [TOTP Secret encryption](./docs/totp-secret-encryption.md)
+- [Jenkins pipeline](./docs/jenkins-pipeline.md)
 - [OpenAPI v1](./docs/openapi-v1.yaml)
 
 ## Local infrastructure

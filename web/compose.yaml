@@ -3,7 +3,6 @@ name: ${COMPOSE_PROJECT_NAME:-gilbom}
 services:
   mosquitto:
     image: eclipse-mosquitto:2.1.2-alpine
-    container_name: gilbom-mosquitto-local
     restart: unless-stopped
     user: "1883:1883"
     depends_on:

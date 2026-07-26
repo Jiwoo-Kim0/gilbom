@@ -18,6 +18,8 @@ import org.springframework.core.annotation.Order;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.validation.ObjectError;
@@ -174,6 +176,21 @@ public class GlobalExceptionHandler {
         return respond(exception.errorCode(), message, List.of(), request);
     }
 
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<ErrorResponse> handleAuthenticationException(
+            AuthenticationException exception,
+            HttpServletRequest request) {
+        return respond(ErrorCode.AUTH_UNAUTHENTICATED, List.of(), request);
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> handleAccessDeniedException(
+            AccessDeniedException exception,
+            HttpServletRequest request) {
+        // 메서드 보안(@PreAuthorize) 거부는 MVC 안에서 발생하므로 필터용 handler와 별도로 처리한다.
+        return respond(ErrorCode.AUTH_FORBIDDEN, List.of(), request);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpectedException(
             Exception exception,
@@ -298,10 +315,7 @@ public class GlobalExceptionHandler {
     }
 
     private String requestId(HttpServletRequest request) {
-        Object requestId = request.getAttribute(RequestIdFilter.ATTRIBUTE_NAME);
-        return requestId instanceof String value && !value.isBlank()
-                ? value
-                : UUID.randomUUID().toString();
+        return RequestIdFilter.getOrCreateRequestId(request);
     }
 
     private String parameterName(MethodParameter methodParameter) {
