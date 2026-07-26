@@ -13,6 +13,6 @@ mqtt:
   security:
     # Public CA certificates can use the JVM default trust store by leaving this empty.
     trust-certificate: ${MQTT_TRUST_CERTIFICATE:}
-    # EC2 client credentials for mTLS. Override these when the deployment path differs.
+    # EC2 client credentials for mTLS. Override these when the deployment path differs.(내가 만들어 놨음 ec2 경로에)
     client-certificate: ${MQTT_CLIENT_CERTIFICATE:/opt/gilbom/backend/certs/client.pem}
     client-private-key: ${MQTT_CLIENT_PRIVATE_KEY:/opt/gilbom/backend/certs/client-key.pem}

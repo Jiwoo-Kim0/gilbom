@@ -37,6 +37,7 @@ else
   cp /tmp/server-local-key.pem "${KEY_FILE}"
 fi
 
+rm -f /tmp/mqtt-passwd
 mosquitto_passwd -b -c /tmp/mqtt-passwd "${MQTT_USERNAME}" "${MQTT_PASSWORD}"
 mosquitto_passwd -b /tmp/mqtt-passwd "${MQTT_ROBOT_USERNAME}" "${MQTT_ROBOT_PASSWORD}"
 cp /tmp/mqtt-passwd "${PASSWORD_FILE}"

@@ -9,7 +9,8 @@ logging:
 
 mqtt:
   security:
-    # Paths inside the backend container. The host certificate directory must be mounted here.
+    # MQTT certificate convention inside the backend container:
+    # /app/config/mqtt/certs/{server-local.pem,client.pem,client-key.pem}
     trust-certificate: ${MQTT_TRUST_CERTIFICATE:}
-    client-certificate: ${MQTT_CLIENT_CERTIFICATE:/app/certs/client.pem}
-    client-private-key: ${MQTT_CLIENT_PRIVATE_KEY:/app/certs/client-key.pem}
+    client-certificate: ${MQTT_CLIENT_CERTIFICATE:/app/config/mqtt/certs/client.pem}
+    client-private-key: ${MQTT_CLIENT_PRIVATE_KEY:/app/config/mqtt/certs/client-key.pem}

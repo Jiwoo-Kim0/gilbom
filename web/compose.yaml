@@ -82,11 +82,11 @@ services:
       MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-gilbom-local-docker}
       MQTT_USERNAME: ${MQTT_USERNAME:-gilbom}
       MQTT_PASSWORD: ${MQTT_PASSWORD:-gilbom}
-      MQTT_TRUST_CERTIFICATE: /app/mqtt-certs/server-local.pem
+      MQTT_TRUST_CERTIFICATE: /app/config/mqtt/certs/server-local.pem
       MQTT_SUBSCRIBE_TOPIC: ${MQTT_SUBSCRIBE_TOPIC:-robots/+/telemetry,robots/+/commands/ack}
       TZ: ${TZ:-UTC}
     volumes:
-      - ../mqtt/local/certs:/app/mqtt-certs:ro
+      - ../mqtt/local/certs:/app/config/mqtt/certs:ro
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
     depends_on:

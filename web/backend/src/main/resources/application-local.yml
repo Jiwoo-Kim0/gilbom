@@ -11,7 +11,9 @@ mqtt:
   broker: ${MQTT_BROKER:ssl://localhost:8883}
   client-id: ${MQTT_CLIENT_ID:gilbom-local}
   security:
-    # Public CA certificates can use the JVM default trust store by leaving this empty.
+    # Local Mosquitto presents mqtt/local/certs/server-local.pem.
+    # Point MQTT_TRUST_CERTIFICATE to that certificate because it is self-signed
+    # and therefore is not included in the JVM default trust store.
     trust-certificate: ${MQTT_TRUST_CERTIFICATE:}
     # Set absolute Windows paths when local mTLS is enabled.
     # Example: C:/ssafy/SSAFY-TASK/mqtt/certs/client.pem
