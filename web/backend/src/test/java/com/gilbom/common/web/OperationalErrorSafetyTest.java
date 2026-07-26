@@ -55,6 +55,8 @@ class OperationalErrorSafetyTest {
                 .doesNotContain("auth.admin_user")
                 .doesNotContain("password_hash")
                 .doesNotContain("must-not-leak")
+                .doesNotContain("secret-access-token")
+                .doesNotContain("JBSWY3DPEHPK3PXP")
                 .doesNotContain("SQLException");
 
         assertThat(output.getAll())
@@ -63,8 +65,32 @@ class OperationalErrorSafetyTest {
                 .doesNotContain("auth.admin_user")
                 .doesNotContain("password_hash")
                 .doesNotContain("must-not-leak")
+                .doesNotContain("secret-access-token")
+                .doesNotContain("JBSWY3DPEHPK3PXP")
                 .doesNotContain("SQLException")
                 .doesNotContain("GlobalExceptionTestController.sqlError");
+    }
+
+    @Test
+    void unexpectedSecretValuesAndStackFramesNeverReachOperationalLogs(CapturedOutput output)
+            throws Exception {
+        mockMvc.perform(get("/test/unexpected")
+                        .header(RequestIdFilter.HEADER_NAME, REQUEST_ID))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code", is("COMMON_INTERNAL_ERROR")))
+                .andExpect(jsonPath("$.requestId", is(REQUEST_ID)));
+
+        assertThat(output.getAll())
+                .contains("requestId=" + REQUEST_ID)
+                .contains("category=APPLICATION")
+                .doesNotContain("database-password")
+                .doesNotContain("must-not-leak")
+                .doesNotContain("Authorization")
+                .doesNotContain("secret-access-token")
+                .doesNotContain("totpSecret")
+                .doesNotContain("JBSWY3DPEHPK3PXP")
+                .doesNotContain("IllegalStateException")
+                .doesNotContain("GlobalExceptionTestController.unexpected");
     }
 
     @Test
@@ -89,10 +115,15 @@ class OperationalErrorSafetyTest {
                 .isEqualTo("OFF");
         assertThat(environment.getProperty("logging.level.org.hibernate.orm.jdbc.bind"))
                 .isEqualTo("OFF");
+        assertThat(environment.getProperty("logging.level.org.hibernate.orm.jdbc.extract"))
+                .isEqualTo("OFF");
         assertThat(environment.getProperty(
                 "logging.level.org.hibernate.engine.jdbc.spi.SqlExceptionHelper"))
                 .isEqualTo("OFF");
         assertThat(environment.getProperty("logging.level.org.springframework.jdbc.core"))
+                .isEqualTo("OFF");
+        assertThat(environment.getProperty(
+                "logging.level.org.flywaydb.core.internal.sqlscript"))
                 .isEqualTo("OFF");
     }
 }

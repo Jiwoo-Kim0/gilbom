@@ -63,6 +63,30 @@ INSERT INTO auth.mfa_recovery_code (
     '{argon2}integration-test-recovery-hash'
 );
 
+INSERT INTO auth.authentication_rate_limit (
+    rate_limit_id,
+    limit_type,
+    subject_key_hash,
+    hash_key_version,
+    window_started_at,
+    last_attempt_at,
+    request_count,
+    failure_count,
+    blocked_until,
+    expires_at
+) VALUES (
+    '35000000-0000-4000-8000-000000000001',
+    'ACCOUNT_PASSWORD_FAILURE',
+    DECODE(REPEAT('ef', 32), 'hex'),
+    1,
+    '2026-07-26T00:00:00Z',
+    '2026-07-26T00:05:00Z',
+    5,
+    5,
+    '2026-07-26T00:20:00Z',
+    '2026-07-26T01:00:00Z'
+);
+
 -- current_version FK는 transaction commit 시점까지 지연되므로 header와 첫 version을 원자적으로 만든다.
 INSERT INTO report.anomaly_report (
     report_id,
@@ -162,15 +186,99 @@ INSERT INTO session_store.session_security_state (
     1800000000000
 );
 
+INSERT INTO request_control.idempotency_request (
+    idempotency_request_id,
+    principal_type,
+    principal_key_hash,
+    idempotency_key_hash,
+    request_fingerprint,
+    request_method,
+    request_path,
+    lease_expires_at,
+    expires_at
+) VALUES (
+    '85000000-0000-4000-8000-000000000001',
+    'USER',
+    DECODE(REPEAT('11', 32), 'hex'),
+    DECODE(REPEAT('22', 32), 'hex'),
+    DECODE(REPEAT('33', 32), 'hex'),
+    'POST',
+    '/api/v1/robots/robot-smoke/commands',
+    '2030-01-01T00:01:00Z',
+    '2030-01-02T00:00:00Z'
+);
+
+UPDATE request_control.idempotency_request
+SET processing_status = 'SUCCEEDED',
+    response_status = 202,
+    response_headers = '{"contentType": "application/json"}'::JSONB,
+    response_body = '{"commandId": "smoke-command"}'::JSONB,
+    updated_at = NOW()
+WHERE idempotency_request_id = '85000000-0000-4000-8000-000000000001';
+
 -- 모두 1이어야 하며 runtime role에는 schema 생성·감사 수정 권한이 없어야 한다.
 SELECT
+    (SELECT password_change_required FROM auth.admin_user WHERE user_id = '10000000-0000-4000-8000-000000000001') AS password_change_required,
     (SELECT COUNT(*) FROM auth.user_role WHERE user_id = '10000000-0000-4000-8000-000000000001') AS user_role_count,
     (SELECT COUNT(*) FROM auth.mfa_factor WHERE user_id = '10000000-0000-4000-8000-000000000001') AS mfa_factor_count,
     (SELECT COUNT(*) FROM auth.mfa_recovery_code WHERE factor_id = '20000000-0000-4000-8000-000000000001') AS recovery_code_count,
+    (SELECT COUNT(*) FROM auth.permission WHERE is_system AND is_active) AS permission_count,
+    (SELECT COUNT(*) FROM auth.role_permission role_permission
+      JOIN auth.role role USING (role_id)
+     WHERE role.role_code = 'ADMIN' AND role_permission.is_active) AS admin_permission_count,
+    (SELECT COUNT(*) FROM auth.role_permission role_permission
+      JOIN auth.role role USING (role_id)
+     WHERE role.role_code = 'MANAGER' AND role_permission.is_active) AS manager_permission_count,
+    (SELECT COUNT(*) FROM auth.role_permission role_permission
+      JOIN auth.role role USING (role_id)
+     WHERE role.role_code = 'OPERATOR' AND role_permission.is_active) AS operator_permission_count,
+    (SELECT COUNT(*) FROM auth.authentication_rate_limit WHERE rate_limit_id = '35000000-0000-4000-8000-000000000001') AS rate_limit_count,
     (SELECT COUNT(*) FROM report.report_version WHERE report_id = '40000000-0000-4000-8000-000000000001') AS report_version_count,
+    (SELECT deleted_at IS NULL FROM report.anomaly_report WHERE report_id = '40000000-0000-4000-8000-000000000001') AS report_not_deleted,
     (SELECT COUNT(*) FROM audit.audit_log WHERE request_id = '60000000-0000-4000-8000-000000000001') AS audit_count,
     (SELECT COUNT(*) FROM session_store.session_security_state WHERE session_primary_id = '70000000-0000-4000-8000-000000000001') AS session_state_count,
+    (SELECT COUNT(*) FROM request_control.idempotency_request WHERE idempotency_request_id = '85000000-0000-4000-8000-000000000001') AS idempotency_count,
     HAS_SCHEMA_PRIVILEGE(CURRENT_USER, 'auth', 'CREATE') AS can_create_auth_object,
-    HAS_TABLE_PRIVILEGE(CURRENT_USER, 'audit.audit_log', 'UPDATE') AS can_update_audit;
+    HAS_SCHEMA_PRIVILEGE(CURRENT_USER, 'request_control', 'CREATE') AS can_create_request_control_object,
+    HAS_TABLE_PRIVILEGE(CURRENT_USER, 'audit.audit_log', 'SELECT') AS can_select_audit,
+    HAS_TABLE_PRIVILEGE(CURRENT_USER, 'audit.audit_log', 'INSERT') AS can_insert_audit,
+    HAS_TABLE_PRIVILEGE(CURRENT_USER, 'audit.audit_log', 'UPDATE') AS can_update_audit,
+    HAS_TABLE_PRIVILEGE(CURRENT_USER, 'audit.audit_log', 'DELETE') AS can_delete_audit,
+    HAS_TABLE_PRIVILEGE(CURRENT_USER, 'auth.permission', 'UPDATE') AS can_update_permission;
+
+SELECT (
+    (SELECT password_change_required FROM auth.admin_user WHERE user_id = '10000000-0000-4000-8000-000000000001')
+    AND (SELECT COUNT(*) FROM auth.user_role WHERE user_id = '10000000-0000-4000-8000-000000000001') = 1
+    AND (SELECT COUNT(*) FROM auth.mfa_factor WHERE user_id = '10000000-0000-4000-8000-000000000001') = 1
+    AND (SELECT COUNT(*) FROM auth.mfa_recovery_code WHERE factor_id = '20000000-0000-4000-8000-000000000001') = 1
+    AND (SELECT COUNT(*) FROM auth.permission WHERE is_system AND is_active) = 18
+    AND (SELECT COUNT(*) FROM auth.authentication_rate_limit WHERE rate_limit_id = '35000000-0000-4000-8000-000000000001') = 1
+    AND (SELECT COUNT(*) FROM report.report_version WHERE report_id = '40000000-0000-4000-8000-000000000001') = 1
+    AND (SELECT deleted_at IS NULL FROM report.anomaly_report WHERE report_id = '40000000-0000-4000-8000-000000000001')
+    AND (SELECT COUNT(*) FROM audit.audit_log WHERE request_id = '60000000-0000-4000-8000-000000000001') = 1
+    AND (SELECT COUNT(*) FROM session_store.session_security_state WHERE session_primary_id = '70000000-0000-4000-8000-000000000001') = 1
+    AND (
+        SELECT processing_status = 'SUCCEEDED'
+               AND response_status = 202
+               AND response_body = '{"commandId": "smoke-command"}'::JSONB
+        FROM request_control.idempotency_request
+        WHERE idempotency_request_id = '85000000-0000-4000-8000-000000000001'
+    )
+    AND NOT HAS_SCHEMA_PRIVILEGE(CURRENT_USER, 'auth', 'CREATE')
+    AND NOT HAS_SCHEMA_PRIVILEGE(CURRENT_USER, 'request_control', 'CREATE')
+    AND HAS_TABLE_PRIVILEGE(CURRENT_USER, 'audit.audit_log', 'SELECT')
+    AND HAS_TABLE_PRIVILEGE(CURRENT_USER, 'audit.audit_log', 'INSERT')
+    AND NOT HAS_TABLE_PRIVILEGE(CURRENT_USER, 'audit.audit_log', 'UPDATE')
+    AND NOT HAS_TABLE_PRIVILEGE(CURRENT_USER, 'audit.audit_log', 'DELETE')
+    AND NOT HAS_TABLE_PRIVILEGE(CURRENT_USER, 'auth.permission', 'UPDATE')
+) AS runtime_contract_ok
+\gset
+
+\if :runtime_contract_ok
+    \echo 'Runtime DML and least-privilege contract: PASS'
+\else
+    \echo 'Runtime DML and least-privilege contract: FAIL'
+    \quit 1
+\endif
 
 ROLLBACK;

@@ -71,13 +71,20 @@ public class GlobalExceptionTestController {
 
     @GetMapping("/test/unexpected")
     void unexpected() {
-        throw new IllegalStateException("database-password=must-not-leak");
+        throw new IllegalStateException(
+                "database-password=must-not-leak; "
+                        + "Authorization=Bearer secret-access-token; "
+                        + "totpSecret=JBSWY3DPEHPK3PXP"
+        );
     }
 
     @GetMapping("/test/sql-error")
     void sqlError() {
         SQLException cause = new SQLException(
-                "relation auth.admin_user does not exist; bind password=must-not-leak"
+                "relation auth.admin_user does not exist; "
+                        + "bind password=must-not-leak; "
+                        + "Authorization=Bearer secret-access-token; "
+                        + "totpSecret=JBSWY3DPEHPK3PXP"
         );
         throw new DataAccessResourceFailureException(
                 "SQL [select password_hash from auth.admin_user]",

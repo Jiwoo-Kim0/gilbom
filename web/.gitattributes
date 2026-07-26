@@ -1,0 +1,11 @@
+* text=auto
+
+# Linux container entrypoints and Flyway resources must be byte-stable across host OS checkouts.
+*.sh text eol=lf
+*.sql text eol=lf
+gradlew text eol=lf
+Dockerfile text eol=lf
+Jenkinsfile text eol=lf
+
+# Windows launcher remains directly executable from cmd.exe.
+*.bat text eol=crlf

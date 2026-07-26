@@ -1,0 +1,115 @@
+\set ON_ERROR_STOP on
+
+-- 빈 volume에서 PostGIS, Flyway V1~V4, 필수 session/RBAC/security schema를 한 번에 검증한다.
+-- flyway_role과 application_role은 psql --set으로 전달하며 비밀번호는 받거나 출력하지 않는다.
+SELECT (
+    :'flyway_role' <> :'application_role'
+    AND EXISTS (
+        SELECT 1
+        FROM pg_extension
+        WHERE extname = 'postgis'
+    )
+    AND (
+        SELECT COUNT(*) >= 4
+               AND COUNT(*) FILTER (WHERE NOT success) = 0
+               AND COUNT(*) FILTER (WHERE version IN ('1', '2', '3', '4') AND success) = 4
+        FROM flyway_history.flyway_schema_history
+    )
+    AND to_regclass('auth.admin_user') IS NOT NULL
+    AND to_regclass('auth.mfa_factor') IS NOT NULL
+    AND to_regclass('auth.mfa_recovery_code') IS NOT NULL
+    AND to_regclass('auth.authentication_rate_limit') IS NOT NULL
+    AND to_regclass('auth.permission') IS NOT NULL
+    AND to_regclass('auth.role_permission') IS NOT NULL
+    AND to_regclass('report.anomaly_report') IS NOT NULL
+    AND to_regclass('audit.audit_log') IS NOT NULL
+    AND to_regclass('session_store.spring_session') IS NOT NULL
+    AND to_regclass('session_store.spring_session_attributes') IS NOT NULL
+    AND to_regclass('session_store.session_security_state') IS NOT NULL
+    AND to_regclass('request_control.idempotency_request') IS NOT NULL
+    AND EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'auth'
+          AND table_name = 'admin_user'
+          AND column_name = 'password_change_required'
+          AND is_nullable = 'NO'
+    )
+    AND (
+        SELECT COUNT(*) = 5
+        FROM information_schema.columns
+        WHERE table_schema = 'auth'
+          AND table_name = 'mfa_factor'
+          AND column_name IN (
+              'secret_ciphertext',
+              'secret_nonce',
+              'secret_key_version',
+              'last_successful_totp_time_step',
+              'factor_type'
+          )
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'report'
+          AND table_name = 'anomaly_report'
+          AND column_name = 'deleted_at'
+    )
+    AND (
+        SELECT ARRAY_AGG(role_code ORDER BY role_code)
+        FROM auth.role
+        WHERE is_system AND is_active
+    ) = ARRAY['ADMIN', 'MANAGER', 'OPERATOR']::VARCHAR[]
+    AND (
+        SELECT COUNT(*)
+        FROM auth.permission
+        WHERE is_system AND is_active
+    ) = 18
+    AND (
+        SELECT COUNT(*)
+        FROM auth.role_permission role_permission
+        JOIN auth.role role USING (role_id)
+        WHERE role.role_code = 'ADMIN' AND role_permission.is_active
+    ) = 18
+    AND (
+        SELECT COUNT(*)
+        FROM auth.role_permission role_permission
+        JOIN auth.role role USING (role_id)
+        WHERE role.role_code = 'MANAGER' AND role_permission.is_active
+    ) = 15
+    AND (
+        SELECT COUNT(*)
+        FROM auth.role_permission role_permission
+        JOIN auth.role role USING (role_id)
+        WHERE role.role_code = 'OPERATOR' AND role_permission.is_active
+    ) = 10
+    AND (
+        SELECT COUNT(*)
+        FROM auth.role_permission role_permission
+        JOIN auth.role role USING (role_id)
+        JOIN auth.permission permission USING (permission_id)
+        WHERE permission.permission_code = 'ADMIN_SETTINGS_MANAGE'
+          AND role_permission.is_active
+          AND role.role_code = 'ADMIN'
+          AND role.is_system
+    ) = 1
+    AND HAS_SCHEMA_PRIVILEGE(:'application_role', 'auth', 'USAGE')
+    AND NOT HAS_SCHEMA_PRIVILEGE(:'application_role', 'auth', 'CREATE')
+    AND HAS_SCHEMA_PRIVILEGE(:'application_role', 'request_control', 'USAGE')
+    AND NOT HAS_SCHEMA_PRIVILEGE(:'application_role', 'request_control', 'CREATE')
+    AND HAS_TABLE_PRIVILEGE(:'application_role', 'audit.audit_log', 'SELECT')
+    AND HAS_TABLE_PRIVILEGE(:'application_role', 'audit.audit_log', 'INSERT')
+    AND NOT HAS_TABLE_PRIVILEGE(:'application_role', 'audit.audit_log', 'UPDATE')
+    AND NOT HAS_TABLE_PRIVILEGE(:'application_role', 'audit.audit_log', 'DELETE')
+    AND HAS_TABLE_PRIVILEGE(:'application_role', 'session_store.spring_session', 'DELETE')
+    AND NOT HAS_TABLE_PRIVILEGE(:'application_role', 'auth.permission', 'UPDATE')
+    AND NOT HAS_SCHEMA_PRIVILEGE(:'application_role', 'flyway_history', 'USAGE')
+) AS empty_database_contract_ok
+\gset
+
+\if :empty_database_contract_ok
+    \echo 'Empty database PostGIS/Flyway/session/RBAC/security contract: PASS'
+\else
+    \echo 'Empty database PostGIS/Flyway/session/RBAC/security contract: FAIL'
+    \quit 1
+\endif

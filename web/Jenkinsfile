@@ -130,28 +130,42 @@ pipeline {
                             wget -qO- http://127.0.0.1/robots \
                             | grep -F '<div id="root"></div>'
 
-                        # 빈 DB에서 PostGIS, Flyway 전체 이력, Spring Session 테이블을 직접 확인한다.
-                        docker compose exec -T db sh -c '
+                        # 빈 DB의 extension, V1~V4, RBAC seed와 runtime 최소 권한을 계약 SQL로 확인한다.
+                        docker compose exec -T db sh -ec '
+                            export PGPASSWORD="$POSTGRES_PASSWORD"
+                            psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+                                --no-password \
+                                --set "flyway_role=$POSTGRES_FLYWAY_USER" \
+                                --set "application_role=$POSTGRES_APP_USER"
+                        ' < infra/postgres/verify-empty-database.sql
+
+                        # 실제 CSRF 요청이 JDBC Session과 attribute를 DB에 쓰는지 확인한다.
+                        docker compose exec -T frontend \
+                            wget -qO- http://127.0.0.1/api/v1/auth/csrf-token \
+                            | grep -Fq '"headerName":"X-CSRF-TOKEN"'
+                        docker compose exec -T db sh -ec '
                             export PGPASSWORD="$POSTGRES_PASSWORD"
                             psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
                                 --no-password --tuples-only --no-align --command "
                                     SELECT (
-                                        EXISTS (
-                                            SELECT 1
-                                            FROM pg_extension
-                                            WHERE extname = '\\''postgis'\\''
-                                        )
-                                        AND (
-                                            SELECT count(*) >= 3
-                                            FROM flyway_history.flyway_schema_history
-                                            WHERE success
-                                        )
-                                        AND to_regclass(
-                                            '\\''session_store.spring_session'\\''
-                                        ) IS NOT NULL
+                                        (SELECT COUNT(*) FROM session_store.spring_session) >= 1
+                                        AND
+                                        (SELECT COUNT(*) FROM session_store.spring_session_attributes) >= 1
                                     )::int;
                                 "
                         ' | grep -qx '1'
+
+                        # Runtime role DML과 audit/report append-only 보호를 실제 권한으로 검증한다.
+                        docker compose exec -T db sh -ec '
+                            export PGPASSWORD="$POSTGRES_APP_PASSWORD"
+                            psql --host 127.0.0.1 --username "$POSTGRES_APP_USER" \
+                                --dbname "$POSTGRES_DB" --no-password
+                        ' < infra/postgres/verify-initial-schema.sql
+                        docker compose exec -T db sh -ec '
+                            export PGPASSWORD="$POSTGRES_FLYWAY_PASSWORD"
+                            psql --host 127.0.0.1 --username "$POSTGRES_FLYWAY_USER" \
+                                --dbname "$POSTGRES_DB" --no-password
+                        ' < infra/postgres/verify-append-only.sql
                     '''
                 }
             }

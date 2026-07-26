@@ -28,8 +28,10 @@
 | V1 | 관리자, Role, 관리자-Role, TOTP factor, 복구 코드 | 로그인 계정과 MFA 암호화·hash 구조 및 재사용 방지 metadata를 먼저 확정 |
 | V2 | 보고서, 보고서 version, 감사 로그 | 변경 가능한 header와 불변 이력을 분리하고 감사 데이터를 append-only로 보호 |
 | V3 | Spring Session JDBC, session security state | 재시작·다중 인스턴스에서도 세션을 공유하고 MFA 상태·절대 만료를 조회 가능하게 저장 |
+| V4 | Permission/RBAC seed, 로그인 제한, 멱등 요청 | 세부 권한 매트릭스를 seed하고 인증 공격·중복 상태 변경을 DB에서 원자적으로 제어 |
 
-시스템 Role `ADMIN`, `MANAGER`, `OPERATOR`는 결정적인 UUID로 seed한다. 실제
+시스템 Role `ADMIN`, `MANAGER`, `OPERATOR`와 18개 세부 permission 및
+role-permission 관계는 결정적인 UUID로 seed한다. 실제
 관리자 계정은 password hash와 MFA 등록 절차가 필요하므로 migration에서 만들지 않는다.
 
 ## 로컬 최초 실행
@@ -42,10 +44,21 @@ docker compose up --build --detach
 docker compose logs backend
 ```
 
-Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V3가
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V4가
 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증
+
+빈 DB 계약 검증은 bootstrap 계정으로 PostGIS, Flyway 이력, Spring Session,
+RBAC seed와 runtime 최소 권한을 확인한다.
+
+```bash
+docker compose exec --no-TTY db sh -ec \
+  'PGPASSWORD="$POSTGRES_PASSWORD" psql --username "$POSTGRES_USER" \
+  --dbname "$POSTGRES_DB" --set "flyway_role=$POSTGRES_FLYWAY_USER" \
+  --set "application_role=$POSTGRES_APP_USER"' \
+  < infra/postgres/verify-empty-database.sql
+```
 
 다음 검증은 실제 runtime role로 모든 schema 관계를 삽입한 뒤 rollback하므로
 업무 데이터를 남기지 않는다.
