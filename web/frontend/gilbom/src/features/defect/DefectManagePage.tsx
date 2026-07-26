@@ -8,15 +8,15 @@ export function DefectManagePage() {
       <div className="page-heading">
         <div>
           <p className="eyebrow">DEFECTS</p>
-          <h2 id="defect-page-title">결함 탐지 현황</h2>
-          <p>필터, 목록, 지도 영역을 분리해 각 기능을 독립적으로 확장할 수 있습니다.</p>
+          <h2 id="defect-page-title">실시간 결함 상태 모니터링</h2>
+          <p>시스템에서 감지된 최신 결함 목록 및 위치 현황입니다.</p>
         </div>
       </div>
-      <DefectFilter />
-      <div className="defect-grid">
-        <DefectList />
+      <div className="defect-layout">
+        <DefectFilter />
         <DefectMap />
       </div>
+      <DefectList />
     </section>
   )
 }
