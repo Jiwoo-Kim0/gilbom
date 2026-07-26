@@ -7,6 +7,13 @@ logging:
   level:
     com.gilbom: INFO
 
+gilbom:
+  security:
+    mfa:
+      totp-secret-encryption:
+        # 운영 서버에서는 disabled 또는 keyring 누락 상태로 기동하지 못한다.
+        required: true
+
 mqtt:
   broker: ${MQTT_BROKER:ssl://i15d101.p.ssafy.io:8883}
   client-id: ${MQTT_CLIENT_ID:gilbom-backend-ec2}
