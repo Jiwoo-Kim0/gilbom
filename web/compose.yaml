@@ -41,11 +41,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-gilbom}
       # Bootstrap 관리 계정은 role/schema 준비에만 사용하고 애플리케이션에는 전달하지 않는다.
       POSTGRES_USER: ${POSTGRES_ADMIN_USER:-gilbom_db_admin}
-      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:-${POSTGRES_PASSWORD:?POSTGRES_ADMIN_PASSWORD must be set}}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?POSTGRES_ADMIN_PASSWORD must be set}
       POSTGRES_FLYWAY_USER: ${POSTGRES_FLYWAY_USER:-gilbom_flyway}
-      POSTGRES_FLYWAY_PASSWORD: ${POSTGRES_FLYWAY_PASSWORD:-${POSTGRES_PASSWORD:?POSTGRES_FLYWAY_PASSWORD must be set}}
+      POSTGRES_FLYWAY_PASSWORD: ${POSTGRES_FLYWAY_PASSWORD:?POSTGRES_FLYWAY_PASSWORD must be set}
       POSTGRES_APP_USER: ${POSTGRES_APP_USER:-gilbom_app}
-      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-${POSTGRES_PASSWORD:?POSTGRES_APP_PASSWORD must be set}}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD must be set}
       POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C
       TZ: ${TZ:-UTC}
       PGTZ: ${TZ:-UTC}
@@ -92,9 +92,9 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-gilbom}
       # Runtime 계정은 DML만, Flyway 계정은 migration DDL만 수행한다.
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_APP_USER:-gilbom_app}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_APP_PASSWORD:-${POSTGRES_PASSWORD:?POSTGRES_APP_PASSWORD must be set}}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD must be set}
       SPRING_FLYWAY_USER: ${POSTGRES_FLYWAY_USER:-gilbom_flyway}
-      SPRING_FLYWAY_PASSWORD: ${POSTGRES_FLYWAY_PASSWORD:-${POSTGRES_PASSWORD:?POSTGRES_FLYWAY_PASSWORD must be set}}
+      SPRING_FLYWAY_PASSWORD: ${POSTGRES_FLYWAY_PASSWORD:?POSTGRES_FLYWAY_PASSWORD must be set}
       # TOTP keyring 원문은 이미지나 DB가 아니라 실행 환경에서만 주입한다.
       MFA_TOTP_SECRET_ENCRYPTION_ENABLED: ${MFA_TOTP_SECRET_ENCRYPTION_ENABLED:-false}
       MFA_TOTP_SECRET_ACTIVE_KEY_VERSION: ${MFA_TOTP_SECRET_ACTIVE_KEY_VERSION:-1}
@@ -102,9 +102,11 @@ services:
       MQTT_BROKER: ${MQTT_BROKER:-ssl://mosquitto:8883}
       MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-gilbom-local-docker}
       MQTT_USERNAME: ${MQTT_USERNAME:-gilbom}
-      MQTT_PASSWORD: ${MQTT_PASSWORD:-gilbom}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD must be set}
       MQTT_TRUST_CERTIFICATE: /app/mqtt-certs/server-local.pem
       MQTT_SUBSCRIBE_TOPIC: ${MQTT_SUBSCRIBE_TOPIC:-robots/+/telemetry,robots/+/commands/ack}
+      MQTT_PUBLISH_TOPIC: ${MQTT_PUBLISH_TOPIC:-robots/test-robot/commands}
+      MQTT_QOS: ${MQTT_QOS:-1}
       TZ: ${TZ:-UTC}
     volumes:
       - ../mqtt/local/certs:/app/mqtt-certs:ro
@@ -179,9 +181,9 @@ services:
     user: "0:0"
     environment:
       MQTT_USERNAME: ${MQTT_USERNAME:-gilbom}
-      MQTT_PASSWORD: ${MQTT_PASSWORD:-gilbom}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD must be set}
       MQTT_ROBOT_USERNAME: ${MQTT_ROBOT_USERNAME:-robot-test}
-      MQTT_ROBOT_PASSWORD: ${MQTT_ROBOT_PASSWORD:-gilbom}
+      MQTT_ROBOT_PASSWORD: ${MQTT_ROBOT_PASSWORD:?MQTT_ROBOT_PASSWORD must be set}
     volumes:
       - ../mqtt/local:/mqtt-local
     # 재실행 때 이전 임시 passwd 파일이 남지 않도록 컨테이너 정지 시 폐기되는 tmpfs를 사용한다.

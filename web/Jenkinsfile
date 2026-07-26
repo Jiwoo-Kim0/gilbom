@@ -68,13 +68,30 @@ pipeline {
 
                         # 실제 .env와 대표적인 개인키/keystore 확장자는 추적되면 즉시 실패시킨다.
                         if git ls-files --full-name \
-                            | grep -E '(^|/)\\.env$|(-key\\.pem|\\.key|\\.p12|\\.pfx)$'; then
+                            | grep -E '(^|/)\\.env$|\\.(pem|key|p12|pfx|jks|keystore)$|(^|/)passwd$|(^|/)credentials\\.json$|(^|/)service-account[^/]*\\.json$'; then
                             echo 'Tracked secret file candidate detected.' >&2
+                            exit 1
+                        fi
+
+                        # 대표적인 provider token과 PEM 개인키 본문이 일반 소스에 들어오면 CI에서 막는다.
+                        if git grep -IlE -e \
+                            'AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|glpat-[A-Za-z0-9_-]{20,}|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}' \
+                            -- . ':!frontend/gilbom/package-lock.json'; then
+                            echo 'Tracked token candidate detected.' >&2
+                            exit 1
+                        fi
+                        if git grep -IlE -e \
+                            '-----BEGIN( [A-Z0-9]+)? PRIVATE KEY-----' \
+                            -- . ':!backend/src/main/java/com/gilbom/robot/mqtt/strategy/PemSslContextSupport.java'; then
+                            echo 'Tracked private key candidate detected.' >&2
                             exit 1
                         fi
 
                         # 필수 환경 변수가 모두 해석되는지도 image build 전에 확인한다.
                         docker compose config --quiet
+
+                        # 개발자 선언과 Docker/lockfile의 지원 버전이 어긋나면 빌드하지 않는다.
+                        sh scripts/verify-supported-versions.sh
                     '''
                 }
             }

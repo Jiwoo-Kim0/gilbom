@@ -1,14 +1,19 @@
-FROM gradle:8.14.3-jdk21-alpine AS builder
+# Java 21의 2026년 7월 CPU patch와 OS까지 고정하고 Gradle Wrapper만 사용한다.
+FROM amazoncorretto:21.0.12-alpine3.22 AS builder
 
 WORKDIR /workspace
 
-COPY --chown=gradle:gradle build.gradle settings.gradle ./
-RUN gradle dependencies --no-daemon
+# Windows checkout에서도 실행 비트가 달라지지 않도록 image 안의 Wrapper 권한을 명시한다.
+COPY --chmod=755 gradlew ./gradlew
+COPY build.gradle settings.gradle ./
+COPY gradle ./gradle
+RUN ./gradlew dependencies --no-daemon
 
-COPY --chown=gradle:gradle src ./src
-RUN gradle clean test bootJar --no-daemon
+COPY src ./src
+RUN ./gradlew clean test bootJar --no-daemon
 
-FROM eclipse-temurin:21-jre-alpine AS runtime
+# 빌드와 운영의 Java vendor·patch가 달라지는 문제를 막기 위해 같은 이미지를 사용한다.
+FROM amazoncorretto:21.0.12-alpine3.22 AS runtime
 
 RUN apk add --no-cache curl \
     && addgroup -S spring \
