@@ -22,5 +22,6 @@ class ErrorCodeTest {
         assertThat(ErrorCode.REPORT_STATE_CONFLICT.httpStatus()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(ErrorCode.COMMON_BUSINESS_RULE_VIOLATION.httpStatus())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        
     }
 }

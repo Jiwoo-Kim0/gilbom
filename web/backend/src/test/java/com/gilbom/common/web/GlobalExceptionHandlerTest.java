@@ -153,6 +153,19 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void mqttContractBusinessExceptionsUseTheirDeclaredStatusAndCode() throws Exception {
+        mockMvc.perform(get("/test/error")
+                        .param("code", "MQTT_PAYLOAD_VALIDATION_FAILED"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code", is("MQTT_PAYLOAD_VALIDATION_FAILED")))
+                .andExpect(jsonPath(
+                        "$.message",
+                        is("MQTT Payload가 통신 계약을 충족하지 않습니다.")
+                ))
+                .andExpect(jsonPath("$.details", hasSize(0)));
+    }
+
+    @Test
     void unsupportedMethodsUse405() throws Exception {
         mockMvc.perform(get("/test/validation"))
                 .andExpect(status().isMethodNotAllowed())
