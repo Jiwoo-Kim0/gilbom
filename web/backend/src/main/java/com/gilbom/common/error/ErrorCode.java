@@ -10,6 +10,9 @@ public enum ErrorCode {
     COMMON_INVALID_REQUEST(HttpStatus.BAD_REQUEST, "요청 값이 올바르지 않습니다."),
     COMMON_MALFORMED_JSON(HttpStatus.BAD_REQUEST, "요청 본문을 해석할 수 없습니다."),
     COMMON_VALIDATION_FAILED(HttpStatus.BAD_REQUEST, "요청 값 검증에 실패했습니다."),
+    MQTT_TOPIC_INVALID(HttpStatus.BAD_REQUEST, "MQTT Topic 형식이 올바르지 않습니다."),
+    MQTT_TOPIC_UNSUPPORTED(HttpStatus.BAD_REQUEST, "지원하지 않는 MQTT Topic입니다."),
+    MQTT_PAYLOAD_MALFORMED(HttpStatus.BAD_REQUEST, "MQTT Payload를 해석할 수 없습니다."),
 
     AUTH_UNAUTHENTICATED(HttpStatus.UNAUTHORIZED, "인증이 필요합니다."),
     AUTH_FORBIDDEN(HttpStatus.FORBIDDEN, "요청을 수행할 권한이 없습니다."),
@@ -33,6 +36,22 @@ public enum ErrorCode {
 
     COMMON_BUSINESS_RULE_VIOLATION(HttpStatus.UNPROCESSABLE_ENTITY, "업무 규칙을 충족하지 않습니다."),
     REPORT_PERIOD_INVALID(HttpStatus.UNPROCESSABLE_ENTITY, "보고서 조회 기간이 올바르지 않습니다."),
+    MQTT_SCHEMA_VERSION_UNSUPPORTED(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "지원하지 않는 MQTT Payload 버전입니다."
+    ),
+    MQTT_PAYLOAD_VALIDATION_FAILED(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "MQTT Payload가 통신 계약을 충족하지 않습니다."
+    ),
+    MQTT_ROBOT_ID_MISMATCH(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "MQTT Topic과 Payload의 로봇 식별자가 일치하지 않습니다."
+    ),
+    MQTT_QOS_MISMATCH(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "MQTT QoS가 Topic 계약과 일치하지 않습니다."
+    ),
 
     COMMON_RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "요청 한도를 초과했습니다."),
 
