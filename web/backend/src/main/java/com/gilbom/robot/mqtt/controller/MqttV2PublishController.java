@@ -1,8 +1,9 @@
 package com.gilbom.robot.mqtt.controller;
 
 import com.gilbom.robot.mqtt.client.MqttV2Publisher;
-import com.gilbom.robot.mqtt.contract.v2.CommandRequestPayload;
-import com.gilbom.robot.mqtt.contract.v2.IngestReceiptPayload;
+import com.gilbom.robot.data.api.response.MqttPublishResponse;
+import com.gilbom.robot.data.mqtt.v2.outbound.CommandRequestPayload;
+import com.gilbom.robot.data.mqtt.v2.outbound.IngestReceiptPayload;
 import jakarta.validation.Valid;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
@@ -24,7 +25,7 @@ public class MqttV2PublishController {
     }
     /*For 조종 명령*/
     @PostMapping("/commands/request")
-    public ResponseEntity<PublishResponse> publishCommand(
+    public ResponseEntity<MqttPublishResponse> publishCommand(
             @PathVariable String robotId,
             @Valid @RequestBody CommandRequestPayload payload
     ) {
@@ -33,7 +34,7 @@ public class MqttV2PublishController {
     
     /*For 중복 탐사 방지*/
     @PostMapping("/ingest/receipt")
-    public ResponseEntity<PublishResponse> publishIngestReceipt(
+    public ResponseEntity<MqttPublishResponse> publishIngestReceipt(
             @PathVariable String robotId,
             @Valid @RequestBody IngestReceiptPayload payload
     ) {
@@ -46,10 +47,10 @@ public class MqttV2PublishController {
     
     
     /*For Common*/
-    private ResponseEntity<PublishResponse> accepted(
+    private ResponseEntity<MqttPublishResponse> accepted(
             MqttV2Publisher.PublishResult result
     ) {
-        return ResponseEntity.accepted().body(new PublishResponse(
+        return ResponseEntity.accepted().body(new MqttPublishResponse(
                 result.topic(),
                 result.qos(),
                 result.retained(),
@@ -57,11 +58,4 @@ public class MqttV2PublishController {
         ));
     }
 
-    public record PublishResponse(
-            String topic,
-            int qos,
-            boolean retained,
-            boolean accepted
-    ) {
-    }
 }

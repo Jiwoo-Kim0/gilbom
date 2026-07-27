@@ -1,6 +1,6 @@
 package com.gilbom.robot.mqtt.parser;
 
-import com.gilbom.robot.mqtt.contract.v2.MqttV2Payload;
+import com.gilbom.robot.data.mqtt.v2.common.MqttV2Payload;
 import com.gilbom.robot.mqtt.topic.ParsedMqttTopic;
 
 import java.time.Instant;
