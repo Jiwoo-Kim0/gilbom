@@ -22,8 +22,8 @@ const legendItems: { tone: DefectStatus; label: string }[] = [
 
 const statusColor: Record<DefectStatus, string> = {
   progress: '#b8863b',
-  received: '#66736b',
-  done: '#1f6b45',
+  received: '#6f6a5e',
+  done: '#7a5c0c',
 }
 
 // 구미시청 인근 — 결함 좌표 API가 연결되기 전까지 사용하는 기본 뷰포트.
