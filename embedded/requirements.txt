@@ -1,15 +1,17 @@
-# Python 버전: 미정 (TBD) — 팀 확정 후 .python-version 추가할 것.
-#   자유 선택이 아니라 보드에 플래싱된 JetPack 이미지가 강제한다
-#   (TensorRT·pycuda 를 JetPack 이 제공하므로):
-#     JetPack 6.x (Ubuntu 22.04) → Python 3.10
-#     JetPack 5.x (Ubuntu 20.04) → Python 3.8
-#   확인: 보드에서 `cat /etc/nv_tegra_release` 또는 `apt-cache show nvidia-jetpack`
-#   venv 사용 시 --system-site-packages 로 시스템 파이썬의 TensorRT 를 상속할 것
-#   (별도 파이썬을 새로 빌드하면 TensorRT 를 못 쓴다).
+# Python 버전: 3.11.9 고정 (.python-version) — 젯슨 실기 테스트 기준.
+#   개발 PC 도 3.11.9 로 맞출 것. 버전이 다르면 wheel 호환 문제가 난다.
+#   venv: python3.11 -m venv .venv --system-site-packages
+#   ※ TensorRT·pycuda 는 JetPack 이 시스템 파이썬용으로만 설치한다.
+#     JetPack 기본 파이썬(6.x→3.10 / 5.x→3.8)과 3.11 이 다를 경우
+#     --system-site-packages 로도 import 가 안 되므로, 추론 붙일 때
+#     보드에서 `python3.11 -c "import tensorrt"` 로 반드시 확인할 것.
+#     (안 되면 3.11 용 TensorRT 바인딩 별도 설치 또는 시스템 파이썬으로 회귀)
+#   보드 JetPack 확인: `cat /etc/nv_tegra_release` 또는 `apt-cache show nvidia-jetpack`
 
 # 의존성 — 구현 착수 시 아래 라이브러리 버전도 == 로 고정할 것
-paho-mqtt        # MQTT 클라이언트 (comms/mqtt_client.py)
-PyYAML           # config.yaml 로드
+paho-mqtt==2.1.0 # MQTT 클라이언트 (comms/mqtt_client.py). MQTT5·CallbackAPIVersion.VERSION2
+                 # 를 쓰므로 1.x 로 내리면 콜백 시그니처부터 깨진다.
+PyYAML==6.0.2    # config.yaml 로드
 requests         # 이미지 HTTP 업로드 (comms/uploader.py)
 pyserial         # GPS NMEA · LiDAR 시리얼
 opencv-python    # 카메라 캡처
