@@ -33,9 +33,21 @@ upload:
 #   steer_min: 60
 #   steer_max: 140
 
-# safety:
-#   lidar_port: /dev/ttyUSB0
-#   stop_distance_m: 0.5    # 팀 확정 필요
+safety:
+  obstacle_confirm_sec: 3.0   # 최초 감지 후 재확인까지 (계약 §10.2).
+                              # 이 시간이 지난 뒤 '다시 봤을 때' 도 있어야 SAFETY_STOPPED 다.
+  # lidar_port: /dev/ttyUSB0
+  # stop_distance_m: 0.5    # 팀 확정 필요
+
+battery:
+  # 등급 판정 임계값 (계약 §9, F-007 "배터리 20% 경고").
+  # 내려가는 방향과 올라오는 방향이 다르다 — 전압 기반 추정이라 모터가 물리면
+  # 퍼센트가 출렁이는데, 단일 임계값이면 LOW/RECOVERED 가 번갈아 나간다.
+  low_pct: 20.0
+  low_recover_pct: 25.0
+  critical_pct: 10.0
+  critical_recover_pct: 15.0
+  confirm_samples: 2        # 배터리는 telemetry 주기(5초)에 읽히므로 10초 연속 확인
 
 # gps:
 #   port: /dev/ttyTHS1      # 실제 포트 확인 필요
