@@ -20,6 +20,8 @@ class ErrorCodeTest {
         assertThat(ErrorCode.COMMON_VALIDATION_FAILED.httpStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(ErrorCode.COMMAND_STATE_CONFLICT.httpStatus()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(ErrorCode.REPORT_STATE_CONFLICT.httpStatus()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(ErrorCode.COMMON_PAYLOAD_TOO_LARGE.httpStatus())
+                .isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE);
         assertThat(ErrorCode.COMMON_BUSINESS_RULE_VIOLATION.httpStatus())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
         

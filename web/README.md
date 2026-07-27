@@ -15,6 +15,7 @@
 - [TOTP Secret encryption](./docs/totp-secret-encryption.md)
 - [Jenkins pipeline](./docs/jenkins-pipeline.md)
 - [Runtime version baseline](./docs/runtime-versions.md)
+- [HTTP request limits and security headers](./docs/http-security-baseline.md)
 - [OpenAPI v1](./docs/openapi-v1.yaml)
 
 ## Local infrastructure

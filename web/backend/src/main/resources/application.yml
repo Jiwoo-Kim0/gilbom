@@ -29,6 +29,11 @@ spring:
       # Spring의 자동 DDL 대신 Flyway가 표준 Session JDBC 테이블을 생성한다.
       initialize-schema: never
       table-name: session_store.spring_session
+  servlet:
+    multipart:
+      # 대표 이미지 계약(500KB)과 전체 요청 상한(1MB)을 컨테이너 파싱 전에도 강제한다.
+      max-file-size: ${GILBOM_MAX_UPLOAD_FILE_SIZE:500KB}
+      max-request-size: ${GILBOM_MAX_REQUEST_BODY_SIZE:1MB}
   jpa:
     hibernate:
       ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:none}
@@ -37,6 +42,11 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
   shutdown: graceful
+  # Cookie를 포함한 전체 요청 헤더가 비정상적으로 커지기 전에 Connector에서 거부한다.
+  max-http-request-header-size: ${GILBOM_MAX_REQUEST_HEADER_SIZE:16KB}
+  tomcat:
+    max-http-form-post-size: ${GILBOM_MAX_REQUEST_BODY_SIZE:1MB}
+    max-swallow-size: ${GILBOM_MAX_REQUEST_BODY_SIZE:1MB}
   servlet:
     session:
       # 로컬 HTTP용 이름이며 운영 profile은 __Host- prefix와 Secure를 강제한다.
@@ -72,6 +82,9 @@ info:
     name: ${spring.application.name}
 
 gilbom:
+  http:
+    # JSON과 chunked body를 포함한 모든 요청 본문의 애플리케이션 전역 상한이다.
+    max-request-body-size: ${GILBOM_MAX_REQUEST_BODY_SIZE:1MB}
   security:
     mfa:
       totp-secret-encryption:
