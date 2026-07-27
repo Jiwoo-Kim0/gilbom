@@ -17,6 +17,8 @@ import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.csrf.CsrfException;
 import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRequestHandler;
+import org.springframework.security.web.csrf.XorCsrfTokenRequestAttributeHandler;
 
 import com.gilbom.auth.session.AuthenticationSessionEnforcementFilter;
 import com.gilbom.auth.session.SessionSecurityStateRepository;
@@ -32,6 +34,7 @@ public class SecurityConfig {
             HttpSecurity http,
             SecurityErrorResponseWriter errorWriter,
             CsrfTokenRepository csrfTokenRepository,
+            CsrfTokenRequestHandler csrfTokenRequestHandler,
             SecurityContextRepository securityContextRepository,
             SessionSecurityStateRepository sessionStateRepository
     ) throws Exception {
@@ -43,7 +46,9 @@ public class SecurityConfig {
                 .requestCache(cache -> cache.disable())
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
-                .csrf(csrf -> csrf.csrfTokenRepository(csrfTokenRepository))
+                .csrf(csrf -> csrf
+                        .csrfTokenRepository(csrfTokenRepository)
+                        .csrfTokenRequestHandler(csrfTokenRequestHandler))
                 .securityContext(context -> context
                         .securityContextRepository(securityContextRepository)
                         .requireExplicitSave(true))
@@ -110,6 +115,12 @@ public class SecurityConfig {
                 new HttpSessionCsrfTokenRepository();
         repository.setHeaderName("X-CSRF-TOKEN");
         return repository;
+    }
+
+    @Bean
+    public CsrfTokenRequestHandler csrfTokenRequestHandler() {
+        // JSON으로 토큰을 전달해도 Spring Security 6의 BREACH 완화 마스킹은 유지한다.
+        return new XorCsrfTokenRequestAttributeHandler();
     }
 
     @Bean

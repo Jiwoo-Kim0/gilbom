@@ -45,6 +45,49 @@ class PasswordHashingServiceTest {
     }
 
     @Test
+    void realAndDummyHashesUseTheSameArgon2idParameters() {
+        PasswordHashingService service = realService();
+
+        String realHash = service.hashNewPassword("same parameter check");
+        String dummyHash = service.dummyPasswordHashForTesting();
+
+        assertThat(realHash)
+                .startsWith("{argon2}$argon2id$")
+                .contains("m=19456,t=2,p=1");
+        assertThat(dummyHash)
+                .startsWith("{argon2}$argon2id$")
+                .contains("m=19456,t=2,p=1");
+        assertThat(service.dummyPasswordHashForTesting())
+                .isSameAs(dummyHash);
+        assertThat(service.verifyAgainstNullableHash(
+                "missing account password",
+                null
+        )).isFalse();
+    }
+
+    @Test
+    void hashesAndVerifiesEveryCodePointOfAUnicodeMaximumLengthPassword() {
+        PasswordHashingService service = realService();
+        String first = "한😀".repeat(12);
+        String differentLastCodePoint =
+                first.substring(0, first.offsetByCodePoints(0, 23)) + "끝";
+
+        assertThat(first.codePointCount(0, first.length())).isEqualTo(24);
+        assertThat(differentLastCodePoint.codePointCount(
+                0,
+                differentLastCodePoint.length()
+        )).isEqualTo(24);
+
+        String encoded = service.hashNewPassword(first);
+
+        assertThat(service.verifyAgainstNullableHash(first, encoded)).isTrue();
+        assertThat(service.verifyAgainstNullableHash(
+                differentLastCodePoint,
+                encoded
+        )).isFalse();
+    }
+
+    @Test
     void enforcesLengthWithoutTrimmingOrCompositionRules() {
         PasswordHashingService service = realService();
 

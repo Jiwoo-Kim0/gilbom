@@ -304,3 +304,36 @@ Day 3·4 구현에서는 최소한 다음을 자동 테스트한다.
 - 로그인, 로그아웃, MFA API의 CSRF 누락·불일치 거부
 - 계정 존재 여부와 내부 예외가 오류 응답에 노출되지 않는지
 - 필터 단계 401·403·429가 공통 오류 형식인지
+
+## 9. 프론트 인증 상태
+
+SPA의 인증 상태, 메모리 CSRF 저장, 공통 API 오류 처리, 라우트 가드와 화면별 API
+연결은 [`frontend-authentication-foundation.md`](./frontend-authentication-foundation.md)를
+기준으로 한다. 프론트 상태는 서버 세션을 대체하지 않으며 새로고침 시
+`GET /api/v1/auth/me`로 다시 검증한다.
+
+## 10. 통합 보안 검증
+
+인증 변경 후에는 실제 PostgreSQL과 임시 Backend를 사용하는 다음 하네스를 실행한다.
+
+```bash
+python3 scripts/auth-security-integration-test.py
+```
+
+하네스는 무작위 이름의 전용 DB와 Backend 컨테이너를 만들고 정상 개발 DB에는 접근하지
+않는다. 종료 성공·실패와 관계없이 임시 컨테이너와 DB를 제거하며, 생성한 비밀번호,
+TOTP secret, 복구 코드, 세션 ID와 CSRF 토큰은 출력하지 않는다.
+
+검증 범위는 이메일 UNIQUE 동시 요청, 계정 열거 방지, pre-auth 보호 API 차단,
+TOTP·복구 코드 재사용 차단, 세션 ID·CSRF 교체, 동시 인증 세션 1개, 비밀번호 변경·
+로그아웃·유휴/절대 만료 후 재사용 차단, IP·계정 Rate Limit, Argon2id 전용 저장과
+감사/애플리케이션 로그의 비밀값 부재다.
+
+Argon2id 설정의 별도 자원 측정은 다음 명령으로 수행한다.
+
+```bash
+bash ./gradlew passwordHashLoadTest
+```
+
+이 부하 테스트는 일반 단위 테스트와 분리되어 있으며, 운영 인스턴스의 CPU·메모리
+등급이나 Argon2id 파라미터를 바꿀 때 다시 측정한다.

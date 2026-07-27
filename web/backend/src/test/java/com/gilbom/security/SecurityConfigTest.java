@@ -27,6 +27,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
@@ -120,6 +121,51 @@ class SecurityConfigTest {
                         .with(user(USER_ID.toString())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result", is("authenticated")));
+    }
+
+    @Test
+    void everyPreAuthenticationStateIsRejectedByProtectedEndpoints()
+            throws Exception {
+        for (AuthenticationState state : java.util.List.of(
+                AuthenticationState.PASSWORD_CHANGE_REQUIRED,
+                AuthenticationState.MFA_ENROLLMENT_REQUIRED,
+                AuthenticationState.MFA_REQUIRED
+        )) {
+            when(sessionStateRepository.findBySessionId(anyString()))
+                    .thenReturn(Optional.of(new SessionSecurityState(
+                            USER_ID,
+                            state,
+                            Instant.parse("2099-01-01T00:00:00Z"),
+                            Instant.parse("2098-12-31T23:55:00Z"),
+                            Instant.parse("2099-01-01T00:00:00Z"),
+                            0
+                    )));
+
+            mockMvc.perform(get("/test/security/protected")
+                            .session(new MockHttpSession())
+                            .with(user(USER_ID.toString())))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath(
+                            "$.code",
+                            is("AUTH_UNAUTHENTICATED")
+                    ));
+        }
+    }
+
+    @Test
+    void aRevokedServerSessionCannotBeReusedWithAStaleSecurityContext()
+            throws Exception {
+        when(sessionStateRepository.findBySessionId(anyString()))
+                .thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/test/security/protected")
+                        .session(new MockHttpSession())
+                        .with(user(USER_ID.toString())))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath(
+                        "$.code",
+                        is("AUTH_UNAUTHENTICATED")
+                ));
     }
 
     @Test

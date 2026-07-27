@@ -3,6 +3,7 @@ type CsrfTokenResponse = {
   token: string
 }
 
+// 의도적으로 모듈 메모리에만 두며 영속 브라우저 저장소나 별도 쿠키에 쓰지 않는다.
 let csrfToken: string | null = null
 let pendingRequest: Promise<string> | null = null
 
@@ -12,7 +13,7 @@ export function clearCsrfToken(): void {
 }
 
 export function replaceCsrfToken(replacement: string): void {
-  if (replacement.length === 0) {
+  if (replacement.trim().length === 0) {
     throw new Error('CSRF token replacement must not be empty')
   }
   csrfToken = replacement

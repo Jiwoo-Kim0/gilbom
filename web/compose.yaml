@@ -173,6 +173,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_NAVER_MAP_CLIENT_ID: ${VITE_NAVER_MAP_CLIENT_ID:?VITE_NAVER_MAP_CLIENT_ID is required}
     image: gilbom-frontend:local
     restart: unless-stopped
     ports:
