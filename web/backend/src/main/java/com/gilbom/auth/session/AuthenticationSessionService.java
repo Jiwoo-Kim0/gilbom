@@ -11,6 +11,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRequestHandler;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,6 +32,7 @@ public class AuthenticationSessionService {
     private final AuthenticationStateMachine stateMachine;
     private final AuthenticationSessionProperties properties;
     private final CsrfTokenRepository csrfTokenRepository;
+    private final CsrfTokenRequestHandler csrfTokenRequestHandler;
     private final SecurityContextRepository securityContextRepository;
     private final Clock clock;
 
@@ -39,6 +41,7 @@ public class AuthenticationSessionService {
             AuthenticationStateMachine stateMachine,
             AuthenticationSessionProperties properties,
             CsrfTokenRepository csrfTokenRepository,
+            CsrfTokenRequestHandler csrfTokenRequestHandler,
             SecurityContextRepository securityContextRepository,
             Clock clock
     ) {
@@ -46,6 +49,7 @@ public class AuthenticationSessionService {
         this.stateMachine = stateMachine;
         this.properties = properties;
         this.csrfTokenRepository = csrfTokenRepository;
+        this.csrfTokenRequestHandler = csrfTokenRequestHandler;
         this.securityContextRepository = securityContextRepository;
         this.clock = clock;
     }
@@ -160,17 +164,36 @@ public class AuthenticationSessionService {
             CsrfToken replacement =
                     csrfTokenRepository.generateToken(request);
             csrfTokenRepository.saveToken(replacement, request, response);
+            // Spring Security 6의 기본 XOR 처리기를 다시 적용해, 저장소의 원시
+            // 토큰이 아니라 다음 요청에서 실제로 검증 가능한 마스킹 값을 노출한다.
+            csrfTokenRequestHandler.handle(
+                    request,
+                    response,
+                    () -> replacement
+            );
+            CsrfToken responseToken = requireResponseCsrfToken(request);
 
             return new AuthenticatedSession(
                     nextState,
                     absoluteExpiresAt,
-                    replacement.getToken()
+                    responseToken.getToken()
             );
         } catch (RuntimeException exception) {
             invalidateQuietly(session);
             SecurityContextHolder.clearContext();
             throw exception;
         }
+    }
+
+    private static CsrfToken requireResponseCsrfToken(
+            HttpServletRequest request
+    ) {
+        Object token = request.getAttribute(CsrfToken.class.getName());
+        if (token instanceof CsrfToken csrfToken) {
+            return csrfToken;
+        }
+        throw new IllegalStateException(
+                "CSRF request handler did not expose a replacement token");
     }
 
     @Transactional(readOnly = true)
@@ -221,17 +244,15 @@ public class AuthenticationSessionService {
     }
 
     @Transactional
-    public void invalidateCurrentSession(HttpServletRequest request) {
+    public void revokeCurrentServerSession(HttpServletRequest request) {
         HttpSession session = request.getSession(false);
         if (session == null) {
-            SecurityContextHolder.clearContext();
             return;
         }
-
-        String sessionId = session.getId();
-        repository.deleteBySessionId(sessionId);
-        invalidateQuietly(session);
-        SecurityContextHolder.clearContext();
+        // Spring Session 행 삭제와 HttpSession.invalidate()를 같은 DB 트랜잭션에서
+        // 실행하면 JDBC 세션 저장소의 별도 삭제가 현재 잠금을 기다릴 수 있다.
+        // 여기서는 서버 행 삭제만 커밋하고 클라이언트 세션 만료는 호출자가 뒤이어 한다.
+        repository.deleteBySessionId(session.getId());
     }
 
     @Transactional

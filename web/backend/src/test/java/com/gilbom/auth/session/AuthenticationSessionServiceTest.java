@@ -24,7 +24,9 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.context.SecurityContextRepository;
+import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRequestHandler;
 import org.springframework.security.web.csrf.DefaultCsrfToken;
 
 import com.gilbom.auth.model.AuthenticationEvent;
@@ -46,6 +48,8 @@ class AuthenticationSessionServiceTest {
             mock(SessionSecurityStateRepository.class);
     private final CsrfTokenRepository csrfTokenRepository =
             mock(CsrfTokenRepository.class);
+    private final CsrfTokenRequestHandler csrfTokenRequestHandler =
+            mock(CsrfTokenRequestHandler.class);
     private final SecurityContextRepository securityContextRepository =
             mock(SecurityContextRepository.class);
     private final AuthenticationSessionProperties properties =
@@ -56,6 +60,7 @@ class AuthenticationSessionServiceTest {
                     new AuthenticationStateMachine(),
                     properties,
                     csrfTokenRepository,
+                    csrfTokenRequestHandler,
                     securityContextRepository,
                     Clock.fixed(NOW, ZoneOffset.UTC)
             );
@@ -126,6 +131,13 @@ class AuthenticationSessionServiceTest {
         );
         when(csrfTokenRepository.generateToken(request))
                 .thenReturn(replacement);
+        DefaultCsrfToken responseToken = new DefaultCsrfToken(
+                "X-CSRF-TOKEN",
+                "_csrf",
+                "masked-replacement-csrf"
+        );
+        when(request.getAttribute(CsrfToken.class.getName()))
+                .thenReturn(responseToken);
         Authentication authentication =
                 UsernamePasswordAuthenticationToken.authenticated(
                         USER_ID.toString(),
@@ -145,12 +157,13 @@ class AuthenticationSessionServiceTest {
                 .isEqualTo(AuthenticationState.AUTHENTICATED);
         assertThat(result.absoluteExpiresAt())
                 .isEqualTo(NOW.plusSeconds(8 * 60 * 60));
-        assertThat(result.csrfToken()).isEqualTo("replacement-csrf");
+        assertThat(result.csrfToken()).isEqualTo("masked-replacement-csrf");
 
         InOrder order = inOrder(
                 repository,
                 request,
                 csrfTokenRepository,
+                csrfTokenRequestHandler,
                 securityContextRepository
         );
         order.verify(repository).promoteAuthenticated(
@@ -173,6 +186,11 @@ class AuthenticationSessionServiceTest {
                 replacement,
                 request,
                 response
+        );
+        order.verify(csrfTokenRequestHandler).handle(
+                any(HttpServletRequest.class),
+                any(HttpServletResponse.class),
+                any()
         );
     }
 
@@ -234,6 +252,14 @@ class AuthenticationSessionServiceTest {
         );
         assertThat(SecurityContextHolder.getContext().getAuthentication())
                 .isNull();
+    }
+
+    @Test
+    void logoutCommitsTheServerRowDeletionBeforeInvalidatingHttpSession() {
+        service.revokeCurrentServerSession(request);
+
+        verify(repository).deleteBySessionId("old-session-id");
+        verify(session, never()).invalidate();
     }
 
     @Test

@@ -62,7 +62,7 @@ export function NavigationBar({ user }: NavigationBarProps) {
           )}
           <span className="nb-profile-text">
             <strong>
-              {user.name} {user.title}
+              {user.name}{user.title ? ` ${user.title}` : ''}
             </strong>
             <small>{user.role}</small>
           </span>
