@@ -7,6 +7,9 @@
 > MQTT 계약: `tbs/v2/robots/{robot_id}/...`, `schema_version = "2.0"`  
 > Flyway 구현: 설계 확정 후 `V5__create_robot_telemetry_schema.sql`
 
+등록·Credential 발급 절차는
+[로봇 등록 및 MQTT Credential 발급](<./로봇 등록 및 MQTT Credential 발급.md>)을 따른다.
+
 ## 1. 버전 구분
 
 세 가지 버전은 서로 다른 의미다.
@@ -28,12 +31,12 @@
 
 등록정보는 다음과 같다.
 
-- 로봇 코드
 - 로봇 표시명
 - Serial Number
 - 운영 상태
 - 등록 관리자와 등록 시각
 
+`robot_code`는 서버가 생성한다.
 `hardware_model`과 `firmware_version`은 저장하지 않는다.
 
 ### 2.2 순찰 방식
@@ -151,10 +154,10 @@ telemetry
 | 컬럼 | 타입 | 필수 | 출처 | 제약·용도 |
 |---|---|---|---|---|
 | `robot_id` | `UUID` | O | 서버 생성 | PK, 내부 FK 전용 |
-| `robot_code` | `VARCHAR(128)` | O | 관리자 입력 | UNIQUE, Topic·Payload의 `robot_id` |
+| `robot_code` | `VARCHAR(128)` | O | 서버 생성 | UNIQUE, Topic·Payload의 `robot_id` |
 | `robot_name` | `VARCHAR(100)` | O | 관리자 입력 | 화면 표시명, 공백 문자열 금지 |
 | `serial_number` | `VARCHAR(100)` | O | 관리자 입력 | UNIQUE, 물리 로봇 식별 |
-| `operational_status` | `VARCHAR(20)` | O | 관리자·서버 | `ACTIVE`, `INACTIVE`, `MAINTENANCE`, `DISABLED` |
+| `operational_status` | `VARCHAR(20)` | O | 관리자·서버 | `PROVISIONING`, `ACTIVE`, `INACTIVE`, `MAINTENANCE`, `DISABLED` |
 | `registered_by` | `UUID` | O | 인증 세션 | `auth.admin_user.user_id` FK |
 | `registered_at` | `TIMESTAMPTZ` | O | 서버 | 등록 완료 시각 |
 | `updated_at` | `TIMESTAMPTZ` | O | 서버 | 기준정보 최종 수정 시각 |
@@ -728,7 +731,8 @@ V5 적용 전에 확정되면 V2 문서와 V5 초안에 반영한다. V5가 한 
 
 ## 12. V5 작성 전 검수 항목
 
-- [ ] 로봇 등록 화면 입력값을 `robot_code`, `robot_name`, `serial_number`로 확정
+- [ ] 로봇 등록 화면 입력값을 `robot_name`, `serial_number`로 확정
+- [ ] `robot_code` 서버 생성 규칙과 동시 등록 충돌 방지 방식 확정
 - [ ] `registered_by`는 로그인 사용자를 Backend가 자동 설정
 - [ ] 로봇 비활성화 상태와 재활성화 정책 확정
 - [ ] 원형 구역의 최소·최대 `radius_m` 확정
