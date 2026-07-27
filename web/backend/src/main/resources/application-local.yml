@@ -10,6 +10,14 @@ logging:
 mqtt:
   broker: ${MQTT_BROKER:ssl://localhost:8883}
   client-id: ${MQTT_CLIENT_ID:gilbom-local}
+  log-payload: ${MQTT_LOG_PAYLOAD:true}
+  credential-provisioning:
+    enabled: ${MQTT_CREDENTIAL_PROVISIONING_ENABLED:true}
+    password-file: ${MQTT_CREDENTIAL_PASSWORD_FILE:../infra/mosquitto/local/runtime/credentials/passwd}
+    password-command: ${MQTT_CREDENTIAL_PASSWORD_COMMAND:mosquitto_passwd}
+    process-timeout: ${MQTT_CREDENTIAL_PROCESS_TIMEOUT:10s}
+    activation-timeout: ${MQTT_CREDENTIAL_ACTIVATION_TIMEOUT:10s}
+    verification-interval: ${MQTT_CREDENTIAL_VERIFICATION_INTERVAL:250ms}
   security:
     # mqtt-init issues the broker certificate from the local development CA.
     # Point MQTT_TRUST_CERTIFICATE to infra/mosquitto/local/runtime/certs/local-ca-cert.pem.

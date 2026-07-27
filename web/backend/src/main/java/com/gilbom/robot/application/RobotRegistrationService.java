@@ -34,11 +34,10 @@ public class RobotRegistrationService {
     @Transactional
     public RegisteredRobot register(
             RegisterRobotCommand command,
-            String authenticatedUsername,
+            UUID actorUserId,
             UUID idempotencyKey,
             UUID requestId
     ) {
-        UUID actorUserId = findActiveAdminUserId(authenticatedUsername);
         byte[] principalKeyHash = sha256("USER\u0000" + actorUserId);
         byte[] idempotencyKeyHash = sha256(idempotencyKey.toString());
         byte[] requestFingerprint = sha256(
@@ -163,24 +162,6 @@ public class RobotRegistrationService {
                 idempotencyKeyHash,
                 registeredRobot);
         return registeredRobot;
-    }
-
-    private UUID findActiveAdminUserId(String authenticatedUsername) {
-        UUID actorUserId = jdbcTemplate.query("""
-                        SELECT user_id
-                        FROM auth.admin_user
-                        WHERE username = ?
-                          AND is_active = TRUE
-                          AND deleted_at IS NULL
-                        """,
-                resultSet -> resultSet.next()
-                        ? resultSet.getObject("user_id", UUID.class)
-                        : null,
-                authenticatedUsername);
-        if (actorUserId == null) {
-            throw new BusinessException(ErrorCode.AUTH_UNAUTHENTICATED);
-        }
-        return actorUserId;
     }
 
     private boolean serialNumberExists(String serialNumber) {

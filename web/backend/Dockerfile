@@ -12,16 +12,19 @@ RUN ./gradlew dependencies --no-daemon
 COPY src ./src
 RUN ./gradlew clean test bootJar --no-daemon
 
+FROM eclipse-mosquitto:2.1.2-alpine AS mqtt-tools
+
 # 빌드와 운영의 Java vendor·patch가 달라지는 문제를 막기 위해 같은 이미지를 사용한다.
 FROM amazoncorretto:21.0.12-alpine3.22 AS runtime
 
-RUN apk add --no-cache curl \
-    && addgroup -S spring \
-    && adduser -S spring -G spring
+RUN apk add --no-cache curl cjson libcrypto3 \
+    && addgroup -S -g 1883 mqttcred \
+    && adduser -S -D -H -u 1883 -G mqttcred spring
 
 WORKDIR /app
 
-COPY --from=builder --chown=spring:spring /workspace/build/libs/*.jar app.jar
+COPY --from=mqtt-tools /usr/bin/mosquitto_passwd /usr/local/bin/mosquitto_passwd
+COPY --from=builder --chown=spring:mqttcred /workspace/build/libs/*.jar app.jar
 
 USER spring
 

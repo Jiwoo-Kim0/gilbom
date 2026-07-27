@@ -33,6 +33,7 @@ public class MqttProperties {
     @Min(0)
     @Max(2)
     private int qos;
+    private boolean logPayload;
 
     /*For mqtt 보안 전략*/
     // @ConfigurationProperties == mqtt.now-mqtt-security-strategy
@@ -108,6 +109,14 @@ public class MqttProperties {
 
     public void setQos(int qos) {
         this.qos = qos;
+    }
+
+    public boolean isLogPayload() {
+        return logPayload;
+    }
+
+    public void setLogPayload(boolean logPayload) {
+        this.logPayload = logPayload;
     }
 
     public Security getSecurity() {

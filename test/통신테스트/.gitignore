@@ -1,0 +1,8 @@
+.venv/
+.env
+*.log
+*.zip
+connection-secret.md
+gilbom-mqtt-external-test/
+.package-staging/
+__pycache__/

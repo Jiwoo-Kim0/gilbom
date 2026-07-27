@@ -1,5 +1,6 @@
 package com.gilbom.robot.mqtt.client;
 
+import com.gilbom.robot.mqtt.config.MqttProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -18,9 +19,14 @@ public class MqttSubscriber {
 
     //Spring이 제공하는 이벤트 발행기
     private final ApplicationEventPublisher eventPublisher;
+    private final boolean logPayload;
 
-    public MqttSubscriber(ApplicationEventPublisher eventPublisher) {
+    public MqttSubscriber(
+            ApplicationEventPublisher eventPublisher,
+            MqttProperties mqttProperties
+    ) {
         this.eventPublisher = eventPublisher;
+        this.logPayload = mqttProperties.isLogPayload();
     }
 
     @ServiceActivator(inputChannel = "mqttInboundChannel")
@@ -35,13 +41,28 @@ public class MqttSubscriber {
                 qos == null ? 0 : qos,
                 Instant.now()
         );
-        log.debug(
-                "MQTT message received. topic={}, qos={}, payloadLength={}",
-                topic,
-                inboundMessage.qos(),
-                payload.length()
-        );
+        if (logPayload) {
+            log.info(
+                    "MQTT message received. topic={}, qos={}, payload={}",
+                    topic,
+                    inboundMessage.qos(),
+                    singleLine(payload)
+            );
+        } else {
+            log.debug(
+                    "MQTT message received. topic={}, qos={}, payloadLength={}",
+                    topic,
+                    inboundMessage.qos(),
+                    payload.length()
+            );
+        }
         eventPublisher.publishEvent(inboundMessage);
+    }
+
+    private String singleLine(String payload) {
+        return payload
+                .replace("\r", "\\r")
+                .replace("\n", "\\n");
     }
 
     private String payloadAsString(Object payload) {

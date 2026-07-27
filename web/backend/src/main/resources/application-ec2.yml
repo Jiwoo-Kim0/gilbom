@@ -41,6 +41,16 @@ gilbom:
 mqtt:
   broker: ${MQTT_BROKER:ssl://i15d101.p.ssafy.io:8883}
   client-id: ${MQTT_CLIENT_ID:gilbom-backend-ec2}
+  log-payload: false
+  credential-provisioning:
+    # EC2 is fail-closed until the production password file and provisioner command
+    # are mounted explicitly by the deployment environment.
+    enabled: ${MQTT_CREDENTIAL_PROVISIONING_ENABLED:false}
+    password-file: ${MQTT_CREDENTIAL_PASSWORD_FILE:}
+    password-command: ${MQTT_CREDENTIAL_PASSWORD_COMMAND:mosquitto_passwd}
+    process-timeout: ${MQTT_CREDENTIAL_PROCESS_TIMEOUT:10s}
+    activation-timeout: ${MQTT_CREDENTIAL_ACTIVATION_TIMEOUT:15s}
+    verification-interval: ${MQTT_CREDENTIAL_VERIFICATION_INTERVAL:500ms}
   security:
     # Public CA certificates can use the JVM default trust store by leaving this empty.
     trust-certificate: ${MQTT_TRUST_CERTIFICATE:}

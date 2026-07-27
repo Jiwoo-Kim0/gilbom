@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.gilbom.auth.AuthenticatedUserIdResolver;
 import com.gilbom.common.web.RequestIdFilter;
 import com.gilbom.robot.application.RobotRegistrationService;
 import com.gilbom.robot.data.api.request.RobotRegistrationRequest;
@@ -27,9 +28,14 @@ import jakarta.validation.Valid;
 public class RobotRegistrationController {
 
     private final RobotRegistrationService registrationService;
+    private final AuthenticatedUserIdResolver userIdResolver;
 
-    public RobotRegistrationController(RobotRegistrationService registrationService) {
+    public RobotRegistrationController(
+            RobotRegistrationService registrationService,
+            AuthenticatedUserIdResolver userIdResolver
+    ) {
         this.registrationService = registrationService;
+        this.userIdResolver = userIdResolver;
     }
 
     @PostMapping
@@ -46,7 +52,7 @@ public class RobotRegistrationController {
                 new RegisterRobotCommand(
                         request.robotName(),
                         request.serialNumber()),
-                authentication.getName(),
+                userIdResolver.require(authentication),
                 idempotencyKey,
                 requestId);
 
