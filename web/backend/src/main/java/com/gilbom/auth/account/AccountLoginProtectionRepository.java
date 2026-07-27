@@ -97,7 +97,6 @@ public class AccountLoginProtectionRepository {
                     updated_at = statement_timestamp()
                 WHERE user_id = ?
                   AND account_status = 'ACTIVE'
-                  AND password_change_required = FALSE
                 """,
                 userId
         );

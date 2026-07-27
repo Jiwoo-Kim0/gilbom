@@ -90,6 +90,7 @@ effectivePermissions
 | Method | Path | 접근 조건 | CSRF | 감사 |
 |---|---|---|:---:|---|
 | GET | `/api/v1/auth/csrf-token` | 공개 |  |  |
+| GET | `/api/v1/auth/session-state` | 공개·쿠키 결합 상태만 반환 |  |  |
 | POST | `/api/v1/auth/email-availability` | 익명 세션 | O |  |
 | POST | `/api/v1/auth/registrations` | 익명 세션 | O | 가입 성공 |
 | POST | `/api/v1/auth/login` | 익명 세션 | O | 성공·실패·제한 |

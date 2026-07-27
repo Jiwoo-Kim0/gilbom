@@ -91,6 +91,12 @@ MFA_REQUIRED
 - 토큰은 프론트엔드 메모리에 보관하며 Local Storage, Session Storage, URL, 로그에 저장하지 않는다.
 - 로그인 완료와 로그아웃 후에는 기존 토큰을 폐기한다.
 
+`GET /api/v1/auth/session-state`는 SPA 새로고침 후 쿠키에 결합된 인증 진행 상태를
+복원한다. `ANONYMOUS`, `PASSWORD_CHANGE_REQUIRED`, `MFA_ENROLLMENT_REQUIRED`,
+`MFA_REQUIRED`, `AUTHENTICATED`와 pre-auth challenge 만료 시각만 반환하며 사용자 ID,
+이메일, 역할과 권한은 포함하지 않는다. 비밀번호를 다시 검증한 로그인은 기존 pre-auth
+challenge를 새 challenge로 교체할 수 있지만 완전 인증 세션을 낮추지는 않는다.
+
 ### 3.2 비밀번호 검증
 
 `POST /api/v1/auth/login`은 `email`, `password`를 받고 `X-CSRF-TOKEN`을 요구한다.

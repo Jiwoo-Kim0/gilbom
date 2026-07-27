@@ -26,6 +26,14 @@ export type LoginChallenge = {
   challengeExpiresAt: string
 }
 
+export type AuthenticationSessionState = {
+  authenticationState:
+    | 'ANONYMOUS'
+    | ServerLoginState
+    | 'AUTHENTICATED'
+  challengeExpiresAt: string | null
+}
+
 export type AuthenticationResponse = {
   user: AuthenticatedUser
   csrfToken: string

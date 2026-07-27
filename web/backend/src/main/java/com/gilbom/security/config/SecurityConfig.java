@@ -78,7 +78,8 @@ public class SecurityConfig {
                                 "/actuator/health/**",
                                 "/api/v1/system/health",
                                 "/api/v1/system/info",
-                                "/api/v1/auth/csrf-token")
+                                "/api/v1/auth/csrf-token",
+                                "/api/v1/auth/session-state")
                         .permitAll()
                         // 공개 인증 API도 CSRF 검사를 통과해야 하며 인증만 요구하지 않는다.
                         .requestMatchers(HttpMethod.POST,

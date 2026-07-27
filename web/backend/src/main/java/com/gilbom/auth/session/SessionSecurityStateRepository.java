@@ -84,7 +84,11 @@ public class SessionSecurityStateRepository {
                     updated_time = EXCLUDED.updated_time,
                     authentication_challenge_started_time =
                         EXCLUDED.authentication_challenge_started_time
-                WHERE session_security_state.authentication_state = 'ANONYMOUS'
+                WHERE session_security_state.authentication_state IN (
+                    'PASSWORD_CHANGE_REQUIRED',
+                    'MFA_ENROLLMENT_REQUIRED',
+                    'MFA_REQUIRED'
+                )
                 """,
                 userId,
                 nextState.name(),
