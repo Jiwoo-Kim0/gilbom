@@ -19,7 +19,6 @@ from comms import TopicKind
 from comms.codec import to_iso
 from comms.contract import (
     BATTERY_SOURCES,
-    BATTERY_STATES,
     HEALTH_MEMBERS,
     HEALTH_STATES,
     MISSION_STATES,
@@ -107,12 +106,53 @@ def _can_enter(current: str, target: str) -> bool:
 
 
 # --------------------------------------------------------------------------
+# 배터리 등급 임계값 (계약 §9)
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BatteryThresholds:
+    """등급 판정 임계값. 기본값은 F-007·계약 §9.2 와 같은 값이다.
+
+    내려가는 방향(low_pct·critical_pct)과 올라오는 방향(*_recover_pct)이 다르다 —
+    잔량이 전압 기반 추정이라 모터가 물리면 퍼센트가 출렁이는데, 단일 임계값이면
+    같은 경계를 오르내리며 BATTERY_LOW/BATTERY_RECOVERED 가 번갈아 나간다.
+    """
+
+    low_pct: float = 20.0
+    low_recover_pct: float = 25.0
+    critical_pct: float = 10.0
+    critical_recover_pct: float = 15.0
+    #: 등급 전이로 인정하기까지 필요한 연속 표본 수. 배터리는 telemetry 주기에
+    #: 읽히므로 2 는 10초 연속 확인을 뜻한다.
+    confirm_samples: int = 2
+
+    @classmethod
+    def from_document(cls, document: dict) -> "BatteryThresholds":
+        """config.yaml 의 battery 절. 없는 값은 기본값을 쓴다."""
+        section = (document or {}).get("battery") or {}
+        return cls(
+            low_pct=float(section.get("low_pct", cls.low_pct)),
+            low_recover_pct=float(section.get("low_recover_pct", cls.low_recover_pct)),
+            critical_pct=float(section.get("critical_pct", cls.critical_pct)),
+            critical_recover_pct=float(
+                section.get("critical_recover_pct", cls.critical_recover_pct)
+            ),
+            confirm_samples=int(section.get("confirm_samples", cls.confirm_samples)),
+        )
+
+
+# --------------------------------------------------------------------------
 # health.storage 판정 (계약 §5.3)
 # --------------------------------------------------------------------------
 
+#: 하드웨어 프로브 주기. 한 tick 안에서 state·telemetry·event 가 각자 health 를
+#: 읽으므로, 0.5초 tick 두 번에 한 번만 실제 장치를 건드리게 묶는다.
+HEALTH_PROBE_INTERVAL_SEC = 1.0
 #: Outbox 에 이만큼 쌓이면 저장 계층이 정상 속도로 비워지지 않는다고 본다.
 STORAGE_PENDING_DEGRADED = 100
 #: 파일 쓰기 검사 주기. 매 tick 마다 디스크를 건드리지 않기 위한 것이다.
+#: health 캐시보다 긴 것은 디스크 쓰기가 I2C·시리얼 읽기보다 비싸기 때문이다.
 STORAGE_PROBE_INTERVAL_SEC = 5.0
 
 
@@ -138,11 +178,14 @@ class Snapshot:
 
     mode: str
     reason_code: str
+    #: 재확인을 통과한 장애물인지 (§10.2). state payload 에는 실리지 않는다.
+    obstacle_confirmed: bool
     mission_id: str
     mission_state: str
     zone_id: str
     mission_elapsed_sec: int
     mission_incident_count: int
+    mission_normal_detection_count: int
     battery_valid: bool
     battery_percent: float
     battery_state: str
@@ -195,6 +238,7 @@ class RobotState:
         health_probes: dict = None,
         outbox=None,
         storage_dir=None,
+        battery_thresholds: BatteryThresholds = None,
         monotonic=time.monotonic,
     ) -> None:
         probes = dict(health_probes or {})
@@ -208,11 +252,15 @@ class RobotState:
         self._outbox = outbox
         self._storage_dir = None if storage_dir is None else str(storage_dir)
         self._monotonic = monotonic
+        self._health_cache = None  # (checked_at, members)
         self._storage_cache = None  # (checked_at, verdict)
+        self._battery_thresholds = battery_thresholds or BatteryThresholds()
 
         self._lock = threading.RLock()
         self._mode = "BOOTING"
         self._reason_code = "NONE"
+        # 재확인을 통과한 장애물인지 (§10.2). 확정 전에는 events/safety 가 나가지 않는다.
+        self._obstacle_confirmed = False
         # 미션 보관함 — 부르는 것은 START_MISSION 을 처리하는 R-5 다.
         # 다섯 값은 start_mission()·end_mission() 으로만 함께 움직인다 (§6.3).
         self._mission_id = None
@@ -220,11 +268,14 @@ class RobotState:
         self._zone_id = None
         self._mission_started_at = None
         self._mission_incident_count = None
+        self._mission_normal_detection_count = None
         # 배터리 측정 경로가 붙기 전이다. 이전 값·더미 값을 만들지 않는다 (§5.5).
         self._battery_valid = False
         self._battery_percent = None
         self._battery_state = "UNKNOWN"
         self._battery_source = None
+        self._battery_candidate = None  # 아직 확정 안 된 등급 후보
+        self._battery_candidate_count = 0
 
     # -- 읽기 (대입 금지 — setter 를 두지 않는다) --------------------------
 
@@ -264,6 +315,18 @@ class RobotState:
     def mission_incident_count(self):
         return self._mission_incident_count
 
+    @property
+    def mission_normal_detection_count(self):
+        return self._mission_normal_detection_count
+
+    @property
+    def obstacle_confirmed(self) -> bool:
+        return self._obstacle_confirmed
+
+    @property
+    def battery_thresholds(self) -> BatteryThresholds:
+        return self._battery_thresholds
+
     def snapshot(self) -> Snapshot:
         # health 는 FSM 필드를 읽지 않는다. 락 밖에서 먼저 모아 두면 느린 장치
         # 검사가 메인 루프의 전이를 막지 않는다.
@@ -272,11 +335,13 @@ class RobotState:
             return Snapshot(
                 mode=self._mode,
                 reason_code=self._reason_code,
+                obstacle_confirmed=self._obstacle_confirmed,
                 mission_id=self._mission_id,
                 mission_state=self._mission_state,
                 zone_id=self._zone_id,
                 mission_elapsed_sec=self.mission_elapsed_sec,
                 mission_incident_count=self._mission_incident_count,
+                mission_normal_detection_count=self._mission_normal_detection_count,
                 battery_valid=self._battery_valid,
                 battery_percent=self._battery_percent,
                 battery_state=self._battery_state,
@@ -320,6 +385,10 @@ class RobotState:
         """일시정지·안전정지에서 순찰 복귀 — → PATROLLING/NONE."""
         return self._transition("PATROLLING", "NONE")
 
+    def stand_by(self) -> bool:
+        """미션이 끝나 대기로 돌아간다 — → READY/NONE.  [R-5 가 부른다]"""
+        return self._transition("READY", "NONE")
+
     def safe_stop(self, reason: str) -> bool:
         return self._transition("SAFE_STOP", reason)
 
@@ -329,24 +398,55 @@ class RobotState:
     def begin_shutdown(self, reason: str = "NONE") -> bool:
         return self._transition("SHUTTING_DOWN", reason)
 
-    # -- 장애물 (계약 §5.6) -----------------------------------------------
+    # -- 장애물 (계약 §5.6, §10.2) ----------------------------------------
     #
-    # State 쪽만 구현한다. 재확인 후 지속된 정지를 events/safety 로 올리는 것은
-    # R-4 이고, 짧은 정지는 계약상 State 로만 알린다.
+    # 짧은 정지는 계약상 State 로만 알린다. events/safety 는 재확인을 통과한 뒤에만
+    # 나가므로, "확정됐는가" 를 여기에 둔다 — SAFETY_CLEARED 가 SAFETY_STOPPED 없이
+    # 나가는 경로를 구조로 막는다.
 
     def obstacle_detected(self) -> bool:
-        """최초 감지 — → SAFE_STOP/OBSTACLE. 이미 그 상태면 아무 것도 안 한다."""
-        return self.safe_stop("OBSTACLE")
+        """최초 감지 — → SAFE_STOP/OBSTACLE. 전이가 없었으면 False.
+
+        이미 서 있으면 사유를 덮어쓰지 않는다. 운영자가 누른 REMOTE_ESTOP 이
+        OBSTACLE 로 바뀌면 그 정지가 기록에서 지워지고, 장애물이 치워졌다는 이유로
+        자동 재개 대상이 된다. 전이 표가 SAFE_STOP 으로 보내 주는 mode 에서만 선다.
+        """
+        with self._lock:
+            if "SAFE_STOP" not in _TRANSITIONS[self._mode]:
+                return False
+            changed = self.safe_stop("OBSTACLE")
+            if changed:
+                # 새 사건이다. 재확인 전이라 아직 확정이 아니다.
+                self._obstacle_confirmed = False
+            return changed
+
+    def confirm_obstacle(self) -> bool:
+        """재확인에서도 있더라 — 확정. 이미 확정이면 False.
+
+        반복 발행 금지(§10.2)를 여기서 지킨다: 확정은 사건당 한 번만 True 다.
+        """
+        with self._lock:
+            if (self._mode, self._reason_code) != ("SAFE_STOP", "OBSTACLE"):
+                return False
+            if self._obstacle_confirmed:
+                return False
+            self._obstacle_confirmed = True
+            return True
 
     def obstacle_cleared(self) -> bool:
         """해제 — SAFE_STOP/OBSTACLE 였을 때만 PATROLLING/NONE 으로 돌아간다.
 
         REMOTE_ESTOP 같은 다른 사유로 서 있는 중이면 장애물이 치워져도 못 움직인다.
+        확정 여부는 여기서 지워지므로, 해제를 알릴지는 부르기 전에 읽어야 한다.
         """
         with self._lock:
             if (self._mode, self._reason_code) != ("SAFE_STOP", "OBSTACLE"):
+                # 사유가 바뀌어 서 있는 동안은 확정 깃발을 그대로 둔다 — 다음
+                # obstacle_detected() 가 리셋하고, 그 사이의 해제 발행은 이 False 가 막는다.
                 return False
-            return self.resume()
+            resumed = self.resume()
+            self._obstacle_confirmed = False
+            return resumed
 
     # -- 미션 보관함 (계약 §6.3) ------------------------------------------
     #
@@ -371,6 +471,7 @@ class RobotState:
             self._zone_id = zone_id
             self._mission_started_at = self._monotonic()
             self._mission_incident_count = 0
+            self._mission_normal_detection_count = 0
 
     def set_mission_state(self, state: str) -> None:
         if state not in MISSION_STATES:
@@ -382,20 +483,39 @@ class RobotState:
             self._mission_state = state
 
     def record_incident(self) -> int:
-        """확정 Incident 1건. telemetry.mission.incident_count 가 여기서 온다."""
+        """확정 Incident 1건. telemetry.mission.incident_count 가 여기서 온다.
+
+        발행한 event 만 센다 — 탐지했지만 발행하지 않은 것을 세면
+        mission.result.incident_count 와 실제 Event 수가 어긋난다.
+        """
         with self._lock:
             self._require_mission()
             self._mission_incident_count += 1
             return self._mission_incident_count
 
+    def record_normal_detection(self) -> int:
+        """정상 관측 1건 (§11.3). mission.result.normal_detection_count 가 여기서 온다.
+
+        카메라 프레임 수가 아니다 — tracking·cooldown 으로 중복을 제거한 뒤의 관측만
+        들어온다. 중복 제거는 detect 몫이고 여기서는 세기만 한다.
+        """
+        with self._lock:
+            self._require_mission()
+            self._mission_normal_detection_count += 1
+            return self._mission_normal_detection_count
+
     def end_mission(self) -> None:
-        """미션 종료 — 보관함을 비운다. mission·mission_id 가 다시 null 이 된다."""
+        """미션 종료 — 보관함을 비운다. mission·mission_id 가 다시 null 이 된다.
+
+        집계도 함께 사라진다. mission 종료 event 의 result 는 이걸 부르기 전에 만든다.
+        """
         with self._lock:
             self._mission_id = None
             self._mission_state = None
             self._zone_id = None
             self._mission_started_at = None
             self._mission_incident_count = None
+            self._mission_normal_detection_count = None
 
     def _require_mission(self) -> None:
         if self._mission_id is None:
@@ -403,26 +523,16 @@ class RobotState:
 
     # -- 배터리 -----------------------------------------------------------
 
-    def set_battery(
-        self,
-        *,
-        valid: bool,
-        percent=None,
-        state: str = "UNKNOWN",
-        source: str = "MEASURED",
-    ) -> bool:
-        """측정값 갱신. 값 검사를 여기서 해서 발행 시점에 터지지 않게 한다.
+    def set_battery(self, *, valid: bool, percent=None, source: str = "MEASURED") -> bool:
+        """센서 원시값 갱신. 등급은 여기서 판정한다.
 
         state 와 telemetry 가 둘 다 배터리를 싣는다. 각자 센서를 읽으면 같은 시점에
         서로 다른 잔량을 보고하게 되므로, 읽기는 여기로만 들어오고 두 발행 경로는
-        스냅샷에서 읽는다.
+        스냅샷에서 읽는다. 등급(NORMAL·LOW·CRITICAL)도 마찬가지다 — 호출자가 주면
+        같은 잔량을 두고 state·telemetry·event 가 서로 다른 등급을 말할 수 있다.
         `source` 는 telemetry 에만 실린다 (§6.3). 추정으로 채운 값이면 호출자가
         ESTIMATED 를 명시해야 한다 — 기본값은 측정 성공을 뜻하는 MEASURED 다.
         """
-        if state not in BATTERY_STATES:
-            raise ValueError(
-                f"battery.state: {state!r} is not one of {sorted(BATTERY_STATES)}"
-            )
         valid = bool(valid)
         if valid:
             if percent is None:
@@ -437,7 +547,6 @@ class RobotState:
         else:
             # 못 믿는 측정값은 이전 값을 복사하지 않고 버린다 (§5.5).
             percent = None
-            state = "UNKNOWN"
             source = None
         with self._lock:
             before = (
@@ -446,22 +555,78 @@ class RobotState:
                 self._battery_state,
                 self._battery_source,
             )
+            state = self._commit_grade("UNKNOWN" if not valid else self._graded(percent))
             self._battery_valid = valid
             self._battery_percent = percent
             self._battery_state = state
             self._battery_source = source
             return before != (valid, percent, state, source)
 
+    def _graded(self, percent: float) -> str:
+        """히스테리시스 등급 판정 (계약 §9.3).
+
+        내려갈 때는 low_pct·critical_pct 를, 올라올 때는 *_recover_pct 를 쓴다.
+        """
+        limits = self._battery_thresholds
+        current = self._battery_state
+        if current == "CRITICAL":
+            if percent >= limits.low_recover_pct:
+                return "NORMAL"
+            return "LOW" if percent >= limits.critical_recover_pct else "CRITICAL"
+        if current == "LOW":
+            if percent < limits.critical_pct:
+                return "CRITICAL"
+            return "NORMAL" if percent >= limits.low_recover_pct else "LOW"
+        if percent < limits.critical_pct:
+            return "CRITICAL"
+        return "LOW" if percent < limits.low_pct else "NORMAL"
+
+    def _commit_grade(self, candidate: str) -> str:
+        """confirm_samples 만큼 연속으로 같은 등급이어야 전이로 인정한다.
+
+        측정 무효(UNKNOWN)와 기동 후 첫 판정은 바로 반영한다 — 흔들림이 아니라
+        등급이 없다가 생긴(혹은 사라진) 것이다.
+        """
+        current = self._battery_state
+        if candidate == current:
+            self._battery_candidate = None
+            self._battery_candidate_count = 0
+            return current
+        if candidate == "UNKNOWN" or current == "UNKNOWN":
+            self._battery_candidate = None
+            self._battery_candidate_count = 0
+            return candidate
+        if candidate == self._battery_candidate:
+            self._battery_candidate_count += 1
+        else:
+            self._battery_candidate = candidate
+            self._battery_candidate_count = 1
+        if self._battery_candidate_count < self._battery_thresholds.confirm_samples:
+            return current
+        self._battery_candidate = None
+        self._battery_candidate_count = 0
+        return candidate
+
     # -- health 취합 (계약 §5.3) ------------------------------------------
 
     def health(self) -> dict:
-        """6종을 계약 순서로 모은다. 하나도 빠뜨리지 않는다 — 전부 필수 멤버다."""
+        """6종을 계약 순서로 모은다. 하나도 빠뜨리지 않는다 — 전부 필수 멤버다.
+
+        HEALTH_PROBE_INTERVAL_SEC 동안은 직전 판정을 그대로 돌려준다. 대가는
+        FAULT 감지가 최대 그만큼 늦는 것이고, 얻는 것은 장치를 초당 수십 번
+        때리지 않는 것이다.
+        """
+        now = self._monotonic()
+        cached = self._health_cache
+        if cached is not None and now - cached[0] < HEALTH_PROBE_INTERVAL_SEC:
+            return dict(cached[1])
         members = {}
         for name in HEALTH_MEMBERS:
             members[name] = (
                 self._storage_health() if name == "storage" else self._probe(name)
             )
-        return members
+        self._health_cache = (now, members)
+        return dict(members)
 
     def _probe(self, name: str) -> str:
         probe = self._probes.get(name)

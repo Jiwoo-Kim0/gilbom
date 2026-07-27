@@ -86,7 +86,7 @@ class FakeGps:
 
 class FakeBattery:
     def __init__(self, **reading) -> None:
-        self.reading = reading or {"valid": False, "percent": None, "state": "UNKNOWN"}
+        self.reading = reading or {"valid": False, "percent": None}
 
     def set(self, **reading) -> None:
         self.reading = reading
@@ -481,7 +481,7 @@ def test_the_real_default_path_never_raises():
 
 
 def test_sensor_reading_goes_through_robot_state(sampler, state, battery):
-    battery.set(valid=True, percent=67.4, state="NORMAL", source="MEASURED")
+    battery.set(valid=True, percent=67.4, source="MEASURED")
     sampler.poll()
     snapshot = state.snapshot()
     assert (snapshot.battery_valid, snapshot.battery_percent) == (True, 67.4)
@@ -489,7 +489,7 @@ def test_sensor_reading_goes_through_robot_state(sampler, state, battery):
 
 
 def test_state_and_telemetry_report_the_same_battery(client, state, sampler, battery):
-    battery.set(valid=True, percent=67.4, state="NORMAL", source="MEASURED")
+    battery.set(valid=True, percent=67.4, source="MEASURED")
     sampler.poll()
     StatePublisher(client, state).publish(force=True)
 
@@ -503,13 +503,13 @@ def test_state_and_telemetry_report_the_same_battery(client, state, sampler, bat
 
 
 def test_estimated_source_is_carried_through(client, sampler, battery):
-    battery.set(valid=True, percent=52.0, state="NORMAL", source="ESTIMATED")
+    battery.set(valid=True, percent=52.0, source="ESTIMATED")
     sampler.poll()
     assert client.samples()[-1]["battery"]["source"] == "ESTIMATED"
 
 
 def test_invalid_battery_nulls_percent_and_source(client, sampler, battery):
-    battery.set(valid=False, percent=None, state="UNKNOWN")
+    battery.set(valid=False, percent=None)
     sampler.poll()
     assert client.samples()[-1]["battery"] == {
         "valid": False,
@@ -521,11 +521,11 @@ def test_invalid_battery_nulls_percent_and_source(client, sampler, battery):
 
 def test_unknown_battery_source_is_rejected(state):
     with pytest.raises(ValueError):
-        state.set_battery(valid=True, percent=50.0, state="NORMAL", source="GUESSED")
+        state.set_battery(valid=True, percent=50.0, source="GUESSED")
 
 
 def test_missing_battery_reader_leaves_robot_state_alone(client, state, clock, tmp_path):
-    state.set_battery(valid=True, percent=80.0, state="NORMAL")
+    state.set_battery(valid=True, percent=80.0)
     bare = TelemetrySampler(
         client, state, monotonic=clock.monotonic, now=clock.now, thermal_root=tmp_path
     )
@@ -883,7 +883,7 @@ def test_hardware_read_stubs_report_no_data():
         "lon": None,
         "heading_deg": None,
     }
-    assert battery.read() == {"valid": False, "percent": None, "state": "UNKNOWN"}
+    assert battery.read() == {"valid": False, "percent": None}
     assert motor.is_driving() is False
 
 

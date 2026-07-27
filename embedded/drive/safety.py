@@ -9,6 +9,15 @@
 #   - LiDAR 통신 두절 시 LIDAR_FAULT 를 알릴 수 있어야 함 (health 반영)
 
 
+def check() -> tuple:
+    """(obstacle, distance_m) — events/safety 의 2단계 판정 재료 (계약 §10.2).
+
+    확정·해제 판정은 events.py 가 한다. 여기서는 지금 보이는 것만 돌려준다.
+    LiDAR 가 붙기 전까지는 장애물 없음이고 거리도 잴 수 없어 null 이다.
+    """
+    return False, None
+
+
 def health() -> str:
     """state.health.lidar — Serial·SDK 연결·최근 Scan·연속 Parse 실패로 판정 (계약 §5.3).
 

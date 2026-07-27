@@ -15,3 +15,16 @@
 #   - NORMAL 탐지는 이벤트 발행 안 함 — 카운트만 유지
 #     (mission 종료 시 normal_detection_count 로 보고)
 #   - 중복 억제: 같은 지점 연속 프레임 재발행 방지 (계약 §8 중복 정책 — 5m/30초 등 팀 확정)
+
+#: incident.model 에 그대로 실린다 (계약 §8.3). 모델이 붙을 때 export 한 실제 값으로 바꾼다.
+MODEL_NAME = "tbs-braille-yolo"
+MODEL_VERSION = "0.0.0-stub"
+
+
+def infer(frame=None):
+    """탐지 결과 1건 또는 None. 엔진이 붙기 전까지는 항상 None 이다.
+
+    결과 dict 는 events.report_incident() 에 그대로 넘어간다 (계약 §8.3):
+      block_type · defect_type · confidence · bbox_norm · damage_ratio(선택)
+    """
+    return None

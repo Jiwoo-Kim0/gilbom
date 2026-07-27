@@ -5,8 +5,9 @@
   - mode·reason_code 짝과 health 판정 → robot_state.RobotState
   - state 발행 타이밍(§5.1)           → robot_state.StatePublisher
   - telemetry 표본·발행 타이밍(§6)    → telemetry.TelemetrySampler
+  - event 4종 판정·발행(§8~§11)       → events.EventPublisher
   - 장치별 health 판정                → 각 하드웨어 모듈의 health()
-요구 추적: F-001(초기화) F-007(시스템 관리) + MQTT 계약 tbs/v2 §4·§5·§6
+요구 추적: F-001(초기화) F-007(시스템 관리) + MQTT 계약 tbs/v2 §4·§5·§6·§8~§11
 """
 
 from __future__ import annotations
@@ -17,7 +18,9 @@ import threading
 from pathlib import Path
 
 from comms import MqttClient, MqttConfig
-from robot_state import RobotState, StatePublisher
+from comms.config import load_document
+from events import OBSTACLE_CONFIRM_SEC, EventPublisher
+from robot_state import BatteryThresholds, RobotState, StatePublisher
 from telemetry import TelemetrySampler
 
 log = logging.getLogger("orincar")
@@ -67,23 +70,49 @@ def sensor_reads() -> dict:
     }
 
 
+def event_sources() -> dict:
+    """event 판정의 재료를 이름에 묶는다.
+
+    2단계 확정·등급 전이 판정은 EventPublisher 안에 있다 — 여기서는 연결만 한다.
+    """
+    from detect import inference
+    from drive import safety
+    from sensors import gps
+
+    return {
+        "lidar": safety.check,
+        "gps": gps.read_position,
+        "model_name": inference.MODEL_NAME,
+        "model_version": inference.MODEL_VERSION,
+    }
+
+
 def build(config_path=CONFIG_PATH):
     """설정 로드 → 모듈 조립. 아직 아무 것도 발행하지 않는다.  [F-001]"""
-    config = MqttConfig.load(config_path)
+    document = load_document(config_path)
+    config = MqttConfig.from_document(document)
     client = MqttClient(config)
     state = RobotState(
         health_probes=health_probes(),
         outbox=client.outbox,
         # Outbox 가 이미 만들어 둔 디렉터리다 (MqttClient 생성 시점).
         storage_dir=Path(config.outbox_path).parent,
+        battery_thresholds=BatteryThresholds.from_document(document),
     )
     publisher = StatePublisher(client, state)
     sampler = TelemetrySampler(client, state, **sensor_reads())
+    safety = document.get("safety") or {}
+    events = EventPublisher(
+        client,
+        state,
+        obstacle_confirm_sec=safety.get("obstacle_confirm_sec", OBSTACLE_CONFIRM_SEC),
+        **event_sources(),
+    )
     # 연결 직후 1회 발행 (계약 §5.1 (a)). 재접속 때마다 다시 불린다.
     # paho 네트워크 스레드에서 불리므로 RobotState·StatePublisher 는 락으로 보호돼 있다.
     # telemetry 에는 이 훅이 없다 — 재접속했다고 과거 표본을 보내지 않는다 (§6.1).
     client.on_connected = publisher.on_connected
-    return client, state, publisher, sampler
+    return client, state, publisher, sampler, events
 
 
 def run(
@@ -91,6 +120,7 @@ def run(
     state: RobotState,
     publisher: StatePublisher,
     sampler: TelemetrySampler,
+    events: EventPublisher,
     stopping,
 ) -> None:
     """기동 전이 → 메인 루프. stopping 이 서면 돌아온다."""
@@ -108,6 +138,9 @@ def run(
         # telemetry 는 5초 주기 하나뿐이다 (§6.1). 30초·5초 둘 다 0.5초 tick 으로
         # 충분해서 스레드를 따로 두지 않는다.
         sampler.poll()
+        # 장애물 재확인(§10.2)과 배터리 등급 전이(§9)를 본다. 발행 조건 판정은
+        # events 안에 있다 — 여기서 비교하지 않는다.
+        events.poll()
 
 
 def shutdown(client, state: RobotState, publisher: StatePublisher) -> None:
@@ -129,7 +162,7 @@ def main() -> int:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
     )
-    client, state, publisher, sampler = build()
+    client, state, publisher, sampler, events = build()
     stopping = threading.Event()
 
     def _request_stop(signum, _frame):
@@ -141,7 +174,7 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _request_stop)
 
     try:
-        run(client, state, publisher, sampler, stopping)
+        run(client, state, publisher, sampler, events, stopping)
     except KeyboardInterrupt:
         log.info("interrupted, shutting down")
     finally:
@@ -154,11 +187,10 @@ if __name__ == "__main__":
 
 
 # 이후 티켓에서 이 조립에 더할 것 (지금은 범위 밖)
-#   R-4 events 4종 — incident(업로드 후 image_id) / safety / battery / mission
-#     장애물이 재확인 후에도 지속될 때만 SAFETY_STOPPED 1회 (계약 §10.2)
 #   R-5 commands/request 처리 → commands/result 응답
-#     START_MISSION 이 mission_id·zone_id 를 채우고 state.start_patrol() 을 부른다
-#     (RobotState 의 미션 보관함)
+#     START_MISSION 이 state.start_mission() 으로 mission_id·zone_id 를 채우고
+#     state.start_patrol() 로 주행을 연다. 미션 event 는 events.mission_*() 이
+#     이미 준비돼 있다 — 부르는 쪽만 만들면 된다.
 #     expires_at 검증이 시계에 의존하므로 NTP 동기(timedatectl) 전제 (계약 §17)
 #   주행·추론 — drive 스텝 + safety.check() / detect 프레임 추론  [F-002~F-004]
 #   배포  [F-007]
