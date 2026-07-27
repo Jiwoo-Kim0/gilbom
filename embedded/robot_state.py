@@ -392,6 +392,21 @@ class RobotState:
     def safe_stop(self, reason: str) -> bool:
         return self._transition("SAFE_STOP", reason)
 
+    def release_safe_stop(self) -> bool:
+        """안전 정지 해제 — 미션 상태에 맞는 운행 mode 로 돌아간다.
+
+        정지 사유가 풀렸을 때 어디로 돌아갈지는 미션이 정한다. 호출자마다 이 판단을
+        따로 하면 원격 해제와 센서 복구가 서로 다른 mode 로 돌아가게 된다.
+        """
+        with self._lock:
+            if self._mode != "SAFE_STOP":
+                return False
+            if self._mission_state == "RUNNING":
+                return self.resume()
+            if self._mission_state == "PAUSED":
+                return self.pause()
+            return self.stand_by()
+
     def fault(self, reason: str) -> bool:
         return self._transition("ERROR", reason)
 

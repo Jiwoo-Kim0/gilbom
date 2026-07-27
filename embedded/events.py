@@ -51,6 +51,8 @@ class EventPublisher:
         model_name: str = None,
         model_version: str = None,
         obstacle_confirm_sec: float = OBSTACLE_CONFIRM_SEC,
+        stop_motor=None,
+        sensor_fault_stops_driving: bool = True,
         upload=upload_image,
         monotonic=time.monotonic,
         now=utc_now,
@@ -62,6 +64,11 @@ class EventPublisher:
         self._model_name = model_name
         self._model_version = model_version
         self._obstacle_confirm_sec = obstacle_confirm_sec
+        #: 장애물 최초 감지 때 부른다. MQTT 보다 먼저 물리 정지를 시키는 자리다 (§10.1).
+        self._stop = stop_motor
+        #: LiDAR·모터가 FAULT 인 동안 주행을 막을지. 눈이 먼 채로 굴러가지 않게 하는
+        #: 안전 정책이라 기본은 켬이다. 장치 없는 개발 PC 에서 주행 흐름을 흉내 낼 때만 끈다.
+        self._sensor_fault_stops_driving = sensor_fault_stops_driving
         self._upload = upload
         self._monotonic = monotonic
         self._now = now
@@ -102,6 +109,15 @@ class EventPublisher:
         if not obstacle:
             self._release_obstacle(snapshot, distance_m)
             return
+        if not snapshot.obstacle_confirmed and (snapshot.mode, snapshot.reason_code) != (
+            "SAFE_STOP",
+            "OBSTACLE",
+        ):
+            # 확정 전에 다른 사유가 우리를 밀어냈다(예: 관리자 e-stop). 이 감지는 없던 것으로
+            # 하고 처음부터 다시 본다 — 안 그러면 그 사유가 풀린 뒤 장애물이 그대로인데도
+            # 다시 서지 못한다.
+            self._forget_obstacle()
+            return
         if self._monotonic() - self._obstacle_since < self._obstacle_confirm_sec:
             return  # 아직 재확인 시점 전이다.
         # 대기시간이 지난 뒤 '다시 봤더니' 여전히 있다 — 이 tick 의 읽기가 재확인이다.
@@ -119,14 +135,32 @@ class EventPublisher:
         )
 
     def _begin_obstacle(self, snapshot) -> None:
-        """최초 감지 — State 만 알리고 Event 는 재확인 뒤로 미룬다 (§10.2).
+        """최초 감지 — 모터를 세우고 State 만 알린다. Event 는 재확인 뒤다 (§10.2).
 
-        실제 모터 정지는 로봇 내부 안전 프로세스가 먼저 한다 (§10.1).
+        정지가 발행보다 먼저다 (§10.1·§16-10).
         """
+        self._stop_motor()
+        if not self._state.obstacle_detected():
+            # 다른 사유로 이미 서 있다. 그 사유가 풀린 뒤 다시 감지되는 때가 최초 감지다 —
+            # 여기서 시각을 붙잡아 두면 그 사이 사건이 통째로 죽는다.
+            return
         self._obstacle_mode_before = snapshot.mode
         self._obstacle_occurred_at = self._now()
         self._obstacle_since = self._monotonic()
-        self._state.obstacle_detected()
+
+    def _forget_obstacle(self) -> None:
+        self._obstacle_since = None
+        self._obstacle_occurred_at = None
+        self._obstacle_mode_before = None
+
+    def _stop_motor(self) -> None:
+        """정지 호출이 실패해도 메인 루프를 죽이지 않는다."""
+        if self._stop is None:
+            return
+        try:
+            self._stop()
+        except Exception:
+            log.exception("failed to stop the motor")
 
     def _release_obstacle(self, snapshot, distance_m) -> None:
         # 확정 여부와 직전 mode 는 obstacle_cleared() 가 바꾸기 전 값이어야 한다.
@@ -135,9 +169,7 @@ class EventPublisher:
         mode_before = snapshot.mode
         released = self._state.obstacle_cleared()
         # 장애물은 실제로 사라졌으니 다음 감지는 새 사건이다.
-        self._obstacle_since = None
-        self._obstacle_occurred_at = None
-        self._obstacle_mode_before = None
+        self._forget_obstacle()
         # 다른 사유로 여전히 서 있으면 해제가 아니다 — 알리면 서버가 안전 상황이
         # 끝난 것으로 읽는데 로봇은 그대로 멈춰 있다.
         if confirmed and released:
@@ -165,22 +197,53 @@ class EventPublisher:
             faulty = health.get(member) == "FAULT"
             if faulty == (member in self._sensor_faults):
                 continue  # 상태가 그대로다. 반복 발행하지 않는다.
+            mode_before = snapshot.mode
             if faulty:
                 self._sensor_faults.add(member)
+                # 정지가 발행보다 먼저다 (§16-10). 서 있는 로봇은 밀지 않는다 —
+                # 판정은 _halt_on_sensor_fault 안에 있다.
+                self._halt_on_sensor_fault()
             else:
                 self._sensor_faults.discard(member)
-            # 고장 시 mode 정책(ERROR 로 떨굴지)은 이번 범위 밖이라 전이하지 않는다 —
-            # 그래서 mode_before 와 mode_after 가 같다.
-            mode = snapshot.mode
+                self._release_after_sensor_fault(snapshot, reason_code)
             self._publish_safety(
                 "SENSOR_FAULT" if faulty else "SENSOR_RECOVERED",
                 occurred_at=self._now(),
                 distance_m=None,
-                mode_before=mode,
-                mode_after=mode,
+                mode_before=mode_before,
+                # 방금 전이한 결과라 스냅샷보다 새 값이다.
+                mode_after=self._state.mode,
                 reason_code=reason_code,
                 auto_resume_allowed=not faulty,
             )
+        # 기동 때부터 고장이던 장치는 위 전이 판정을 이미 지나갔다. 그 뒤에 주행이
+        # 시작되는 경로(START_MISSION)가 있으므로 매 tick 다시 본다.
+        self._halt_on_sensor_fault()
+
+    def _halt_on_sensor_fault(self) -> None:
+        """LiDAR·모터가 고장인 채로 굴러가지 않게 한다.
+
+        주행 중일 때만 세운다. 서 있는 로봇까지 SAFE_STOP 으로 밀면 장치가 하나도
+        없는 개발 PC 가 부팅하자마자 안전 정지에 갇히고, START_MISSION 이 통째로 막힌다.
+        """
+        if not (self._sensor_fault_stops_driving and self._sensor_faults):
+            return
+        if self._state.mode != "PATROLLING":
+            return
+        for member, reason_code in SENSOR_REASON_CODES.items():
+            if member not in self._sensor_faults:
+                continue
+            self._stop_motor()
+            self._state.safe_stop(reason_code)
+            return
+
+    def _release_after_sensor_fault(self, snapshot, reason_code: str) -> None:
+        """그 고장 때문에 서 있었고 다른 고장도 남지 않았으면 정지를 푼다."""
+        if self._sensor_faults:
+            return  # 다른 장치가 아직 고장이다. 지금 풀면 눈이 반쯤 먼 채로 나간다.
+        if (snapshot.mode, snapshot.reason_code) != ("SAFE_STOP", reason_code):
+            return  # 다른 사유로 서 있다 — 이 복구가 풀 정지가 아니다.
+        self._state.release_safe_stop()
 
     def _publish_safety(
         self,
@@ -361,9 +424,16 @@ class EventPublisher:
         return self._finish_mission("MISSION_FAILED", "FAILED", completion_reason)
 
     def _finish_mission(self, event_type, mission_state, completion_reason) -> dict:
-        """종료 3종. 보관함이 비기 전에 집계를 읽는다 — end_mission() 은 R-5 가 뒤에 부른다."""
+        """종료 3종. 집계를 실어 보내고 보관함을 비운다.
+
+        result 는 payload 로 이미 복사된 뒤라 여기서 비워도 안전하다. 비우는 것을
+        호출자에게 맡기면 종료 상태로 elapsed_sec 이 계속 자라는 창이 남는다.
+        mode 전이(→ READY)는 완료·취소·실패에 따라 갈리므로 명령 쪽에서 한다.
+        """
         self._state.set_mission_state(mission_state)
-        return self._publish_mission(event_type, completion_reason=completion_reason)
+        payload = self._publish_mission(event_type, completion_reason=completion_reason)
+        self._state.end_mission()
+        return payload
 
     def _publish_mission(self, event_type: str, *, completion_reason: str = None) -> dict:
         # 미션 집계는 한 시점의 값이어야 한다 — 스냅샷 하나에서 전부 읽는다.
