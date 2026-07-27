@@ -1,0 +1,3 @@
+# 로봇에 전달하는 실제 MQTT 비밀번호가 든 로컬 env는 커밋하지 않는다.
+mqtt/*.env
+!mqtt/*.env.example
