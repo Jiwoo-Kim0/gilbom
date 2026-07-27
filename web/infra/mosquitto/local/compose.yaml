@@ -10,7 +10,7 @@ services:
         condition: service_completed_successfully
 
     ports:
-      - "127.0.0.1:8883:8883"
+      - "${MQTT_BIND_ADDRESS:-127.0.0.1}:${MQTT_TLS_PORT:-8883}:8883"
 
     volumes:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
@@ -40,6 +40,8 @@ services:
       MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD must be set}
       MQTT_ROBOT_USERNAME: ${MQTT_ROBOT_USERNAME:-robot-test}
       MQTT_ROBOT_PASSWORD: ${MQTT_ROBOT_PASSWORD:?MQTT_ROBOT_PASSWORD must be set}
+      MQTT_LAN_IP: ${MQTT_LAN_IP:-}
+      MQTT_PUBLIC_HOSTNAME: ${MQTT_PUBLIC_HOSTNAME:-}
     volumes:
       - .:/mqtt-local
       - ../acl:/mqtt-input/acl:ro

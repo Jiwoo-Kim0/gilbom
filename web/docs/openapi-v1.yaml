@@ -10,6 +10,8 @@ info:
 tags:
   - name: Auth
     description: 관리자 서버 세션·CSRF·TOTP 인증
+  - name: Robots
+    description: 로봇 기준정보 등록 및 관제
   - name: Reports
     description: 보고서 생성·버전·검토·승인 상태 계약
 
@@ -498,6 +500,53 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /api/v1/robots:
+    post:
+      tags: [Robots]
+      operationId: registerRobot
+      summary: 로봇 기준정보 등록
+      description: |
+        로그인 관리자를 등록자로 사용해 로봇을 PROVISIONING 상태로 등록하고,
+        현재 연결 상태를 OFFLINE으로 초기화합니다. MQTT Credential은 발급하지 않습니다.
+        동일 관리자·동일 Idempotency-Key의 완료 요청은 최초 201 응답을 재사용합니다.
+      x-required-permission: ROBOT_REGISTER
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RobotRegistrationRequest"
+      responses:
+        "201":
+          description: 로봇 등록 완료
+          headers:
+            Location:
+              description: 등록한 로봇 리소스 경로
+              schema:
+                type: string
+                example: /api/v1/robots/8750afcb-d682-4ef6-a90d-f63fcf5c214e
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RobotRegistrationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /api/v1/reports/{reportId}/reject:
     post:
       tags: [Reports]
@@ -575,6 +624,62 @@ components:
         format: uuid
 
   schemas:
+    RobotRegistrationRequest:
+      type: object
+      required: [robotName, serialNumber]
+      additionalProperties: false
+      properties:
+        robotName:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: 앞뒤 공백과 제어 문자를 제외한 관제 화면 표시명
+          example: 점자블록 순찰 로봇 1호
+        serialNumber:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
+          description: 실제 기체의 고유 Serial Number
+          example: SN-JETSON-0001
+
+    RobotOperationalStatus:
+      type: string
+      enum: [PROVISIONING]
+
+    RobotConnectivityStatus:
+      type: string
+      enum: [OFFLINE]
+
+    RobotRegistrationResponse:
+      type: object
+      required:
+        - robotId
+        - robotCode
+        - robotName
+        - serialNumber
+        - operationalStatus
+        - connectivityStatus
+      additionalProperties: false
+      properties:
+        robotId:
+          type: string
+          format: uuid
+        robotCode:
+          type: string
+          pattern: "^RBT-[0-9]{3,}$"
+          example: RBT-001
+        robotName:
+          type: string
+          example: 점자블록 순찰 로봇 1호
+        serialNumber:
+          type: string
+          example: SN-JETSON-0001
+        operationalStatus:
+          $ref: "#/components/schemas/RobotOperationalStatus"
+        connectivityStatus:
+          $ref: "#/components/schemas/RobotConnectivityStatus"
+
     PermissionCode:
       type: string
       enum:
@@ -945,6 +1050,7 @@ components:
         - IMAGE_NOT_FOUND
         - COMMON_METHOD_NOT_ALLOWED
         - COMMON_CONFLICT
+        - ROBOT_SERIAL_NUMBER_CONFLICT
         - COMMAND_STATE_CONFLICT
         - REPORT_STATE_CONFLICT
         - COMMON_PAYLOAD_TOO_LARGE

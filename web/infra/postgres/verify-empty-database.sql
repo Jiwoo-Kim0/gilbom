@@ -1,6 +1,6 @@
 \set ON_ERROR_STOP on
 
--- 빈 volume에서 PostGIS, Flyway V1~V4, 필수 session/RBAC/security schema를 한 번에 검증한다.
+-- 빈 volume에서 PostGIS, Flyway V1~V5, 필수 session/RBAC/security/robot schema를 한 번에 검증한다.
 -- flyway_role과 application_role은 psql --set으로 전달하며 비밀번호는 받거나 출력하지 않는다.
 SELECT (
     :'flyway_role' <> :'application_role'
@@ -10,9 +10,9 @@ SELECT (
         WHERE extname = 'postgis'
     )
     AND (
-        SELECT COUNT(*) >= 4
+        SELECT COUNT(*) >= 5
                AND COUNT(*) FILTER (WHERE NOT success) = 0
-               AND COUNT(*) FILTER (WHERE version IN ('1', '2', '3', '4') AND success) = 4
+               AND COUNT(*) FILTER (WHERE version IN ('1', '2', '3', '4', '5') AND success) = 5
         FROM flyway_history.flyway_schema_history
     )
     AND to_regclass('auth.admin_user') IS NOT NULL
@@ -27,6 +27,10 @@ SELECT (
     AND to_regclass('session_store.spring_session_attributes') IS NOT NULL
     AND to_regclass('session_store.session_security_state') IS NOT NULL
     AND to_regclass('request_control.idempotency_request') IS NOT NULL
+    AND to_regclass('robot.robot') IS NOT NULL
+    AND to_regclass('robot.robot_credential') IS NOT NULL
+    AND to_regclass('telemetry.robot_telemetry') IS NOT NULL
+    AND to_regclass('telemetry.robot_current_state') IS NOT NULL
     AND EXISTS (
         SELECT 1
         FROM information_schema.columns
@@ -97,10 +101,27 @@ SELECT (
     AND NOT HAS_SCHEMA_PRIVILEGE(:'application_role', 'auth', 'CREATE')
     AND HAS_SCHEMA_PRIVILEGE(:'application_role', 'request_control', 'USAGE')
     AND NOT HAS_SCHEMA_PRIVILEGE(:'application_role', 'request_control', 'CREATE')
+    AND HAS_SCHEMA_PRIVILEGE(:'application_role', 'robot', 'USAGE')
+    AND NOT HAS_SCHEMA_PRIVILEGE(:'application_role', 'robot', 'CREATE')
+    AND HAS_SCHEMA_PRIVILEGE(:'application_role', 'telemetry', 'USAGE')
+    AND NOT HAS_SCHEMA_PRIVILEGE(:'application_role', 'telemetry', 'CREATE')
     AND HAS_TABLE_PRIVILEGE(:'application_role', 'audit.audit_log', 'SELECT')
     AND HAS_TABLE_PRIVILEGE(:'application_role', 'audit.audit_log', 'INSERT')
     AND NOT HAS_TABLE_PRIVILEGE(:'application_role', 'audit.audit_log', 'UPDATE')
     AND NOT HAS_TABLE_PRIVILEGE(:'application_role', 'audit.audit_log', 'DELETE')
+    AND HAS_SEQUENCE_PRIVILEGE(
+        :'application_role',
+        'robot.robot_code_sequence',
+        'USAGE'
+    )
+    AND HAS_TABLE_PRIVILEGE(:'application_role', 'robot.robot_credential', 'UPDATE')
+    AND NOT HAS_TABLE_PRIVILEGE(:'application_role', 'robot.robot_credential', 'DELETE')
+    AND HAS_TABLE_PRIVILEGE(:'application_role', 'telemetry.robot_telemetry', 'SELECT')
+    AND HAS_TABLE_PRIVILEGE(:'application_role', 'telemetry.robot_telemetry', 'INSERT')
+    AND NOT HAS_TABLE_PRIVILEGE(:'application_role', 'telemetry.robot_telemetry', 'UPDATE')
+    AND NOT HAS_TABLE_PRIVILEGE(:'application_role', 'telemetry.robot_telemetry', 'DELETE')
+    AND HAS_TABLE_PRIVILEGE(:'application_role', 'telemetry.robot_current_state', 'UPDATE')
+    AND NOT HAS_TABLE_PRIVILEGE(:'application_role', 'telemetry.robot_current_state', 'DELETE')
     AND HAS_TABLE_PRIVILEGE(:'application_role', 'session_store.spring_session', 'DELETE')
     AND NOT HAS_TABLE_PRIVILEGE(:'application_role', 'auth.permission', 'UPDATE')
     AND NOT HAS_SCHEMA_PRIVILEGE(:'application_role', 'flyway_history', 'USAGE')

@@ -69,6 +69,148 @@ Git에 커밋하지 않는다. 새로 저장소를 받은 개발자는
 
 환경별 실행 방법은 [`PROFILES.md`](./PROFILES.md)를 참고한다.
 
+## 로컬 PC와 팀원 로봇 PC의 LAN 통신
+
+두 PC가 같은 Wi-Fi 또는 같은 사설망에 있으면 ngrok이나 공유기 포트포워딩 없이
+Broker PC의 LAN IPv4로 직접 연결한다. 기본 Compose는 안전하게 localhost에만
+바인딩되므로, LAN 테스트할 때만 ignored `.env`를 다음처럼 변경한다.
+
+```dotenv
+MQTT_BIND_ADDRESS=0.0.0.0
+MQTT_LAN_IP=192.168.100.191
+MQTT_TLS_PORT=8883
+MQTT_ROBOT_USERNAME=RBT-001
+MQTT_ROBOT_PASSWORD=<로봇별 테스트 비밀번호>
+```
+
+`MQTT_LAN_IP`에는 예시 값을 복사하지 말고 Broker PC에서 확인한 현재 LAN IPv4를
+입력한다. 이 값은 로컬 Broker 인증서의 IP SAN에도 포함된다. IP가 바뀌면 값을
+수정하고 `mqtt-init`을 다시 실행하여 Broker 인증서를 재발급해야 한다.
+
+```bash
+docker compose up --build --detach mqtt-init mosquitto
+docker compose ps
+docker compose logs --tail 100 mqtt-init mosquitto
+```
+
+팀원에게 전달할 값은 다음으로 제한한다.
+
+```text
+MQTT_HOST=<Broker PC의 LAN IPv4>
+MQTT_PORT=8883
+MQTT_USERNAME=<robot_id와 동일>
+MQTT_PASSWORD=<해당 로봇의 비밀번호>
+MQTT_CA_CERT=local-ca-cert.pem의 로봇 PC 내 경로
+```
+
+공개 인증서인
+`infra/mosquitto/local/runtime/certs/local-ca-cert.pem`은 전달해도 되지만,
+`local-ca-key.pem`, Broker 개인키, `runtime/passwd`, Backend 계정 비밀번호는
+전달하지 않는다. 로봇 Client는 CA 검증과 인증서 hostname/IP 검증을 모두
+유지하며 insecure TLS 옵션을 사용하지 않는다.
+
+Windows Defender Firewall은 Private 프로필에서 TCP 8883을 팀원 PC의 LAN
+IP 하나에만 허용한다. 관리자 PowerShell 예시는 다음과 같다.
+
+```powershell
+New-NetFirewallRule `
+  -DisplayName "Gilbom MQTT LAN Test" `
+  -Direction Inbound `
+  -Protocol TCP `
+  -LocalPort 8883 `
+  -RemoteAddress <TEAMMATE_LAN_IP> `
+  -Profile Private `
+  -Action Allow
+```
+
+테스트 종료 후 규칙을 제거하거나 비활성화하고 `.env`의
+`MQTT_BIND_ADDRESS`를 다시 `127.0.0.1`로 되돌린다.
+
+```powershell
+Remove-NetFirewallRule -DisplayName "Gilbom MQTT LAN Test"
+```
+
+## 서로 다른 네트워크에서 ngrok TCP로 통신
+
+서로 다른 Wi-Fi에서 당일 통합할 때는 공유기 포트포워딩보다 ngrok TCP를
+우선한다. Broker는 계속 localhost에만 바인딩하고 ngrok agent가 outbound
+tunnel을 만든다.
+
+```dotenv
+MQTT_BIND_ADDRESS=127.0.0.1
+MQTT_LAN_IP=
+```
+
+별도 터미널에서 tunnel을 시작한다. 가능하면 팀원 PC의 공인 egress IP만
+허용한다.
+
+```powershell
+ngrok tcp 8883 --cidr-allow=<TEAMMATE_PUBLIC_IP>/32
+```
+
+ngrok이 출력한 주소가 다음과 같다고 가정한다.
+
+```text
+tcp://0.tcp.ap.ngrok.io:12345
+```
+
+`.env`에는 scheme과 port를 제외한 hostname만 넣는다.
+
+```dotenv
+MQTT_PUBLIC_HOSTNAME=0.tcp.ap.ngrok.io
+```
+
+그다음 `mqtt-init`과 Broker를 재생성한다. 초기화 스크립트는 hostname이 기존
+인증서에 없을 때 Broker 인증서만 다시 발급하고 로컬 CA는 재사용한다.
+
+```bash
+docker compose up --build --detach --force-recreate mqtt-init mosquitto
+```
+
+팀원 로봇 PC에는 다음을 전달한다.
+
+```text
+MQTT_HOST=0.tcp.ap.ngrok.io
+MQTT_PORT=12345
+MQTT_USERNAME=<robot_id와 동일>
+MQTT_PASSWORD=<해당 로봇의 비밀번호>
+MQTT_CA_CERT=<전달받은 local-ca-cert.pem 경로>
+```
+
+Backend는 ngrok endpoint를 사용하지 않고 같은 PC의 Broker에 직접 연결한다.
+
+| Backend 실행 방식 | MQTT Broker URI | CA 인증서 |
+|---|---|---|
+| IDE·Gradle 로컬 실행 | `ssl://localhost:8883` | `../infra/mosquitto/local/runtime/certs/local-ca-cert.pem` |
+| Docker Compose 실행 | `ssl://mosquitto:8883` | `/app/config/mqtt/certs/local-ca-cert.pem` |
+
+로컬 Backend 실행:
+
+```powershell
+cd C:\ssafy\SSAFY-TASK\web
+docker compose up --build --detach db mqtt-init mosquitto
+
+cd backend
+.\gradlew.bat bootRun
+```
+
+Docker Backend 실행:
+
+```powershell
+cd C:\ssafy\SSAFY-TASK\web
+docker compose up --build --detach db mqtt-init mosquitto backend
+```
+
+두 Backend를 동시에 실행하거나 같은 MQTT Client ID로 접속하지 않는다.
+
+ngrok TCP는 MQTT TLS byte stream을 Broker까지 전달한다. 로봇 Client의 CA와
+hostname 검증을 끄지 않는다. 무료·임시 주소가 바뀌면 새 hostname을 `.env`에
+반영하고 Broker 인증서를 다시 발급해야 한다.
+
+이 절차에서도 MQTT `1883` 평문 포트를 열지 않고, 공유기 포트포워딩과 Windows
+인바운드 방화벽 규칙을 추가하지 않는다. 장기 운영은 ngrok이나 가정용
+포트포워딩이 아니라 운영 Broker와 정식 인증서를 사용한다.
+
 ## Git과 EC2에서 관리할 파일
 
 | 파일 | 위치 | Git 커밋 |

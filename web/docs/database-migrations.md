@@ -29,6 +29,7 @@
 | V2 | 보고서, 보고서 version, 감사 로그 | 변경 가능한 header와 불변 이력을 분리하고 감사 데이터를 append-only로 보호 |
 | V3 | Spring Session JDBC, session security state | 재시작·다중 인스턴스에서도 세션을 공유하고 MFA 상태·절대 만료를 조회 가능하게 저장 |
 | V4 | Permission/RBAC seed, 로그인 제한, 멱등 요청 | 세부 권한 매트릭스를 seed하고 인증 공격·중복 상태 변경을 DB에서 원자적으로 제어 |
+| V5 | Robot, MQTT Credential, Telemetry 이력·현재 상태 | 로봇 통신에 필요한 기준정보·Credential 수명주기와 최신 데이터 보호 기반을 우선 생성 |
 
 시스템 Role `ADMIN`, `MANAGER`, `OPERATOR`와 18개 세부 permission 및
 role-permission 관계는 결정적인 UUID로 seed한다. 실제
@@ -44,7 +45,7 @@ docker compose up --build --detach
 docker compose logs backend
 ```
 
-Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V4가
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V5가
 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증

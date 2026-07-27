@@ -9,7 +9,8 @@ services:
       mqtt-init:
         condition: service_completed_successfully
     ports:
-      - "127.0.0.1:${MQTT_TLS_PORT:-8883}:8883"
+      # 기본은 localhost 전용이다. 팀원 PC와 LAN 통신할 때만 MQTT_BIND_ADDRESS=0.0.0.0으로 바꾼다.
+      - "${MQTT_BIND_ADDRESS:-127.0.0.1}:${MQTT_TLS_PORT:-8883}:8883"
     volumes:
       - ./infra/mosquitto/local/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./infra/mosquitto/local/runtime:/mosquitto/local:ro
@@ -184,6 +185,10 @@ services:
       MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD must be set}
       MQTT_ROBOT_USERNAME: ${MQTT_ROBOT_USERNAME:-robot-test}
       MQTT_ROBOT_PASSWORD: ${MQTT_ROBOT_PASSWORD:?MQTT_ROBOT_PASSWORD must be set}
+      # 외부 로봇이 IP로 TLS 검증할 때 Broker 인증서 SAN에 포함할 현재 PC의 LAN IPv4다.
+      MQTT_LAN_IP: ${MQTT_LAN_IP:-}
+      # ngrok TCP 등 외부 hostname으로 접속할 때 Broker 인증서 DNS SAN에 포함한다.
+      MQTT_PUBLIC_HOSTNAME: ${MQTT_PUBLIC_HOSTNAME:-}
     volumes:
       - ./infra/mosquitto/local:/mqtt-local
       - ./infra/mosquitto/acl:/mqtt-input/acl:ro

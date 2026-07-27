@@ -14,10 +14,13 @@ PASSWORD_FILE="${RUNTIME_DIR}/passwd"
 ACL_SOURCE_FILE=/mqtt-input/acl
 ACL_RUNTIME_FILE="${RUNTIME_DIR}/acl"
 RENEW_BEFORE_SECONDS=2592000
+MQTT_LAN_IP="${MQTT_LAN_IP:-}"
+MQTT_PUBLIC_HOSTNAME="${MQTT_PUBLIC_HOSTNAME:-}"
 
 mkdir -p "${CERT_DIR}" "${CA_DIR}"
 
 WORK_DIR="$(mktemp -d /tmp/mqtt-local-init.XXXXXX)"
+SERVER_OPENSSL_CONFIG="${WORK_DIR}/openssl-local-runtime.cnf"
 
 cleanup() {
   rm -rf "${WORK_DIR}"
@@ -25,6 +28,57 @@ cleanup() {
 
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
+
+validate_lan_ip() {
+  [ -z "${MQTT_LAN_IP}" ] && return 0
+
+  printf '%s\n' "${MQTT_LAN_IP}" | awk -F. '
+    NF != 4 { exit 1 }
+    {
+      for (i = 1; i <= 4; i++) {
+        if ($i !~ /^[0-9]+$/ || $i < 0 || $i > 255) {
+          exit 1
+        }
+      }
+    }
+  ' || {
+    echo "MQTT_LAN_IP must be a valid IPv4 address." >&2
+    exit 1
+  }
+}
+
+validate_public_hostname() {
+  [ -z "${MQTT_PUBLIC_HOSTNAME}" ] && return 0
+
+  printf '%s\n' "${MQTT_PUBLIC_HOSTNAME}" | awk '
+    length($0) < 1 || length($0) > 253 { exit 1 }
+    $0 ~ /^\./ || $0 ~ /\.$/ || $0 ~ /\.\./ { exit 1 }
+    {
+      count = split($0, labels, ".")
+      for (i = 1; i <= count; i++) {
+        if (length(labels[i]) < 1 || length(labels[i]) > 63) {
+          exit 1
+        }
+        if (labels[i] !~ /^([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9])$/) {
+          exit 1
+        }
+      }
+    }
+  ' || {
+    echo "MQTT_PUBLIC_HOSTNAME must be a valid DNS hostname without a scheme or port." >&2
+    exit 1
+  }
+}
+
+prepare_server_openssl_config() {
+  cp "${LOCAL_DIR}/openssl-local.cnf" "${SERVER_OPENSSL_CONFIG}"
+  if [ -n "${MQTT_LAN_IP}" ]; then
+    printf 'IP.2 = %s\n' "${MQTT_LAN_IP}" >> "${SERVER_OPENSSL_CONFIG}"
+  fi
+  if [ -n "${MQTT_PUBLIC_HOSTNAME}" ]; then
+    printf 'DNS.3 = %s\n' "${MQTT_PUBLIC_HOSTNAME}" >> "${SERVER_OPENSSL_CONFIG}"
+  fi
+}
 
 certificate_matches_key() {
   certificate_file="$1"
@@ -38,6 +92,18 @@ certificate_matches_key() {
     cmp -s \
       "${WORK_DIR}/${output_prefix}-certificate.pub" \
       "${WORK_DIR}/${output_prefix}-private-key.pub"
+}
+
+certificate_has_requested_lan_ip() {
+  [ -z "${MQTT_LAN_IP}" ] ||
+    openssl x509 -in "${SERVER_CERT_FILE}" -checkip "${MQTT_LAN_IP}" \
+      -noout >/dev/null 2>&1
+}
+
+certificate_has_requested_public_hostname() {
+  [ -z "${MQTT_PUBLIC_HOSTNAME}" ] ||
+    openssl x509 -in "${SERVER_CERT_FILE}" -checkhost "${MQTT_PUBLIC_HOSTNAME}" \
+      -noout >/dev/null 2>&1
 }
 
 ca_is_reusable() {
@@ -55,7 +121,9 @@ broker_certificate_is_reusable() {
     openssl x509 -in "${SERVER_CERT_FILE}" -checkend "${RENEW_BEFORE_SECONDS}" \
       -noout >/dev/null 2>&1 &&
     certificate_matches_key "${SERVER_CERT_FILE}" "${SERVER_KEY_FILE}" "server" &&
-    openssl verify -CAfile "${CA_CERT_FILE}" "${SERVER_CERT_FILE}" >/dev/null 2>&1
+    openssl verify -CAfile "${CA_CERT_FILE}" "${SERVER_CERT_FILE}" >/dev/null 2>&1 &&
+    certificate_has_requested_lan_ip &&
+    certificate_has_requested_public_hostname
 }
 
 generate_ca() {
@@ -82,7 +150,7 @@ generate_broker_certificate() {
     -sha256 \
     -keyout "${WORK_DIR}/local-broker-key.pem" \
     -out "${WORK_DIR}/local-broker.csr" \
-    -config "${LOCAL_DIR}/openssl-local.cnf" \
+    -config "${SERVER_OPENSSL_CONFIG}" \
     -reqexts server_request_extensions
 
   certificate_serial="$(openssl rand -hex 16)"
@@ -94,13 +162,17 @@ generate_broker_certificate() {
     -set_serial "0x${certificate_serial}" \
     -days 825 \
     -sha256 \
-    -extfile "${LOCAL_DIR}/openssl-local.cnf" \
+    -extfile "${SERVER_OPENSSL_CONFIG}" \
     -extensions server_extensions \
     -out "${WORK_DIR}/local-broker-cert.pem"
 
   cp "${WORK_DIR}/local-broker-cert.pem" "${SERVER_CERT_FILE}"
   cp "${WORK_DIR}/local-broker-key.pem" "${SERVER_KEY_FILE}"
 }
+
+validate_lan_ip
+validate_public_hostname
+prepare_server_openssl_config
 
 if ca_is_reusable; then
   echo "MQTT local CA already exists; reusing it."
@@ -112,7 +184,15 @@ fi
 if broker_certificate_is_reusable; then
   echo "MQTT broker certificate already exists; reusing it."
 else
-  echo "Issuing the MQTT broker certificate from the local CA."
+  if [ -n "${MQTT_PUBLIC_HOSTNAME}" ] && [ -n "${MQTT_LAN_IP}" ]; then
+    echo "Issuing the MQTT broker certificate for localhost, ${MQTT_LAN_IP}, and ${MQTT_PUBLIC_HOSTNAME}."
+  elif [ -n "${MQTT_PUBLIC_HOSTNAME}" ]; then
+    echo "Issuing the MQTT broker certificate for localhost and ${MQTT_PUBLIC_HOSTNAME}."
+  elif [ -n "${MQTT_LAN_IP}" ]; then
+    echo "Issuing the MQTT broker certificate for localhost and ${MQTT_LAN_IP}."
+  else
+    echo "Issuing the MQTT broker certificate for localhost."
+  fi
   generate_broker_certificate
 fi
 

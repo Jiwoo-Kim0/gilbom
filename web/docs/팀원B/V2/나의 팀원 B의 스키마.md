@@ -5,7 +5,7 @@
 > 담당: 팀원 B — 로봇 통신·임무·실시간 관제  
 > 대상 DB: PostgreSQL 16 + PostGIS 3.5  
 > MQTT 계약: `tbs/v2/robots/{robot_id}/...`, `schema_version = "2.0"`  
-> Flyway 구현: 설계 확정 후 `V5__create_robot_telemetry_schema.sql`
+> Flyway 구현: `V5__create_robot_credential_and_telemetry_schema.sql`
 
 등록·Credential 발급 절차는
 [로봇 등록 및 MQTT Credential 발급](<./로봇 등록 및 MQTT Credential 발급.md>)을 따른다.
@@ -18,9 +18,11 @@
 |---|---|---|
 | 설계 문서 | `V2` | 팀원 B DB 설계의 두 번째 검토안 |
 | MQTT Schema | `2.0` | Topic과 Payload 계약 버전 |
-| Flyway Migration | 다음 번호 `V5` | V1~V4 다음에 실제 DB를 생성할 migration |
+| Flyway Migration | `V5` | Robot·Credential·Current State·Telemetry 이력의 우선 migration |
 
-이 문서가 검수되기 전에는 Flyway V5 SQL을 만들거나 DB에 적용하지 않는다.
+2026-07-27 구현 우선순위 결정에 따라 V5는 로봇 통신에 필요한 네 테이블만
+먼저 생성한다. 임무·명령·이벤트·Boot Session은 검수 후 V6 이상의 후속
+migration으로 추가하며, 한 번 적용된 V5는 수정하지 않는다.
 
 ## 2. V2에서 확정한 업무 흐름
 
@@ -36,7 +38,8 @@
 - 운영 상태
 - 등록 관리자와 등록 시각
 
-`robot_code`는 서버가 생성한다.
+`robot_code`는 `robot.robot_code_sequence`를 사용하여
+`RBT-{최소 3자리 숫자}` 형식으로 서버가 생성한다. 예: `RBT-001`, `RBT-1000`.
 `hardware_model`과 `firmware_version`은 저장하지 않는다.
 
 ### 2.2 순찰 방식
@@ -89,12 +92,24 @@ robot
 telemetry
 ```
 
-### 3.2 생성 대상 테이블
+### 3.2 V5 생성 대상 테이블
 
 | Schema | 테이블 | 역할 |
 |---|---|---|
 | `robot` | `robot` | 관리자 화면에서 등록한 로봇 기준정보 |
 | `robot` | `robot_credential` | MQTT Credential Hash와 발급·회전·폐기 상태 |
+| `telemetry` | `robot_telemetry` | GPS·배터리·온도 측정 이력 |
+| `telemetry` | `robot_current_state` | 관제 화면용 최신 상태 |
+
+V5에는 위 네 테이블만 포함한다. `robot_boot_session`이 아직 없으므로
+`boot_id`와 `current_boot_id`는 UUID 값을 보존하되 FK는 후속 migration에서
+추가한다. Mission 테이블이 없으므로 관계형 `mission_id`도 V5에는 저장하지 않고
+검증된 `raw_payload`와 임무 상태·집계 값만 보존한다.
+
+### 3.3 후속 migration 생성 대상 테이블
+
+| Schema | 테이블 | 역할 |
+|---|---|---|
 | `robot` | `patrol_area` | 로봇이 순찰할 운영 구역 |
 | `robot` | `mission` | 순찰 임무의 현재 상태 |
 | `robot` | `mission_status_history` | 임무 상태 전이 이력 |
@@ -102,14 +117,12 @@ telemetry
 | `robot` | `robot_command` | 서버가 생성하고 발행한 로봇 명령 |
 | `robot` | `robot_command_result` | 로봇 ACK와 최종 명령 결과 |
 | `telemetry` | `robot_boot_session` | 부팅 단위 연결 세션 |
-| `telemetry` | `robot_telemetry` | GPS·배터리·온도 측정 이력 |
-| `telemetry` | `robot_current_state` | 관제 화면용 최신 상태 |
 | `telemetry` | `robot_event` | Battery·Safety·Mission Event 공통 정보 |
 | `telemetry` | `robot_battery_event` | Battery Event 상세 |
 | `telemetry` | `robot_safety_event` | Safety Event 상세 |
 | `telemetry` | `robot_mission_event` | Mission Event 상세 |
 
-### 3.3 생성하지 않는 테이블
+### 3.4 생성하지 않는 테이블
 
 | 테이블 | 제외 이유 |
 |---|---|
@@ -118,7 +131,7 @@ telemetry
 | `mission_trajectory` | GPS Telemetry와 중복 |
 | `waypoint` | 시작점·도착점·Waypoint 방식이 아님 |
 
-### 3.4 다른 팀 소유 데이터
+### 3.5 다른 팀 소유 데이터
 
 | 대상 | 소유자 | 팀원 B의 사용 방식 |
 |---|---|---|
@@ -392,7 +405,7 @@ Presence와 State에서 연결 상태·운행 모드가 실제로 바뀔 때만 
 | `robot_id` | `UUID` | O | Topic 조회 | `robot.robot` FK |
 | `boot_id` | `UUID` | O | Payload | Boot Session FK |
 | `seq` | `BIGINT` | O | Payload | 0 이상, `(robot_id, boot_id, seq)` UNIQUE |
-| `mission_id` | `UUID` | X | Payload 코드 조회 | 관련 Mission FK |
+| `mission_id` | `UUID` | X | Payload 코드 조회 | V5 제외, Mission migration에서 FK와 함께 추가 |
 | `sampled_at` | `TIMESTAMPTZ` | O | Payload | 로봇 측정 시각 |
 | `received_at` | `TIMESTAMPTZ` | O | 서버 | 서버 수신 시각 |
 | `position_valid` | `BOOLEAN` | O | `position.valid` | 위치 유효 여부 |
@@ -441,7 +454,7 @@ ORDER BY sampled_at, seq
 | `state_received_at` | `TIMESTAMPTZ` | X | 서버 | State 수신 시각 |
 | `robot_mode` | `VARCHAR(20)` | X | State | RobotMode |
 | `state_reason_code` | `VARCHAR(50)` | X | State | RobotStateReason |
-| `active_mission_id` | `UUID` | X | State·Telemetry | Mission FK |
+| `active_mission_id` | `UUID` | X | State·Telemetry | V5 제외, Mission migration에서 FK와 함께 추가 |
 | `mission_status` | `VARCHAR(20)` | X | State·Telemetry | 현재 MissionState |
 | `battery_valid` | `BOOLEAN` | X | State·Telemetry | 배터리 유효 여부 |
 | `battery_percent` | `NUMERIC(5,2)` | X | State·Telemetry | 0~100 |
@@ -718,8 +731,9 @@ DB 등록 성공만으로 MQTT Credential 발급 성공 응답을 반환하면 �
 - 센서 원본값인지 임베디드 계산값인지
 - State와 Telemetry 중 어느 Topic에서 보내는지
 
-V5 적용 전에 확정되면 V2 문서와 V5 초안에 반영한다. V5가 한 번이라도 적용된
-뒤에 확정되면 기존 V5를 수정하지 않고 V6 이상의 새 migration으로 추가한다.
+V5에 포함된 센서 컬럼은 현재 MQTT v2 DTO에서 검증 가능한 값으로 제한한다.
+V5 적용 뒤 새 센서가 확정되면 기존 V5를 수정하지 않고 V6 이상의 새
+migration으로 추가한다.
 
 관제 화면에서는 진행률 대신 다음 정보를 표시한다.
 
@@ -729,11 +743,15 @@ V5 적용 전에 확정되면 V2 문서와 V5 초안에 반영한다. V5가 한 
 - 탐지 건수
 - 배터리·온도·통신 상태
 
-## 12. V5 작성 전 검수 항목
+## 12. 후속 구현·migration 검수 항목
 
-- [ ] 로봇 등록 화면 입력값을 `robot_name`, `serial_number`로 확정
-- [ ] `robot_code` 서버 생성 규칙과 동시 등록 충돌 방지 방식 확정
-- [ ] `registered_by`는 로그인 사용자를 Backend가 자동 설정
+V5는 Robot·Credential·Current State·Telemetry 이력 네 테이블로 범위를
+확정했다. 아래 미확정 항목은 Credential 발급 API와 V6 이상의 임무·명령·이벤트
+migration을 시작하기 전에 검수한다.
+
+- [x] 로봇 등록 화면 입력값을 `robot_name`, `serial_number`로 확정
+- [x] `robot_code` 서버 생성 규칙과 동시 등록 충돌 방지 방식 확정
+- [x] `registered_by`는 로그인 사용자를 Backend가 자동 설정
 - [ ] 로봇 비활성화 상태와 재활성화 정책 확정
 - [ ] 원형 구역의 최소·최대 `radius_m` 확정
 - [ ] START_MISSION에 `geofence.center_lat`, `center_lon`, `radius_m` 추가
@@ -748,4 +766,5 @@ V5 적용 전에 확정되면 V2 문서와 V5 초안에 반영한다. V5가 한 
 - [ ] 발급 원문 1회 응답에 `Cache-Control: no-store`와 로그 마스킹 적용
 - [ ] Credential 만료 알림과 최대 180일 회전 일정 확정
 
-위 항목을 검수한 뒤에만 실제 Flyway V5 SQL을 작성한다.
+위 항목은 이미 적용한 V5를 수정하는 근거로 사용하지 않는다. 변경이 필요하면
+새 Flyway version migration으로 반영한다.

@@ -87,6 +87,79 @@ INSERT INTO auth.authentication_rate_limit (
     '2026-07-26T01:00:00Z'
 );
 
+INSERT INTO robot.robot (
+    robot_id,
+    robot_code,
+    robot_name,
+    serial_number,
+    registered_by
+) VALUES (
+    '36000000-0000-4000-8000-000000000001',
+    'RBT-SMOKE',
+    'Migration Smoke Robot',
+    'SN-MIGRATION-SMOKE',
+    '10000000-0000-4000-8000-000000000001'
+);
+
+INSERT INTO robot.robot_credential (
+    credential_id,
+    robot_id,
+    credential_version,
+    secret_hash,
+    secret_fingerprint,
+    issued_by,
+    expires_at
+) VALUES (
+    '37000000-0000-4000-8000-000000000001',
+    '36000000-0000-4000-8000-000000000001',
+    1,
+    '$7$101$migration-smoke-verifier',
+    REPEAT('ab', 32),
+    '10000000-0000-4000-8000-000000000001',
+    NOW() + INTERVAL '90 days'
+);
+
+INSERT INTO telemetry.robot_current_state (robot_id)
+VALUES ('36000000-0000-4000-8000-000000000001');
+
+INSERT INTO telemetry.robot_telemetry (
+    message_id,
+    schema_version,
+    robot_id,
+    boot_id,
+    seq,
+    sampled_at,
+    position_valid,
+    position,
+    heading_deg,
+    moving,
+    speed_mps,
+    battery_valid,
+    battery_percent,
+    battery_state,
+    battery_source,
+    jetson_temp_c,
+    raw_payload
+) VALUES (
+    '38000000-0000-4000-8000-000000000001',
+    '2.0',
+    '36000000-0000-4000-8000-000000000001',
+    '39000000-0000-4000-8000-000000000001',
+    1,
+    NOW(),
+    TRUE,
+    ST_SetSRID(ST_MakePoint(127.0396, 37.5013), 4326),
+    90.0,
+    TRUE,
+    1.2,
+    TRUE,
+    87.0,
+    'NORMAL',
+    'MEASURED',
+    41.5,
+    '{"schema_version":"2.0","robot_id":"RBT-SMOKE"}'::JSONB
+);
+
 -- current_version FK는 transaction commit 시점까지 지연되므로 header와 첫 version을 원자적으로 만든다.
 INSERT INTO report.anomaly_report (
     report_id,
@@ -233,6 +306,10 @@ SELECT
       JOIN auth.role role USING (role_id)
      WHERE role.role_code = 'OPERATOR' AND role_permission.is_active) AS operator_permission_count,
     (SELECT COUNT(*) FROM auth.authentication_rate_limit WHERE rate_limit_id = '35000000-0000-4000-8000-000000000001') AS rate_limit_count,
+    (SELECT COUNT(*) FROM robot.robot WHERE robot_id = '36000000-0000-4000-8000-000000000001') AS robot_count,
+    (SELECT COUNT(*) FROM robot.robot_credential WHERE credential_id = '37000000-0000-4000-8000-000000000001') AS credential_count,
+    (SELECT COUNT(*) FROM telemetry.robot_current_state WHERE robot_id = '36000000-0000-4000-8000-000000000001') AS current_state_count,
+    (SELECT COUNT(*) FROM telemetry.robot_telemetry WHERE message_id = '38000000-0000-4000-8000-000000000001') AS telemetry_count,
     (SELECT COUNT(*) FROM report.report_version WHERE report_id = '40000000-0000-4000-8000-000000000001') AS report_version_count,
     (SELECT deleted_at IS NULL FROM report.anomaly_report WHERE report_id = '40000000-0000-4000-8000-000000000001') AS report_not_deleted,
     (SELECT COUNT(*) FROM audit.audit_log WHERE request_id = '60000000-0000-4000-8000-000000000001') AS audit_count,
@@ -240,11 +317,17 @@ SELECT
     (SELECT COUNT(*) FROM request_control.idempotency_request WHERE idempotency_request_id = '85000000-0000-4000-8000-000000000001') AS idempotency_count,
     HAS_SCHEMA_PRIVILEGE(CURRENT_USER, 'auth', 'CREATE') AS can_create_auth_object,
     HAS_SCHEMA_PRIVILEGE(CURRENT_USER, 'request_control', 'CREATE') AS can_create_request_control_object,
+    HAS_SCHEMA_PRIVILEGE(CURRENT_USER, 'robot', 'CREATE') AS can_create_robot_object,
+    HAS_SCHEMA_PRIVILEGE(CURRENT_USER, 'telemetry', 'CREATE') AS can_create_telemetry_object,
     HAS_TABLE_PRIVILEGE(CURRENT_USER, 'audit.audit_log', 'SELECT') AS can_select_audit,
     HAS_TABLE_PRIVILEGE(CURRENT_USER, 'audit.audit_log', 'INSERT') AS can_insert_audit,
     HAS_TABLE_PRIVILEGE(CURRENT_USER, 'audit.audit_log', 'UPDATE') AS can_update_audit,
     HAS_TABLE_PRIVILEGE(CURRENT_USER, 'audit.audit_log', 'DELETE') AS can_delete_audit,
-    HAS_TABLE_PRIVILEGE(CURRENT_USER, 'auth.permission', 'UPDATE') AS can_update_permission;
+    HAS_TABLE_PRIVILEGE(CURRENT_USER, 'auth.permission', 'UPDATE') AS can_update_permission,
+    HAS_TABLE_PRIVILEGE(CURRENT_USER, 'robot.robot_credential', 'UPDATE') AS can_update_credential,
+    HAS_TABLE_PRIVILEGE(CURRENT_USER, 'robot.robot_credential', 'DELETE') AS can_delete_credential,
+    HAS_TABLE_PRIVILEGE(CURRENT_USER, 'telemetry.robot_telemetry', 'UPDATE') AS can_update_telemetry,
+    HAS_TABLE_PRIVILEGE(CURRENT_USER, 'telemetry.robot_current_state', 'UPDATE') AS can_update_current_state;
 
 SELECT (
     (SELECT password_change_required FROM auth.admin_user WHERE user_id = '10000000-0000-4000-8000-000000000001')
@@ -253,6 +336,10 @@ SELECT (
     AND (SELECT COUNT(*) FROM auth.mfa_recovery_code WHERE factor_id = '20000000-0000-4000-8000-000000000001') = 1
     AND (SELECT COUNT(*) FROM auth.permission WHERE is_system AND is_active) = 18
     AND (SELECT COUNT(*) FROM auth.authentication_rate_limit WHERE rate_limit_id = '35000000-0000-4000-8000-000000000001') = 1
+    AND (SELECT COUNT(*) FROM robot.robot WHERE robot_id = '36000000-0000-4000-8000-000000000001') = 1
+    AND (SELECT COUNT(*) FROM robot.robot_credential WHERE credential_id = '37000000-0000-4000-8000-000000000001') = 1
+    AND (SELECT COUNT(*) FROM telemetry.robot_current_state WHERE robot_id = '36000000-0000-4000-8000-000000000001') = 1
+    AND (SELECT COUNT(*) FROM telemetry.robot_telemetry WHERE message_id = '38000000-0000-4000-8000-000000000001') = 1
     AND (SELECT COUNT(*) FROM report.report_version WHERE report_id = '40000000-0000-4000-8000-000000000001') = 1
     AND (SELECT deleted_at IS NULL FROM report.anomaly_report WHERE report_id = '40000000-0000-4000-8000-000000000001')
     AND (SELECT COUNT(*) FROM audit.audit_log WHERE request_id = '60000000-0000-4000-8000-000000000001') = 1
@@ -266,11 +353,17 @@ SELECT (
     )
     AND NOT HAS_SCHEMA_PRIVILEGE(CURRENT_USER, 'auth', 'CREATE')
     AND NOT HAS_SCHEMA_PRIVILEGE(CURRENT_USER, 'request_control', 'CREATE')
+    AND NOT HAS_SCHEMA_PRIVILEGE(CURRENT_USER, 'robot', 'CREATE')
+    AND NOT HAS_SCHEMA_PRIVILEGE(CURRENT_USER, 'telemetry', 'CREATE')
     AND HAS_TABLE_PRIVILEGE(CURRENT_USER, 'audit.audit_log', 'SELECT')
     AND HAS_TABLE_PRIVILEGE(CURRENT_USER, 'audit.audit_log', 'INSERT')
     AND NOT HAS_TABLE_PRIVILEGE(CURRENT_USER, 'audit.audit_log', 'UPDATE')
     AND NOT HAS_TABLE_PRIVILEGE(CURRENT_USER, 'audit.audit_log', 'DELETE')
     AND NOT HAS_TABLE_PRIVILEGE(CURRENT_USER, 'auth.permission', 'UPDATE')
+    AND HAS_TABLE_PRIVILEGE(CURRENT_USER, 'robot.robot_credential', 'UPDATE')
+    AND NOT HAS_TABLE_PRIVILEGE(CURRENT_USER, 'robot.robot_credential', 'DELETE')
+    AND NOT HAS_TABLE_PRIVILEGE(CURRENT_USER, 'telemetry.robot_telemetry', 'UPDATE')
+    AND HAS_TABLE_PRIVILEGE(CURRENT_USER, 'telemetry.robot_current_state', 'UPDATE')
 ) AS runtime_contract_ok
 \gset
 
