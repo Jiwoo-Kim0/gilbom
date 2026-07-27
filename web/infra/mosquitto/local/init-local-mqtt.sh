@@ -5,19 +5,21 @@ set -eu
 LOCAL_DIR=/mqtt-local
 RUNTIME_DIR="${LOCAL_DIR}/runtime"
 CERT_DIR="${RUNTIME_DIR}/certs"
+CREDENTIAL_DIR="${RUNTIME_DIR}/credentials"
 CA_DIR="${LOCAL_DIR}/ca"
 CA_CERT_FILE="${CERT_DIR}/local-ca-cert.pem"
 CA_KEY_FILE="${CA_DIR}/local-ca-key.pem"
 SERVER_CERT_FILE="${CERT_DIR}/local-broker-cert.pem"
 SERVER_KEY_FILE="${CERT_DIR}/local-broker-key.pem"
-PASSWORD_FILE="${RUNTIME_DIR}/passwd"
+PASSWORD_FILE="${CREDENTIAL_DIR}/passwd"
+LEGACY_PASSWORD_FILE="${RUNTIME_DIR}/passwd"
 ACL_SOURCE_FILE=/mqtt-input/acl
 ACL_RUNTIME_FILE="${RUNTIME_DIR}/acl"
 RENEW_BEFORE_SECONDS=2592000
 MQTT_LAN_IP="${MQTT_LAN_IP:-}"
 MQTT_PUBLIC_HOSTNAME="${MQTT_PUBLIC_HOSTNAME:-}"
 
-mkdir -p "${CERT_DIR}" "${CA_DIR}"
+mkdir -p "${CERT_DIR}" "${CREDENTIAL_DIR}" "${CA_DIR}"
 
 WORK_DIR="$(mktemp -d /tmp/mqtt-local-init.XXXXXX)"
 SERVER_OPENSSL_CONFIG="${WORK_DIR}/openssl-local-runtime.cnf"
@@ -196,11 +198,31 @@ else
   generate_broker_certificate
 fi
 
-mosquitto_passwd -b -c "${WORK_DIR}/passwd" "${MQTT_USERNAME}" "${MQTT_PASSWORD}"
-mosquitto_passwd -b "${WORK_DIR}/passwd" "${MQTT_ROBOT_USERNAME}" "${MQTT_ROBOT_PASSWORD}"
+if [ -s "${PASSWORD_FILE}" ]; then
+  cp "${PASSWORD_FILE}" "${WORK_DIR}/passwd"
+elif [ -s "${LEGACY_PASSWORD_FILE}" ]; then
+  echo "Migrating the legacy MQTT password file."
+  cp "${LEGACY_PASSWORD_FILE}" "${WORK_DIR}/passwd"
+else
+  mosquitto_passwd -b -c \
+    "${WORK_DIR}/passwd" \
+    "${MQTT_USERNAME}" \
+    "${MQTT_PASSWORD}"
+fi
+
+# Refresh the two local bootstrap accounts without deleting issued robot accounts.
+mosquitto_passwd -b \
+  "${WORK_DIR}/passwd" \
+  "${MQTT_USERNAME}" \
+  "${MQTT_PASSWORD}"
+mosquitto_passwd -b \
+  "${WORK_DIR}/passwd" \
+  "${MQTT_ROBOT_USERNAME}" \
+  "${MQTT_ROBOT_PASSWORD}"
 cp "${WORK_DIR}/passwd" "${PASSWORD_FILE}"
 cp "${ACL_SOURCE_FILE}" "${ACL_RUNTIME_FILE}"
 
+chown 1883:1883 "${CREDENTIAL_DIR}" 2>/dev/null || true
 chown 1883:1883 \
   "${CA_CERT_FILE}" \
   "${SERVER_CERT_FILE}" \
@@ -210,7 +232,9 @@ chown 1883:1883 \
 chown 0:0 "${CA_KEY_FILE}" 2>/dev/null || true
 
 chmod 644 "${CA_CERT_FILE}" "${SERVER_CERT_FILE}"
-chmod 640 "${SERVER_KEY_FILE}" "${PASSWORD_FILE}"
+chmod 640 "${SERVER_KEY_FILE}"
+chmod 770 "${CREDENTIAL_DIR}"
+chmod 660 "${PASSWORD_FILE}"
 chmod 700 "${ACL_RUNTIME_FILE}"
 chmod 600 "${CA_KEY_FILE}"
 

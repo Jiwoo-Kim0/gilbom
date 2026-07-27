@@ -3,6 +3,8 @@ package com.gilbom.robot.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.matchesPattern;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -26,6 +28,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -34,6 +37,11 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.gilbom.auth.AuthenticatedUserIdResolver;
+import com.gilbom.auth.model.AuthenticationState;
+import com.gilbom.auth.password.PasswordHashingConfiguration;
+import com.gilbom.auth.session.SessionSecurityState;
+import com.gilbom.auth.session.SessionSecurityStateRepository;
 import com.gilbom.common.web.GlobalExceptionHandler;
 import com.gilbom.common.web.RequestBodySizeLimitFilter;
 import com.gilbom.common.web.RequestIdFilter;
@@ -58,7 +66,6 @@ class RobotRegistrationIntegrationTest {
                     .asCompatibleSubstituteFor("postgres");
     private static final UUID ADMIN_USER_ID =
             UUID.fromString("f854f421-f550-40c3-bbe7-6369a17bc993");
-    private static final String ADMIN_USERNAME = "robot-integration-admin";
     private static final String ADMIN_PASSWORD = "integration-only-admin-password";
     private static final SimpleGrantedAuthority ROBOT_REGISTER =
             new SimpleGrantedAuthority("ROBOT_REGISTER");
@@ -95,28 +102,44 @@ class RobotRegistrationIntegrationTest {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @MockitoBean
+    private SessionSecurityStateRepository sessionSecurityStateRepository;
+
     @BeforeEach
     void createAuthenticatedAdminFixture() {
+        when(sessionSecurityStateRepository.findBySessionId(anyString()))
+                .thenReturn(java.util.Optional.of(new SessionSecurityState(
+                        ADMIN_USER_ID,
+                        AuthenticationState.AUTHENTICATED,
+                        java.time.Instant.parse("2099-01-01T00:00:00Z"),
+                        null,
+                        null,
+                        0
+                )));
         String passwordHash = passwordEncoder.encode(ADMIN_PASSWORD);
         jdbcTemplate.update("""
                 INSERT INTO auth.admin_user (
                     user_id,
                     user_code,
-                    username,
                     password_hash,
                     display_name,
                     email,
-                    password_change_required
-                ) VALUES (?, ?, ?, ?, ?, ?, FALSE)
+                    is_active,
+                    account_status,
+                    password_change_required,
+                    password_changed_at
+                ) VALUES (?, ?, ?, ?, ?, TRUE, 'ACTIVE', FALSE, NOW())
                 ON CONFLICT (user_id) DO UPDATE
                 SET password_hash = EXCLUDED.password_hash,
                     is_active = TRUE,
+                    account_status = 'ACTIVE',
+                    password_change_required = FALSE,
+                    password_changed_at = NOW(),
                     deleted_at = NULL,
                     updated_at = NOW()
                 """,
                 ADMIN_USER_ID,
                 "USR-ROBOT-INTEGRATION",
-                ADMIN_USERNAME,
                 passwordHash,
                 "로봇 통합 테스트 관리자",
                 "robot-integration@example.test");
@@ -132,7 +155,8 @@ class RobotRegistrationIntegrationTest {
                 UUID.fromString("76f8c7e4-2b9e-48ca-a366-e0175a1d9109");
 
         String firstResponse = mockMvc.perform(post("/api/v1/robots")
-                        .with(user(ADMIN_USERNAME).authorities(ROBOT_REGISTER))
+                        .with(user(ADMIN_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER))
                         .with(csrf().asHeader())
                         .header(RequestIdFilter.HEADER_NAME, firstRequestId)
                         .header("Idempotency-Key", idempotencyKey)
@@ -196,7 +220,8 @@ class RobotRegistrationIntegrationTest {
                 .containsEntry("response_status", 201);
 
         String replayResponse = mockMvc.perform(post("/api/v1/robots")
-                        .with(user(ADMIN_USERNAME).authorities(ROBOT_REGISTER))
+                        .with(user(ADMIN_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER))
                         .with(csrf().asHeader())
                         .header(RequestIdFilter.HEADER_NAME, replayRequestId)
                         .header("Idempotency-Key", idempotencyKey)
@@ -254,7 +279,9 @@ class RobotRegistrationIntegrationTest {
             RequestBodySizeLimitFilter.class,
             GlobalExceptionHandler.class,
             RobotRegistrationController.class,
-            RobotRegistrationService.class
+            RobotRegistrationService.class,
+            AuthenticatedUserIdResolver.class,
+            PasswordHashingConfiguration.class
     })
     static class TestApplication {
     }

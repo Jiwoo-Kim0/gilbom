@@ -6,6 +6,8 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.integration.mqtt.support.MqttHeaders;
 import org.springframework.messaging.support.MessageBuilder;
 
+import com.gilbom.robot.mqtt.config.MqttProperties;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -15,7 +17,11 @@ class MqttSubscriberTest {
     @Test
     void convertsReceivedMessageToMqttEvent() {
         ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
-        MqttSubscriber subscriber = new MqttSubscriber(eventPublisher);
+        MqttProperties mqttProperties = new MqttProperties();
+        mqttProperties.setLogPayload(true);
+        MqttSubscriber subscriber = new MqttSubscriber(
+                eventPublisher,
+                mqttProperties);
 
         subscriber.receive(
                 MessageBuilder

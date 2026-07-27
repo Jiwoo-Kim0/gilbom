@@ -5,6 +5,9 @@ services:
     image: eclipse-mosquitto:2.1.2-alpine
     user: "1883:1883"
     restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - /mosquitto/config/run-local-mosquitto.sh
     depends_on:
       mqtt-init:
         condition: service_completed_successfully
@@ -14,6 +17,7 @@ services:
 
     volumes:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./run-local-mosquitto.sh:/mosquitto/config/run-local-mosquitto.sh:ro
       - ./runtime:/mosquitto/local:ro
 
     read_only: true

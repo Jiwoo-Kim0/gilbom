@@ -2,6 +2,7 @@ package com.gilbom.robot.controller;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -13,8 +14,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -24,6 +28,10 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.gilbom.auth.AuthenticatedUserIdResolver;
+import com.gilbom.auth.model.AuthenticationState;
+import com.gilbom.auth.session.SessionSecurityState;
+import com.gilbom.auth.session.SessionSecurityStateRepository;
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
 import com.gilbom.common.web.GlobalExceptionHandler;
@@ -44,10 +52,13 @@ import com.gilbom.security.web.SecurityHeadersFilter;
         SecurityHeadersFilter.class,
         RequestIdFilter.class,
         RequestBodySizeLimitFilter.class,
-        GlobalExceptionHandler.class
+        GlobalExceptionHandler.class,
+        AuthenticatedUserIdResolver.class
 })
 class RobotRegistrationControllerTest {
 
+    private static final UUID ACTOR_USER_ID =
+            UUID.fromString("17000000-0000-4000-8000-000000000001");
     private static final UUID REQUEST_ID =
             UUID.fromString("e299ff0c-4a83-43c8-8212-ee1b537c5731");
     private static final UUID IDEMPOTENCY_KEY =
@@ -63,6 +74,22 @@ class RobotRegistrationControllerTest {
     @MockitoBean
     private RobotRegistrationService registrationService;
 
+    @MockitoBean
+    private SessionSecurityStateRepository sessionSecurityStateRepository;
+
+    @BeforeEach
+    void setUpAuthenticatedSessionState() {
+        when(sessionSecurityStateRepository.findBySessionId(anyString()))
+                .thenReturn(Optional.of(new SessionSecurityState(
+                        ACTOR_USER_ID,
+                        AuthenticationState.AUTHENTICATED,
+                        Instant.parse("2099-01-01T00:00:00Z"),
+                        null,
+                        null,
+                        0
+                )));
+    }
+
     @Test
     void registersRobotWithSessionActorAndReturnsCreatedDto() throws Exception {
         RegisterRobotCommand command = new RegisterRobotCommand(
@@ -77,13 +104,14 @@ class RobotRegistrationControllerTest {
                 "OFFLINE");
         when(registrationService.register(
                 eq(command),
-                eq("admin"),
+                eq(ACTOR_USER_ID),
                 eq(IDEMPOTENCY_KEY),
                 eq(REQUEST_ID)))
                 .thenReturn(registeredRobot);
 
         mockMvc.perform(post("/api/v1/robots")
-                        .with(user("admin").authorities(ROBOT_REGISTER))
+                        .with(user(ACTOR_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER))
                         .with(csrf().asHeader())
                         .header(RequestIdFilter.HEADER_NAME, REQUEST_ID)
                         .header("Idempotency-Key", IDEMPOTENCY_KEY)
@@ -112,7 +140,7 @@ class RobotRegistrationControllerTest {
 
         verify(registrationService).register(
                 command,
-                "admin",
+                ACTOR_USER_ID,
                 IDEMPOTENCY_KEY,
                 REQUEST_ID);
     }
@@ -133,7 +161,7 @@ class RobotRegistrationControllerTest {
     @Test
     void requiresRobotRegisterPermission() throws Exception {
         mockMvc.perform(post("/api/v1/robots")
-                        .with(user("viewer"))
+                        .with(user(ACTOR_USER_ID.toString()))
                         .with(csrf().asHeader())
                         .header("Idempotency-Key", IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -147,7 +175,8 @@ class RobotRegistrationControllerTest {
     @Test
     void requiresCsrfTokenForRegistration() throws Exception {
         mockMvc.perform(post("/api/v1/robots")
-                        .with(user("admin").authorities(ROBOT_REGISTER))
+                        .with(user(ACTOR_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER))
                         .header("Idempotency-Key", IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(validRequest()))
@@ -160,7 +189,8 @@ class RobotRegistrationControllerTest {
     @Test
     void requiresIdempotencyKey() throws Exception {
         mockMvc.perform(post("/api/v1/robots")
-                        .with(user("admin").authorities(ROBOT_REGISTER))
+                        .with(user(ACTOR_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER))
                         .with(csrf().asHeader())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(validRequest()))
@@ -177,7 +207,8 @@ class RobotRegistrationControllerTest {
     @Test
     void validatesRobotNameAndSerialNumber() throws Exception {
         mockMvc.perform(post("/api/v1/robots")
-                        .with(user("admin").authorities(ROBOT_REGISTER))
+                        .with(user(ACTOR_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER))
                         .with(csrf().asHeader())
                         .header("Idempotency-Key", IDEMPOTENCY_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -200,14 +231,15 @@ class RobotRegistrationControllerTest {
                 eq(new RegisterRobotCommand(
                         "점자블록 순찰 로봇 1호",
                         "SN-JETSON-0001")),
-                eq("admin"),
+                eq(ACTOR_USER_ID),
                 eq(IDEMPOTENCY_KEY),
                 eq(REQUEST_ID)))
                 .thenThrow(new BusinessException(
                         ErrorCode.ROBOT_SERIAL_NUMBER_CONFLICT));
 
         mockMvc.perform(post("/api/v1/robots")
-                        .with(user("admin").authorities(ROBOT_REGISTER))
+                        .with(user(ACTOR_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER))
                         .with(csrf().asHeader())
                         .header(RequestIdFilter.HEADER_NAME, REQUEST_ID)
                         .header("Idempotency-Key", IDEMPOTENCY_KEY)
