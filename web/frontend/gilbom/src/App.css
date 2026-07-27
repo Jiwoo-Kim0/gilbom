@@ -192,7 +192,7 @@
 
 .eyebrow {
   margin: 0;
-  color: var(--brand);
+  color: var(--brand-strong);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.13em;
@@ -214,7 +214,7 @@
   height: 36px;
   border-radius: 50%;
   place-items: center;
-  color: #fff;
+  color: var(--nb-ink);
   background: var(--brand);
   font-size: 10px;
 }
@@ -265,7 +265,7 @@
 }
 
 .primary-button {
-  color: #fff;
+  color: var(--nb-ink);
   background: var(--brand);
 }
 
@@ -497,7 +497,7 @@
 
 .defect-status-dot-done,
 .defect-legend-item-done .defect-status-dot {
-  background: var(--brand);
+  background: var(--brand-strong);
 }
 
 .defect-filter-reset {
@@ -705,7 +705,7 @@
 }
 
 .robot-legend-item-online .robot-status-dot {
-  background: var(--brand);
+  background: var(--brand-strong);
 }
 
 .robot-legend-item-warning .robot-status-dot {
@@ -919,7 +919,7 @@
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: var(--brand);
+  background: var(--brand-strong);
 }
 
 .robot-fleet-card-warning .robot-battery-bar-fill {
@@ -938,7 +938,7 @@
 .robot-log-view-all {
   padding: 0;
   border: none;
-  color: var(--brand);
+  color: var(--brand-strong);
   background: none;
   font-size: 13px;
   font-weight: 700;

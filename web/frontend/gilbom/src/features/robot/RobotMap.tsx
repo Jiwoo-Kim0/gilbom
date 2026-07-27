@@ -14,10 +14,10 @@ const legendItems: { tone: RobotStatus; label: string }[] = [
 ]
 
 const statusColor: Record<RobotStatus, string> = {
-  online: '#1f6b45',
+  online: '#7a5c0c',
   warning: '#c0392b',
   charging: '#b8863b',
-  offline: '#66736b',
+  offline: '#6f6a5e',
 }
 
 // 구미시청 인근 — 로봇 위치 API가 연결되기 전까지 사용하는 기본 뷰포트.
