@@ -1,0 +1,50 @@
+name: gilbom-mqtt-local
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.1.2-alpine
+    user: "1883:1883"
+    restart: unless-stopped
+    depends_on:
+      mqtt-init:
+        condition: service_completed_successfully
+
+    ports:
+      - "127.0.0.1:8883:8883"
+
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./runtime:/mosquitto/local:ro
+
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /mosquitto/data
+      - /mosquitto/log
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+
+  mqtt-init:
+    build:
+      context: .
+      dockerfile: Dockerfile.init
+    image: gilbom-mqtt-init:local
+    restart: "no"
+    user: "0:0"
+    environment:
+      MQTT_USERNAME: ${MQTT_USERNAME:-gilbom}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD must be set}
+      MQTT_ROBOT_USERNAME: ${MQTT_ROBOT_USERNAME:-robot-test}
+      MQTT_ROBOT_PASSWORD: ${MQTT_ROBOT_PASSWORD:?MQTT_ROBOT_PASSWORD must be set}
+    volumes:
+      - .:/mqtt-local
+      - ../acl:/mqtt-input/acl:ro
+    tmpfs:
+      - /tmp
+    command:
+      - /bin/sh
+      - /mqtt-local/init-local-mqtt.sh

@@ -1,0 +1,30 @@
+name: gilbom-mqtt-mtls
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.1.2-alpine
+    user: "1883:1883"
+    restart: unless-stopped
+
+    ports:
+      - "8883:8883"
+
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ../acl:/mosquitto/config/acl:ro
+
+      # Required files:
+      # fullchain.pem, privkey.pem, client-ca.pem
+      - /opt/gilbom/mosquitto/certs:/mosquitto/certs:ro
+
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /mosquitto/data
+      - /mosquitto/log
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
