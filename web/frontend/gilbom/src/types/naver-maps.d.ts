@@ -13,12 +13,33 @@ declare namespace naver.maps {
     constructor(width: number, height: number)
   }
 
+  enum Position {
+    CENTER,
+    TOP_LEFT,
+    TOP_CENTER,
+    TOP_RIGHT,
+    LEFT_TOP,
+    LEFT_CENTER,
+    LEFT_BOTTOM,
+    RIGHT_TOP,
+    RIGHT_CENTER,
+    RIGHT_BOTTOM,
+    BOTTOM_LEFT,
+    BOTTOM_CENTER,
+    BOTTOM_RIGHT,
+  }
+
+  interface ZoomControlOptions {
+    position?: Position
+  }
+
   interface MapOptions {
     center: LatLng
     zoom?: number
     minZoom?: number
     maxZoom?: number
     zoomControl?: boolean
+    zoomControlOptions?: ZoomControlOptions
   }
 
   class Map {

@@ -1,15 +1,27 @@
+import { Filter, Plus } from 'lucide-react'
+import { RobotFleetGrid } from './RobotFleetGrid'
+import { RobotMap } from './RobotMap'
+import { RobotSystemLog } from './RobotSystemLog'
+
 export function RobotManagePage() {
   return (
     <section className="page-stack" aria-labelledby="robot-page-title">
       <div className="page-heading">
         <div>
           <p className="eyebrow">FLEET</p>
-          <h2 id="robot-page-title">등록 로봇과 운행 상태</h2>
-          <p>로봇 목록 API가 연결되면 상태·배정·인증정보를 이 화면에서 관리합니다.</p>
+          <h2 id="robot-page-title">로봇 상태 모니터링</h2>
+          <p>실시간 함대 위치 및 운영 데이터를 추적합니다.</p>
         </div>
-        <button className="primary-button" type="button" disabled>
-          로봇 등록 준비 중
-        </button>
+        <div className="robot-page-actions">
+          <button className="secondary-button" type="button" disabled>
+            <Filter size={16} aria-hidden="true" />
+            필터
+          </button>
+          <button className="primary-button" type="button" disabled>
+            <Plus size={16} aria-hidden="true" />
+            로봇 등록
+          </button>
+        </div>
       </div>
 
       <div className="summary-grid" aria-label="로봇 현황">
@@ -30,13 +42,11 @@ export function RobotManagePage() {
         </article>
       </div>
 
-      <div className="content-card empty-state">
-        <span className="empty-state-icon" aria-hidden="true">
-          RO
-        </span>
-        <h3>로봇 목록을 연결할 준비가 되었습니다.</h3>
-        <p>공통 레이아웃과 라우팅만 제공하며 실제 운영 데이터는 임의로 만들지 않습니다.</p>
-      </div>
+      <RobotMap />
+
+      <RobotFleetGrid />
+
+      <RobotSystemLog />
     </section>
   )
 }
