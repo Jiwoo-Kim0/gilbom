@@ -18,9 +18,11 @@ from pathlib import Path
 from comms import TopicKind
 from comms.codec import to_iso
 from comms.contract import (
+    BATTERY_SOURCES,
     BATTERY_STATES,
     HEALTH_MEMBERS,
     HEALTH_STATES,
+    MISSION_STATES,
     MODES,
     REASON_CODES,
     SAFETY_REASON_CODES,
@@ -139,9 +141,13 @@ class Snapshot:
     mission_id: str
     mission_state: str
     zone_id: str
+    mission_elapsed_sec: int
+    mission_incident_count: int
     battery_valid: bool
     battery_percent: float
     battery_state: str
+    #: telemetry 에만 실린다 (§6.3). state·event 는 이 값을 싣지 않는다.
+    battery_source: str
     #: ((name, value), ...) — dict 와 달리 그대로 비교·해시할 수 있다.
     health: tuple
 
@@ -155,6 +161,8 @@ class Snapshot:
 
         battery.percent 는 뺀다 — 소수점이 끊임없이 흔들려서 넣으면 30초 주기가
         사실상 무의미해진다. 계약이 요구하는 전이 신호는 battery.state 다.
+        battery.source·mission 집계도 뺀다 — state payload 에 없는 값이라
+        여기에 넣으면 state 가 자기와 무관한 이유로 재발행된다.
         """
         return (
             self.mode,
@@ -205,14 +213,18 @@ class RobotState:
         self._lock = threading.RLock()
         self._mode = "BOOTING"
         self._reason_code = "NONE"
-        # 미션 보관함 — 채우는 것은 START_MISSION 을 처리하는 R-5 다.
+        # 미션 보관함 — 부르는 것은 START_MISSION 을 처리하는 R-5 다.
+        # 다섯 값은 start_mission()·end_mission() 으로만 함께 움직인다 (§6.3).
         self._mission_id = None
         self._mission_state = None
         self._zone_id = None
+        self._mission_started_at = None
+        self._mission_incident_count = None
         # 배터리 측정 경로가 붙기 전이다. 이전 값·더미 값을 만들지 않는다 (§5.5).
         self._battery_valid = False
         self._battery_percent = None
         self._battery_state = "UNKNOWN"
+        self._battery_source = None
 
     # -- 읽기 (대입 금지 — setter 를 두지 않는다) --------------------------
 
@@ -236,6 +248,22 @@ class RobotState:
     def zone_id(self):
         return self._zone_id
 
+    @property
+    def mission_elapsed_sec(self):
+        """미션 시작 후 경과 (§6.3). 활성 미션이 없으면 None.
+
+        저장하지 않고 계산한다 — 아무도 주기적으로 갱신하지 않아도 값이 맞는다.
+        일시정지 중에도 계속 센다 — 멈춤 여부는 R-5 결정이다.
+        """
+        with self._lock:
+            if self._mission_started_at is None:
+                return None
+            return int(self._monotonic() - self._mission_started_at)
+
+    @property
+    def mission_incident_count(self):
+        return self._mission_incident_count
+
     def snapshot(self) -> Snapshot:
         # health 는 FSM 필드를 읽지 않는다. 락 밖에서 먼저 모아 두면 느린 장치
         # 검사가 메인 루프의 전이를 막지 않는다.
@@ -247,9 +275,12 @@ class RobotState:
                 mission_id=self._mission_id,
                 mission_state=self._mission_state,
                 zone_id=self._zone_id,
+                mission_elapsed_sec=self.mission_elapsed_sec,
+                mission_incident_count=self._mission_incident_count,
                 battery_valid=self._battery_valid,
                 battery_percent=self._battery_percent,
                 battery_state=self._battery_state,
+                battery_source=self._battery_source,
                 health=members,
             )
 
@@ -317,10 +348,77 @@ class RobotState:
                 return False
             return self.resume()
 
+    # -- 미션 보관함 (계약 §6.3) ------------------------------------------
+    #
+    # mission_id 가 있으면 telemetry 는 state·elapsed_sec·incident_count 를 전부
+    # 실어야 한다. 네 값을 따로 대입하면 한쪽만 채워진 순간 factory 가 표본을 거부하고
+    # telemetry 가 조용히 멈춘다 — 그래서 mode·reason_code 처럼 메서드로만 바뀐다.
+
+    def start_mission(self, mission_id: str, *, zone_id=None, state="RUNNING") -> None:
+        """미션 시작 — 보관함 다섯 값을 한 번에 채운다.  [R-5 가 부른다]
+
+        mode 는 건드리지 않는다. PATROLLING 으로 넘기는 것은 start_patrol() 이다.
+        """
+        if not mission_id:
+            raise ValueError("mission_id is required")
+        if state not in MISSION_STATES:
+            raise ValueError(
+                f"mission.state: {state!r} is not one of {sorted(MISSION_STATES)}"
+            )
+        with self._lock:
+            self._mission_id = mission_id
+            self._mission_state = state
+            self._zone_id = zone_id
+            self._mission_started_at = self._monotonic()
+            self._mission_incident_count = 0
+
+    def set_mission_state(self, state: str) -> None:
+        if state not in MISSION_STATES:
+            raise ValueError(
+                f"mission.state: {state!r} is not one of {sorted(MISSION_STATES)}"
+            )
+        with self._lock:
+            self._require_mission()
+            self._mission_state = state
+
+    def record_incident(self) -> int:
+        """확정 Incident 1건. telemetry.mission.incident_count 가 여기서 온다."""
+        with self._lock:
+            self._require_mission()
+            self._mission_incident_count += 1
+            return self._mission_incident_count
+
+    def end_mission(self) -> None:
+        """미션 종료 — 보관함을 비운다. mission·mission_id 가 다시 null 이 된다."""
+        with self._lock:
+            self._mission_id = None
+            self._mission_state = None
+            self._zone_id = None
+            self._mission_started_at = None
+            self._mission_incident_count = None
+
+    def _require_mission(self) -> None:
+        if self._mission_id is None:
+            raise ValueError("no active mission; call start_mission() first")
+
     # -- 배터리 -----------------------------------------------------------
 
-    def set_battery(self, *, valid: bool, percent=None, state: str = "UNKNOWN") -> bool:
-        """측정값 갱신. 값 검사를 여기서 해서 발행 시점에 터지지 않게 한다."""
+    def set_battery(
+        self,
+        *,
+        valid: bool,
+        percent=None,
+        state: str = "UNKNOWN",
+        source: str = "MEASURED",
+    ) -> bool:
+        """측정값 갱신. 값 검사를 여기서 해서 발행 시점에 터지지 않게 한다.
+
+        state 와 telemetry 가 둘 다 배터리를 싣는다. 각자 센서를 읽으면 같은 시점에
+        서로 다른 잔량을 보고하게 되므로, 읽기는 여기로만 들어오고 두 발행 경로는
+        스냅샷에서 읽는다.
+        `source` 는 telemetry 에만 실린다 (§6.3). 추정으로 채운 값이면 호출자가
+        ESTIMATED 를 명시해야 한다 — 기본값은 측정 성공을 뜻하는 MEASURED 다.
+        """
         if state not in BATTERY_STATES:
             raise ValueError(
                 f"battery.state: {state!r} is not one of {sorted(BATTERY_STATES)}"
@@ -331,17 +429,28 @@ class RobotState:
                 raise ValueError("battery: valid=True requires percent")
             if not 0.0 <= percent <= 100.0:
                 raise ValueError(f"battery.percent: {percent} out of range 0.0~100.0")
+            if source not in BATTERY_SOURCES:
+                raise ValueError(
+                    f"battery.source: {source!r} is not one of {sorted(BATTERY_SOURCES)}"
+                )
             percent = float(percent)
         else:
             # 못 믿는 측정값은 이전 값을 복사하지 않고 버린다 (§5.5).
             percent = None
             state = "UNKNOWN"
+            source = None
         with self._lock:
-            before = (self._battery_valid, self._battery_percent, self._battery_state)
+            before = (
+                self._battery_valid,
+                self._battery_percent,
+                self._battery_state,
+                self._battery_source,
+            )
             self._battery_valid = valid
             self._battery_percent = percent
             self._battery_state = state
-            return before != (valid, percent, state)
+            self._battery_source = source
+            return before != (valid, percent, state, source)
 
     # -- health 취합 (계약 §5.3) ------------------------------------------
 

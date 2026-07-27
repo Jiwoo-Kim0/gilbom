@@ -9,6 +9,16 @@
 #   - 상태가 '전이'된 순간을 감지해서 알림 → events/battery 발행은 main→comms
 
 
+def read() -> dict:
+    """RobotState.set_battery() 에 그대로 넘어가는 읽기 결과.
+
+    측정 회로가 붙기 전이라 아직 못 믿는다 — valid=False 면 잔량은 null 이고
+    등급은 UNKNOWN 이다 (§5.5). 회로가 붙으면 percent 와 함께
+    source=MEASURED(가동시간 추정이면 ESTIMATED)를 채운다.
+    """
+    return {"valid": False, "percent": None, "state": "UNKNOWN"}
+
+
 def health() -> str:
     """state.health.battery — BMS·ADC 읽기 성공·최근 측정값으로 판정 (계약 §5.3).
 

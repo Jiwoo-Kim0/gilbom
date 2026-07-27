@@ -526,6 +526,19 @@ def test_mission_slot_is_empty(state):
     assert (state.mission_id, state.mission_state, state.zone_id) == (None, None, None)
 
 
+def test_state_mission_block_carries_only_id_and_state(client, publisher, state):
+    """state 는 mission_id·state 만 싣는다 — 경과·Incident 집계는 telemetry 쪽이다."""
+    state.start_mission("MIS-20260726-001", zone_id="ZONE-A")
+    publisher.publish(force=True)
+    assert client.states()[-1]["mission"] == {
+        "mission_id": "MIS-20260726-001",
+        "state": "RUNNING",
+    }
+    state.end_mission()
+    publisher.publish(force=True)
+    assert client.states()[-1]["mission"] is None
+
+
 # --------------------------------------------------------------------------
 # 접속 직후 발행 (계약 §5.1 (a), DoD 2)
 # --------------------------------------------------------------------------
