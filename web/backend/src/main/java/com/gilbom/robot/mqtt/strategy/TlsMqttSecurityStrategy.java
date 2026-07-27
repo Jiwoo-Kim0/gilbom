@@ -30,6 +30,7 @@ public class TlsMqttSecurityStrategy implements MqttSecurityStrategy {
             SSLContext context = SSLContext.getInstance("TLS");
             context.init(
                     null,
+                    // One-way TLS: the client trusts the CA that issued the broker certificate.
                     PemSslContextSupport.createTrustManagers(
                             properties.getSecurity().getTrustCertificate()
                     ),

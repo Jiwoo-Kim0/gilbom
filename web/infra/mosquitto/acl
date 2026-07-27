@@ -1,21 +1,21 @@
-# Access Control List :기기와 어떤 토픽에 메시지를 발행하거나 구독할 수 있는지 권한을 제어
+# MQTT username must be identical to robot_id so %u limits a robot to itself.
+pattern write tbs/v2/robots/%u/presence
+pattern write tbs/v2/robots/%u/state
+pattern write tbs/v2/robots/%u/telemetry
+pattern write tbs/v2/robots/%u/events/incident
+pattern write tbs/v2/robots/%u/events/battery
+pattern write tbs/v2/robots/%u/events/safety
+pattern write tbs/v2/robots/%u/events/mission
+pattern write tbs/v2/robots/%u/commands/result
+pattern read  tbs/v2/robots/%u/commands/request
+pattern read  tbs/v2/robots/%u/ingest/receipt
 
-# %u (로봇 전용 규칙): 로그인한 특정 사용자의 username을 대입하는 변수  `오직 자신의 ID에만 접근`할 수 있게 묶어주는 보안 역할
-# 로봇 `MQTT username`은 `robotId`와 같아야 한다.
-# 예: username=robot-001이면 robots/robot-001/*에만 접근 가능
-
-
-pattern write robots/%u/telemetry
-pattern write robots/%u/status
-pattern write robots/%u/alerts
-pattern write robots/%u/commands/ack
-pattern read  robots/%u/commands
-
-# 백엔드는 모든 로봇의 데이터를 받고 명령을 발행한다. MQTT에서 +는 단일 레벨 `와일드카드`
-#  백엔드는 모든 로봇의 데이터를 관리해야 하므로, 특정 ID를 고정하는 대신 +를 써서 어떤 로봇 ID가 들어오든 한 번에 다 읽거나 쓸 수 있게 한다.
+# The backend reads every robot-to-server topic and writes only server-to-robot topics.
 user gilbom
-topic read  robots/+/telemetry
-topic read  robots/+/status
-topic read  robots/+/alerts
-topic read  robots/+/commands/ack
-topic write robots/+/commands
+topic read  tbs/v2/robots/+/presence
+topic read  tbs/v2/robots/+/state
+topic read  tbs/v2/robots/+/telemetry
+topic read  tbs/v2/robots/+/events/+
+topic read  tbs/v2/robots/+/commands/result
+topic write tbs/v2/robots/+/commands/request
+topic write tbs/v2/robots/+/ingest/receipt
