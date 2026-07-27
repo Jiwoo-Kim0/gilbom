@@ -25,13 +25,19 @@ import com.gilbom.common.web.RequestIdFilter;
 import com.gilbom.security.config.SecurityConfig;
 import com.gilbom.security.web.CsrfTokenController;
 import com.gilbom.security.web.SecurityErrorResponseWriter;
+import com.gilbom.security.web.SecurityHeadersFilter;
 
 @WebMvcTest(controllers = {
         HealthController.class,
         CsrfTokenController.class,
         SecurityTestController.class
 })
-@Import({SecurityConfig.class, SecurityErrorResponseWriter.class, RequestIdFilter.class})
+@Import({
+        SecurityConfig.class,
+        SecurityErrorResponseWriter.class,
+        SecurityHeadersFilter.class,
+        RequestIdFilter.class
+})
 class SecurityConfigTest {
 
     private static final String REQUEST_ID = "e299ff0c-4a83-43c8-8212-ee1b537c5731";
@@ -55,6 +61,24 @@ class SecurityConfigTest {
                 .andExpect(jsonPath("$.code", is("AUTH_UNAUTHENTICATED")))
                 .andExpect(jsonPath("$.requestId", is(REQUEST_ID)))
                 .andExpect(jsonPath("$.details", hasSize(0)));
+    }
+
+    @Test
+    void everyResponseUsesTheBrowserSecurityHeaderBaseline() throws Exception {
+        mockMvc.perform(get("/api/health").secure(true))
+                .andExpect(status().isOk())
+                .andExpect(header().string(
+                        "Content-Security-Policy",
+                        SecurityHeadersFilter.CONTENT_SECURITY_POLICY))
+                .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+                .andExpect(header().string("X-Frame-Options", "DENY"))
+                .andExpect(header().string("Referrer-Policy", "no-referrer"))
+                .andExpect(header().string(
+                        "Permissions-Policy",
+                        SecurityHeadersFilter.PERMISSIONS_POLICY))
+                .andExpect(header().string(
+                        "Strict-Transport-Security",
+                        "max-age=31536000"));
     }
 
     @Test

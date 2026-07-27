@@ -18,10 +18,17 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.gilbom.security.web.SecurityHeadersFilter;
+
 @WebMvcTest(
         controllers = GlobalExceptionTestController.class,
         excludeAutoConfiguration = SecurityAutoConfiguration.class)
-@Import({GlobalExceptionHandler.class, RequestIdFilter.class})
+@Import({
+        GlobalExceptionHandler.class,
+        RequestIdFilter.class,
+        RequestBodySizeLimitFilter.class,
+        SecurityHeadersFilter.class
+})
 class GlobalExceptionHandlerTest {
 
     private static final String UUID_PATTERN =
@@ -86,6 +93,25 @@ class GlobalExceptionHandlerTest {
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code", is("COMMON_MALFORMED_JSON")))
+                .andExpect(jsonPath("$.details", hasSize(0)));
+    }
+
+    @Test
+    void oversizedRequestBodiesUseTheCommon413Contract() throws Exception {
+        byte[] oversizedBody = new byte[(1024 * 1024) + 1];
+
+        mockMvc.perform(post("/test/validation")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(oversizedBody))
+                .andExpect(status().isPayloadTooLarge())
+                .andExpect(header().exists(RequestIdFilter.HEADER_NAME))
+                .andExpect(header().string(
+                        "Content-Security-Policy",
+                        SecurityHeadersFilter.CONTENT_SECURITY_POLICY))
+                .andExpect(jsonPath("$.status", is(413)))
+                .andExpect(jsonPath("$.code", is("COMMON_PAYLOAD_TOO_LARGE")))
+                .andExpect(jsonPath("$.message", is("요청 본문이 허용된 상한을 초과했습니다.")))
+                .andExpect(jsonPath("$.path", is("/test/validation")))
                 .andExpect(jsonPath("$.details", hasSize(0)));
     }
 

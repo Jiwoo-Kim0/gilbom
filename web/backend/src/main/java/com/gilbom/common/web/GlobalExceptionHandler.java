@@ -120,6 +120,9 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleMalformedJson(
             HttpMessageNotReadableException exception,
             HttpServletRequest request) {
+        if (RequestBodyTooLargeException.isCausedBy(exception)) {
+            return respond(ErrorCode.COMMON_PAYLOAD_TOO_LARGE, List.of(), request);
+        }
         return respond(ErrorCode.COMMON_MALFORMED_JSON, List.of(), request);
     }
 

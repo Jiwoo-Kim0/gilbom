@@ -105,6 +105,7 @@ HTTP 상태와 응답 형식은 다음 원칙을 따른다.
 | `COMMON_RESOURCE_NOT_FOUND` | 404 | 도메인을 특정할 수 없는 리소스 없음 |
 | `COMMON_METHOD_NOT_ALLOWED` | 405 | 지원하지 않는 HTTP 메서드 |
 | `COMMON_CONFLICT` | 409 | 도메인을 특정할 수 없는 중복·상태 충돌 |
+| `COMMON_PAYLOAD_TOO_LARGE` | 413 | 전역 요청 본문 크기 상한 초과 |
 | `COMMON_UNSUPPORTED_MEDIA_TYPE` | 415 | 일반 API에서 지원하지 않는 Content-Type |
 | `COMMON_BUSINESS_RULE_VIOLATION` | 422 | 도메인을 특정할 수 없는 업무 규칙 위반 |
 | `COMMON_RATE_LIMIT_EXCEEDED` | 429 | 요청 한도 초과 |
@@ -185,6 +186,7 @@ Validation 오류 하나는 다음 필드를 사용한다.
 | 매핑되지 않은 경로·정적 리소스 | 404 | `COMMON_RESOURCE_NOT_FOUND` |
 | `HttpRequestMethodNotSupportedException` | 405 | `COMMON_METHOD_NOT_ALLOWED` |
 | 중복 생성·멱등 키 불일치·상태 충돌 | 409 | `{DOMAIN}_CONFLICT` |
+| 전역 요청 본문 상한 초과 | 413 | `COMMON_PAYLOAD_TOO_LARGE` |
 | `MaxUploadSizeExceededException` | 413 | `IMAGE_TOO_LARGE` |
 | `HttpMediaTypeNotSupportedException` | 415 | `COMMON_UNSUPPORTED_MEDIA_TYPE` |
 | 이미지 콘텐츠 자체의 형식 검증 실패 | 415 | `IMAGE_UNSUPPORTED_MEDIA_TYPE` |
@@ -212,6 +214,7 @@ Validation 오류 하나는 다음 필드를 사용한다.
 | `BusinessException` | 공개 가능한 `ErrorCode`를 운반하는 공통 업무 예외 |
 | `GlobalExceptionHandler` | 프레임워크·Validation·업무·미처리 예외 변환 |
 | `RequestIdFilter` | 유효한 외부 UUID 수용 또는 신규 UUID 생성, 헤더·로그 MDC 연결 |
+| `RequestBodySizeLimitFilter` | 선언된 길이와 실제 streaming body를 모두 계수해 전역 상한 적용 |
 
 미처리 예외 로그는 다음 원칙을 따른다.
 

@@ -107,6 +107,9 @@ staging은 prod와 같은 인증·쿠키·IAM·네트워크 정책을 사용하�
 | `GILBOM_FRONTEND_ORIGIN` |  | 정확한 단일 Origin 또는 승인 목록 |
 | `GILBOM_CORS_ALLOWED_ORIGINS` |  | staging/prod wildcard 금지 |
 | `GILBOM_REQUEST_ID_HEADER` |  | `X-Request-Id` 고정 |
+| `GILBOM_MAX_REQUEST_BODY_SIZE` |  | 전체 HTTP 요청 본문 상한, 기본 `1MB` |
+| `GILBOM_MAX_REQUEST_HEADER_SIZE` |  | Cookie를 포함한 요청 헤더 상한, 기본 `16KB` |
+| `GILBOM_MAX_UPLOAD_FILE_SIZE` |  | multipart 파일 1개 상한, 기본 `500KB` |
 | `GILBOM_MAX_JSON_BYTES` |  | API별 상한의 공통 방어값 |
 
 ### 5.2 DB

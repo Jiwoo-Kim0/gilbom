@@ -30,6 +30,7 @@ public enum ErrorCode {
     COMMAND_STATE_CONFLICT(HttpStatus.CONFLICT, "현재 명령 상태에서는 요청을 수행할 수 없습니다."),
     REPORT_STATE_CONFLICT(HttpStatus.CONFLICT, "현재 보고서 상태에서는 요청을 수행할 수 없습니다."),
 
+    COMMON_PAYLOAD_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "요청 본문이 허용된 상한을 초과했습니다."),
     IMAGE_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "이미지 크기가 허용된 상한을 초과했습니다."),
     COMMON_UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "지원하지 않는 Content-Type입니다."),
     IMAGE_UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "지원하지 않는 이미지 형식입니다."),
