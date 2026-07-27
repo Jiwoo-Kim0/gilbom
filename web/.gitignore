@@ -35,6 +35,9 @@ backend/.settings/
 .DS_Store
 
 # Mosquitto
+infra/mosquitto/local/ca/
+infra/mosquitto/local/runtime/
+
 # 실제 계정의 비밀번호 해시 파일
 infra/mosquitto/passwd
 

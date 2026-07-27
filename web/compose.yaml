@@ -11,11 +11,8 @@ services:
     ports:
       - "127.0.0.1:${MQTT_TLS_PORT:-8883}:8883"
     volumes:
-      # mqtt-init creates passwd in this directory when it is absent.
-      - ../mqtt/local:/mosquitto/config:ro
-      - ../mqtt/local/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      - ../mqtt/local/acl:/mosquitto/config/acl:ro
-      - ../mqtt/local/certs:/mosquitto/certs:ro
+      - ./infra/mosquitto/local/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./infra/mosquitto/local/runtime:/mosquitto/local:ro
     read_only: true
     tmpfs:
       - /tmp
@@ -88,7 +85,7 @@ services:
     image: gilbom-backend:local
     restart: unless-stopped
     environment:
-      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local,docker}
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-gilbom}
       # Runtime 계정은 DML만, Flyway 계정은 migration DDL만 수행한다.
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_APP_USER:-gilbom_app}
@@ -103,13 +100,13 @@ services:
       MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-gilbom-local-docker}
       MQTT_USERNAME: ${MQTT_USERNAME:-gilbom}
       MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD must be set}
-      MQTT_TRUST_CERTIFICATE: /app/config/mqtt/certs/server-local.pem
-      MQTT_SUBSCRIBE_TOPIC: ${MQTT_SUBSCRIBE_TOPIC:-robots/+/telemetry,robots/+/commands/ack}
-      MQTT_PUBLISH_TOPIC: ${MQTT_PUBLISH_TOPIC:-robots/test-robot/commands}
+      MQTT_TRUST_CERTIFICATE: ${MQTT_TRUST_CERTIFICATE:-/app/config/mqtt/certs/local-ca-cert.pem}
+      MQTT_SUBSCRIBE_TOPIC: ${MQTT_SUBSCRIBE_TOPIC:-tbs/v2/robots/+/presence,tbs/v2/robots/+/state,tbs/v2/robots/+/telemetry,tbs/v2/robots/+/events/#,tbs/v2/robots/+/commands/result}
+      MQTT_PUBLISH_TOPIC: ${MQTT_PUBLISH_TOPIC:-tbs/v2/robots/robot-test/commands/request}
       MQTT_QOS: ${MQTT_QOS:-1}
       TZ: ${TZ:-UTC}
     volumes:
-      - ../mqtt/local/certs:/app/config/mqtt/certs:ro
+      - ./infra/mosquitto/local/runtime/certs:/app/config/mqtt/certs:ro
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
     depends_on:
@@ -171,10 +168,10 @@ services:
         max-size: 10m
         max-file: "3"
 
-  # Local MQTT assets only. Existing files are reused; missing files are generated.
+  # Generates the local CA, CA-signed broker certificate, and password file.
   mqtt-init:
     build:
-      context: ../mqtt/local
+      context: ./infra/mosquitto/local
       dockerfile: Dockerfile.init
     image: gilbom-mqtt-init:local
     restart: "no"
@@ -185,7 +182,8 @@ services:
       MQTT_ROBOT_USERNAME: ${MQTT_ROBOT_USERNAME:-robot-test}
       MQTT_ROBOT_PASSWORD: ${MQTT_ROBOT_PASSWORD:?MQTT_ROBOT_PASSWORD must be set}
     volumes:
-      - ../mqtt/local:/mqtt-local
+      - ./infra/mosquitto/local:/mqtt-local
+      - ./infra/mosquitto/acl:/mqtt-input/acl:ro
     # 재실행 때 이전 임시 passwd 파일이 남지 않도록 컨테이너 정지 시 폐기되는 tmpfs를 사용한다.
     tmpfs:
       - /tmp
