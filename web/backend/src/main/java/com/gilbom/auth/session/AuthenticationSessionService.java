@@ -64,11 +64,17 @@ public class AuthenticationSessionService {
         HttpSession session = requireCurrentSession(request);
         Optional<SessionSecurityState> existing =
                 repository.findBySessionId(session.getId());
-        AuthenticationState currentState = existing
+        if (existing
                 .map(SessionSecurityState::authenticationState)
-                .orElse(AuthenticationState.ANONYMOUS);
+                .filter(AuthenticationState::isFullyAuthenticated)
+                .isPresent()) {
+            throw unauthenticated();
+        }
+        // 비밀번호를 다시 검증한 경우 기존 pre-auth challenge는 새 challenge로
+        // 교체할 수 있다. 새로고침으로 프론트 메모리가 사라져도 상태 머신 예외를
+        // 외부 500으로 노출하지 않는다.
         AuthenticationState nextState = stateMachine.transition(
-                currentState,
+                AuthenticationState.ANONYMOUS,
                 passwordVerifiedEvent
         );
 

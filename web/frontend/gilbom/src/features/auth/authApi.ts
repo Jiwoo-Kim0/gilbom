@@ -6,6 +6,7 @@ import {
 import type {
   AuthenticatedUser,
   AuthenticationResponse,
+  AuthenticationSessionState,
   LoginChallenge,
   MfaEnrollmentConfirmationResponse,
   MyProfile,
@@ -19,6 +20,13 @@ const AUTH_RETRY_OPTIONS = {
 
 export function getCurrentUser(): Promise<AuthenticatedUser> {
   return apiJson<AuthenticatedUser>('/api/v1/auth/me', {
+    method: 'GET',
+    notifyUnauthorized: false,
+  })
+}
+
+export function getAuthenticationSessionState(): Promise<AuthenticationSessionState> {
+  return apiJson<AuthenticationSessionState>('/api/v1/auth/session-state', {
     method: 'GET',
     notifyUnauthorized: false,
   })

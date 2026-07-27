@@ -36,6 +36,8 @@ import com.gilbom.auth.password.PasswordHashingConfiguration;
 import com.gilbom.auth.model.AuthenticationState;
 import com.gilbom.auth.session.SessionSecurityState;
 import com.gilbom.auth.session.SessionSecurityStateRepository;
+import com.gilbom.auth.session.AuthenticationSessionService;
+import com.gilbom.auth.session.AuthenticationSessionStateController;
 import com.gilbom.common.web.RequestIdFilter;
 import com.gilbom.security.config.SecurityConfig;
 import com.gilbom.security.web.CsrfTokenController;
@@ -45,6 +47,7 @@ import com.gilbom.security.web.SecurityHeadersFilter;
 @WebMvcTest(controllers = {
         HealthController.class,
         CsrfTokenController.class,
+        AuthenticationSessionStateController.class,
         SecurityTestController.class
 })
 @Import({
@@ -68,6 +71,9 @@ class SecurityConfigTest {
 
     @MockitoBean
     private SessionSecurityStateRepository sessionStateRepository;
+
+    @MockitoBean
+    private AuthenticationSessionService authenticationSessionService;
 
     @BeforeEach
     void setUpAuthenticatedSessionState() {
@@ -190,6 +196,23 @@ class SecurityConfigTest {
                 .andExpect(header().string("Cache-Control", "no-store"))
                 .andExpect(jsonPath("$.headerName", is("X-CSRF-TOKEN")))
                 .andExpect(jsonPath("$.token", not(blankOrNullString())));
+    }
+
+    @Test
+    void anonymousClientCanRestoreItsCookieBoundAuthenticationState()
+            throws Exception {
+        when(authenticationSessionService.findCurrentState(
+                org.mockito.ArgumentMatchers.any()
+        )).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/v1/auth/session-state"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath(
+                        "$.authenticationState",
+                        is("ANONYMOUS")
+                ))
+                .andExpect(jsonPath("$.challengeExpiresAt").doesNotExist());
     }
 
     @Test

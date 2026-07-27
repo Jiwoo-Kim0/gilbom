@@ -385,12 +385,56 @@ def run_integration(base_url: str, db_container: str, database: str) -> list[str
         UPDATE auth.admin_user
         SET account_status = 'ACTIVE',
             is_active = TRUE,
-            password_change_required = FALSE
+            password_change_required = TRUE
         WHERE normalized_email = LOWER({sql_literal(email)})
         RETURNING user_id;
         """,
     )
     ensure(bool(user_id), "test_account_activation")
+
+    initial_password_client = ApiClient(base_url, "198.51.100.19")
+    login(
+        initial_password_client,
+        email,
+        old_password,
+        "PASSWORD_CHANGE_REQUIRED",
+    )
+    initial_state = initial_password_client.request(
+        "GET",
+        "/api/v1/auth/session-state",
+    )
+    ensure(
+        initial_state.status == 200
+        and isinstance(initial_state.body, dict)
+        and initial_state.body.get("authenticationState")
+            == "PASSWORD_CHANGE_REQUIRED"
+        and isinstance(initial_state.body.get("challengeExpiresAt"), str),
+        "initial_password_state_restoration",
+    )
+    expect_error(
+        initial_password_client.request("GET", "/api/v1/auth/me"),
+        401,
+        "AUTH_UNAUTHENTICATED",
+        "initial_password_pre_auth",
+    )
+    ensure(
+        initial_password_client.request(
+            "POST",
+            "/api/v1/auth/logout",
+            csrf=True,
+        ).status == 204,
+        "initial_password_challenge_logout",
+    )
+    psql(
+        db_container,
+        database,
+        f"""
+        UPDATE auth.admin_user
+        SET password_change_required = FALSE
+        WHERE user_id = {sql_literal(user_id)}::uuid;
+        """,
+    )
+    checks.append("initial_password_change_transition")
 
     known_failure_client = ApiClient(base_url, "198.51.100.20")
     known_failure = known_failure_client.request(
@@ -428,6 +472,19 @@ def run_integration(base_url: str, db_container: str, database: str) -> list[str
 
     first = ApiClient(base_url, "198.51.100.30")
     login(first, email, old_password, "MFA_ENROLLMENT_REQUIRED")
+    enrollment_state = first.request(
+        "GET",
+        "/api/v1/auth/session-state",
+    )
+    ensure(
+        enrollment_state.status == 200
+        and isinstance(enrollment_state.body, dict)
+        and enrollment_state.body.get("authenticationState")
+            == "MFA_ENROLLMENT_REQUIRED"
+        and isinstance(enrollment_state.body.get("challengeExpiresAt"), str),
+        "mfa_enrollment_state_restoration",
+    )
+    login(first, email, old_password, "MFA_ENROLLMENT_REQUIRED")
     expect_error(
         first.request("GET", "/api/v1/auth/me"),
         401,
@@ -440,7 +497,10 @@ def run_integration(base_url: str, db_container: str, database: str) -> list[str
         "AUTH_UNAUTHENTICATED",
         "pre_auth_profile",
     )
-    checks.append("password_only_cannot_access")
+    checks.extend([
+        "pre_auth_state_restore_and_restart",
+        "password_only_cannot_access",
+    ])
 
     first.issue_csrf()
     enrollment = first.request(

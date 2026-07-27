@@ -299,6 +299,44 @@ def test_obstacle_publishes_two_states_and_no_safety_event(client, publisher, st
 
 
 # --------------------------------------------------------------------------
+# FSM — 안전 정지 해제
+# --------------------------------------------------------------------------
+
+
+def test_releasing_a_safe_stop_returns_to_the_running_mission(state):
+    patrolling(state)
+    state.start_mission("MIS-20260726-001")
+    state.safe_stop("LIDAR_FAULT")
+
+    assert state.release_safe_stop() is True
+    assert (state.mode, state.reason_code) == ("PATROLLING", "NONE")
+
+
+def test_releasing_a_safe_stop_keeps_a_paused_mission_paused(state):
+    patrolling(state)
+    state.start_mission("MIS-20260726-001")
+    state.set_mission_state("PAUSED")
+    state.safe_stop("OBSTACLE")
+
+    state.release_safe_stop()
+    assert (state.mode, state.reason_code) == ("PAUSED", "REMOTE_PAUSE")
+
+
+def test_releasing_a_safe_stop_without_a_mission_stands_by(state):
+    patrolling(state)
+    state.safe_stop("REMOTE_ESTOP")
+
+    state.release_safe_stop()
+    assert (state.mode, state.reason_code) == ("READY", "NONE")
+
+
+def test_releasing_when_the_robot_is_not_stopped_changes_nothing(state):
+    patrolling(state)
+    assert state.release_safe_stop() is False
+    assert state.mode == "PATROLLING"
+
+
+# --------------------------------------------------------------------------
 # health 취합 (계약 §5.3, DoD 5)
 # --------------------------------------------------------------------------
 
@@ -825,6 +863,25 @@ def test_shutdown_publishes_shutting_down_before_disconnect(wired):
     last_topic, last_payload = paho.published[-1]
     assert last_topic == f"tbs/v2/robots/{ROBOT_ID}/presence"
     assert json.loads(last_payload)["reason"] == "GRACEFUL_SHUTDOWN"
+
+
+def test_shutdown_stops_the_wheels_first_and_closes_devices_last(wired, monkeypatch):
+    """바퀴가 먼저다. 장치를 먼저 닫으면 health 가 UNKNOWN 으로 되돌아가서
+    종료 시점에 무엇이 고장이었는지가 마지막 state 에서 지워진다."""
+    import main
+
+    paho, client, state, publisher = wired
+    paho.simulate_connect()
+    order = []
+    monkeypatch.setattr(main, "stop_motion", lambda: order.append("wheels"))
+    monkeypatch.setattr(main, "release_devices", lambda: order.append("devices"))
+    monkeypatch.setattr(
+        publisher, "publish", lambda **kwargs: order.append("state") or True
+    )
+
+    main.shutdown(client, state, publisher)
+
+    assert order == ["wheels", "state", "devices"]
 
 
 def test_shutdown_waits_for_the_last_state_to_leave(wired):

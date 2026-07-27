@@ -11,7 +11,11 @@ import {
   ApiError,
   subscribeToUnauthorized,
 } from '../../shared/api/apiClient'
-import { getCurrentUser, logout as requestLogout } from './authApi'
+import {
+  getAuthenticationSessionState,
+  getCurrentUser,
+  logout as requestLogout,
+} from './authApi'
 import type {
   AuthenticatedUser,
   AuthenticationResponse,
@@ -34,6 +38,7 @@ type AuthenticationState = {
 type AuthenticationAction =
   | { type: 'RESTORE_AUTHENTICATED'; user: AuthenticatedUser }
   | { type: 'RESTORE_ANONYMOUS' }
+  | { type: 'RESTORE_CHALLENGE'; challenge: LoginChallenge }
   | { type: 'CHALLENGE_RECEIVED'; challenge: LoginChallenge }
   | { type: 'AUTHENTICATION_COMPLETED'; response: AuthenticationResponse }
   | { type: 'SIGNED_OUT' }
@@ -79,6 +84,13 @@ function reducer(
         challengeExpiresAt: null,
         sessionExpiresAt: null,
       }
+    case 'RESTORE_CHALLENGE':
+      return {
+        status: action.challenge.loginState,
+        user: null,
+        challengeExpiresAt: action.challenge.challengeExpiresAt,
+        sessionExpiresAt: null,
+      }
     case 'CHALLENGE_RECEIVED': {
       if (state.status === 'BOOTSTRAPPING' || state.status === 'AUTHENTICATED') {
         return state
@@ -120,9 +132,32 @@ export function AuthenticationProvider({ children }: { children: ReactNode }) {
 
   const refreshAuthentication = useCallback(async (): Promise<boolean> => {
     try {
-      const user = await getCurrentUser()
-      dispatch({ type: 'RESTORE_AUTHENTICATED', user })
-      return true
+      const sessionState = await getAuthenticationSessionState()
+      if (sessionState.authenticationState === 'AUTHENTICATED') {
+        const user = await getCurrentUser()
+        dispatch({ type: 'RESTORE_AUTHENTICATED', user })
+        return true
+      }
+      if (
+        (
+          sessionState.authenticationState === 'PASSWORD_CHANGE_REQUIRED'
+          || sessionState.authenticationState === 'MFA_ENROLLMENT_REQUIRED'
+          || sessionState.authenticationState === 'MFA_REQUIRED'
+        )
+        && sessionState.challengeExpiresAt !== null
+      ) {
+        dispatch({
+          type: 'RESTORE_CHALLENGE',
+          challenge: {
+            loginState: sessionState.authenticationState,
+            challengeExpiresAt: sessionState.challengeExpiresAt,
+          },
+        })
+        return false
+      }
+      clearCsrfToken()
+      dispatch({ type: 'RESTORE_ANONYMOUS' })
+      return false
     } catch {
       clearCsrfToken()
       dispatch({ type: 'RESTORE_ANONYMOUS' })

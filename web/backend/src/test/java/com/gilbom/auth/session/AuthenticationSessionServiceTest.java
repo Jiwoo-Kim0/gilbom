@@ -104,6 +104,73 @@ class AuthenticationSessionServiceTest {
     }
 
     @Test
+    void verifiedPasswordReplacesAnExistingPreAuthenticationChallenge() {
+        when(repository.findBySessionId("old-session-id"))
+                .thenReturn(Optional.of(new SessionSecurityState(
+                        USER_ID,
+                        AuthenticationState.MFA_ENROLLMENT_REQUIRED,
+                        NOW.plusSeconds(120),
+                        NOW.minusSeconds(180),
+                        NOW.plusSeconds(120),
+                        0
+                )));
+        when(repository.createChallenge(
+                "old-session-id",
+                USER_ID,
+                AuthenticationState.MFA_ENROLLMENT_REQUIRED,
+                NOW,
+                NOW.plusSeconds(300)
+        )).thenReturn(true);
+
+        AuthenticationSessionService.ChallengeSession result =
+                service.beginChallenge(
+                        request,
+                        USER_ID,
+                        AuthenticationEvent
+                                .PASSWORD_VERIFIED_MFA_ENROLLMENT_REQUIRED
+                );
+
+        assertThat(result.authenticationState())
+                .isEqualTo(AuthenticationState.MFA_ENROLLMENT_REQUIRED);
+        assertThat(result.challengeExpiresAt())
+                .isEqualTo(NOW.plusSeconds(300));
+        verify(repository).createChallenge(
+                "old-session-id",
+                USER_ID,
+                AuthenticationState.MFA_ENROLLMENT_REQUIRED,
+                NOW,
+                NOW.plusSeconds(300)
+        );
+    }
+
+    @Test
+    void verifiedPasswordCannotDowngradeAnAuthenticatedSession() {
+        when(repository.findBySessionId("old-session-id"))
+                .thenReturn(Optional.of(new SessionSecurityState(
+                        USER_ID,
+                        AuthenticationState.AUTHENTICATED,
+                        NOW.plusSeconds(3600),
+                        null,
+                        null,
+                        0
+                )));
+
+        assertThatThrownBy(() -> service.beginChallenge(
+                request,
+                USER_ID,
+                AuthenticationEvent.PASSWORD_VERIFIED_MFA_REQUIRED
+        )).isInstanceOf(com.gilbom.common.error.BusinessException.class);
+
+        verify(repository, never()).createChallenge(
+                any(),
+                any(),
+                any(),
+                any(),
+                any()
+        );
+    }
+
+    @Test
     void mfaSuccessRotatesSessionAndCsrfBeforeSavingAuthentication() {
         SessionSecurityState challenge = new SessionSecurityState(
                 USER_ID,

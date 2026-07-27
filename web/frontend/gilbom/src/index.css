@@ -2,21 +2,21 @@
   font-family:
     Inter, Pretendard, 'Noto Sans KR', system-ui, -apple-system, BlinkMacSystemFont,
     'Segoe UI', sans-serif;
-  color: #17221c;
-  background: #f4f7f5;
+  color: #1a1a1a;
+  background: #f7f6f4;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   --surface: #ffffff;
-  --surface-muted: #f1f5f2;
-  --line: #dce5df;
-  --text: #17221c;
-  --text-muted: #66736b;
-  --brand: #1f6b45;
-  --brand-strong: #155035;
-  --brand-soft: #e2f2e8;
+  --surface-muted: #f5f1e9;
+  --line: #e3ded2;
+  --text: #1a1a1a;
+  --text-muted: #6f6a5e;
+  --brand: #edcb31;
+  --brand-strong: #7a5c0c;
+  --brand-soft: #fbeecb;
   --focus: #f0a128;
-  --shadow: 0 14px 40px rgba(28, 55, 39, 0.08);
+  --shadow: 0 14px 40px rgba(35, 28, 12, 0.1);
   --nb-gold: #b8863b;
   --nb-gold-soft: #f5dfa0;
   --nb-ink: #1a1a1a;
@@ -35,7 +35,7 @@ body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
-  background: #f4f7f5;
+  background: #f7f6f4;
 }
 
 button,

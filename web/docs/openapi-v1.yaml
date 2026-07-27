@@ -169,6 +169,33 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /api/v1/auth/session-state:
+    get:
+      tags: [Auth]
+      operationId: getAuthenticationSessionState
+      summary: 브라우저 세션 인증 진행 상태 복원
+      description: |
+        새로고침 후 쿠키에 결합된 익명·초기 비밀번호 변경·MFA 대기·인증 완료 상태를
+        복원합니다. 사용자 ID, 이메일, 역할과 권한은 반환하지 않습니다.
+      security:
+        - serverSession: []
+      responses:
+        "200":
+          description: 현재 브라우저 세션의 인증 진행 상태
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthenticationSessionStateResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /api/v1/auth/login:
     post:
       tags: [Auth]
@@ -1084,6 +1111,25 @@ components:
         - PASSWORD_CHANGE_REQUIRED
         - MFA_ENROLLMENT_REQUIRED
         - MFA_REQUIRED
+
+    AuthenticationSessionStateResponse:
+      type: object
+      required: [authenticationState, challengeExpiresAt]
+      additionalProperties: false
+      properties:
+        authenticationState:
+          type: string
+          enum:
+            - ANONYMOUS
+            - PASSWORD_CHANGE_REQUIRED
+            - MFA_ENROLLMENT_REQUIRED
+            - MFA_REQUIRED
+            - AUTHENTICATED
+        challengeExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: pre-auth challenge에만 존재하며 그 외 상태에서는 null
 
     LoginChallengeResponse:
       type: object

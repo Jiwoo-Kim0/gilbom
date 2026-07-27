@@ -29,16 +29,15 @@
 | V2 | 보고서, 보고서 version, 감사 로그 | 변경 가능한 header와 불변 이력을 분리하고 감사 데이터를 append-only로 보호 |
 | V3 | Spring Session JDBC, session security state | 재시작·다중 인스턴스에서도 세션을 공유하고 MFA 상태·절대 만료를 조회 가능하게 저장 |
 | V4 | Permission/RBAC seed, 로그인 제한, 멱등 요청 | 세부 권한 매트릭스를 seed하고 인증 공격·중복 상태 변경을 DB에서 원자적으로 제어 |
-<<<<<<< HEAD
 | V5 | Robot, MQTT Credential, Telemetry 이력·현재 상태 | 로봇 통신에 필요한 기준정보·Credential 수명주기와 최신 데이터 보호 기반을 우선 생성 |
-=======
 | V5 | Argon2id·초기 비밀번호 상태 제약 | 비밀번호 hash를 Argon2id로 고정하고 `PASSWORD_CHANGE_REQUIRED` challenge를 세션 상태에 추가 |
 | V6 | 계정·인증 저장 구조 완성 | 정규화 이메일 UNIQUE, 계정 생명주기·잠금, MFA/복구 코드와 challenge/session 정합성 제약 추가 |
 | V7 | 계정 생성 경로 | 공개 가입 계정을 bootstrap 관리자로 오인하지 않도록 생성 origin과 단일 bootstrap 제약 추가 |
 | V8 | 공개 인증 Rate Limit | 이메일 중복 확인과 회원가입 IP bucket을 로그인 제한과 분리 |
 | V9 | 세션 수명 정책 | 유휴 30분·challenge 5분·절대 8시간 상한과 만료 조회 index 강제 |
 | V10 | 인증 공격 방어 정책 | 비밀번호 5회·15분 계정 잠금, MFA 계정 bucket, 감사 action 조회 index 강제 |
->>>>>>> d85ae2eac35ce35b2dd01b0862711a78afb8d090
+| V11 | defect 스키마 | 점자블록 결함(defect)·관측(defect_observation)·처리 이력(defect_status_history)·병합 이력(defect_merge_history)을 추가하고 처리 이력을 append-only로 보호. 상세는 [defect-schema.md](defect-schema.md) 참고 |
+
 
 시스템 Role `ADMIN`, `MANAGER`, `OPERATOR`와 18개 세부 permission 및
 role-permission 관계는 결정적인 UUID로 seed한다. 실제
@@ -54,11 +53,11 @@ docker compose up --build --detach
 docker compose logs backend
 ```
 
-<<<<<<< HEAD
+
 Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V5가
-=======
+
 Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V10이
->>>>>>> d85ae2eac35ce35b2dd01b0862711a78afb8d090
+
 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증

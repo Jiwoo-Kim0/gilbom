@@ -101,7 +101,7 @@ export function DefectFilter() {
             onChange={(event) => setStatus((prev) => ({ ...prev, done: event.target.checked }))}
           />
           <span className="defect-status-dot defect-status-dot-done" aria-hidden="true" />
-          완료 (Green)
+          완료 (Amber)
         </label>
       </fieldset>
 
