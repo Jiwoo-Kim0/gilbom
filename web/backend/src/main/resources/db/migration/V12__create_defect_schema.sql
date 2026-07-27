@@ -1,7 +1,7 @@
--- 점자블록 결함 관리 스키마. robot·telemetry·storage 스키마는 아직 없으므로
--- 그 스키마를 참조하는 칼럼(patrol_area_id, patrol_route_id, defect_observation.event_id,
--- defect_observation.image_id)은 FK 없이 UUID만 보관하고, 해당 스키마가 생기면
--- 후속 migration에서 FK를 이어 붙인다.
+-- 점자블록 결함 관리 스키마. robot·telemetry·storage 도메인과 결합되는 칼럼
+-- (patrol_area_id, patrol_route_id, defect_observation.event_id,
+-- defect_observation.image_id)은 현재 FK 없이 UUID만 보관하고,
+-- 연동 대상 테이블 계약이 확정되면 후속 migration에서 FK를 이어 붙인다.
 CREATE SCHEMA defect;
 
 -- 서로 다른 event_id의 공간적 중복을 병합해 만드는 실제 관리 대상. 위험도는 서버가
@@ -68,8 +68,8 @@ COMMENT ON TABLE defect.defect IS '서로 다른 event_id의 공간적 중복을
 COMMENT ON COLUMN defect.defect.incident_code IS '외부 표시 코드. 예: INC-20260723-000031';
 COMMENT ON COLUMN defect.defect.risk_level IS '서버가 계산한 위험도. AI confidence와는 별개 값';
 COMMENT ON COLUMN defect.defect.workflow_status IS '관리자 REST 처리로만 전이되는 행정 처리 상태';
-COMMENT ON COLUMN defect.defect.patrol_area_id IS 'robot.patrol_area 참조 예정 UUID. robot 스키마가 없어 FK는 아직 걸지 않는다.';
-COMMENT ON COLUMN defect.defect.patrol_route_id IS 'robot.patrol_route 참조 예정 UUID. robot 스키마가 없어 FK는 아직 걸지 않는다.';
+COMMENT ON COLUMN defect.defect.patrol_area_id IS 'robot.patrol_area 참조 예정 UUID. 대상 테이블 계약 확정 후 FK를 추가한다.';
+COMMENT ON COLUMN defect.defect.patrol_route_id IS 'robot.patrol_route 참조 예정 UUID. 대상 테이블 계약 확정 후 FK를 추가한다.';
 COMMENT ON COLUMN defect.defect.merged_into_defect_id IS '공간 병합으로 흡수된 경우의 대표 결함';
 
 -- events/incident의 불변 관측 사실. AI가 보낸 모델·이미지·BBox·파손 비율을 실제 관리
@@ -125,8 +125,8 @@ CREATE UNIQUE INDEX uq_observation_representative
     WHERE is_representative = TRUE;
 
 COMMENT ON TABLE defect.defect_observation IS 'events/incident의 불변 관측 사실과 AI 모델·이미지·BBox·파손 비율';
-COMMENT ON COLUMN defect.defect_observation.event_id IS 'telemetry.robot_event.event_id 참조 예정 UUID. telemetry 스키마가 없어 FK는 아직 걸지 않는다.';
-COMMENT ON COLUMN defect.defect_observation.image_id IS 'storage.robot_image.image_id 참조 예정 UUID. storage 스키마가 없어 FK는 아직 걸지 않는다.';
+COMMENT ON COLUMN defect.defect_observation.event_id IS 'telemetry.robot_event.event_id 참조 예정 UUID. 대상 테이블 계약 확정 후 FK를 추가한다.';
+COMMENT ON COLUMN defect.defect_observation.image_id IS 'storage.robot_image.image_id 참조 예정 UUID. 대상 테이블 계약 확정 후 FK를 추가한다.';
 COMMENT ON COLUMN defect.defect_observation.is_representative IS '결함 카드에 표시할 대표 관측 여부. 결함당 최대 하나';
 
 -- 관리자 처리상태·유형·위험도·위치·처리 결과 변경의 전후 값과 사유. report_version,
