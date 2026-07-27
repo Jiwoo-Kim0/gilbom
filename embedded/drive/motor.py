@@ -7,6 +7,16 @@
 #     (예외 없이 항상 성공해야 하는 유일한 메서드)
 
 
+def is_driving() -> bool:
+    """주행 PWM 명령을 내보내는 중인지 (계약 §6.4).
+
+    telemetry.motion.moving 의 재료다. 실제 바퀴 회전 측정이 아니라 제어 명령
+    기준이다 — 엔코더가 없어서 회전을 확인할 방법 자체가 없다.
+    주행 코드가 붙기 전까지는 명령을 낸 적이 없으므로 False 다.
+    """
+    return False
+
+
 def health() -> str:
     """state.health.motor — I2C Driver 응답·Fault Feedback 으로 판정 (계약 §5.3).
 
