@@ -17,7 +17,7 @@ public enum MqttTopicType {
     BATTERY_EVENT("events/battery", MqttTopicDirection.ROBOT_TO_SERVER, 1, false),
     SAFETY_EVENT("events/safety", MqttTopicDirection.ROBOT_TO_SERVER, 1, false),
     MISSION_EVENT("events/mission", MqttTopicDirection.ROBOT_TO_SERVER, 1, false),
-    COMMAND_RESULT("commands/result", MqttTopicDirection.ROBOT_TO_SERVER, 1, false),
+    COMMAND_RESULT("comamnds/result", MqttTopicDirection.ROBOT_TO_SERVER, 1, false),
     COMMAND_REQUEST("commands/request", MqttTopicDirection.SERVER_TO_ROBOT, 1, false),
     INGEST_RECEIPT("ingest/receipt", MqttTopicDirection.SERVER_TO_ROBOT, 1, false);
 
