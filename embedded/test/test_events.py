@@ -17,7 +17,7 @@ from robot_state import (
     RobotState,
     StatePublisher,
 )
-from telemetry import TelemetrySampler
+from telemetry import TELEMETRY_INTERVAL_SEC, TelemetrySampler
 
 ROBOT_ID = "RBT-001"
 CONFIRM_SEC = OBSTACLE_CONFIRM_SEC
@@ -400,6 +400,79 @@ def test_a_new_obstacle_after_the_estop_is_released_is_reported(
     assert (state.mode, state.reason_code) == ("PATROLLING", "NONE")
 
 
+def test_an_obstacle_that_outlives_an_estop_stops_the_robot_again(
+    client, events, state, clock, lidar
+):
+    """e-stop 이 풀렸는데 장애물이 그대로면 다시 서야 한다.
+
+    감지 시각을 붙잡아 둔 채 확정만 계속 실패하면 그 사이 정지 판정이 영구히 죽는다.
+    """
+    patrolling(state)
+    state.safe_stop("REMOTE_ESTOP")
+    lidar.set(True, 0.30)
+    for _ in range(int(CONFIRM_SEC / TICK) + 2):  # e-stop 동안에는 아무 것도 안 나간다
+        events.poll()
+        clock.advance(TICK)
+    assert client.safety() == []
+
+    state.resume()  # 관리자가 e-stop 을 풀었다 — 장애물은 아직 있다
+    events.poll()
+    assert (state.mode, state.reason_code) == ("SAFE_STOP", "OBSTACLE")
+    clock.advance(CONFIRM_SEC)
+    events.poll()
+    assert [p["event_type"] for p in client.safety()] == ["SAFETY_STOPPED"]
+
+
+def test_an_estop_before_confirmation_restarts_the_detection(
+    client, events, state, clock, lidar
+):
+    patrolling(state)
+    lidar.set(True, 0.30)
+    events.poll()  # 최초 감지 — SAFE_STOP/OBSTACLE
+    state.safe_stop("REMOTE_ESTOP")  # 확정 전에 관리자가 눌렀다
+    clock.advance(CONFIRM_SEC)
+    events.poll()
+    assert client.safety() == []  # 이 사건은 없던 것이 된다
+
+    state.resume()
+    events.poll()
+    clock.advance(CONFIRM_SEC)
+    events.poll()
+    assert [p["event_type"] for p in client.safety()] == ["SAFETY_STOPPED"]
+
+
+def test_the_motor_stops_before_the_state_is_published(client, state, clock, lidar):
+    """§10.1 — 물리 정지가 먼저고 MQTT 는 그 결과를 보고한다."""
+    stops = []
+    watcher = EventPublisher(
+        client,
+        state,
+        lidar=lidar,
+        stop_motor=lambda: stops.append(state.mode),
+        monotonic=clock.monotonic,
+        now=clock.now,
+    )
+    patrolling(state)
+    lidar.set(True, 0.30)
+    watcher.poll()
+    # 정지 호출 시점의 mode 가 아직 PATROLLING 이다 = 전이·발행보다 먼저 불렸다.
+    assert stops == ["PATROLLING"]
+    assert state.mode == "SAFE_STOP"
+
+
+def test_a_failing_motor_stop_does_not_break_the_loop(client, state, clock, lidar):
+    def boom():
+        raise OSError("i2c bus is gone")
+
+    watcher = EventPublisher(
+        client, state, lidar=lidar, stop_motor=boom, monotonic=clock.monotonic, now=clock.now
+    )
+    patrolling(state)
+    lidar.set(True, 0.30)
+    watcher.poll()
+    assert (state.mode, state.reason_code) == ("SAFE_STOP", "OBSTACLE")
+
+
 def test_missing_lidar_never_reports_an_obstacle(client, state, clock):
     bare = EventPublisher(client, state, monotonic=clock.monotonic, now=clock.now)
     patrolling(state)
@@ -448,6 +521,120 @@ def test_unknown_health_is_not_a_fault(client, events, probes):
     # UNKNOWN 은 '검사 전' 이지 고장이 아니다 (계약 §5.3).
     events.poll()
     assert client.safety() == []
+
+
+def watching(client, state, probes, clock, **options) -> EventPublisher:
+    """센서 고장 판정만 보는 EventPublisher. 정지 호출을 기억한다."""
+    stops = []
+    watcher = EventPublisher(
+        client,
+        state,
+        stop_motor=lambda: stops.append(state.mode),
+        monotonic=clock.monotonic,
+        now=clock.now,
+        **options,
+    )
+    watcher.stops = stops
+    return watcher
+
+
+def test_a_lidar_fault_stops_the_robot_while_it_is_driving(client, state, probes, clock):
+    """눈이 먼 채로 굴러가게 두지 않는다. 정지가 발행보다 먼저다 (§16-10)."""
+    watcher = watching(client, state, probes, clock)
+    patrolling(state)
+    probes["lidar"] = "FAULT"
+    watcher.poll()
+
+    assert watcher.stops == ["PATROLLING"]  # 세울 때는 아직 주행 중이었다
+    assert (state.mode, state.reason_code) == ("SAFE_STOP", "LIDAR_FAULT")
+    fault = client.safety()[-1]
+    assert (fault["event_type"], fault["reason_code"]) == ("SENSOR_FAULT", "LIDAR_FAULT")
+    assert fault["transition"] == {"mode_before": "PATROLLING", "mode_after": "SAFE_STOP"}
+
+
+def test_a_standing_robot_is_not_pushed_into_a_safe_stop(client, state, probes, clock):
+    """장치가 하나도 없는 개발 PC 가 부팅하자마자 안전 정지에 갇히면 안 된다."""
+    watcher = watching(client, state, probes, clock)
+    state.boot_completed()
+    probes["lidar"] = "FAULT"
+    watcher.poll()
+
+    assert watcher.stops == []
+    assert state.mode == "READY"  # START_MISSION 이 막히지 않는다
+    assert client.safety()[-1]["transition"] == {"mode_before": "READY", "mode_after": "READY"}
+
+
+def test_driving_off_with_a_known_fault_is_stopped_too(client, state, probes, clock):
+    """고장을 이미 알린 뒤에 주행이 시작되는 경로(START_MISSION)도 막아야 한다."""
+    watcher = watching(client, state, probes, clock)
+    state.boot_completed()
+    probes["lidar"] = "FAULT"
+    watcher.poll()  # READY 라 전이 없음
+    state.start_patrol()
+    watcher.poll()
+
+    assert (state.mode, state.reason_code) == ("SAFE_STOP", "LIDAR_FAULT")
+    # 사건은 처음 한 번만 알린다 — 매 tick 다시 발행하지 않는다 (§10.2).
+    assert [p["event_type"] for p in client.safety()] == ["SENSOR_FAULT"]
+
+
+def test_a_recovered_sensor_returns_to_the_mission_state(client, state, probes, clock):
+    watcher = watching(client, state, probes, clock)
+    patrolling(state)
+    state.start_mission("MIS-20260726-001", zone_id="A-01")
+    probes["lidar"] = "FAULT"
+    watcher.poll()
+    assert state.mode == "SAFE_STOP"
+
+    probes["lidar"] = "OK"
+    clock.advance(HEALTH_PROBE_INTERVAL_SEC)
+    watcher.poll()
+
+    assert (state.mode, state.reason_code) == ("PATROLLING", "NONE")
+    recovered = client.safety()[-1]
+    assert recovered["event_type"] == "SENSOR_RECOVERED"
+    assert recovered["transition"] == {"mode_before": "SAFE_STOP", "mode_after": "PATROLLING"}
+
+
+def test_one_recovery_does_not_release_a_second_fault(client, state, probes, clock):
+    watcher = watching(client, state, probes, clock)
+    patrolling(state)
+    probes["lidar"] = "FAULT"
+    probes["motor"] = "FAULT"
+    watcher.poll()
+    assert state.mode == "SAFE_STOP"
+
+    probes["lidar"] = "OK"
+    clock.advance(HEALTH_PROBE_INTERVAL_SEC)
+    watcher.poll()
+    # 모터가 아직 고장이다 — 반쯤 고장인 채로 내보내지 않는다.
+    assert state.mode == "SAFE_STOP"
+
+
+def test_a_remote_estop_is_not_released_by_a_sensor_recovery(client, state, probes, clock):
+    watcher = watching(client, state, probes, clock)
+    patrolling(state)
+    probes["lidar"] = "FAULT"
+    watcher.poll()
+    state.safe_stop("REMOTE_ESTOP")  # 관리자가 그 위에 정지를 걸었다
+
+    probes["lidar"] = "OK"
+    clock.advance(HEALTH_PROBE_INTERVAL_SEC)
+    watcher.poll()
+
+    assert (state.mode, state.reason_code) == ("SAFE_STOP", "REMOTE_ESTOP")
+
+
+def test_the_fault_stop_can_be_turned_off_for_a_bench_run(client, state, probes, clock):
+    """장치 없는 PC 에서 주행 흐름을 흉내 낼 때만 끈다 (config safety 절)."""
+    watcher = watching(client, state, probes, clock, sensor_fault_stops_driving=False)
+    patrolling(state)
+    probes["lidar"] = "FAULT"
+    watcher.poll()
+
+    assert watcher.stops == []
+    assert state.mode == "PATROLLING"
+    assert client.safety()[-1]["event_type"] == "SENSOR_FAULT"  # 알리기는 한다
 
 
 # --------------------------------------------------------------------------
@@ -612,7 +799,7 @@ def build_from(config_path, monkeypatch, tmp_path):
 def test_shipped_config_reaches_the_assembled_modules(monkeypatch, tmp_path):
     import main
 
-    client, state, _publisher, _sampler, events = build_from(
+    client, state, _publisher, _sampler, events, _commands = build_from(
         main.CONFIG_PATH, monkeypatch, tmp_path
     )
     try:
@@ -634,7 +821,7 @@ def test_a_config_without_a_safety_section_keeps_the_default(monkeypatch, tmp_pa
         "robot:\n  id: RBT-001\nmqtt:\n  host: broker.example.com\n",
         encoding="utf-8",
     )
-    client, _state, _publisher, _sampler, events = build_from(
+    client, _state, _publisher, _sampler, events, _commands = build_from(
         config, monkeypatch, tmp_path
     )
     try:
@@ -711,19 +898,19 @@ def test_completion_carries_the_full_result(client, events, state, clock):
         "normal_detection_count": 2,
         "completion_reason": "ROUTE_COMPLETED",
     }
-    assert state.mission_state == "COMPLETED"
+    # 발행이 끝나면 보관함도 비워진다 — 종료 상태로 elapsed_sec 이 자라지 않는다.
+    assert (state.mission_id, state.mission_state) == (None, None)
+    assert state.mission_elapsed_sec is None
 
 
 @pytest.mark.parametrize(
-    "finish, event_type, mission_state",
+    "finish, event_type",
     [
-        (lambda e: e.mission_cancelled("OPERATOR_CANCELLED"), "MISSION_CANCELLED", "CANCELLED"),
-        (lambda e: e.mission_failed("LIDAR_FAULT"), "MISSION_FAILED", "FAILED"),
+        (lambda e: e.mission_cancelled("OPERATOR_CANCELLED"), "MISSION_CANCELLED"),
+        (lambda e: e.mission_failed("LIDAR_FAULT"), "MISSION_FAILED"),
     ],
 )
-def test_cancel_and_failure_also_carry_a_result(
-    client, events, state, finish, event_type, mission_state
-):
+def test_cancel_and_failure_also_carry_a_result(client, events, state, finish, event_type):
     state.start_mission("MIS-20260726-001")
     finish(events)
     payload = client.mission()[-1]
@@ -734,17 +921,42 @@ def test_cancel_and_failure_also_carry_a_result(
         "normal_detection_count",
         "completion_reason",
     }
-    assert state.mission_state == mission_state
+    assert state.mission_id is None
 
 
 def test_the_result_is_read_before_the_slot_is_cleared(client, events, state):
-    """end_mission() 은 집계를 지운다 — 종료 event 를 먼저 만든다."""
+    """집계를 payload 로 복사한 뒤에 보관함을 비운다 — 순서를 틀릴 방법이 없다."""
     state.start_mission("MIS-20260726-001")
     state.record_incident()
     events.mission_completed()
-    state.end_mission()
     assert client.mission()[-1]["result"]["incident_count"] == 1
     assert state.mission_id is None
+    state.end_mission()  # 한 번 더 불러도 안전하다
+    assert state.mission_incident_count is None
+
+
+def test_telemetry_stops_carrying_the_mission_after_it_ends(
+    client, events, state, clock, tmp_path
+):
+    """종료 event 직후의 표본에는 mission 이 남아 있으면 안 된다."""
+    sampler = TelemetrySampler(
+        client,
+        state,
+        monotonic=clock.monotonic,
+        now=clock.now,
+        thermal_root=tmp_path / "no-thermal",
+    )
+    state.start_mission("MIS-20260726-001", zone_id="A-01")
+    sampler.poll()
+    assert client.of(TopicKind.TELEMETRY)[-1]["mission_id"] == "MIS-20260726-001"
+
+    events.mission_cancelled("OPERATOR_CANCELLED")
+    clock.advance(TELEMETRY_INTERVAL_SEC)
+    sampler.poll()
+
+    sample = client.of(TopicKind.TELEMETRY)[-1]
+    assert sample["mission_id"] is None
+    assert sample["mission"] is None
 
 
 @pytest.mark.parametrize(

@@ -24,6 +24,7 @@ ROBOT_ID = "RBT-001"
 PRESENCE = f"tbs/v2/robots/{ROBOT_ID}/presence"
 INCIDENT = f"tbs/v2/robots/{ROBOT_ID}/events/incident"
 COMMANDS = f"tbs/v2/robots/{ROBOT_ID}/commands/request"
+RESULTS = f"tbs/v2/robots/{ROBOT_ID}/commands/result"
 
 DOWNTIME_SEC = float(os.environ.get("TBS_DOWNTIME_SEC", "3"))
 #: 재접속 백오프는 최대 30초까지 늘어난다 — 그만큼 기다려 준다.
@@ -76,6 +77,14 @@ def presence_of(broker, status, reason=None):
 def incidents(broker, count):
     def predicate(records):
         hits = [r for r in records if r.topic == INCIDENT]
+        return hits if len(hits) >= count else None
+
+    return predicate
+
+
+def results(broker, count):
+    def predicate(records):
+        hits = [r for r in records if r.topic == RESULTS]
         return hits if len(hits) >= count else None
 
     return predicate
@@ -256,3 +265,85 @@ def test_command_request_reaches_the_queue(broker, client):
     }
     assert broker.send_to(COMMANDS, encode(command))
     assert client.commands.get(timeout=5) == command
+
+
+def emergency_stop(command_id="95626222-c5c8-47ea-901e-f9e467b275f6"):
+    return {
+        "schema_version": "2.0",
+        "command_id": command_id,
+        "command_type": "EMERGENCY_STOP",
+        "issued_at": "2026-07-26T05:21:00.000Z",
+        # 실시계로 도는 테스트다 — 만료로 걸리지 않게 넉넉히 잡는다.
+        "expires_at": "2030-01-01T00:00:00.000Z",
+        "requested_by": {"actor_type": "ADMIN", "actor_id": "ADM-0042"},
+        "parameters": {"reason": "operator_request"},
+    }
+
+
+def drain(runner, timeout=5.0):
+    """paho 네트워크 스레드가 큐를 채울 때까지 기다렸다 비운다."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if runner.poll():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_command_round_trip_publishes_two_results(broker, client):
+    """서버 → commands/request → 실행 → commands/result 왕복."""
+    from commands import CommandRunner
+    from events import EventPublisher
+    from robot_state import RobotState
+
+    client.start()
+    assert client.wait_until_connected(timeout=5)
+    assert broker.wait_for_subscription(COMMANDS, timeout=5)
+
+    state = RobotState()
+    state.boot_completed()
+    runner = CommandRunner(client, state, EventPublisher(client, state))
+
+    command = emergency_stop()
+    assert broker.send_to(COMMANDS, encode(command))
+    assert drain(runner), "command never reached the queue"
+
+    hits = broker.wait_for(results(broker, 2), timeout=5)
+    assert hits, "no command result arrived"
+    bodies = [json.loads(record.payload) for record in hits]
+    assert [b["status"] for b in bodies] == ["ACCEPTED", "COMPLETED"]
+    assert {b["command_id"] for b in bodies} == {command["command_id"]}
+    assert len({b["result_id"] for b in bodies}) == 2
+    assert bodies[0]["completed_at"] is None
+    # 정지가 먼저다 — 첫 결과가 이미 정지 후 상태를 싣고 있다 (§16-10).
+    assert bodies[0]["state"] == {"mode": "SAFE_STOP", "reason_code": "REMOTE_ESTOP"}
+    assert (state.mode, state.reason_code) == ("SAFE_STOP", "REMOTE_ESTOP")
+    for record in hits:
+        assert (record.qos, record.retain) == (1, False)
+
+
+def test_a_redelivered_command_is_executed_once(broker, client):
+    from commands import CommandRunner
+    from events import EventPublisher
+    from robot_state import RobotState
+
+    client.start()
+    assert client.wait_until_connected(timeout=5)
+    assert broker.wait_for_subscription(COMMANDS, timeout=5)
+
+    state = RobotState()
+    state.boot_completed()
+    runner = CommandRunner(client, state, EventPublisher(client, state))
+
+    command = emergency_stop()
+    assert broker.send_to(COMMANDS, encode(command))
+    assert drain(runner)
+    assert broker.wait_for(results(broker, 2), timeout=5)
+
+    state.resume()  # 다시 실행됐다면 SAFE_STOP 으로 돌아간다
+    assert broker.send_to(COMMANDS, encode(command))
+    assert drain(runner)
+
+    time.sleep(0.5)
+    assert len(broker.messages_on(RESULTS)) == 2
+    assert state.mode == "PATROLLING"
