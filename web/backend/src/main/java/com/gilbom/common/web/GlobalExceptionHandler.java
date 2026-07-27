@@ -16,6 +16,8 @@ import org.springframework.core.MethodParameter;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.dao.DataAccessException;
+import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
@@ -40,6 +42,7 @@ import com.gilbom.common.api.ErrorResponse;
 import com.gilbom.common.api.ValidationErrorDetail;
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
+import com.gilbom.auth.ratelimit.AuthenticationRateLimitExceededException;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
@@ -61,7 +64,15 @@ public class GlobalExceptionHandler {
             "authorization",
             "credential",
             "cookie",
-            "session");
+            "setcookie",
+            "session",
+            "csrf",
+            "totp",
+            "otp",
+            "code",
+            "recoverycode",
+            "privatekey",
+            "presignedurl");
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleMethodArgumentNotValid(
@@ -177,6 +188,27 @@ public class GlobalExceptionHandler {
             message = exception.errorCode().defaultMessage();
         }
         return respond(exception.errorCode(), message, List.of(), request);
+    }
+
+    @ExceptionHandler(AuthenticationRateLimitExceededException.class)
+    public ResponseEntity<ErrorResponse> handleAuthenticationRateLimitExceeded(
+            AuthenticationRateLimitExceededException exception,
+            HttpServletRequest request
+    ) {
+        ErrorResponse body = ErrorResponse.of(
+                exception.errorCode(),
+                exception.getMessage(),
+                request.getRequestURI(),
+                requestId(request),
+                List.of()
+        );
+        return ResponseEntity.status(exception.errorCode().httpStatus())
+                .cacheControl(CacheControl.noStore())
+                .header(
+                        HttpHeaders.RETRY_AFTER,
+                        Long.toString(exception.retryAfterSeconds())
+                )
+                .body(body);
     }
 
     @ExceptionHandler(AuthenticationException.class)

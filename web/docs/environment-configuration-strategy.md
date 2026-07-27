@@ -129,20 +129,40 @@ staging은 prod와 같은 인증·쿠키·IAM·네트워크 정책을 사용하�
 
 | 환경변수 | Secret | 기본·규칙 |
 |---|:---:|---|
-| `GILBOM_SESSION_STORE` |  | `memory` 또는 `jdbc`, staging/prod는 `jdbc` |
-| `GILBOM_SESSION_COOKIE_NAME` |  | 환경 매트릭스의 이름 |
-| `GILBOM_SESSION_COOKIE_SECURE` |  | staging/prod `true` 강제 |
-| `GILBOM_SESSION_COOKIE_SAME_SITE` |  | `Lax` |
 | `GILBOM_SESSION_IDLE_TIMEOUT` |  | `30m` |
 | `GILBOM_SESSION_ABSOLUTE_TIMEOUT` |  | `8h` |
 | `GILBOM_SESSION_MAX_CONCURRENT` |  | `1` |
 | `GILBOM_MFA_CHALLENGE_TIMEOUT` |  | `5m` |
+| `GILBOM_MFA_CHALLENGE_MAX_FAILURES` |  | `5` |
+| `GILBOM_SESSION_CLEANUP_INTERVAL` |  | 만료 보안 세션 정리 주기 `1m` |
+| `GILBOM_SESSION_CLEANUP_BATCH_SIZE` |  | 한 번에 최대 `1000` |
 | `GILBOM_TOTP_ISSUER` |  | 환경별 구분 가능한 표시명 |
 | `GILBOM_TOTP_KMS_KEY_ARN` |  | staging/prod 전용 KMS key ARN |
-| `GILBOM_AUTH_ACCOUNT_FAILURE_LIMIT` |  | 15분당 `5` |
-| `GILBOM_AUTH_IP_REQUEST_LIMIT` |  | 1분당 `20` |
+| `AUTH_IP_MAX_REQUESTS` |  | 고정 `20` |
+| `AUTH_IP_WINDOW` |  | 고정 `1m` |
+| `AUTH_PASSWORD_MAX_FAILURES` |  | 고정 `5` |
+| `AUTH_PASSWORD_FAILURE_WINDOW` |  | 고정 `15m` |
+| `AUTH_MFA_MAX_FAILURES` |  | 고정 `5` |
+| `AUTH_MFA_FAILURE_WINDOW` |  | 고정 `15m` |
+| `AUTH_TEMPORARY_LOCK_DURATION` |  | 비밀번호·MFA 제한 모두 고정 `15m` |
+| `INITIAL_ADMIN_BOOTSTRAP_ENABLED` |  | 기본 `false`, 빈 DB 최초 생성 때만 `true` |
+| `INITIAL_ADMIN_EMAIL` | O | 초기 관리자 이메일, bootstrap 외 사용 금지 |
+| `INITIAL_ADMIN_PASSWORD` | O | 10~24자 임시 비밀번호, 최초 생성 후 Secret 폐기 |
+| `INITIAL_ADMIN_DISPLAY_NAME` |  | 앞뒤 공백 없는 최대 100자 |
+| `INITIAL_ADMIN_USER_CODE` |  | 앞뒤 공백 없는 최대 30자 |
+| `AUTH_RATE_LIMIT_HMAC_KEY_VERSION` |  | HMAC key 회전 버전, 양의 정수 |
+| `AUTH_RATE_LIMIT_HMAC_KEY_BASE64` | O | 최소 32-byte key의 Base64, staging/prod 외부 Secret |
+| `AUTH_EMAIL_AVAILABILITY_MAX_REQUESTS` |  | 기본 1분당 `20` |
+| `AUTH_EMAIL_AVAILABILITY_WINDOW` |  | 기본 `1m` |
+| `AUTH_REGISTRATION_MAX_REQUESTS` |  | 기본 1시간당 `5` |
+| `AUTH_REGISTRATION_WINDOW` |  | 기본 `1h` |
+| `AUTH_RATE_LIMIT_CLEANUP_INTERVAL` |  | 만료 bucket 정리 주기, 기본 `10m` |
+| `AUTH_RATE_LIMIT_CLEANUP_BATCH_SIZE` |  | 한 번에 정리할 최대 bucket 수, 기본 `1000` |
 
 TOTP KMS key 자체를 환경변수에 넣지 않고 ARN만 설정한다.
+초기 관리자 Secret은 최초 생성 후 `INITIAL_ADMIN_BOOTSTRAP_ENABLED=false`로 되돌리고
+배포 환경에서 제거한다.
+Rate Limit HMAC key는 인스턴스 간 동일하게 주입하고 회전할 때 version을 함께 올린다.
 
 ### 5.4 AWS·S3
 

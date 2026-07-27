@@ -6,6 +6,9 @@ TOTP 검증은 동일한 Secret 원문이 다시 필요하므로 비밀번호처
 저장할 수 없다. 대신 애플리케이션 외부에서 주입한 AES-256 key로 인증된 암호화를
 수행하고 DB에는 다음 envelope만 저장한다.
 
+MFA 등록 여부는 `auth.admin_user`에 별도 boolean으로 중복 저장하지 않는다.
+`auth.mfa_factor`에 `factor_status=ACTIVE`인 현재 TOTP factor가 존재하는지가 단일 기준이다.
+
 | DB 컬럼 | 애플리케이션 값 | 역할 |
 |---|---|---|
 | `secret_ciphertext` | `EncryptedTotpSecret.ciphertext` | 암호문과 128-bit GCM tag |

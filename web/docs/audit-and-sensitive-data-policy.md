@@ -1,7 +1,7 @@
 # 감사 로그·민감정보 처리 정책
 
 - 문서 상태: 확정
-- 구현 예정: Day 3 인증 감사 이벤트, Day 4 RBAC·관리자·업무 감사 이벤트
+- 구현 상태: Day 3 인증 감사 공통 서비스 완료, Day 4 RBAC·관리자·업무 연결 예정
 - DB 기준: `audit.audit_log`
 
 ## 1. 목적과 구분
@@ -91,7 +91,16 @@ action code는 `UPPER_SNAKE_CASE`로 고정하며 화면 문구로 재사용하�
 |---|---|
 | `AUTH_LOGIN_SUCCEEDED` | 비밀번호와 MFA를 모두 통과한 때 |
 | `AUTH_LOGIN_FAILED` | 비밀번호 검증 실패 또는 계정 사용 불가 |
+| `AUTH_PASSWORD_VERIFIED` | 비밀번호 검증 후 제한된 pre-auth challenge 생성 |
+| `AUTH_ACCOUNT_TEMPORARILY_LOCKED` | 비밀번호 연속 실패로 실제 계정에 15분 잠금 적용 |
+| `AUTH_INITIAL_ADMIN_CREATED` | 외부 Secret을 사용한 초기 관리자 최초 생성 |
+| `AUTH_PUBLIC_REGISTRATION_CREATED` | 역할 없는 승인 대기 공개 계정 생성 |
+| `AUTH_INITIAL_PASSWORD_CHANGED` | 제한된 사전 인증 상태에서 초기 비밀번호 변경 완료 |
+| `AUTH_INITIAL_PASSWORD_CHANGE_FAILED` | 초기 비밀번호 변경 검증 실패 |
+| `AUTH_PASSWORD_CHANGED` | 인증 완료 상태에서 본인 비밀번호 변경 완료 |
+| `AUTH_PASSWORD_CHANGE_FAILED` | 현재 비밀번호 불일치·재사용·경쟁 조건으로 변경 실패 |
 | `AUTH_MFA_CHALLENGE_FAILED` | TOTP·복구 코드 검증 실패 |
+| `AUTH_MFA_ENROLLMENT_STARTED` | 암호화된 pending TOTP factor 저장 |
 | `AUTH_MFA_ENROLLED` | TOTP 등록 확인 완료 |
 | `AUTH_MFA_RESET` | 사용자 또는 관리자가 MFA 초기화 |
 | `AUTH_RECOVERY_CODE_USED` | 복구 코드 사용 |
@@ -99,7 +108,7 @@ action code는 `UPPER_SNAKE_CASE`로 고정하며 화면 문구로 재사용하�
 | `AUTH_SESSION_REVOKED` | 비밀번호·권한·계정 변경 또는 관리자 조치로 세션 폐기 |
 | `AUTH_RATE_LIMITED` | 로그인 또는 MFA 시도 제한 적용 |
 
-실패 로그인에서 제출된 username, password, TOTP 값은 기록하지 않는다. 존재하는 사용자를 안전하게 식별할 수 있을 때만 대상 사용자 UUID를 `target_id`로 기록한다.
+실패 로그인에서 제출된 email, password, TOTP 값은 기록하지 않는다. 존재하는 사용자를 안전하게 식별할 수 있을 때만 대상 사용자 UUID를 `target_id`로 기록한다.
 
 ### 5.2 관리자·권한
 
@@ -144,6 +153,12 @@ action code는 `UPPER_SNAKE_CASE`로 고정하며 화면 문구로 재사용하�
 - 검증을 통과했지만 처리 중 실패한 중요 작업은 `FAILURE`로 기록한다.
 - DB 상태 변경과 감사 로그는 가능한 한 같은 DB 트랜잭션에 저장한다.
 - 감사 로그 저장에 실패하면 보안·권한·승인·명령 등 중요 변경은 함께 실패시킨다.
+- 로그인 성공·실패, 계정 잠금, MFA 실패와 권한 변경은 필수 감사이며 같은 트랜잭션에서
+  감사 저장이 실패하면 상태 변경도 실패시킨다.
+- Rate Limit 거부는 이미 요청을 차단한 뒤 독립 트랜잭션으로 기록한다. 감사 실패가
+  429 거부를 허용으로 바꾸지 않는다.
+- 로그아웃은 서버 세션을 먼저 폐기하고 감사를 best-effort로 기록한다. 감사 장애 때문에
+  기존 인증 세션을 유지하지 않는다.
 - 조회 API의 감사 로그 실패는 가용성을 위해 조회를 실패시키지 않을 수 있지만 별도 운영 경보를 생성한다.
 - 비동기 작업의 `SUCCESS`는 “요청 접수·영속화 성공”을 뜻한다. MQTT 실행·파일 생성 같은 최종 결과는 별도 이벤트로 기록한다.
 - 감사 로그 자체는 애플리케이션 API로 수정하거나 삭제할 수 없다.
