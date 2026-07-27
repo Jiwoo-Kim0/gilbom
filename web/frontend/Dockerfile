@@ -1,6 +1,8 @@
 # Node patch와 Alpine 세대까지 고정해 로컬·CI image 재빌드 결과를 일치시킨다.
 FROM node:24.18.0-alpine3.23 AS builder
 
+ARG VITE_NAVER_MAP_CLIENT_ID
+
 WORKDIR /app
 
 COPY gilbom/package.json gilbom/package-lock.json ./
@@ -12,7 +14,9 @@ COPY gilbom/public ./public
 COPY gilbom/src ./src
 
 # CI와 로컬 image가 같은 정적 검증을 수행하도록 lint를 build 앞에 둔다.
-RUN npm run lint && npm run build
+RUN test -n "$VITE_NAVER_MAP_CLIENT_ID" \
+    && npm run lint \
+    && npm run build
 
 FROM nginx:1.30.4-alpine AS runtime
 

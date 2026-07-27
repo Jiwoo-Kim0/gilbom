@@ -276,7 +276,8 @@ class AuthenticationDefenseServiceTest {
         service.logout(request, USER_ID, CONTEXT);
 
         InOrder order = inOrder(sessionService, auditService);
-        order.verify(sessionService).invalidateCurrentSession(request);
+        order.verify(sessionService).revokeCurrentServerSession(request);
+        order.verify(sessionService).expireCurrentClientSession(request);
         order.verify(auditService).recordLogoutBestEffort(CONTEXT, USER_ID);
     }
 }
