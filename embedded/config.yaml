@@ -1,20 +1,29 @@
 # OrinCar 설정 — 구현 착수 시 값 채울 것. 코드에 하드코딩 금지.
 # 비밀값(MQTT 비번, API Key)은 Git 커밋 금지 — 환경변수나 별도 미추적 파일로.
+#
+# placeholder 두 가지를 지원한다 (comms/config.py: load_document).
+#   ${env:NAME}   환경변수. 없으면 기동 시 ConfigError — 비밀값은 전부 이 형식으로.
+#   ${robot.id}   이 파일 안의 다른 값 참조. 같은 값을 두 번 적지 않기 위한 것.
 
-# robot:
-#   id: RBT-001
-#   firmware_version: 1.0.0
+robot:
+  # 이 값 하나가 topic 세그먼트 {robot_id} · payload 의 robot_id ·
+  # MQTT client_id · MQTT username 을 전부 결정한다. 여기만 고치면 된다.
+  id: RBT-001
+  firmware_version: 1.0.0
 
-# mqtt:
-#   host: <EC2 브로커 주소>
-#   port: 8883
-#   username: RBT-001
-#   password: <env 로>
-#   keepalive: 30
+mqtt:
+  host: ${env:MQTT_HOST}        # EC2 브로커 주소
+  port: 8883
+  username: ${robot.id}         # 브로커 ACL·payload 검증이 robot_id 와 같아야 통과한다
+  password: ${env:MQTT_PASSWORD}
+  keepalive: 30                 # LTE NAT 매핑이 끊기기 전에 PINGREQ 를 보낸다
+  ca_cert: null                 # 브로커 CA 인증서 경로. 운영은 필수 —
+                                # null 이면 TLS 없이 접속한다(로컬 mosquitto 검증 전용).
+  outbox_path: var/outbox.sqlite3   # 미전송 event 저장소 (커밋 금지)
 
-# upload:
-#   url: https://<서버>/api/v1/images
-#   api_key: <env 로>
+upload:
+  url: ${env:UPLOAD_URL}          # POST /api/v1/images 전체 URL
+  api_key: ${env:UPLOAD_API_KEY}  # 기기별 X-API-Key. 세션 쿠키·CSRF 아니다.
 
 # drive:
 #   i2c_bus: 7

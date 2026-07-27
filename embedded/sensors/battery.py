@@ -7,3 +7,13 @@
 #   - 상태 판정 (계약 §9, 히스테리시스):
 #     NORMAL ≥20% / LOW <20% / CRITICAL <10%(TBD) / 복귀 RECOVERED ≥25%
 #   - 상태가 '전이'된 순간을 감지해서 알림 → events/battery 발행은 main→comms
+
+
+def health() -> str:
+    """state.health.battery — BMS·ADC 읽기 성공·최근 측정값으로 판정 (계약 §5.3).
+
+    battery.state 와 다른 축이다: 측정 장치가 멀쩡하고 잔량만 낮으면
+    battery.state=LOW / health.battery=OK 다 (계약 §5.5).
+    하드웨어가 붙기 전까지 UNKNOWN — '검사 전' 이라는 뜻이라 지금 상태와 맞는다.
+    """
+    return "UNKNOWN"
