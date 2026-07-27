@@ -26,40 +26,43 @@ public class MqttConnectionConfig {
             MqttSecurityStrategyFactory securityStrategyFactory
     ) {
         MqttConnectionOptions options = new MqttConnectionOptions();
-        options.setServerURIs(new String[]{properties.getBroker()});
-        options.setUserName(properties.getUsername());
-        options.setPassword(properties.getPassword().getBytes(StandardCharsets.UTF_8));
+        options.setServerURIs(new String[]{properties.getBroker()});// 브로커 주소 연결
+        options.setUserName(properties.getUsername());				// MQTT 서비스 사용자 이름
+        options.setPassword(properties.getPassword().getBytes(StandardCharsets.UTF_8)); // PW로 증명
         options.setSocketFactory(
                 securityStrategyFactory
-                        .getNowStrategy()
-                        .createSslContext()
-                        .getSocketFactory()
+                        .getNowStrategy()  // tls or mtls or ..평문
+                        .createSslContext() // 인증 정보  브로커를 신뢰할 트러스트스토어(CA 인증서) +클라이언트 인증서(mutual TLS라면)
+                        .getSocketFactory()//완성된 SSLContext에서 실제 소켓을 생성할 팩토리
         );
         options.setAutomaticReconnect(true);
-        options.setCleanStart(true);
+        options.setCleanStart(true);  //연결할 때마다 이전 세션 상태를 버리고 완전히 새로 시작(LIVE)//FALSE로하면 안버리고 누적해서 받기 가능
         options.setConnectionTimeout(10);
         options.setKeepAliveInterval(30);
         return options;
     }
-
+    //실제 MQTT 클라이언트 연결을 관리하는 매니저
     @Bean
     public ClientManager<IMqttAsyncClient, MqttConnectionOptions> mqttClientManager(
             MqttConnectionOptions connectionOptions,
             MqttProperties properties
     ) {
-        return new Mqttv5ClientManager(connectionOptions, properties.getClientId());
+        return new Mqttv5ClientManager(
+                connectionOptions,
+                properties.getClientId());//브로커에 접속하는 클라(스프링서버)
     }
-
+    //브로커로부터 받은 메시지가 흘러 들어오는 파이프/ path-variable로 관리하므로 구독자가 정확히 하나 처리
     @Bean
     public MessageChannel mqttInboundChannel() {
         return new DirectChannel();
     }
-
+    //브로커로 메시지를 보낼 때 쓰는 파이프입니다.
     @Bean
     public MessageChannel mqttOutboundChannel() {
         return new DirectChannel();
     }
 
+    //브로커 토픽을 구독(subscribe)하는 역할
     @Bean
     public Mqttv5PahoMessageDrivenChannelAdapter mqttInboundAdapter(
             ClientManager<IMqttAsyncClient, MqttConnectionOptions> clientManager,

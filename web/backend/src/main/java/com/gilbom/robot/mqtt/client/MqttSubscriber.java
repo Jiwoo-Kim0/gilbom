@@ -16,6 +16,7 @@ public class MqttSubscriber {
 
     private static final Logger log = LoggerFactory.getLogger(MqttSubscriber.class);
 
+    //Spring이 제공하는 이벤트 발행기
     private final ApplicationEventPublisher eventPublisher;
 
     public MqttSubscriber(ApplicationEventPublisher eventPublisher) {
