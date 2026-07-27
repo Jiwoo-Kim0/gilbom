@@ -11,11 +11,10 @@ mqtt:
   broker: ${MQTT_BROKER:ssl://localhost:8883}
   client-id: ${MQTT_CLIENT_ID:gilbom-local}
   security:
-    # Local Mosquitto presents mqtt/local/certs/server-local.pem.
-    # Point MQTT_TRUST_CERTIFICATE to that certificate because it is self-signed
-    # and therefore is not included in the JVM default trust store.
+    # mqtt-init issues the broker certificate from the local development CA.
+    # Point MQTT_TRUST_CERTIFICATE to infra/mosquitto/local/runtime/certs/local-ca-cert.pem.
     trust-certificate: ${MQTT_TRUST_CERTIFICATE:}
     # Set absolute Windows paths when local mTLS is enabled.
-    # Example: C:/ssafy/SSAFY-TASK/mqtt/certs/client.pem
+    # Example: C:/ssafy/SSAFY-TASK/web/infra/mosquitto/local/runtime/certs/client.pem
     client-certificate: ${MQTT_CLIENT_CERTIFICATE:}
     client-private-key: ${MQTT_CLIENT_PRIVATE_KEY:}

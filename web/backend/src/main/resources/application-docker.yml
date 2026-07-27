@@ -10,7 +10,7 @@ logging:
 mqtt:
   security:
     # MQTT certificate convention inside the backend container:
-    # /app/config/mqtt/certs/{server-local.pem,client.pem,client-key.pem}
+    # /app/config/mqtt/certs/{local-ca-cert.pem,client.pem,client-key.pem}
     trust-certificate: ${MQTT_TRUST_CERTIFICATE:}
     client-certificate: ${MQTT_CLIENT_CERTIFICATE:/app/config/mqtt/certs/client.pem}
     client-private-key: ${MQTT_CLIENT_PRIVATE_KEY:/app/config/mqtt/certs/client-key.pem}

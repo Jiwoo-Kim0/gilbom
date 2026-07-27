@@ -3,7 +3,7 @@ spring:
   application:
     name: gilbom-backend
   # STS에서 직접 실행: 별도 지정 없이 local을 기본 프로필로 사용
-  # 로컬 Docker에서 실행: SPRING_PROFILES_ACTIVE=docker
+  # 로컬 Docker에서 실행: SPRING_PROFILES_ACTIVE=local,docker
   # EC2의 Docker에서 실행: SPRING_PROFILES_ACTIVE=ec2,docker
   profiles:
     default: local
@@ -88,6 +88,6 @@ mqtt:
   username: ${MQTT_USERNAME}
   password: ${MQTT_PASSWORD}
   # Comma-separated MQTT topic filters.
-  subscribe-topic: ${MQTT_SUBSCRIBE_TOPIC:robots/+/telemetry,robots/+/commands/ack}
-  publish-topic: ${MQTT_PUBLISH_TOPIC:robots/test-robot/commands}
+  subscribe-topic: "${MQTT_SUBSCRIBE_TOPIC:tbs/v2/robots/+/presence,tbs/v2/robots/+/state,tbs/v2/robots/+/telemetry,tbs/v2/robots/+/events/#,tbs/v2/robots/+/commands/result}"
+  publish-topic: ${MQTT_PUBLISH_TOPIC:tbs/v2/robots/robot-test/commands/request}
   qos: ${MQTT_QOS:1}
