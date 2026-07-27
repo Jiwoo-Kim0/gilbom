@@ -1,7 +1,6 @@
 package com.gilbom.security.config;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.time.Clock;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -11,14 +10,16 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
-import org.springframework.security.crypto.argon2.Argon2PasswordEncoder;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.DelegatingPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.security.web.context.SecurityContextHolderFilter;
+import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.csrf.CsrfException;
 import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRepository;
 
+import com.gilbom.auth.session.AuthenticationSessionEnforcementFilter;
+import com.gilbom.auth.session.SessionSecurityStateRepository;
 import com.gilbom.common.error.ErrorCode;
 import com.gilbom.security.web.SecurityErrorResponseWriter;
 
@@ -29,12 +30,11 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
-            SecurityErrorResponseWriter errorWriter
+            SecurityErrorResponseWriter errorWriter,
+            CsrfTokenRepository csrfTokenRepository,
+            SecurityContextRepository securityContextRepository,
+            SessionSecurityStateRepository sessionStateRepository
     ) throws Exception {
-        HttpSessionCsrfTokenRepository csrfTokenRepository =
-                new HttpSessionCsrfTokenRepository();
-        csrfTokenRepository.setHeaderName("X-CSRF-TOKEN");
-
         http
                 // SPA가 JSON API를 사용하므로 Spring 기본 HTML login과 Basic 인증은 열지 않는다.
                 .formLogin(form -> form.disable())
@@ -44,6 +44,9 @@ public class SecurityConfig {
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .csrf(csrf -> csrf.csrfTokenRepository(csrfTokenRepository))
+                .securityContext(context -> context
+                        .securityContextRepository(securityContextRepository)
+                        .requireExplicitSave(true))
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint((request, response, exception) ->
                                 errorWriter.write(
@@ -72,26 +75,46 @@ public class SecurityConfig {
                                 "/api/v1/system/info",
                                 "/api/v1/auth/csrf-token")
                         .permitAll()
-                        // 실제 login controller가 추가돼도 기본 form login을 우회하지 않는다.
-                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/login")
+                        // 공개 인증 API도 CSRF 검사를 통과해야 하며 인증만 요구하지 않는다.
+                        .requestMatchers(HttpMethod.POST,
+                                "/api/v1/auth/login",
+                                "/api/v1/auth/password/initial-change",
+                                "/api/v1/auth/mfa/totp/enroll",
+                                "/api/v1/auth/mfa/totp/confirm",
+                                "/api/v1/auth/mfa/totp/verify",
+                                "/api/v1/auth/mfa/recovery",
+                                "/api/v1/auth/logout",
+                                "/api/v1/auth/email-availability",
+                                "/api/v1/auth/registrations")
                         .permitAll()
                         .requestMatchers("/error")
                         .permitAll()
                         // 명시하지 않은 API는 새 기능이 추가돼도 자동 공개되지 않는다.
                         .anyRequest()
-                        .authenticated());
+                        .authenticated())
+                .addFilterAfter(
+                        new AuthenticationSessionEnforcementFilter(
+                                sessionStateRepository,
+                                errorWriter,
+                                Clock.systemUTC()
+                        ),
+                        SecurityContextHolderFilter.class
+                );
 
         return http.build();
     }
 
     @Bean
-    public PasswordEncoder passwordEncoder() {
-        Map<String, PasswordEncoder> encoders = new HashMap<>();
-        encoders.put("argon2", Argon2PasswordEncoder.defaultsForSpringSecurity_v5_8());
-        encoders.put("bcrypt", new BCryptPasswordEncoder());
+    public CsrfTokenRepository csrfTokenRepository() {
+        HttpSessionCsrfTokenRepository repository =
+                new HttpSessionCsrfTokenRepository();
+        repository.setHeaderName("X-CSRF-TOKEN");
+        return repository;
+    }
 
-        // 신규 hash는 Argon2id로 만들고 {id} prefix로 기존 bcrypt 검증·점진 재해시를 지원한다.
-        return new DelegatingPasswordEncoder("argon2", encoders);
+    @Bean
+    public SecurityContextRepository securityContextRepository() {
+        return new HttpSessionSecurityContextRepository();
     }
 
     @Bean

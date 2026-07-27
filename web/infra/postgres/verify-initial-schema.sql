@@ -6,18 +6,30 @@ BEGIN;
 INSERT INTO auth.admin_user (
     user_id,
     user_code,
-    username,
+    legacy_username,
     password_hash,
     display_name,
-    email
+    email,
+    account_status,
+    is_active,
+    account_origin
 ) VALUES (
     '10000000-0000-4000-8000-000000000001',
     'ADM-SMOKE',
     'migration_smoke',
-    '{argon2}integration-test-hash',
+    '{argon2}$argon2id$v=19$m=19456,t=2,p=1$integration-test-hash',
     'Migration Smoke',
-    'migration-smoke@example.invalid'
+    'Migration-Smoke@Example.Invalid',
+    'ACTIVE',
+    TRUE,
+    'ADMIN_CREATED'
 );
+
+UPDATE auth.admin_user
+SET failed_login_count = 5,
+    last_failed_login_at = '2026-07-26T00:05:00Z',
+    locked_until = '2026-07-26T00:20:00Z'
+WHERE user_id = '10000000-0000-4000-8000-000000000001';
 
 INSERT INTO auth.user_role (
     user_id,
@@ -60,7 +72,7 @@ INSERT INTO auth.mfa_recovery_code (
     '30000000-0000-4000-8000-000000000001',
     '20000000-0000-4000-8000-000000000001',
     1,
-    '{argon2}integration-test-recovery-hash'
+    '{argon2}$argon2id$v=19$m=19456,t=2,p=1$integration-test-recovery-hash'
 );
 
 INSERT INTO auth.authentication_rate_limit (
@@ -167,7 +179,7 @@ INSERT INTO session_store.spring_session (
     1800000000000,
     1800,
     1800001800000,
-    'migration_smoke'
+    '10000000-0000-4000-8000-000000000001'
 );
 
 INSERT INTO session_store.session_security_state (
@@ -219,6 +231,10 @@ WHERE idempotency_request_id = '85000000-0000-4000-8000-000000000001';
 -- 모두 1이어야 하며 runtime role에는 schema 생성·감사 수정 권한이 없어야 한다.
 SELECT
     (SELECT password_change_required FROM auth.admin_user WHERE user_id = '10000000-0000-4000-8000-000000000001') AS password_change_required,
+    (SELECT normalized_email FROM auth.admin_user WHERE user_id = '10000000-0000-4000-8000-000000000001') AS normalized_email,
+    (SELECT account_status FROM auth.admin_user WHERE user_id = '10000000-0000-4000-8000-000000000001') AS account_status,
+    (SELECT failed_login_count FROM auth.admin_user WHERE user_id = '10000000-0000-4000-8000-000000000001') AS failed_login_count,
+    (SELECT locked_until IS NOT NULL FROM auth.admin_user WHERE user_id = '10000000-0000-4000-8000-000000000001') AS account_locked,
     (SELECT COUNT(*) FROM auth.user_role WHERE user_id = '10000000-0000-4000-8000-000000000001') AS user_role_count,
     (SELECT COUNT(*) FROM auth.mfa_factor WHERE user_id = '10000000-0000-4000-8000-000000000001') AS mfa_factor_count,
     (SELECT COUNT(*) FROM auth.mfa_recovery_code WHERE factor_id = '20000000-0000-4000-8000-000000000001') AS recovery_code_count,
@@ -248,6 +264,19 @@ SELECT
 
 SELECT (
     (SELECT password_change_required FROM auth.admin_user WHERE user_id = '10000000-0000-4000-8000-000000000001')
+    AND (
+        SELECT normalized_email = 'migration-smoke@example.invalid'
+        FROM auth.admin_user
+        WHERE user_id = '10000000-0000-4000-8000-000000000001'
+    )
+    AND (
+        SELECT account_status = 'ACTIVE'
+               AND is_active
+               AND failed_login_count = 5
+               AND locked_until = '2026-07-26T00:20:00Z'::TIMESTAMPTZ
+        FROM auth.admin_user
+        WHERE user_id = '10000000-0000-4000-8000-000000000001'
+    )
     AND (SELECT COUNT(*) FROM auth.user_role WHERE user_id = '10000000-0000-4000-8000-000000000001') = 1
     AND (SELECT COUNT(*) FROM auth.mfa_factor WHERE user_id = '10000000-0000-4000-8000-000000000001') = 1
     AND (SELECT COUNT(*) FROM auth.mfa_recovery_code WHERE factor_id = '20000000-0000-4000-8000-000000000001') = 1

@@ -3,6 +3,14 @@ spring:
     activate:
       on-profile: docker
 
+server:
+  # Backend는 loopback에만 publish되고 신뢰된 Docker Nginx가 전달한 X-Forwarded-*를 해석한다.
+  forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      remote-ip-header: X-Forwarded-For
+      protocol-header: X-Forwarded-Proto
+
 logging:
   level:
     com.gilbom: INFO

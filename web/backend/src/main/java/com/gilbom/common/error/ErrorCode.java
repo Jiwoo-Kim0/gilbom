@@ -16,6 +16,14 @@ public enum ErrorCode {
 
     AUTH_UNAUTHENTICATED(HttpStatus.UNAUTHORIZED, "인증이 필요합니다."),
     AUTH_FORBIDDEN(HttpStatus.FORBIDDEN, "요청을 수행할 권한이 없습니다."),
+    AUTH_PASSWORD_REUSE_NOT_ALLOWED(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "새 비밀번호는 현재 비밀번호와 달라야 합니다."
+    ),
+    AUTH_MFA_UNAVAILABLE(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "MFA 서비스를 일시적으로 사용할 수 없습니다."
+    ),
 
     COMMON_RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "요청한 리소스를 찾을 수 없습니다."),
     ROBOT_NOT_FOUND(HttpStatus.NOT_FOUND, "로봇을 찾을 수 없습니다."),
@@ -27,6 +35,7 @@ public enum ErrorCode {
     COMMON_METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "지원하지 않는 HTTP 메서드입니다."),
 
     COMMON_CONFLICT(HttpStatus.CONFLICT, "요청이 현재 리소스 상태와 충돌합니다."),
+    AUTH_EMAIL_ALREADY_REGISTERED(HttpStatus.CONFLICT, "이미 사용 중인 이메일입니다."),
     COMMAND_STATE_CONFLICT(HttpStatus.CONFLICT, "현재 명령 상태에서는 요청을 수행할 수 없습니다."),
     REPORT_STATE_CONFLICT(HttpStatus.CONFLICT, "현재 보고서 상태에서는 요청을 수행할 수 없습니다."),
 

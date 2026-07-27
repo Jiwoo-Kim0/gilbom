@@ -90,7 +90,10 @@ effectivePermissions
 | Method | Path | 접근 조건 | CSRF | 감사 |
 |---|---|---|:---:|---|
 | GET | `/api/v1/auth/csrf-token` | 공개 |  |  |
+| POST | `/api/v1/auth/email-availability` | 익명 세션 | O |  |
+| POST | `/api/v1/auth/registrations` | 익명 세션 | O | 가입 성공 |
 | POST | `/api/v1/auth/login` | 익명 세션 | O | 성공·실패·제한 |
+| POST | `/api/v1/auth/password/initial-change` | `PASSWORD_CHANGE_REQUIRED` | O | 성공·실패 |
 | POST | `/api/v1/auth/mfa/totp/enroll` | `MFA_ENROLLMENT_REQUIRED` | O | 등록 시작 실패 |
 | POST | `/api/v1/auth/mfa/totp/confirm` | `MFA_ENROLLMENT_REQUIRED` | O | 등록 성공·실패 |
 | POST | `/api/v1/auth/mfa/totp/verify` | `MFA_REQUIRED` | O | 성공·실패·제한 |

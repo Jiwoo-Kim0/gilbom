@@ -102,6 +102,8 @@ HTTP 상태와 응답 형식은 다음 원칙을 따른다.
 | `COMMON_VALIDATION_FAILED` | 400 | Bean Validation 필드·파라미터 검증 실패 |
 | `AUTH_UNAUTHENTICATED` | 401 | 로그인 세션 또는 로봇 인증 없음 |
 | `AUTH_FORBIDDEN` | 403 | RBAC 권한 부족 또는 CSRF 검증 실패 |
+| `AUTH_PASSWORD_REUSE_NOT_ALLOWED` | 422 | 새 비밀번호가 현재 비밀번호와 동일 |
+| `AUTH_MFA_UNAVAILABLE` | 503 | TOTP 암호화·검증 기반을 안전하게 사용할 수 없음 |
 | `COMMON_RESOURCE_NOT_FOUND` | 404 | 도메인을 특정할 수 없는 리소스 없음 |
 | `COMMON_METHOD_NOT_ALLOWED` | 405 | 지원하지 않는 HTTP 메서드 |
 | `COMMON_CONFLICT` | 409 | 도메인을 특정할 수 없는 중복·상태 충돌 |
