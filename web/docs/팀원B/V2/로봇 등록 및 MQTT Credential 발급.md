@@ -73,10 +73,12 @@ firmware_version
 | `registered_at` | 서버 현재시각 |
 | `operational_status` | 최초 `PROVISIONING` |
 | `connectivity_status` | 최초 `OFFLINE` |
-| `mqtt_client_id` | 로봇 설정에서 `robot_code`와 동일하게 사용 |
 
 `registered_by`를 Request Body로 받지 않는다. Frontend가 다른 관리자 ID를 보내
 등록자를 위조하지 못하도록 Backend가 인증 세션에서 결정한다.
+
+MQTT Client ID는 V2 Payload 계약의 식별자가 아니며 등록 API가 생성하지 않는다.
+로봇 런타임 설정에서 동시에 연결되는 MQTT Client마다 고유한 값을 사용한다.
 
 ## 4. 상태 구분
 
@@ -192,16 +194,18 @@ Idempotency-Key: <요청별 고유값>
 
 Backend와 Provisioner 처리:
 
-1. `ROBOT_REGISTER` 권한, CSRF, 중요 작업 재인증, 요청 멱등성을 확인한다.
+1. `ROBOT_REGISTER` 권한, CSRF, 요청 멱등성을 확인한다.
 2. 대상 로봇이 등록되어 있고 `DISABLED`가 아닌지 확인한다.
 3. 안전한 난수 32바이트 이상으로 비밀번호를 생성한다.
-4. Mosquitto 호환 Password Hash와 Fingerprint를 만든다.
-5. `robot_credential`을 `PENDING`으로 생성한다.
-6. Provisioner가 기존 사용자 전체를 보존하면서 `passwd` 파일을 갱신한다.
-7. 파일을 안전한 권한으로 원자적 교체하고 Mosquitto를 Reload한다.
-8. 반영 성공 시 Credential을 `ACTIVE`로 변경한다.
-9. 로봇 운영 상태를 `ACTIVE`로 변경한다.
-10. 같은 DB 트랜잭션에 감사 로그 `ROBOT_CREDENTIAL_ISSUED`를 저장한다.
+4. Provisioner가 기존 사용자 전체를 보존하면서 `passwd` 파일을 갱신한다.
+5. Broker 실행 래퍼가 변경을 감지해 Mosquitto를 Reload한다.
+6. 새 username과 원문 비밀번호로 TLS MQTT 로그인을 검증한다.
+7. Mosquitto Password Hash와 SHA-256 Fingerprint를
+   `robot_credential(ACTIVE)`에 저장한다.
+8. 로봇 운영 상태를 `ACTIVE`로 변경하고 같은 DB 트랜잭션에 감사 로그
+   `ROBOT_CREDENTIAL_ISSUED`를 저장한다.
+9. DB 트랜잭션이 실패하면 Provisioner가 추가한 Broker 계정을 제거한다.
+10. 원문을 제외한 결과만 멱등성 저장소에 기록한다.
 11. 마지막으로 원문 비밀번호를 한 번만 응답한다.
 
 성공 Response 예:
@@ -364,25 +368,31 @@ Credential만 발급되고 Presence가 없으면 `연결 대기`로 표시한다
 
 ## 11. 현재 프로젝트의 구현 상태
 
-현재 Mosquitto는 password-file 방식이다.
+현재 Mosquitto는 password-file 방식이며 로컬 동적 Credential Provisioner가
+구현되어 있다.
 
-- 로컬 `mqtt-init`은 환경변수의 Backend 계정과 테스트 로봇 계정만 생성한다.
-- 운영 TLS Profile은 `passwd` 파일을 Broker에 읽기 전용으로 마운트한다.
-- Backend가 호출할 수 있는 동적 Credential Provisioner는 아직 없다.
+- 로컬 `mqtt-init`은 Backend·테스트 계정을 갱신하되 기존 발급 계정을 보존한다.
+- Backend는 공유된 `local/runtime/credentials/passwd`를 제한된 권한으로 갱신한다.
+- Broker 실행 래퍼는 파일 변경을 감지해 Reload한다.
+- Backend는 새 Credential로 실제 TLS MQTT 로그인을 확인한 뒤 성공을 응답한다.
+- EC2 Profile은 운영 Credential 볼륨과 Reload 절차가 준비되기 전까지
+  `MQTT_CREDENTIAL_PROVISIONING_ENABLED=false`로 실패 폐쇄한다.
 
-따라서 현재 단계에서 등록 화면이 할 수 있는 안전한 범위는 다음과 같다.
+등록 화면의 정상 흐름은 다음과 같다.
 
 ```text
 로봇 DB 등록
 → operational_status=PROVISIONING
 → connectivity_status=OFFLINE
-→ "MQTT Credential 발급 준비 중" 표시
+→ Credential 발급 API 호출
+→ 생성된 비밀번호 1회 표시 및 로봇에 별도 주입
+→ operational_status=ACTIVE
+→ 로봇의 outbound MQTT 연결 대기
 ```
 
-Provisioner가 구현되기 전에는 Credential 발급 성공이나 비밀번호 원문을 임의로
-표시하면 안 된다. 수동 `mosquitto_passwd` 작업을 사용한다면 제한된 운영자만
-서버에서 대화형으로 수행하고, 비밀번호를 명령행 인자로 넣거나 Shell History에
-남기지 않는다.
+서버가 로봇의 인바운드 포트로 파일을 보내지는 않는다. QR, USB, 설치 도구,
+승인된 보안 채널 같은 별도 초기 프로비저닝 경로로 비밀번호와 공개 CA를 주입한
+뒤 로봇이 Broker에 outbound 연결한다.
 
 ## 12. 구현 체크리스트
 
@@ -390,13 +400,14 @@ Provisioner가 구현되기 전에는 Credential 발급 성공이나 비밀번�
 - [x] 등록 화면 입력값을 이름·Serial Number로 제한
 - [x] `registered_by`를 인증 세션에서 자동 설정
 - [x] 로봇·현재 상태·감사 로그의 동일 트랜잭션 저장
-- [ ] Credential Provisioner 실행 주체와 권한
-- [ ] Mosquitto `passwd` 원자적 교체와 Reload
-- [ ] Broker 반영 실패 보상 작업
-- [ ] 비밀번호 원문 1회 응답과 `Cache-Control: no-store`
+- [x] 로컬 Credential Provisioner 실행 주체와 공유 파일 권한
+- [x] Mosquitto `passwd` 변경 감지와 Reload
+- [x] Broker 반영 또는 DB 트랜잭션 실패 보상 작업
+- [x] 비밀번호 원문 1회 응답과 `Cache-Control: no-store`
 - [ ] Frontend Secret 비영속 처리
 - [ ] 로봇 Secret 파일 권한과 로그 마스킹
 - [ ] 로봇별 Topic ACL 검증
 - [ ] Presence ONLINE까지 연결 대기 UI
 - [ ] 최대 180일 회전과 즉시 폐기 절차
 - [ ] 발급·실패·재발급·폐기 감사 로그
+- [ ] EC2 Credential 전용 볼륨과 Reload 배포 구성

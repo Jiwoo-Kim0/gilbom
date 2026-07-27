@@ -62,13 +62,15 @@ Credential 발급과 Mosquitto 반영이 모두 성공한 뒤 다음 정보를 �
 | `mqtt_broker_port` | `8883` | X |
 | `mqtt_username` | `RBT-001` | X |
 | `mqtt_password` | 무작위 32바이트 이상 | O |
-| `mqtt_client_id` | `RBT-001` | X |
+| `mqtt_client_id` | `RBT-001-main` | X |
 | `mqtt_keepalive_sec` | `30` | X |
 | `mqtt_schema_version` | `2.0` | X |
 | `ca_certificate` 또는 설치 안내 | `ca.pem` | X |
 | `credential_expires_at` | UTC 시각 | X |
 
-`robot_id`, username, Client ID는 V2 MVP에서 같은 `robot_code`를 사용한다.
+`robot_id`와 username은 ACL 적용을 위해 같은 `robot_code`를 사용한다.
+Client ID는 인증·권한 식별자가 아니며 동시에 연결되는 MQTT Client마다 고유해야
+한다. 단일 로봇 프로세스는 `<robot_code>-main` 같은 값을 사용할 수 있다.
 비밀번호만 Secret이다. CA 인증서는 공개 가능한 신뢰 정보지만 변조되지 않도록
 서버의 인증서 Fingerprint 또는 승인된 경로로 전달한다.
 
@@ -303,8 +305,6 @@ def load_mqtt_settings() -> MqttSettings:
 
     if username != robot_id:
         raise RuntimeError("MQTT username must match ROBOT_ID")
-    if client_id != robot_id:
-        raise RuntimeError("MQTT client ID must match ROBOT_ID")
 
     return MqttSettings(
         robot_id=robot_id,
@@ -346,7 +346,7 @@ def create_client(settings: MqttSettings) -> mqtt.Client:
 
 연결 순서:
 
-1. 환경변수 필수값과 Robot ID 일치를 검증한다.
+1. 환경변수 필수값과 Robot ID·username 일치를 검증한다.
 2. LWT용 OFFLINE Presence를 `connect()` 전에 설정한다.
 3. Broker `8883`에 TLS로 연결한다.
 4. MQTT CONNECT에 username과 password를 포함한다.

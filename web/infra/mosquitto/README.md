@@ -18,6 +18,7 @@ infra/mosquitto/
 │  ├─ compose.yaml           # Mosquitto 단독 실행용 Compose
 │  ├─ Dockerfile.init        # 로컬 초기화 컨테이너 이미지
 │  ├─ init-local-mqtt.sh     # CA·Broker 인증서·계정·ACL 초기화
+│  ├─ run-local-mosquitto.sh # passwd 변경 감지 후 Broker Reload
 │  ├─ mosquitto.conf         # 로컬 TLS Broker 설정
 │  ├─ openssl-local-ca.cnf   # 로컬 CA 발급 설정
 │  ├─ openssl-local.cnf      # Broker 인증서 발급 설정
@@ -29,7 +30,8 @@ infra/mosquitto/
 │  │
 │  └─ runtime/               # 자동 생성, Git 제외
 │     ├─ acl                 # 실행 권한을 적용한 ACL 복사본
-│     ├─ passwd              # 로컬 MQTT 계정 파일
+│     ├─ credentials/
+│     │  └─ passwd           # Backend와 Broker가 공유하는 로컬 계정 파일
 │     └─ certs/
 │        ├─ local-ca-cert.pem
 │        ├─ local-broker-cert.pem
@@ -79,8 +81,9 @@ Broker PC의 LAN IPv4로 직접 연결한다. 기본 Compose는 안전하게 loc
 MQTT_BIND_ADDRESS=0.0.0.0
 MQTT_LAN_IP=192.168.100.191
 MQTT_TLS_PORT=8883
-MQTT_ROBOT_USERNAME=RBT-001
-MQTT_ROBOT_PASSWORD=<로봇별 테스트 비밀번호>
+MQTT_ROBOT_USERNAME=robot-test
+MQTT_ROBOT_PASSWORD=<robot-test 초기 계정 비밀번호>
+MQTT_PUBLIC_BROKER_URI=ssl://192.168.100.191:8883
 ```
 
 `MQTT_LAN_IP`에는 예시 값을 복사하지 말고 Broker PC에서 확인한 현재 LAN IPv4를
@@ -105,9 +108,22 @@ MQTT_CA_CERT=local-ca-cert.pem의 로봇 PC 내 경로
 
 공개 인증서인
 `infra/mosquitto/local/runtime/certs/local-ca-cert.pem`은 전달해도 되지만,
-`local-ca-key.pem`, Broker 개인키, `runtime/passwd`, Backend 계정 비밀번호는
+`local-ca-key.pem`, Broker 개인키, `runtime/credentials/passwd`,
+Backend 계정 비밀번호는
 전달하지 않는다. 로봇 Client는 CA 검증과 인증서 hostname/IP 검증을 모두
 유지하며 insecure TLS 옵션을 사용하지 않는다.
+
+로봇 DB 등록과 MQTT Credential 발급은 별도 단계다. 관리자가
+`POST /api/v1/robots/{robotId}/credentials`를 호출하면 Backend가 비밀번호를
+자동 생성하고 `runtime/credentials/passwd`를 갱신한다. Broker 실행 래퍼는
+파일 변경을 감지해 설정을 Reload한다. 응답의 원문 비밀번호는 한 번만 표시되므로
+즉시 로봇의 보호된 Secret 저장소에 주입한다.
+
+EC2에서는 같은 API 코드를 사용하되 `ec2` Profile의 자동 발급이 기본적으로
+비활성화되어 있다. 운영 배포에서 Backend와 Broker에 전용 Credential 볼륨,
+`mosquitto_passwd`, Reload 방식, 외부 Broker URI를 명시한 뒤에만
+`MQTT_CREDENTIAL_PROVISIONING_ENABLED=true`로 연다. 로컬 CA·로컬 passwd를
+EC2로 복사하지 않는다.
 
 Windows Defender Firewall은 Private 프로필에서 TCP 8883을 팀원 PC의 LAN
 IP 하나에만 허용한다. 관리자 PowerShell 예시는 다음과 같다.

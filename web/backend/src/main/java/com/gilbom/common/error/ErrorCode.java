@@ -37,6 +37,14 @@ public enum ErrorCode {
     COMMON_CONFLICT(HttpStatus.CONFLICT, "요청이 현재 리소스 상태와 충돌합니다."),
 
     ROBOT_SERIAL_NUMBER_CONFLICT(HttpStatus.CONFLICT, "이미 등록된 로봇 시리얼 번호입니다."),
+    ROBOT_CREDENTIAL_CONFLICT(
+            HttpStatus.CONFLICT,
+            "이미 활성화된 로봇 MQTT 인증정보가 있습니다."
+    ),
+    ROBOT_CREDENTIAL_SECRET_ALREADY_ISSUED(
+            HttpStatus.CONFLICT,
+            "이미 처리된 인증정보 발급 요청입니다. 비밀번호는 다시 표시할 수 없습니다."
+    ),
 
     AUTH_EMAIL_ALREADY_REGISTERED(HttpStatus.CONFLICT, "이미 사용 중인 이메일입니다."),
 
@@ -76,6 +84,10 @@ public enum ErrorCode {
     S3_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "파일 저장소를 일시적으로 사용할 수 없습니다."),
     MQTT_CERTIFICATE_NOT_X509(HttpStatus.INTERNAL_SERVER_ERROR, "MQTT 인증서가 X.509 형식이 아닙니다."),
     MQTT_SECURITY_CONFIGURATION_INVALID(HttpStatus.INTERNAL_SERVER_ERROR, "MQTT 보안 설정이 올바르지 않습니다."),
+    MQTT_CREDENTIAL_PROVISIONING_UNAVAILABLE(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "MQTT 인증정보 발급 서비스를 일시적으로 사용할 수 없습니다."
+    ),
     MQTT_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "MQTT 서비스를 일시적으로 사용할 수 없습니다.");
 
     private final HttpStatus httpStatus;
