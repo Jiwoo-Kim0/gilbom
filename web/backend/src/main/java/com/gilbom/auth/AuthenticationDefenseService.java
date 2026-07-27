@@ -169,7 +169,8 @@ public class AuthenticationDefenseService {
             AuthenticationRequestAuditContext context
     ) {
         // 로그아웃 감사 장애가 세션 폐기를 되돌리지 못하게 폐기를 먼저 확정한다.
-        sessionService.invalidateCurrentSession(request);
+        sessionService.revokeCurrentServerSession(request);
+        sessionService.expireCurrentClientSession(request);
         auditService.recordLogoutBestEffort(context, userId);
     }
 

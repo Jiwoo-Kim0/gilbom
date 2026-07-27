@@ -10,13 +10,14 @@
 
 
 def read() -> dict:
-    """RobotState.set_battery() 에 그대로 넘어가는 읽기 결과.
+    """RobotState.set_battery() 에 그대로 넘어가는 원시 읽기 결과.
 
-    측정 회로가 붙기 전이라 아직 못 믿는다 — valid=False 면 잔량은 null 이고
-    등급은 UNKNOWN 이다 (§5.5). 회로가 붙으면 percent 와 함께
-    source=MEASURED(가동시간 추정이면 ESTIMATED)를 채운다.
+    등급(NORMAL·LOW·CRITICAL)은 여기서 정하지 않는다 — 임계값·히스테리시스로
+    RobotState 가 판정한다. 센서는 valid·percent·source 만 준다.
+    측정 회로가 붙기 전이라 아직 못 믿는다 — valid=False 면 잔량은 null 이다 (§5.5).
+    회로가 붙으면 percent 와 함께 source=MEASURED(가동시간 추정이면 ESTIMATED)를 채운다.
     """
-    return {"valid": False, "percent": None, "state": "UNKNOWN"}
+    return {"valid": False, "percent": None}
 
 
 def health() -> str:

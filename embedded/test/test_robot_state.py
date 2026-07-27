@@ -13,8 +13,10 @@ import pytest
 from comms import MessageFactory, MqttConfig, MqttClient, TopicKind
 from comms.contract import HEALTH_MEMBERS, HEALTH_STATES, MODES, REASON_CODES
 from robot_state import (
+    HEALTH_PROBE_INTERVAL_SEC,
     MODE_REASONS,
     STATE_INTERVAL_SEC,
+    STORAGE_PROBE_INTERVAL_SEC,
     InvalidTransition,
     RobotState,
     StatePublisher,
@@ -127,6 +129,43 @@ def test_patrolling_pause_resume(state):
     assert (state.mode, state.reason_code) == ("PATROLLING", "NONE")
 
 
+@pytest.mark.parametrize(
+    "reach",
+    [
+        patrolling,
+        lambda s: (patrolling(s), s.pause())[0],
+        lambda s: (patrolling(s), s.safe_stop("OBSTACLE"))[0],
+    ],
+)
+def test_stand_by_returns_to_ready(state, reach):
+    """미션이 끝나 대기로 돌아가는 경로 (전이 표의 PATROLLING·PAUSED·SAFE_STOP → READY)."""
+    reach(state)
+    assert state.stand_by() is True
+    assert (state.mode, state.reason_code) == ("READY", "NONE")
+
+
+def test_stand_by_from_ready_reports_no_change(state):
+    state.boot_completed()
+    assert state.stand_by() is False  # 이미 대기다 — 재발행할 이유가 없다
+
+
+def test_stand_by_during_boot_is_the_same_transition_as_boot_completed(state):
+    """BOOTING → READY 는 전이 표에 하나뿐이다. 부르는 이름이 달라도 결과가 같다.
+
+    따로 막지 않는다 — FSM 이 지키는 것은 (mode, reason_code) 짝이지
+    어느 메서드를 거쳤는지가 아니다.
+    """
+    assert state.stand_by() is True
+    assert (state.mode, state.reason_code) == ("READY", "NONE")
+    assert RobotState().boot_completed() is True
+
+
+def test_stand_by_is_rejected_after_shutdown(state):
+    state.begin_shutdown()
+    with pytest.raises(InvalidTransition):
+        state.stand_by()
+
+
 def test_error_and_shutdown_are_reachable_from_anywhere():
     for reach in (lambda s: None, lambda s: s.boot_completed(), patrolling):
         fresh = RobotState()
@@ -214,6 +253,25 @@ def test_repeated_obstacle_detection_does_not_change_state(state):
     patrolling(state)
     state.obstacle_detected()
     assert state.obstacle_detected() is False  # 최초 감지 1회만 전이다
+
+
+@pytest.mark.parametrize("reason", ["REMOTE_ESTOP", "CRITICAL_BATTERY", "LIDAR_FAULT"])
+def test_obstacle_does_not_overwrite_another_safe_stop_reason(state, reason):
+    """운영자가 누른 정지가 장애물로 덮이면 기록에서 지워지고 자동 재개 대상이 된다."""
+    patrolling(state)
+    state.safe_stop(reason)
+    assert state.obstacle_detected() is False
+    assert (state.mode, state.reason_code) == ("SAFE_STOP", reason)
+
+
+@pytest.mark.parametrize("mode", ["BOOTING", "ERROR"])
+def test_obstacle_is_ignored_where_safe_stop_is_not_reachable(mode):
+    """전이 표가 막는 mode 에서는 조용히 False 다 — 예외로 루프를 세우지 않는다."""
+    fresh = RobotState()
+    if mode == "ERROR":
+        fresh.fault("INTERNAL_ERROR")
+    assert fresh.obstacle_detected() is False
+    assert fresh.mode == mode
 
 
 def test_obstacle_cleared_does_not_release_other_safe_stops(state):
@@ -340,6 +398,52 @@ def test_storage_degraded_when_outbox_piles_up(tmp_path, clock):
     assert wired.health()["storage"] == "DEGRADED"
 
 
+def test_hardware_probes_are_cached_between_ticks(clock):
+    """스텁은 공짜지만 I2C·시리얼이 붙으면 tick 마다 장치를 때리게 된다."""
+    calls = []
+    wired = RobotState(
+        health_probes={"camera": lambda: (calls.append(1), "OK")[1]},
+        monotonic=clock.monotonic,
+    )
+    for _ in range(4):  # 0.5초 tick 두 번 = 캐시 한 주기
+        wired.health()
+        clock.advance(0.25)
+    assert len(calls) == 1
+
+    clock.advance(HEALTH_PROBE_INTERVAL_SEC)
+    wired.health()
+    assert len(calls) == 2
+
+
+def test_one_tick_probes_each_member_at_most_once(client, clock):
+    """publisher·sampler·events 가 한 tick 에 각자 health 를 읽어도 프로브는 한 바퀴다."""
+    from events import EventPublisher
+    from telemetry import TelemetrySampler
+
+    calls = []
+
+    def probe(name):
+        calls.append(name)
+        return "OK"
+
+    members = ("camera", "lidar", "gps", "battery", "motor")
+    counted = RobotState(
+        health_probes={name: (lambda n=name: probe(n)) for name in members},
+        monotonic=clock.monotonic,
+    )
+    publisher = StatePublisher(client, counted, monotonic=clock.monotonic)
+    sampler = TelemetrySampler(
+        client, counted, monotonic=clock.monotonic, thermal_root="no-thermal"
+    )
+    events = EventPublisher(client, counted, monotonic=clock.monotonic)
+
+    publisher.poll()
+    sampler.poll()
+    events.poll()
+    assert len(calls) <= len(members)
+    assert set(calls) == set(members)
+
+
 def test_storage_probe_is_cached_between_ticks(tmp_path, clock):
     outbox = FakeOutbox()
     wired = RobotState(
@@ -352,12 +456,29 @@ def test_storage_probe_is_cached_between_ticks(tmp_path, clock):
     assert wired.health()["storage"] == "DEGRADED"
 
 
-def test_health_change_publishes(client):
+def test_storage_keeps_its_own_longer_window(tmp_path, clock):
+    """디스크 쓰기라 health 캐시(1초)가 만료돼도 5초까지는 다시 검사하지 않는다."""
+    outbox = FakeOutbox()
+    wired = RobotState(storage_dir=tmp_path, outbox=outbox, monotonic=clock.monotonic)
+    assert wired.health()["storage"] == "OK"
+    outbox.pending = 500
+
+    clock.advance(HEALTH_PROBE_INTERVAL_SEC)
+    assert wired.health()["storage"] == "OK"  # health 캐시는 만료됐지만 storage 는 아니다
+    clock.advance(STORAGE_PROBE_INTERVAL_SEC)
+    assert wired.health()["storage"] == "DEGRADED"
+
+
+def test_health_change_publishes(client, clock):
     verdict = ["OK"]
-    wired = RobotState(health_probes={"camera": lambda: verdict[0]})
+    wired = RobotState(
+        health_probes={"camera": lambda: verdict[0]}, monotonic=clock.monotonic
+    )
     pub = StatePublisher(client, wired)
     pub.publish(force=True)
     verdict[0] = "FAULT"
+    assert pub.poll() is False  # 아직 캐시 — 감지가 최대 1초 늦는다
+    clock.advance(HEALTH_PROBE_INTERVAL_SEC)
     assert pub.poll() is True
     assert client.states()[-1]["health"]["camera"] == "FAULT"
 
@@ -420,26 +541,28 @@ def test_forced_publish_also_resets_the_timer(client, publisher, clock):
 def test_battery_state_change_publishes_but_percent_drift_does_not(
     client, publisher, state, clock
 ):
-    state.set_battery(valid=True, percent=67.4, state="NORMAL")
+    state.set_battery(valid=True, percent=67.4)
     publisher.poll()
-    state.set_battery(valid=True, percent=67.1, state="NORMAL")
+    state.set_battery(valid=True, percent=67.1)
     assert publisher.poll() is False  # 퍼센트만 흔들린 것은 전이가 아니다
-    state.set_battery(valid=True, percent=19.5, state="LOW")
+    state.set_battery(valid=True, percent=19.5)
+    assert publisher.poll() is False  # 첫 표본은 아직 확정이 아니다 (confirm_samples)
+    state.set_battery(valid=True, percent=19.2)
     assert publisher.poll() is True
     assert client.states()[-1]["battery"] == {
         "valid": True,
-        "percent": 19.5,
+        "percent": 19.2,
         "state": "LOW",
     }
 
 
 def test_invalid_battery_values_are_rejected_before_publish(state):
     with pytest.raises(ValueError):
-        state.set_battery(valid=True, percent=None, state="NORMAL")
+        state.set_battery(valid=True, percent=None)
     with pytest.raises(ValueError):
-        state.set_battery(valid=True, percent=140.0, state="NORMAL")
+        state.set_battery(valid=True, percent=140.0)
     with pytest.raises(ValueError):
-        state.set_battery(valid=True, percent=50.0, state="FULL")
+        state.set_battery(valid=True, percent=50.0, source="GUESSED")
 
 
 # --------------------------------------------------------------------------

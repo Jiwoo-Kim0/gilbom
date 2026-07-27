@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useLocation } from 'react-router'
 import { NavigationBar } from '../features/navigationbar'
+import { useAuthentication } from '../features/auth/authenticationContext'
 
 const pageTitles: Record<string, string> = {
   '/robots': '로봇 상태 관리',
@@ -9,16 +10,11 @@ const pageTitles: Record<string, string> = {
   '/my': '마이페이지',
 }
 
-// 인증 API 연결 전까지 사용하는 자리표시자 사용자 정보.
-const currentUser = {
-  name: '강민준',
-  title: '차장',
-  role: 'System Admin',
-}
-
 export function AppLayout() {
   const location = useLocation()
+  const { user } = useAuthentication()
   const pageTitle = pageTitles[location.pathname] ?? '길봄 관리자'
+  const primaryRole = user?.roles.at(0)?.roleName ?? '권한 미지정'
 
   return (
     <>
@@ -26,7 +22,13 @@ export function AppLayout() {
         본문으로 바로가기
       </a>
       <div className="app-shell">
-        <NavigationBar user={currentUser} />
+        <NavigationBar
+          user={{
+            name: user?.displayName ?? '관리자',
+            title: '',
+            role: primaryRole,
+          }}
+        />
 
         <div className="app-frame">
           <header className="topbar">
@@ -36,7 +38,7 @@ export function AppLayout() {
             </div>
             <NavLink className="account-link" to="/my">
               <span className="account-avatar" aria-hidden="true">
-                AD
+                {user?.displayName.slice(0, 1) ?? 'A'}
               </span>
               <span>내 계정</span>
             </NavLink>
