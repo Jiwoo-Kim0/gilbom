@@ -9,6 +9,7 @@ import java.util.Objects;
 public record ParsedMqttMessage(
         ParsedMqttTopic topic,
         MqttV2Payload payload,
+        String rawPayload,
         int qos,
         Instant receivedAt
 ) {
@@ -16,6 +17,7 @@ public record ParsedMqttMessage(
     public ParsedMqttMessage {
         Objects.requireNonNull(topic, "topic must not be null");
         Objects.requireNonNull(payload, "payload must not be null");
+        Objects.requireNonNull(rawPayload, "rawPayload must not be null");
         Objects.requireNonNull(receivedAt, "receivedAt must not be null");
     }
 }

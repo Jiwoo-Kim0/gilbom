@@ -68,6 +68,7 @@ public class MqttMessageParser {
         return new ParsedMqttMessage(
                 topic,
                 payload,
+                inboundMessage.payload(),
                 inboundMessage.qos(),
                 inboundMessage.receivedAt()
         );
