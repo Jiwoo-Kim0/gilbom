@@ -49,6 +49,7 @@ class FakePahoClient:
         self.on_message = self.on_publish = None
         self.will = None
         self.published = []  # (topic, payload, qos, retain, mid)
+        self.infos = []  # publish 가 돌려준 FakeInfo
         self.subscriptions = []
         self.connect_args = None
         self.reconnect_delay = None
@@ -84,6 +85,7 @@ class FakePahoClient:
         self._mid += 1
         self.published.append((topic, payload, qos, retain, self._mid))
         info = FakeInfo(self._mid)
+        self.infos.append(info)
         if self.auto_ack and qos > 0:
             self.ack(self._mid)
         return info
@@ -215,6 +217,21 @@ def test_publish_uses_policy(client, paho):
     )
     topic, _, qos, retain, _ = paho.last()
     assert (topic, qos, retain) == ("tbs/v2/robots/RBT-001/telemetry", 0, False)
+
+
+def test_publish_does_not_wait_by_default(client, paho):
+    paho.simulate_connect()
+    paho.infos.clear()
+    client.publish(TopicKind.STATE, sample_state(client))
+    assert [info.waited for info in paho.infos] == [False]
+
+
+def test_publish_can_wait_for_the_socket(client, paho):
+    """종료 직전처럼 곧바로 disconnect 가 뒤따르는 경로에서만 쓴다."""
+    paho.simulate_connect()
+    paho.infos.clear()
+    assert client.publish(TopicKind.STATE, sample_state(client), wait_sec=1.5) is True
+    assert [info.waited for info in paho.infos] == [True]
 
 
 def test_publish_rejects_subscribe_only_topic(client):

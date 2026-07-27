@@ -21,9 +21,9 @@ mqtt:
                                 # null 이면 TLS 없이 접속한다(로컬 mosquitto 검증 전용).
   outbox_path: var/outbox.sqlite3   # 미전송 event 저장소 (커밋 금지)
 
-# upload:
-#   url: https://<서버>/api/v1/images
-#   api_key: ${env:UPLOAD_API_KEY}
+upload:
+  url: ${env:UPLOAD_URL}          # POST /api/v1/images 전체 URL
+  api_key: ${env:UPLOAD_API_KEY}  # 기기별 X-API-Key. 세션 쿠키·CSRF 아니다.
 
 # drive:
 #   i2c_bus: 7

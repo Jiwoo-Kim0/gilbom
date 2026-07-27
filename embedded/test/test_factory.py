@@ -6,6 +6,7 @@
 import json
 import re
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -69,6 +70,29 @@ def test_no_v1_namespace_anywhere():
     assert NAMESPACE == "tbs/v2"
     for kind in TopicKind:
         assert "tbs/v1" not in topic(ROBOT_ID, kind)
+
+
+#: 계약 계보상 「MQTT 통신 스웨거 명세서」는 v1 이다. 이걸 "신버전" 으로 적어 둔 주석이
+#: 남아 있으면 다음 사람이 v1 문서를 정본으로 읽는다 — 실제로 uploader 에서 한 번 났다.
+_STALE_SPEC_MARKERS = ("tbs/v1", "스웨거", "schema_version \"1.0\"")
+
+
+def test_source_never_points_at_the_v1_contract():
+    """구현 파일이 v1 문서를 기준으로 지목하지 않는지. 정본은 v2 하나다."""
+    root = Path(__file__).resolve().parents[1]
+    sources = [
+        path
+        for path in root.rglob("*.py")
+        if "test" not in path.parts and "__pycache__" not in path.parts
+    ]
+    assert sources, "스캔할 소스를 못 찾았다 — 경로 가정이 깨졌다"
+    offenders = []
+    for path in sources:
+        text = path.read_text(encoding="utf-8")
+        for marker in _STALE_SPEC_MARKERS:
+            if marker in text:
+                offenders.append(f"{path.relative_to(root)}: {marker!r}")
+    assert not offenders, "v1 계약을 가리키는 참조가 남았다: " + ", ".join(offenders)
 
 
 # --------------------------------------------------------------------------
