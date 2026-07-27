@@ -2,11 +2,11 @@ import { Navigate, createBrowserRouter } from 'react-router'
 import { AppLayout } from './AppLayout'
 import { RouteErrorPage } from './RouteErrorPage'
 import { DefectManagePage } from '../features/defect/DefectManagePage'
-import { MyPage } from '../pages/MyPage'
+import { MyPage } from '../features/platform/MyPage'
 import { NotFoundPage } from '../pages/NotFoundPage'
-import { ReportsPage } from '../pages/ReportsPage'
+import { ReportsPage } from '../features/platform/ReportsPage'
 import { RobotManagePage } from '../features/robot/RobotManagePage'
-import { RoleManagePage } from '../pages/RoleManagePage'
+import { RoleManagePage } from '../features/platform/RoleManagePage'
 
 // route 정의를 한곳에 두어 navigation, 권한 가드, loader를 기능 구현 때 일관되게 확장한다.
 export const router = createBrowserRouter([
