@@ -5,3 +5,12 @@
 #   - read() -> position dict (telemetry.position 에 그대로 들어감)
 #     valid, lat, lon, accuracy_m(hdop 기반), heading_deg(course, 없으면 null)
 #   - fix 미확보 → valid=False, 좌표는 null (더미 좌표는 개발 초기에만)
+
+
+def health() -> str:
+    """state.health.gps — Serial 연결·최근 NMEA·GPS Fix 로 판정 (계약 §5.3).
+
+    하드웨어가 붙기 전까지 UNKNOWN 이다. 계약상 UNKNOWN 은 '검사 전' 이라는 뜻이라
+    지금 상태를 정확히 나타낸다 — 가짜 OK 를 돌려주면 안 된다.
+    """
+    return "UNKNOWN"

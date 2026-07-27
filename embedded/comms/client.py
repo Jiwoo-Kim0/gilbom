@@ -52,6 +52,7 @@ class MqttClient:
         command_queue: "queue.Queue" = None,
         client_factory=None,
         resend_interval_sec: float = RESEND_INTERVAL_SEC,
+        on_connected=None,
     ) -> None:
         self.config = config
         self.messages = factory or MessageFactory(config.robot_id)
@@ -61,6 +62,9 @@ class MqttClient:
         self.outbox = outbox or Outbox(config.outbox_path)
         #: main.py 가 pop 해서 실행한다. 이 클래스는 명령을 해석하지 않는다.
         self.commands = command_queue or queue.Queue()
+        #: 접속(재접속 포함) 직후 부르는 훅. main.py 가 "현재 state 발행" 을 건다.
+        #: 이 클래스는 로봇 상태를 모른다 — 훅만 제공한다.
+        self.on_connected = on_connected
 
         self._resend_interval = resend_interval_sec
         self._connected = threading.Event()
@@ -151,7 +155,7 @@ class MqttClient:
 
     # -- 발행 ------------------------------------------------------------
 
-    def publish(self, kind: TopicKind, payload: dict) -> bool:
+    def publish(self, kind: TopicKind, payload: dict, *, wait_sec: float = None) -> bool:
         """topic 종류에 맞는 QoS·retain 으로 발행한다.
 
         events 4종은 Outbox 를 거친다 — 저장 → 발행 → PUBACK 시 sent.
@@ -159,13 +163,21 @@ class MqttClient:
 
         반환값은 '지금 paho 로 넘겼는지' 다. event 가 False 여도 유실이 아니라
         Outbox 에 남아 있다는 뜻이다. 서버 수신 확인은 PUBACK 시점에 이뤄진다.
+
+        `wait_sec` 을 주면 소켓에 실릴 때까지 기다린다. 종료 직전처럼 곧바로
+        disconnect 가 뒤따라서 큐에 남은 메시지가 버려지는 경로에서만 쓴다.
         """
         kind = TopicKind(kind)
         if kind not in PUBLISH_POLICY:
             raise ValueError(f"{kind} is not a publish topic")
         if kind in EVENT_KINDS:
             return self.publish_event(kind, payload)
-        return self._publish_direct(kind, payload).rc == mqtt.MQTT_ERR_SUCCESS
+        info = self._publish_direct(kind, payload)
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            return False
+        if wait_sec is not None:
+            info.wait_for_publish(wait_sec)
+        return True
 
     def publish_event(self, kind: TopicKind, payload: dict) -> bool:
         """event 를 Outbox 에 적고, 접속돼 있으면 바로 발행한다."""
@@ -265,6 +277,14 @@ class MqttClient:
         client.subscribe(self.topics.of(TopicKind.COMMAND_REQUEST), qos=SUBSCRIBE_QOS)
         # 밀린 event 재발행은 네트워크 루프를 막지 않도록 워커에 맡긴다.
         self._wakeup.set()
+        # presence 와 구독이 끝난 뒤에 알린다. 훅에서 예외가 올라오면 paho 네트워크
+        # 스레드가 죽으므로 여기서 삼킨다.
+        callback = self.on_connected
+        if callback is not None:
+            try:
+                callback()
+            except Exception:
+                log.exception("on_connected hook failed")
 
     def _on_disconnect(self, client, userdata, *args):
         self._connected.clear()

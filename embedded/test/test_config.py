@@ -133,6 +133,8 @@ def test_repo_config_is_loadable(monkeypatch):
     """실제 embedded/config.yaml 이 계약대로 로드되는지."""
     monkeypatch.setenv("MQTT_HOST", "broker.example.com")
     monkeypatch.setenv("MQTT_PASSWORD", "pw")
+    monkeypatch.setenv("UPLOAD_URL", "https://server.example/api/v1/images")
+    monkeypatch.setenv("UPLOAD_API_KEY", "key")
     document = load_document(REPO_CONFIG)
     config = MqttConfig.from_document(document)
     assert config.robot_id == document["robot"]["id"]

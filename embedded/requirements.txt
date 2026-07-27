@@ -8,8 +8,11 @@
 #     (안 되면 3.11 용 TensorRT 바인딩 별도 설치 또는 시스템 파이썬으로 회귀)
 #   보드 JetPack 확인: `cat /etc/nv_tegra_release` 또는 `apt-cache show nvidia-jetpack`
 
-# 의존성 — 구현 착수 시 아래 라이브러리 버전도 == 로 고정할 것
-paho-mqtt==2.1.0 # MQTT 클라이언트 (comms/mqtt_client.py). MQTT5·CallbackAPIVersion.VERSION2
+# 의존성 — 버전 고정은 위 파이썬 버전이 실기에서 확정된 뒤에 한다.
+#   지금 개발 PC 에서 해석된 값을 박으면 TensorRT 때문에 시스템 파이썬(3.10/3.8)으로
+#   회귀할 때 설치가 깨진다. 예: requests 최신은 Python >=3.10 을 요구한다.
+#   아래 paho 처럼 "이 버전이 아니면 코드가 안 도는" 경우만 예외로 고정한다.
+paho-mqtt==2.1.0 # MQTT 클라이언트 (comms/client.py). MQTT5·CallbackAPIVersion.VERSION2
                  # 를 쓰므로 1.x 로 내리면 콜백 시그니처부터 깨진다.
 PyYAML==6.0.2    # config.yaml 로드
 requests         # 이미지 HTTP 업로드 (comms/uploader.py)
