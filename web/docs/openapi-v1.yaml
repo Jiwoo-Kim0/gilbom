@@ -31,6 +31,22 @@ x-api-conventions:
     productionCookie: __Host-GILBOM_SESSION
     csrfHeader: X-CSRF-TOKEN
     mfa: TOTP required for every administrator
+    idleTimeout: PT30M
+    absoluteTimeout: PT8H
+    preAuthenticationChallengeTimeout: PT5M
+    maximumAuthenticatedSessionsPerUser: 1
+    csrfClientStorage: memory-only
+    ipAuthenticationRateLimit:
+      maximumRequests: 20
+      window: PT1M
+    passwordFailureLimit:
+      maximumFailures: 5
+      window: PT15M
+      temporaryLock: PT15M
+    mfaFailureLimit:
+      maximumFailures: 5
+      window: PT15M
+      temporaryLock: PT15M
   authorization:
     model: RBAC permission plus resource scope
     default: deny
@@ -40,6 +56,8 @@ x-contract-sources:
   common: common-api-response-and-errors.md
   api: api-contract.md
   authentication: admin-authentication-security.md
+  session: session-cookie-csrf.md
+  authenticationDefense: authentication-rate-limit-lock-audit.md
   authorization: authorization-matrix.md
   reportStatus: report-status-contract.md
   environment: environment-configuration-strategy.md
@@ -71,13 +89,93 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /api/v1/auth/email-availability:
+    post:
+      tags: [Auth]
+      operationId: checkRegistrationEmailAvailability
+      summary: 회원가입 이메일 중복 확인
+      description: |
+        이메일이 URL·프록시 access log에 남지 않도록 JSON body를 사용합니다.
+        결과는 UX 보조 정보이며 가입 시 DB UNIQUE 제약으로 다시 확인합니다.
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailAvailabilityRequest"
+      responses:
+        "200":
+          description: 이메일 사용 가능 여부
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAvailabilityResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/auth/registrations:
+    post:
+      tags: [Auth]
+      operationId: registerPublicAccount
+      summary: 공개 회원가입
+      description: |
+        계정을 PENDING_APPROVAL·역할 없음으로 생성합니다. 인증 세션이나 업무 권한을
+        만들지 않으며 클라이언트는 가입 안내 후 로그인 화면으로 이동합니다.
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublicRegistrationRequest"
+      responses:
+        "201":
+          description: 승인 대기 회원가입 생성
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicRegistrationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /api/v1/auth/login:
     post:
       tags: [Auth]
       operationId: login
-      summary: 관리자 아이디·비밀번호 검증
+      summary: 관리자 이메일·비밀번호 검증
       description: |
-        성공해도 업무 권한을 부여하지 않고 MFA 다음 상태를 반환합니다.
+        성공해도 업무 권한을 부여하지 않고 비밀번호 변경 또는 MFA 다음 상태를 반환합니다.
         익명 세션에 결합된 CSRF 토큰이 필요합니다.
       security:
         - serverSession: []
@@ -91,7 +189,12 @@ paths:
               $ref: "#/components/schemas/LoginRequest"
       responses:
         "202":
-          description: 비밀번호 검증 성공, MFA 등록 또는 검증 필요
+          description: 비밀번호 검증 성공, 초기 비밀번호 변경 또는 MFA 단계 필요
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
           content:
             application/json:
               schema:
@@ -106,13 +209,63 @@ paths:
           $ref: "#/components/responses/TooManyRequests"
         "500":
           $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/auth/password/initial-change:
+    post:
+      tags: [Auth]
+      operationId: changeInitialPassword
+      summary: 초기 비밀번호 변경
+      description: |
+        PASSWORD_CHANGE_REQUIRED 세션에서만 호출할 수 있습니다. 성공해도 인증을
+        완료하지 않고 MFA_ENROLLMENT_REQUIRED 상태를 202로 반환합니다.
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InitialPasswordChangeRequest"
+      responses:
+        "202":
+          description: 초기 비밀번호 변경 완료, TOTP 등록 필요
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginChallengeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /api/v1/auth/mfa/totp/enroll:
     post:
       tags: [Auth]
       operationId: enrollTotp
       summary: TOTP 등록 정보 일회성 발급
-      description: MFA_ENROLLMENT_REQUIRED 세션에서만 호출할 수 있습니다.
+      description: |
+        MFA_ENROLLMENT_REQUIRED 세션에서만 호출할 수 있습니다.
+        기존 미확인 등록 정보는 폐기되고 새 AES-GCM 암호문이 저장됩니다.
+        응답의 otpauth URI와 수동 입력키는 로그·브라우저 저장소에 보관하면 안 됩니다.
       security:
         - serverSession: []
       parameters:
@@ -135,12 +288,20 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /api/v1/auth/mfa/totp/confirm:
     post:
       tags: [Auth]
       operationId: confirmTotpEnrollment
       summary: 첫 TOTP 코드 확인 및 등록 완료
+      description: |
+        MFA_ENROLLMENT_REQUIRED 세션에서 첫 TOTP를 검증합니다.
+        성공할 때 factor 활성화, 복구 코드 hash 저장, 기존 세션 폐기,
+        현재 세션 ID·CSRF 교체를 함께 완료합니다.
       security:
         - serverSession: []
       parameters:
@@ -171,12 +332,19 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /api/v1/auth/mfa/totp/verify:
     post:
       tags: [Auth]
       operationId: verifyTotp
       summary: 로그인 TOTP 검증
+      description: |
+        MFA_REQUIRED 세션에서 RFC 6238 TOTP를 검증합니다.
+        현재 30초 time-step과 앞뒤 1개만 허용하며 이미 성공한 step은 재사용할 수 없습니다.
       security:
         - serverSession: []
       parameters:
@@ -190,6 +358,11 @@ paths:
       responses:
         "200":
           description: MFA와 관리자 인증 완료
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
           content:
             application/json:
               schema:
@@ -202,12 +375,19 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /api/v1/auth/mfa/recovery:
     post:
       tags: [Auth]
       operationId: verifyMfaRecoveryCode
       summary: 일회용 복구 코드 검증
+      description: |
+        MFA_REQUIRED 세션에서 미사용 복구 코드를 검증하고 원자적으로 소비합니다.
+        성공한 코드는 다시 사용할 수 없으며 응답의 recoveryCodeUsed는 true입니다.
       security:
         - serverSession: []
       parameters:
@@ -221,6 +401,11 @@ paths:
       responses:
         "200":
           description: 복구 코드 소비 및 관리자 인증 완료
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
           content:
             application/json:
               schema:
@@ -233,12 +418,19 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /api/v1/auth/logout:
     post:
       tags: [Auth]
       operationId: logout
       summary: 세션 폐기 및 로그아웃
+      description: |
+        인증 완료 또는 pre-auth challenge 세션을 서버에서 폐기하고 세션 쿠키를
+        Max-Age=0으로 만료합니다. 폐기한 세션 ID는 다시 사용할 수 없습니다.
       security:
         - serverSession: []
       parameters:
@@ -246,10 +438,23 @@ paths:
       responses:
         "204":
           description: 로그아웃 완료
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+            Set-Cookie:
+              schema:
+                type: string
+              description: 동일한 이름·Path의 세션 쿠키를 Max-Age=0으로 만료
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /api/v1/auth/me:
     get:
@@ -261,12 +466,95 @@ paths:
       responses:
         "200":
           description: 현재 관리자
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthenticatedUser"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/my/profile:
+    get:
+      tags: [Auth]
+      operationId: getMyProfile
+      summary: 현재 관리자 마이페이지 프로필 조회
+      description: |
+        이메일, 표시 이름, 조직 정보, 역할·권한, MFA 상태와 비밀번호·최근 로그인
+        시각만 반환합니다. 비밀번호 hash, TOTP secret, 복구 코드, 세션·CSRF는 반환하지
+        않습니다.
+      security:
+        - serverSession: []
+      responses:
+        "200":
+          description: 현재 관리자 프로필
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyProfileResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/my/password:
+    patch:
+      tags: [Auth]
+      operationId: changeMyPassword
+      summary: 현재 관리자 비밀번호 변경
+      description: |
+        현재 비밀번호를 재검증하고 새 비밀번호를 중앙 Argon2id 설정으로 hash합니다.
+        성공하면 모든 서버 세션을 폐기하고 현재 세션 쿠키도 만료하므로 다시 로그인해야
+        합니다.
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MyPasswordChangeRequest"
+      responses:
+        "204":
+          description: 비밀번호 변경과 모든 세션 폐기 완료
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+            Set-Cookie:
+              schema:
+                type: string
+              description: 동일한 이름·Path의 세션 쿠키를 Max-Age=0으로 만료
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /api/v1/my/mfa/totp/reset:
     post:
@@ -590,7 +878,8 @@ components:
       name: __Host-GILBOM_SESSION
       description: |
         운영 서버 세션 쿠키입니다. 쿠키 존재만으로 인증 완료를 뜻하지 않으며
-        서버의 ANONYMOUS, MFA 대기, AUTHENTICATED 상태를 함께 검사합니다.
+        서버의 ANONYMOUS, PASSWORD_CHANGE_REQUIRED, MFA 대기, AUTHENTICATED
+        상태를 함께 검사합니다.
     robotApiKey:
       type: apiKey
       in: header
@@ -716,35 +1005,109 @@ components:
 
     LoginRequest:
       type: object
-      required: [username, password]
+      required: [email, password]
       additionalProperties: false
       properties:
-        username:
+        email:
           type: string
-          minLength: 1
-          maxLength: 50
+          format: email
+          maxLength: 254
+          description: |
+            로그인 ID. 앞뒤 공백을 허용하지 않으며 Locale.ROOT 기준 전체 소문자를
+            normalized_email로 사용합니다. DNS·MX·사업자별 별칭 정규화는 하지 않습니다.
         password:
           type: string
           format: password
-          minLength: 1
-          maxLength: 128
+          minLength: 10
+          maxLength: 24
           writeOnly: true
+
+    EmailAvailabilityRequest:
+      type: object
+      required: [email]
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          description: 앞뒤 공백을 허용하지 않는 회원가입 이메일
+
+    EmailAvailabilityResponse:
+      type: object
+      required: [available]
+      additionalProperties: false
+      properties:
+        available:
+          type: boolean
+          description: normalized_email 기준 현재 사용 가능 여부
+
+    PublicRegistrationRequest:
+      type: object
+      required: [email, password, displayName]
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          description: 로그인 ID로 사용할 이메일
+        password:
+          type: string
+          format: password
+          minLength: 10
+          maxLength: 24
+          description: 조합 규칙 없이 Unicode code point 기준 10~24자
+          writeOnly: true
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: 앞뒤 공백과 제어문자를 허용하지 않는 표시 이름
+
+    PublicRegistrationResponse:
+      type: object
+      required: [accountStatus, nextAction]
+      additionalProperties: false
+      properties:
+        accountStatus:
+          type: string
+          enum: [PENDING_APPROVAL]
+        nextAction:
+          type: string
+          enum: [LOGIN]
+          description: 자동 인증 없이 로그인 화면으로 이동하라는 클라이언트 지시
 
     LoginState:
       type: string
       enum:
+        - PASSWORD_CHANGE_REQUIRED
         - MFA_ENROLLMENT_REQUIRED
         - MFA_REQUIRED
 
     LoginChallengeResponse:
       type: object
       required: [loginState, challengeExpiresAt]
+      additionalProperties: false
       properties:
         loginState:
           $ref: "#/components/schemas/LoginState"
         challengeExpiresAt:
           type: string
           format: date-time
+
+    InitialPasswordChangeRequest:
+      type: object
+      required: [newPassword]
+      additionalProperties: false
+      properties:
+        newPassword:
+          type: string
+          format: password
+          minLength: 10
+          maxLength: 24
+          description: 조합 규칙 없이 Unicode code point 기준 10~24자
+          writeOnly: true
 
     TotpCodeRequest:
       type: object
@@ -764,9 +1127,11 @@ components:
       properties:
         recoveryCode:
           type: string
-          minLength: 1
-          maxLength: 100
+          minLength: 22
+          maxLength: 22
+          pattern: '^(0[1-9]|10)-[A-Z2-7]{4}(?:-[A-Z2-7]{4}){3}$'
           writeOnly: true
+          description: 등록 확인 성공 응답에서 한 번만 발급한 위치 식별형 복구 코드
 
     OwnMfaResetRequest:
       type: object
@@ -777,8 +1142,8 @@ components:
         currentPassword:
           type: string
           format: password
-          minLength: 1
-          maxLength: 128
+          minLength: 10
+          maxLength: 24
           writeOnly: true
         totpCode:
           type: string
@@ -805,8 +1170,8 @@ components:
         currentPassword:
           type: string
           format: password
-          minLength: 1
-          maxLength: 128
+          minLength: 10
+          maxLength: 24
           writeOnly: true
         totpCode:
           type: string
@@ -820,6 +1185,7 @@ components:
     TotpEnrollmentResponse:
       type: object
       required: [otpauthUri, manualEntryKey, enrollmentExpiresAt]
+      additionalProperties: false
       properties:
         otpauthUri:
           type: string
@@ -835,6 +1201,7 @@ components:
     RoleSummary:
       type: object
       required: [roleCode, roleName]
+      additionalProperties: false
       properties:
         roleCode:
           type: string
@@ -846,6 +1213,7 @@ components:
     AuthenticatedUser:
       type: object
       required: [userId, displayName, roles, permissions]
+      additionalProperties: false
       properties:
         userId:
           type: string
@@ -862,9 +1230,89 @@ components:
           items:
             $ref: "#/components/schemas/PermissionCode"
 
+    MfaProfileStatus:
+      type: string
+      enum:
+        - ENROLLED
+        - ENROLLMENT_PENDING
+        - NOT_ENROLLED
+
+    MyProfileResponse:
+      type: object
+      required:
+        - userId
+        - email
+        - displayName
+        - roles
+        - permissions
+        - mfaStatus
+      additionalProperties: false
+      properties:
+        userId:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        displayName:
+          type: string
+          maxLength: 100
+        departmentName:
+          type: string
+          maxLength: 100
+          nullable: true
+        jobTitle:
+          type: string
+          maxLength: 100
+          nullable: true
+        officeName:
+          type: string
+          maxLength: 100
+          nullable: true
+        roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/RoleSummary"
+        permissions:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/PermissionCode"
+        mfaStatus:
+          $ref: "#/components/schemas/MfaProfileStatus"
+        passwordChangedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastLoginAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    MyPasswordChangeRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      additionalProperties: false
+      properties:
+        currentPassword:
+          type: string
+          format: password
+          minLength: 10
+          maxLength: 24
+          writeOnly: true
+        newPassword:
+          type: string
+          format: password
+          minLength: 10
+          maxLength: 24
+          writeOnly: true
+          description: 현재 비밀번호와 달라야 하며 조합 규칙은 적용하지 않음
+
     AuthenticationResponse:
       type: object
-      required: [user, csrfToken, sessionExpiresAt]
+      required: [user, csrfToken, sessionExpiresAt, recoveryCodeUsed]
+      additionalProperties: false
       properties:
         user:
           $ref: "#/components/schemas/AuthenticatedUser"
@@ -889,9 +1337,13 @@ components:
               type: array
               minItems: 10
               maxItems: 10
+              uniqueItems: true
               description: 한 번만 노출되는 일회용 복구 코드. 저장·로그 금지.
               items:
                 type: string
+                minLength: 22
+                maxLength: 22
+                pattern: '^(0[1-9]|10)-[A-Z2-7]{4}(?:-[A-Z2-7]{4}){3}$'
 
     ReportStatus:
       type: string
@@ -1042,6 +1494,8 @@ components:
         - COMMON_VALIDATION_FAILED
         - AUTH_UNAUTHENTICATED
         - AUTH_FORBIDDEN
+        - AUTH_PASSWORD_REUSE_NOT_ALLOWED
+        - AUTH_MFA_UNAVAILABLE
         - COMMON_RESOURCE_NOT_FOUND
         - ROBOT_NOT_FOUND
         - DEFECT_NOT_FOUND
@@ -1050,7 +1504,11 @@ components:
         - IMAGE_NOT_FOUND
         - COMMON_METHOD_NOT_ALLOWED
         - COMMON_CONFLICT
+<<<<<<< HEAD
         - ROBOT_SERIAL_NUMBER_CONFLICT
+=======
+        - AUTH_EMAIL_ALREADY_REGISTERED
+>>>>>>> d85ae2eac35ce35b2dd01b0862711a78afb8d090
         - COMMAND_STATE_CONFLICT
         - REPORT_STATE_CONFLICT
         - COMMON_PAYLOAD_TOO_LARGE

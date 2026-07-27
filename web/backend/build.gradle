@@ -45,7 +45,25 @@ dependencies {
 }
 
 tasks.named('test') {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags 'password-load'
+    }
+}
+
+tasks.register('passwordHashLoadTest', Test) {
+    group = 'verification'
+    description = 'Measures Argon2id hashing and concurrent verification cost.'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'password-load'
+    }
+    maxParallelForks = 1
+    jvmArgs '-Xms256m', '-Xmx512m'
+    testLogging {
+        events 'passed', 'failed'
+        showStandardStreams = true
+    }
 }
 
 tasks.named('jar') {

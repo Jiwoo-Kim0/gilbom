@@ -29,6 +29,10 @@ logging:
 
 gilbom:
   security:
+    rate-limit:
+      key:
+        # 다중 인스턴스와 재시작에서도 같은 HMAC bucket을 사용하도록 운영 Secret을 강제한다.
+        external-required: true
     mfa:
       totp-secret-encryption:
         # 운영 서버에서는 disabled 또는 keyring 누락 상태로 기동하지 못한다.

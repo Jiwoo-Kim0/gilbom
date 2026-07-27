@@ -4,8 +4,9 @@
 여기에 하드웨어 접근 코드나 판정 로직을 직접 쓰지 말 것.
   - mode·reason_code 짝과 health 판정 → robot_state.RobotState
   - state 발행 타이밍(§5.1)           → robot_state.StatePublisher
+  - telemetry 표본·발행 타이밍(§6)    → telemetry.TelemetrySampler
   - 장치별 health 판정                → 각 하드웨어 모듈의 health()
-요구 추적: F-001(초기화) F-007(시스템 관리) + MQTT 계약 tbs/v2 §4·§5
+요구 추적: F-001(초기화) F-007(시스템 관리) + MQTT 계약 tbs/v2 §4·§5·§6
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from pathlib import Path
 
 from comms import MqttClient, MqttConfig
 from robot_state import RobotState, StatePublisher
+from telemetry import TelemetrySampler
 
 log = logging.getLogger("orincar")
 
@@ -49,6 +51,22 @@ def health_probes() -> dict:
     }
 
 
+def sensor_reads() -> dict:
+    """telemetry 표본의 재료가 되는 읽기 함수를 계약 이름에 묶는다.
+
+    값 판정은 각 모듈과 TelemetrySampler 가 한다 — 여기서는 이름만 연결한다.
+    battery 는 RobotState 를 거쳐 state·telemetry 가 같은 값을 보게 한다.
+    """
+    from drive import motor
+    from sensors import battery, gps
+
+    return {
+        "gps": gps.read_position,
+        "battery": battery.read,
+        "motor": motor.is_driving,
+    }
+
+
 def build(config_path=CONFIG_PATH):
     """설정 로드 → 모듈 조립. 아직 아무 것도 발행하지 않는다.  [F-001]"""
     config = MqttConfig.load(config_path)
@@ -60,13 +78,21 @@ def build(config_path=CONFIG_PATH):
         storage_dir=Path(config.outbox_path).parent,
     )
     publisher = StatePublisher(client, state)
+    sampler = TelemetrySampler(client, state, **sensor_reads())
     # 연결 직후 1회 발행 (계약 §5.1 (a)). 재접속 때마다 다시 불린다.
     # paho 네트워크 스레드에서 불리므로 RobotState·StatePublisher 는 락으로 보호돼 있다.
+    # telemetry 에는 이 훅이 없다 — 재접속했다고 과거 표본을 보내지 않는다 (§6.1).
     client.on_connected = publisher.on_connected
-    return client, state, publisher
+    return client, state, publisher, sampler
 
 
-def run(client, state: RobotState, publisher: StatePublisher, stopping) -> None:
+def run(
+    client,
+    state: RobotState,
+    publisher: StatePublisher,
+    sampler: TelemetrySampler,
+    stopping,
+) -> None:
     """기동 전이 → 메인 루프. stopping 이 서면 돌아온다."""
     client.start()
     client.wait_until_connected(timeout=CONNECT_WAIT_SEC)
@@ -79,6 +105,9 @@ def run(client, state: RobotState, publisher: StatePublisher, stopping) -> None:
         # 전이가 있었으면 즉시(§5.1 (b)), 없어도 30초마다(§5.1 (c)) 발행한다.
         # 판정은 publisher 안에 있다 — 여기서 비교하지 않는다.
         publisher.poll()
+        # telemetry 는 5초 주기 하나뿐이다 (§6.1). 30초·5초 둘 다 0.5초 tick 으로
+        # 충분해서 스레드를 따로 두지 않는다.
+        sampler.poll()
 
 
 def shutdown(client, state: RobotState, publisher: StatePublisher) -> None:
@@ -100,7 +129,7 @@ def main() -> int:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
     )
-    client, state, publisher = build()
+    client, state, publisher, sampler = build()
     stopping = threading.Event()
 
     def _request_stop(signum, _frame):
@@ -112,7 +141,7 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _request_stop)
 
     try:
-        run(client, state, publisher, stopping)
+        run(client, state, publisher, sampler, stopping)
     except KeyboardInterrupt:
         log.info("interrupted, shutting down")
     finally:
@@ -125,8 +154,6 @@ if __name__ == "__main__":
 
 
 # 이후 티켓에서 이 조립에 더할 것 (지금은 범위 밖)
-#   R-3 telemetry 5초 주기 발행 — position/battery/jetson_temp_c  [F-007]
-#     telemetry.system.jetson_temp_c 는 tj-thermal(/sys thermal zone) 읽기
 #   R-4 events 4종 — incident(업로드 후 image_id) / safety / battery / mission
 #     장애물이 재확인 후에도 지속될 때만 SAFETY_STOPPED 1회 (계약 §10.2)
 #   R-5 commands/request 처리 → commands/result 응답

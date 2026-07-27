@@ -12,6 +12,7 @@
 | 공통 성공·오류·Validation | [`common-api-response-and-errors.md`](./common-api-response-and-errors.md) |
 | REST/SSE 공통 API·정본·버전 계약 | [`api-contract.md`](./api-contract.md) |
 | 관리자 로그인·세션·쿠키·CSRF·TOTP | [`admin-authentication-security.md`](./admin-authentication-security.md) |
+| 비밀번호 hash·dummy 검증·초기 관리자 | [`password-and-initial-admin.md`](./password-and-initial-admin.md) |
 | 역할·권한·API 접근 매트릭스 | [`authorization-matrix.md`](./authorization-matrix.md) |
 | 감사 로그·민감정보 처리 | [`audit-and-sensitive-data-policy.md`](./audit-and-sensitive-data-policy.md) |
 | 보호 자산·접근 지점·관리자·AWS·LLM 위협 | [`threat-model.md`](./threat-model.md) |
@@ -27,7 +28,7 @@
 
 | 기존 초안 | Day 1 확정 계약 |
 |---|---|
-| 로그인 성공 즉시 `200` 사용자 응답 | 비밀번호 성공은 `202` MFA 대기, TOTP·복구 성공 후에만 인증 완료 |
+| 로그인 성공 즉시 `200` 사용자 응답 | 비밀번호 성공은 `202` 비밀번호 변경 또는 MFA 대기, MFA 성공 후에만 인증 완료 |
 | 로그인 요청에 CSRF 없음 | 로그인 전 공개 CSRF 발급 후 로그인에도 `X-CSRF-TOKEN` 필수 |
 | CSRF 발급은 로그인 사용자만 가능 | `/api/v1/auth/csrf-token`은 익명 세션에도 허용 |
 | `GILBOM_SESSION` | 운영 `__Host-GILBOM_SESSION`, 로컬 HTTP만 `GILBOM_SESSION` |
@@ -44,6 +45,15 @@
 | `AUTH-004` | 모든 관리자 역할은 비밀번호와 TOTP MFA를 모두 통과해야 인증 완료된다. 비밀번호 성공만으로 업무 권한을 부여하지 않는다. |
 | `AUTH-005` | 로그인 실패는 계정 존재·비밀번호·MFA 중 어느 단계가 실패했는지 외부에 상세히 노출하지 않는다. |
 | `AUTH-006` | 비밀번호, API Key, MQTT 비밀번호는 원문 저장하지 않는다. 세션 ID는 지정 세션 저장소 외에 저장하지 않으며 어떤 로그에도 기록하지 않는다. |
+| `AUTH-007` | 비밀번호 hash는 `{argon2}$argon2id$` 형식의 Argon2id만 허용하며 BCrypt와 알고리즘 fallback을 제공하지 않는다. |
+| `AUTH-008` | 로그인 ID는 이메일이고 비밀번호는 조합 규칙 없이 원문 기준 10~24 Unicode code point로 제한한다. |
+| `AUTH-009` | 초기 비밀번호 성공은 `PASSWORD_CHANGE_REQUIRED`, 변경 성공은 `MFA_ENROLLMENT_REQUIRED`이며 MFA 성공 전에는 인증 완료로 승격하지 않는다. |
+| `AUTH-010` | 공개 회원가입 계정은 승인 대기·역할 없음으로 생성하고 초기 관리자만 서버 bootstrap으로 만든다. |
+| `AUTH-011` | 이메일 중복은 DB generated `normalized_email` UNIQUE로 보장하고 계정 생명주기와 임시 잠금을 분리한다. |
+| `AUTH-012` | 비밀번호·복구 코드는 salt·파라미터를 포함한 전체 Argon2id encoded hash만 저장하고 별도 salt·algorithm 컬럼을 두지 않는다. |
+| `AUTH-013` | 존재하지 않는 계정도 프로세스당 한 번 만든 동일 파라미터의 Argon2id dummy hash로 검증한다. |
+| `AUTH-014` | 초기 관리자는 외부 Secret으로 한 번만 생성하며 다른 origin 계정을 승격하거나 재시작 때 비밀번호·권한을 덮어쓰지 않는다. |
+| `AUTH-015` | 이메일 중복 확인과 공개 가입은 CSRF·no-store·IP Rate Limit을 적용하고, 가입은 승인 대기·역할 없음·비인증 상태로 완료한다. |
 | `AUTHZ-001` | 역할은 권한 묶음이고 서버 API는 역할명이 아니라 세부 권한 코드로 인가한다. 미등록 API는 기본 거부한다. |
 | `AUTHZ-002` | 활성 역할 권한의 합집합에 사용자 예외를 적용하고, 동일 권한의 `DENY`가 `ALLOW`보다 우선한다. |
 | `AUTHZ-003` | 로봇과 연결된 리소스는 권한 코드와 `OWNER/OPERATOR/VIEWER` 객체 범위를 모두 검사한다. |

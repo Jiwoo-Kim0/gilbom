@@ -29,7 +29,16 @@
 | V2 | 보고서, 보고서 version, 감사 로그 | 변경 가능한 header와 불변 이력을 분리하고 감사 데이터를 append-only로 보호 |
 | V3 | Spring Session JDBC, session security state | 재시작·다중 인스턴스에서도 세션을 공유하고 MFA 상태·절대 만료를 조회 가능하게 저장 |
 | V4 | Permission/RBAC seed, 로그인 제한, 멱등 요청 | 세부 권한 매트릭스를 seed하고 인증 공격·중복 상태 변경을 DB에서 원자적으로 제어 |
+<<<<<<< HEAD
 | V5 | Robot, MQTT Credential, Telemetry 이력·현재 상태 | 로봇 통신에 필요한 기준정보·Credential 수명주기와 최신 데이터 보호 기반을 우선 생성 |
+=======
+| V5 | Argon2id·초기 비밀번호 상태 제약 | 비밀번호 hash를 Argon2id로 고정하고 `PASSWORD_CHANGE_REQUIRED` challenge를 세션 상태에 추가 |
+| V6 | 계정·인증 저장 구조 완성 | 정규화 이메일 UNIQUE, 계정 생명주기·잠금, MFA/복구 코드와 challenge/session 정합성 제약 추가 |
+| V7 | 계정 생성 경로 | 공개 가입 계정을 bootstrap 관리자로 오인하지 않도록 생성 origin과 단일 bootstrap 제약 추가 |
+| V8 | 공개 인증 Rate Limit | 이메일 중복 확인과 회원가입 IP bucket을 로그인 제한과 분리 |
+| V9 | 세션 수명 정책 | 유휴 30분·challenge 5분·절대 8시간 상한과 만료 조회 index 강제 |
+| V10 | 인증 공격 방어 정책 | 비밀번호 5회·15분 계정 잠금, MFA 계정 bucket, 감사 action 조회 index 강제 |
+>>>>>>> d85ae2eac35ce35b2dd01b0862711a78afb8d090
 
 시스템 Role `ADMIN`, `MANAGER`, `OPERATOR`와 18개 세부 permission 및
 role-permission 관계는 결정적인 UUID로 seed한다. 실제
@@ -45,7 +54,11 @@ docker compose up --build --detach
 docker compose logs backend
 ```
 
+<<<<<<< HEAD
 Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V5가
+=======
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V10이
+>>>>>>> d85ae2eac35ce35b2dd01b0862711a78afb8d090
 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증
@@ -69,6 +82,46 @@ docker compose exec --no-TTY db sh -ec \
   'PGPASSWORD="$POSTGRES_APP_PASSWORD" psql --host 127.0.0.1 \
   --username "$POSTGRES_APP_USER" --dbname "$POSTGRES_DB"' \
   < infra/postgres/verify-initial-schema.sql
+```
+
+계정 이메일 중복, 비-Argon2id hash, 계정 상태 모순, TOTP step 회귀, 동시 인증
+세션처럼 거부돼야 하는 입력은 다음 부정 테스트로 검증한다.
+
+```bash
+docker compose exec --no-TTY db sh -ec \
+  'PGPASSWORD="$POSTGRES_APP_PASSWORD" psql --host 127.0.0.1 \
+  --username "$POSTGRES_APP_USER" --dbname "$POSTGRES_DB"' \
+  < infra/postgres/verify-account-authentication-constraints.sql
+```
+
+세션의 유휴·challenge·절대 만료 상한, 동시 인증 세션과 부모 세션 삭제 cascade는
+다음 rollback 검증으로 확인한다.
+
+```bash
+docker compose exec --no-TTY db sh -ec \
+  'PGPASSWORD="$POSTGRES_APP_PASSWORD" psql --host 127.0.0.1 \
+  --username "$POSTGRES_APP_USER" --dbname "$POSTGRES_DB"' \
+  < infra/postgres/verify-session-lifecycle.sql
+```
+
+공개 가입의 승인 대기·역할 없음 상태와 새 Rate Limit type은 다음 rollback 검증으로
+확인한다.
+
+```bash
+docker compose exec --no-TTY db sh -ec \
+  'PGPASSWORD="$POSTGRES_APP_PASSWORD" psql --host 127.0.0.1 \
+  --username "$POSTGRES_APP_USER" --dbname "$POSTGRES_DB"' \
+  < infra/postgres/verify-public-registration.sql
+```
+
+비밀번호 실패 5회 잠금, 인증·MFA bucket type, 인증 감사 이벤트와 append-only
+권한은 다음 rollback 검증으로 확인한다.
+
+```bash
+docker compose exec --no-TTY db sh -ec \
+  'PGPASSWORD="$POSTGRES_APP_PASSWORD" psql --host 127.0.0.1 \
+  --username "$POSTGRES_APP_USER" --dbname "$POSTGRES_DB"' \
+  < infra/postgres/verify-authentication-defense.sql
 ```
 
 append-only trigger 검증은 Flyway owner로 수행한다.

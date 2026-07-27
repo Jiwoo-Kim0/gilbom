@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoDrive - 인도 주행 자율주행 로봇 & 점자블럭 탐지</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Pretendard:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=3.0">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="brand">
+                <div class="pulse-dot active" id="sysPulse"></div>
+                <h1>AUTODRIVE <span>SIDEWALK ROBOT & BRAILLE DETECT</span></h1>
+            </div>
+            
+            <div class="header-controls">
+                <!-- LiDAR Source Toggle -->
+                <div class="hardware-mode-group">
+                    <label for="lidarSourceSelect">LiDAR 입력:</label>
+                    <select id="lidarSourceSelect" onchange="toggleLidarSource(this.value)">
+                        <option value="HARDWARE" selected>실물 YDLIDAR (/dev/ttyUSB0)</option>
+                        <option value="MOCK">시뮬레이터 (Mock Simulation)</option>
+                    </select>
+                </div>
+
+                <!-- Auto Drive Toggle Switch -->
+                <div class="auto-toggle-container">
+                    <span class="auto-label">자율 주행 (Autonomous):</span>
+                    <label class="switch">
+                        <input type="checkbox" id="autoSwitch" onchange="toggleAutoDrive(this.checked)">
+                        <span class="slider round"></span>
+                    </label>
+                    <span id="autoBadge" class="mode-badge manual">MANUAL</span>
+                </div>
+
+                <div class="hardware-mode-group">
+                    <label for="modeSelect">모터 하드웨어:</label>
+                    <select id="modeSelect" onchange="changeHardwareMode(this.value)">
+                        <option value="PCA9685">PCA9685 (I2C Servo + DC Motor)</option>
+                        <option value="HYBRID">HYBRID (PCA9685 Servo + GPIO DC)</option>
+                        <option value="GPIO">GPIO (Direct L298N)</option>
+                        <option value="MOCK">MOCK (Software Sim)</option>
+                    </select>
+                </div>
+            </div>
+        </header>
+
+        <!-- Status Banner -->
+        <div class="status-banner" id="statusBanner">
+            <div class="status-icon" id="statusIcon">🛡️</div>
+            <div class="status-text">
+                <h2 id="statusTitle">인도 주행 & 점자블럭 감지 모드</h2>
+                <p id="statusSubtitle">LiDAR 수평 장애물 회피 + 비전 인도 세그멘테이션 융합 주행 중</p>
+            </div>
+            <div class="action-pill" id="actionPill">STANDBY</div>
+        </div>
+
+        <!-- Main Dashboard Layout -->
+        <div class="dashboard-grid">
+            
+            <!-- Left Column: Camera Stream & Vision Segmentation -->
+            <section class="card vision-card">
+                <div class="card-header">
+                    <h2>📷 비전 카메라 (YOLO Segmentation + 점자 보도블럭 탐지)</h2>
+                    <div class="badge-row">
+                        <span class="badge" id="brailleCountBadge">점자블럭: 0개 탐지</span>
+                        <span class="badge" id="sidewalkSegBadge">인도 영역: 탐지중</span>
+                    </div>
+                </div>
+
+                <div class="camera-stream-container">
+                    <img id="videoFeed" src="{{ url_for('video_feed') }}" alt="Camera Feed" class="camera-feed-img">
+                    <div class="camera-overlay-info">
+                        <div class="overlay-item">
+                            <span>인도 중심 편차:</span>
+                            <strong id="visionOffsetVal">0.00</strong>
+                        </div>
+                        <div class="overlay-item">
+                            <span>권장 조향각:</span>
+                            <strong id="visionSteerVal">100°</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Captured Braille Block Snapshots Gallery -->
+                <div class="capture-gallery-container">
+                    <div class="gallery-header">
+                        <h3>📸 점자 보도블럭 자동 캡쳐 갤러리</h3>
+                        <small>탐지 시 자동 저장된 이미지</small>
+                    </div>
+                    <div class="gallery-scroll" id="captureGallery">
+                        <div class="empty-gallery">아직 저장된 점자블럭 캡쳐가 없습니다.</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Column: Horizontal LiDAR & Motor Controls -->
+            <div class="right-column">
+                
+                <!-- Horizontal 2D LiDAR Radar Canvas -->
+                <section class="card radar-card">
+                    <div class="card-header">
+                        <h2>📡 수평 LiDAR 장애물 회피 레이더 (2D Scan)</h2>
+                    </div>
+
+                    <div class="radar-container">
+                        <canvas id="radarCanvas" width="480" height="280"></canvas>
+                        <div class="radar-overlay">
+                            <div class="sector-indicator left" id="sectorLeft">
+                                <span class="sector-name">좌측</span>
+                                <span class="sector-status" id="distLeft">-- m</span>
+                            </div>
+                            <div class="sector-indicator center" id="sectorCenter">
+                                <span class="sector-name">전방</span>
+                                <span class="sector-status" id="distCenter">-- m</span>
+                            </div>
+                            <div class="sector-indicator right" id="sectorRight">
+                                <span class="sector-name">우측</span>
+                                <span class="sector-status" id="distRight">-- m</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Vehicle Telemetry & Steering Control -->
+                <section class="card telemetry-card">
+                    <h2>🚗 주행 텔레메트리 (Vehicle Telemetry)</h2>
+                    <div class="gauges-row">
+                        <div class="gauge">
+                            <div class="gauge-value" id="speedDisplay">75%</div>
+                            <div class="gauge-label">모터 속도 (PWM)</div>
+                        </div>
+                        <div class="gauge angle-gauge">
+                            <div class="gauge-value" id="angleDisplay">100°</div>
+                            <div class="gauge-label">서보 조향각</div>
+                        </div>
+                        <div class="direction-badge" id="directionBadge">STOP</div>
+                    </div>
+                </section>
+
+                <!-- Manual Control Pad -->
+                <section class="card control-card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <h2 style="margin: 0;">🎮 수동 조향 & 모터 컨트롤</h2>
+                        <span id="gamepadStatus" style="font-size: 0.75rem; padding: 4px 10px; border-radius: 12px; background: rgba(255, 255, 255, 0.08); color: #8a99ad; font-weight: normal; font-family: Pretendard, sans-serif;">🎮 조이패드 연결 대기중</span>
+                    </div>
+                    <div class="dpad">
+                        <button id="btnW" class="btn btn-dir btn-up" onmousedown="sendCommand('FORWARD')" onmouseup="sendCommand('STOP')" ontouchstart="sendCommand('FORWARD')" ontouchend="sendCommand('STOP')">
+                            ▲ 전진 (W / ↑)
+                        </button>
+                        <div class="dpad-middle">
+                            <button id="btnA" class="btn btn-dir btn-left" onclick="sendCommand('LEFT')">
+                                ◄ 좌 (A / ←)
+                            </button>
+                            <button id="btnStop" class="btn btn-stop" onclick="sendCommand('STOP')">
+                                STOP (Space)
+                            </button>
+                            <button id="btnD" class="btn btn-dir btn-right" onclick="sendCommand('RIGHT')">
+                                ► 우 (D / →)
+                            </button>
+                        </div>
+                        <button id="btnC" class="btn btn-center" onclick="sendCommand('CENTER')">
+                            🎯 중앙 100° (C)
+                        </button>
+                        <button id="btnS" class="btn btn-dir btn-down" onmousedown="sendCommand('BACKWARD')" onmouseup="sendCommand('STOP')" ontouchstart="sendCommand('BACKWARD')" ontouchend="sendCommand('STOP')">
+                            ▼ 후진 (S / ↓)
+                        </button>
+                    </div>
+
+                    <!-- Sliders -->
+                    <div class="slider-group">
+                        <div class="slider-label">
+                            <span>서보 angle:</span>
+                            <span id="angleSliderVal">100°</span>
+                        </div>
+                        <input type="range" id="angleSlider" min="0" max="180" value="100" oninput="document.getElementById('angleSliderVal').innerText = this.value + '°'" onchange="sendCommand('SET_ANGLE', {angle: this.value})">
+                    </div>
+
+                    <div class="slider-group">
+                        <div class="slider-label">
+                            <span>모터 속도:</span>
+                            <span id="speedSliderVal">75%</span>
+                        </div>
+                        <input type="range" id="speedSlider" min="0" max="100" value="75" oninput="document.getElementById('speedSliderVal').innerText = this.value + '%'" onchange="sendCommand('FORWARD', {speed: this.value})">
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <!-- Log Console -->
+        <section class="card log-card">
+            <div class="log-header">
+                <h2>📋 시스템 & 점자블럭 감지 이벤트 로그</h2>
+                <button class="btn-clear" onclick="clearLogs()">로그 지우기</button>
+            </div>
+            <div class="log-console" id="logConsole">
+                <div class="log-line info">[SYSTEM] Sidewalk Robot & Braille Block Capture Dashboard Initialized.</div>
+            </div>
+        </section>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}?v=3.0"></script>
+</body>
+</html>

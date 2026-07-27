@@ -1,6 +1,9 @@
 \set ON_ERROR_STOP on
 
+
 -- 빈 volume에서 PostGIS, Flyway V1~V5, 필수 session/RBAC/security/robot schema를 한 번에 검증한다.
+
+-- 빈 volume에서 PostGIS, Flyway V1~V10, 필수 account/MFA/session/RBAC/security schema를 검증한다.
 -- flyway_role과 application_role은 psql --set으로 전달하며 비밀번호는 받거나 출력하지 않는다.
 SELECT (
     :'flyway_role' <> :'application_role'
@@ -10,9 +13,19 @@ SELECT (
         WHERE extname = 'postgis'
     )
     AND (
+
         SELECT COUNT(*) >= 5
                AND COUNT(*) FILTER (WHERE NOT success) = 0
                AND COUNT(*) FILTER (WHERE version IN ('1', '2', '3', '4', '5') AND success) = 5
+
+        SELECT COUNT(*) >= 8
+               AND COUNT(*) FILTER (WHERE NOT success) = 0
+               AND COUNT(*) FILTER (
+                   WHERE version IN (
+                       '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'
+                   ) AND success
+               ) = 10
+
         FROM flyway_history.flyway_schema_history
     )
     AND to_regclass('auth.admin_user') IS NOT NULL
@@ -39,6 +52,110 @@ SELECT (
           AND column_name = 'password_change_required'
           AND is_nullable = 'NO'
     )
+    AND EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'auth'
+          AND table_name = 'admin_user'
+          AND column_name = 'email'
+          AND character_maximum_length = 254
+          AND is_nullable = 'NO'
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'auth'
+          AND table_name = 'admin_user'
+          AND column_name = 'normalized_email'
+          AND character_maximum_length = 254
+          AND is_generated = 'ALWAYS'
+          AND is_nullable = 'NO'
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'auth'
+          AND table_name = 'admin_user'
+          AND column_name = 'password_hash'
+          AND character_maximum_length >= 255
+          AND is_nullable = 'NO'
+    )
+    AND NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'auth'
+          AND table_name = 'admin_user'
+          AND column_name IN (
+              'password',
+              'password_plaintext',
+              'encrypted_password',
+              'password_salt',
+              'password_algorithm'
+          )
+    )
+    AND (
+        SELECT COUNT(*) = 6
+        FROM information_schema.columns
+        WHERE table_schema = 'auth'
+          AND table_name = 'admin_user'
+          AND column_name IN (
+              'account_status',
+              'failed_login_count',
+              'last_failed_login_at',
+              'locked_until',
+              'is_active',
+              'account_origin'
+          )
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'uq_admin_normalized_email'
+          AND conrelid = 'auth.admin_user'::REGCLASS
+          AND contype = 'u'
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'ck_admin_temporary_login_lock_policy'
+          AND conrelid = 'auth.admin_user'::REGCLASS
+          AND contype = 'c'
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'auth'
+          AND tablename = 'admin_user'
+          AND indexname = 'uq_single_bootstrap_admin'
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'session_store'
+          AND table_name = 'session_security_state'
+          AND column_name = 'authentication_challenge_expires_at'
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'session_store'
+          AND table_name = 'session_security_state'
+          AND column_name = 'authentication_challenge_started_time'
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'session_store'
+          AND table_name = 'session_security_state'
+          AND column_name = 'authentication_challenge_failure_count'
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'ck_session_security_lifetime_limits'
+          AND conrelid =
+              'session_store.session_security_state'::REGCLASS
+    )
     AND (
         SELECT COUNT(*) = 5
         FROM information_schema.columns
@@ -51,6 +168,15 @@ SELECT (
               'last_successful_totp_time_step',
               'factor_type'
           )
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'auth'
+          AND table_name = 'mfa_recovery_code'
+          AND column_name = 'code_hash'
+          AND character_maximum_length >= 255
+          AND is_nullable = 'NO'
     )
     AND EXISTS (
         SELECT 1
@@ -129,8 +255,8 @@ SELECT (
 \gset
 
 \if :empty_database_contract_ok
-    \echo 'Empty database PostGIS/Flyway/session/RBAC/security contract: PASS'
+    \echo 'Empty database PostGIS/Flyway/account/MFA/session/RBAC/security contract: PASS'
 \else
-    \echo 'Empty database PostGIS/Flyway/session/RBAC/security contract: FAIL'
+    \echo 'Empty database PostGIS/Flyway/account/MFA/session/RBAC/security contract: FAIL'
     \quit 1
 \endif
