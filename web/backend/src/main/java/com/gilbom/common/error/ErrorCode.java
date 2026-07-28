@@ -51,6 +51,7 @@ public enum ErrorCode {
     COMMON_CONFLICT(HttpStatus.CONFLICT, "요청이 현재 리소스 상태와 충돌합니다."),
 
     ROBOT_SERIAL_NUMBER_CONFLICT(HttpStatus.CONFLICT, "이미 등록된 로봇 시리얼 번호입니다."),
+    PATROL_AREA_CODE_CONFLICT(HttpStatus.CONFLICT, "이미 등록된 순찰 구역 코드입니다."),
     ROBOT_CREDENTIAL_CONFLICT(
             HttpStatus.CONFLICT,
             "이미 활성화된 로봇 MQTT 인증정보가 있습니다."
@@ -75,6 +76,10 @@ public enum ErrorCode {
     IMAGE_UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "지원하지 않는 이미지 형식입니다."),
 
     COMMON_BUSINESS_RULE_VIOLATION(HttpStatus.UNPROCESSABLE_ENTITY, "업무 규칙을 충족하지 않습니다."),
+    PATROL_AREA_GEOMETRY_INVALID(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "순찰 구역 경계는 유효한 Polygon 또는 MultiPolygon이어야 합니다."
+    ),
     REPORT_PERIOD_INVALID(HttpStatus.UNPROCESSABLE_ENTITY, "보고서 조회 기간이 올바르지 않습니다."),
     MQTT_SCHEMA_VERSION_UNSUPPORTED(
             HttpStatus.UNPROCESSABLE_ENTITY,

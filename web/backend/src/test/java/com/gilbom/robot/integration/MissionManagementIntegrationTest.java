@@ -21,6 +21,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gilbom.audit.AuditLogRepository;
 import com.gilbom.audit.AuditLogService;
 import com.gilbom.audit.AuditRequestContext;
@@ -32,8 +33,12 @@ import com.gilbom.robot.data.api.response.MissionDtos.MissionCreateRequest;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionStatus;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionUpdateRequest;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaCreateRequest;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaResponse;
 import com.gilbom.robot.mission.MissionManagementService;
 import com.gilbom.robot.mission.MissionQueryService;
+import com.gilbom.robot.mission.PatrolAreaManagementService;
+import com.gilbom.robot.mission.PatrolCatalogQueryService;
 
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(
@@ -80,6 +85,12 @@ class MissionManagementIntegrationTest {
 
     @Autowired
     private MissionQueryService queryService;
+
+    @Autowired
+    private PatrolAreaManagementService patrolAreaManagementService;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     private UUID robotId;
     private UUID areaId;
@@ -276,6 +287,139 @@ class MissionManagementIntegrationTest {
     }
 
     @Test
+    void createsQueryablePatrolAreaAndWritesAudit() throws Exception {
+        UUID requestId = UUID.randomUUID();
+        String areaCode = "AREA-CREATE-"
+                + UUID.randomUUID().toString().substring(0, 8);
+
+        PatrolAreaResponse created = patrolAreaManagementService.create(
+                new PatrolAreaCreateRequest(
+                        areaCode,
+                        "등록 통합 테스트 구역",
+                        objectMapper.readTree("""
+                                {
+                                  "type": "MultiPolygon",
+                                  "coordinates": [
+                                    [
+                                      [
+                                        [127.00, 37.00],
+                                        [127.02, 37.00],
+                                        [127.02, 37.02],
+                                        [127.00, 37.02],
+                                        [127.00, 37.00]
+                                      ]
+                                    ]
+                                  ]
+                                }
+                                """),
+                        null),
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(requestId));
+
+        assertThat(created.areaCode()).isEqualTo(areaCode);
+        assertThat(created.areaName()).isEqualTo("등록 통합 테스트 구역");
+        assertThat(created.lifecycleStatus()).isEqualTo("ACTIVE");
+        assertThat(created.boundary().path("type").asText())
+                .isEqualTo("MultiPolygon");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT
+                    GeometryType(boundary) = 'MULTIPOLYGON'
+                    AND ST_SRID(boundary) = 4326
+                    AND ST_IsValid(boundary)
+                FROM robot.patrol_area
+                WHERE patrol_area_id = ?
+                """, Boolean.class, created.patrolAreaId()))
+                .isTrue();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM audit.audit_log
+                WHERE request_id = ?
+                  AND actor_user_id = ?
+                  AND action_type = 'PATROL_AREA_CREATED'
+                  AND target_type = 'PATROL_AREA'
+                  AND target_id = ?
+                  AND after_value ->> 'areaCode' = ?
+                  AND result = 'SUCCESS'
+                """,
+                Integer.class,
+                requestId,
+                OWNER_ID,
+                created.patrolAreaId(),
+                areaCode))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void rejectsDuplicateCodeAndInvalidBoundary() throws Exception {
+        String areaCode = "AREA-DUP-"
+                + UUID.randomUUID().toString().substring(0, 8);
+        PatrolAreaCreateRequest valid = new PatrolAreaCreateRequest(
+                areaCode,
+                "중복 검사 구역",
+                objectMapper.readTree("""
+                        {
+                          "type": "Polygon",
+                          "coordinates": [
+                            [
+                              [127.00, 37.00],
+                              [127.02, 37.00],
+                              [127.02, 37.02],
+                              [127.00, 37.00]
+                            ]
+                          ]
+                        }
+                        """),
+                null);
+        patrolAreaManagementService.create(
+                valid,
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID()));
+
+        assertThatThrownBy(() -> patrolAreaManagementService.create(
+                valid,
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID())))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(
+                                        ErrorCode.PATROL_AREA_CODE_CONFLICT));
+
+        PatrolAreaCreateRequest selfIntersecting =
+                new PatrolAreaCreateRequest(
+                        "AREA-INVALID-"
+                                + UUID.randomUUID()
+                                        .toString()
+                                        .substring(0, 8),
+                        "자가 교차 구역",
+                        objectMapper.readTree("""
+                                {
+                                  "type": "Polygon",
+                                  "coordinates": [
+                                    [
+                                      [127.00, 37.00],
+                                      [127.02, 37.02],
+                                      [127.02, 37.00],
+                                      [127.00, 37.02],
+                                      [127.00, 37.00]
+                                    ]
+                                  ]
+                                }
+                                """),
+                        null);
+
+        assertThatThrownBy(() -> patrolAreaManagementService.create(
+                selfIntersecting,
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID())))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(
+                                        ErrorCode.PATROL_AREA_GEOMETRY_INVALID));
+    }
+
+    @Test
     void rejectsRouteThatDoesNotBelongToArea() {
         UUID otherAreaId = UUID.randomUUID();
         jdbcTemplate.update("""
@@ -357,7 +501,9 @@ class MissionManagementIntegrationTest {
             AuditLogService.class,
             BestEffortAuditLogWriter.class,
             MissionQueryService.class,
-            MissionManagementService.class
+            MissionManagementService.class,
+            PatrolCatalogQueryService.class,
+            PatrolAreaManagementService.class
     })
     static class TestApplication {
     }

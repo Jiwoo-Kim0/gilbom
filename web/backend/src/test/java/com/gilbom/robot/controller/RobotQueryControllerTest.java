@@ -2,11 +2,16 @@ package com.gilbom.robot.controller;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.math.BigDecimal;
@@ -21,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -44,6 +50,7 @@ import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolRouteResponse;
 import com.gilbom.robot.data.api.response.RobotDetailResponse;
 import com.gilbom.robot.data.api.response.RobotListItemResponse;
 import com.gilbom.robot.data.api.response.RobotListResponse;
+import com.gilbom.robot.mission.PatrolAreaManagementService;
 import com.gilbom.robot.mission.PatrolCatalogQueryService;
 import com.gilbom.security.config.SecurityConfig;
 import com.gilbom.security.web.SecurityErrorResponseWriter;
@@ -76,6 +83,8 @@ class RobotQueryControllerTest {
             new SimpleGrantedAuthority("ROBOT_STATUS_VIEW");
     private static final SimpleGrantedAuthority MISSION_VIEW =
             new SimpleGrantedAuthority("MISSION_VIEW");
+    private static final SimpleGrantedAuthority MISSION_MANAGE =
+            new SimpleGrantedAuthority("MISSION_MANAGE");
 
     @Autowired
     private MockMvc mockMvc;
@@ -85,6 +94,9 @@ class RobotQueryControllerTest {
 
     @MockitoBean
     private PatrolCatalogQueryService patrolCatalogQueryService;
+
+    @MockitoBean
+    private PatrolAreaManagementService patrolAreaManagementService;
 
     @MockitoBean
     private SessionSecurityStateRepository sessionSecurityStateRepository;
@@ -201,6 +213,116 @@ class RobotQueryControllerTest {
                 .andExpect(jsonPath("$.areas[0].areaCode", is("A-11")))
                 .andExpect(jsonPath("$.areas[0].boundary.type",
                         is("Polygon")));
+    }
+
+    @Test
+    void createsPatrolAreaWithMissionManage() throws Exception {
+        PatrolAreaResponse created = new PatrolAreaResponse(
+                PATROL_AREA_ID,
+                "AREA-SEOUL-01",
+                "서울 순찰 구역 1",
+                new com.fasterxml.jackson.databind.ObjectMapper()
+                        .readTree("""
+                                {
+                                  "type": "Polygon",
+                                  "coordinates": [
+                                    [
+                                      [127.0, 37.0],
+                                      [127.1, 37.0],
+                                      [127.1, 37.1],
+                                      [127.0, 37.0]
+                                    ]
+                                  ]
+                                }
+                                """),
+                "ACTIVE",
+                Instant.parse("2026-07-29T00:00:00Z"),
+                Instant.parse("2026-07-29T00:00:00Z"));
+        when(patrolAreaManagementService.create(
+                any(),
+                eq(USER_ID),
+                any()))
+                .thenReturn(created);
+
+        mockMvc.perform(post("/api/v1/patrol-areas")
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_MANAGE))
+                        .with(csrf().asHeader())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "areaCode": " AREA-SEOUL-01 ",
+                                  "areaName": " 서울 순찰 구역 1 ",
+                                  "boundary": {
+                                    "type": "Polygon",
+                                    "coordinates": [
+                                      [
+                                        [127.0, 37.0],
+                                        [127.1, 37.0],
+                                        [127.1, 37.1],
+                                        [127.0, 37.0]
+                                      ]
+                                    ]
+                                  }
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(header().string(
+                        "Location",
+                        "/api/v1/patrol-areas/" + PATROL_AREA_ID))
+                .andExpect(jsonPath(
+                        "$.patrolAreaId",
+                        is(PATROL_AREA_ID.toString())))
+                .andExpect(jsonPath("$.areaCode", is("AREA-SEOUL-01")))
+                .andExpect(jsonPath("$.lifecycleStatus", is("ACTIVE")));
+    }
+
+    @Test
+    void requiresMissionManageForPatrolAreaCreation() throws Exception {
+        mockMvc.perform(post("/api/v1/patrol-areas")
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_VIEW))
+                        .with(csrf().asHeader())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "areaCode": "AREA-SEOUL-01",
+                                  "areaName": "서울 순찰 구역 1",
+                                  "boundary": {
+                                    "type": "Polygon",
+                                    "coordinates": []
+                                  }
+                                }
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")));
+
+        verifyNoInteractions(patrolAreaManagementService);
+    }
+
+    @Test
+    void rejectsBlankPatrolAreaCodeBeforeServiceCall() throws Exception {
+        mockMvc.perform(post("/api/v1/patrol-areas")
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_MANAGE))
+                        .with(csrf().asHeader())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "areaCode": " ",
+                                  "areaName": "서울 순찰 구역 1",
+                                  "boundary": {
+                                    "type": "Polygon",
+                                    "coordinates": []
+                                  }
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath(
+                        "$.code",
+                        is("COMMON_VALIDATION_FAILED")));
+
+        verifyNoInteractions(patrolAreaManagementService);
     }
 
     @Test

@@ -119,6 +119,8 @@ HTTP 상태와 응답 형식은 다음 원칙을 따른다.
 | 오류 코드 | HTTP | 의미 |
 |---|---:|---|
 | `ROBOT_NOT_FOUND` | 404 | 로봇 없음 |
+| `PATROL_AREA_CODE_CONFLICT` | 409 | 이미 등록된 순찰 구역 코드 |
+| `PATROL_AREA_GEOMETRY_INVALID` | 422 | 순찰 구역 경계가 유효한 Polygon/MultiPolygon 또는 4326 좌표 범위를 충족하지 않음 |
 | `DEFECT_NOT_FOUND` | 404 | 결함 없음 |
 | `COMMAND_NOT_FOUND` | 404 | 명령 없음 |
 | `REPORT_NOT_FOUND` | 404 | 보고서 없음 |

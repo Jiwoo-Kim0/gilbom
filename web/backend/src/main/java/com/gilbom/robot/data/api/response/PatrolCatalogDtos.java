@@ -6,9 +6,34 @@ import java.util.UUID;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
+
 public final class PatrolCatalogDtos {
 
     private PatrolCatalogDtos() {
+    }
+
+    public enum PatrolAreaCreateLifecycleStatus {
+        ACTIVE,
+        INACTIVE
+    }
+
+    public record PatrolAreaCreateRequest(
+            @NotBlank @Size(max = 50) String areaCode,
+            @NotBlank @Size(max = 100) String areaName,
+            @NotNull JsonNode boundary,
+            PatrolAreaCreateLifecycleStatus lifecycleStatus
+    ) {
+
+        public PatrolAreaCreateRequest {
+            areaCode = normalize(areaCode);
+            areaName = normalize(areaName);
+            lifecycleStatus = lifecycleStatus == null
+                    ? PatrolAreaCreateLifecycleStatus.ACTIVE
+                    : lifecycleStatus;
+        }
     }
 
     public record PatrolAreaListResponse(
@@ -51,5 +76,9 @@ public final class PatrolCatalogDtos {
             Instant createdAt,
             Instant updatedAt
     ) {
+    }
+
+    private static String normalize(String value) {
+        return value == null ? null : value.trim();
     }
 }

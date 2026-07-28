@@ -6,6 +6,7 @@ public enum AuditTargetType {
     ROBOT,
     ROBOT_CREDENTIAL,
     ROBOT_COMMAND,
+    PATROL_AREA,
     MISSION,
     DEFECT,
     REPORT,
