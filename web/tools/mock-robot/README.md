@@ -13,11 +13,11 @@ python -m pip install -r tools/mock-robot/requirements-test.txt
 
 ## 실행
 
-로봇 MQTT username은 `robot_id`와 같아야 한다.
+로봇 MQTT username은 `mqtt_id`와 같아야 한다.
 
 ```powershell
 $env:MQTT_PASSWORD='robot-test MQTT 비밀번호'
-python tools/mock-robot/mock_robot.py --robot-id robot-test
+python tools/mock-robot/mock_robot.py --mqtt-id robot-test
 ```
 
 기본 연결 대상은 `localhost:8883`이며 CA 인증서는
@@ -26,10 +26,10 @@ python tools/mock-robot/mock_robot.py --robot-id robot-test
 주요 Topic:
 
 ```text
-Publish   tbs/v2/robots/{robot_id}/presence
-Publish   tbs/v2/robots/{robot_id}/state
-Publish   tbs/v2/robots/{robot_id}/telemetry
-Publish   tbs/v2/robots/{robot_id}/commands/result
-Subscribe tbs/v2/robots/{robot_id}/commands/request
-Subscribe tbs/v2/robots/{robot_id}/ingest/receipt
+Publish   tbs/v2/robots/{mqtt_id}/presence
+Publish   tbs/v2/robots/{mqtt_id}/state
+Publish   tbs/v2/robots/{mqtt_id}/telemetry
+Publish   tbs/v2/robots/{mqtt_id}/commands/result
+Subscribe tbs/v2/robots/{mqtt_id}/commands/request
+Subscribe tbs/v2/robots/{mqtt_id}/ingest/receipt
 ```

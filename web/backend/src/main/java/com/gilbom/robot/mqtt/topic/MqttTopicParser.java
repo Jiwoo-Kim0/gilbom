@@ -14,7 +14,7 @@ public class MqttTopicParser {
     private static final String NAMESPACE = "tbs";
     private static final String ROBOTS_SEGMENT = "robots";
     private static final String VERSION_SEGMENT = "v2";
-    private static final Pattern ROBOT_ID_PATTERN =
+    private static final Pattern MQTT_ID_PATTERN =
             Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
 
     public ParsedMqttTopic parse(String topic) {
@@ -26,15 +26,15 @@ public class MqttTopicParser {
         if (segments.length < 5
                 || !NAMESPACE.equals(segments[0])
                 || !ROBOTS_SEGMENT.equals(segments[2])) {
-            throw invalidTopic("MQTT topic must match tbs/v2/robots/{robot_id}/...");
+            throw invalidTopic("MQTT topic must match tbs/v2/robots/{mqtt_id}/...");
         }
         if (!VERSION_SEGMENT.equals(segments[1])) {
             throw new BusinessException(ErrorCode.MQTT_SCHEMA_VERSION_UNSUPPORTED);
         }
 
-        String robotId = segments[3];
-        if (!ROBOT_ID_PATTERN.matcher(robotId).matches()) {
-            throw invalidTopic("MQTT topic contains an invalid robot_id");
+        String mqttId = segments[3];
+        if (!MQTT_ID_PATTERN.matcher(mqttId).matches()) {
+            throw invalidTopic("MQTT topic contains an invalid mqtt_id");
         }
 
         String relativePath = String.join(
@@ -43,21 +43,21 @@ public class MqttTopicParser {
         );
         return new ParsedMqttTopic(
                 ParsedMqttTopic.SUPPORTED_VERSION,
-                robotId,
+                mqttId,
                 MqttTopicType.fromRelativePath(relativePath)
         );
     }
 
-    public String format(MqttTopicType type, String robotId) {
+    public String format(MqttTopicType type, String mqttId) {
         Objects.requireNonNull(type, "type must not be null");
-        if (robotId == null || !ROBOT_ID_PATTERN.matcher(robotId).matches()) {
-            throw invalidTopic("Cannot format topic with an invalid robot_id");
+        if (mqttId == null || !MQTT_ID_PATTERN.matcher(mqttId).matches()) {
+            throw invalidTopic("Cannot format topic with an invalid mqtt_id");
         }
         return "%s/%s/%s/%s/%s".formatted(
                 NAMESPACE,
                 VERSION_SEGMENT,
                 ROBOTS_SEGMENT,
-                robotId,
+                mqttId,
                 type.relativePath()
         );
     }

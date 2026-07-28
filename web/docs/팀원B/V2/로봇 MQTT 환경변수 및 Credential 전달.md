@@ -57,7 +57,7 @@ Credential 발급과 Mosquitto 반영이 모두 성공한 뒤 다음 정보를 �
 
 | 항목 | 예 | Secret |
 |---|---|:---:|
-| `robot_id` | `RBT-001` | X |
+| `mqtt_id` | `RBT-001` | X |
 | `mqtt_broker_host` | `mqtt.example.com` | X |
 | `mqtt_broker_port` | `8883` | X |
 | `mqtt_username` | `RBT-001` | X |
@@ -68,9 +68,9 @@ Credential 발급과 Mosquitto 반영이 모두 성공한 뒤 다음 정보를 �
 | `ca_certificate` 또는 설치 안내 | `ca.pem` | X |
 | `credential_expires_at` | UTC 시각 | X |
 
-`robot_id`와 username은 ACL 적용을 위해 같은 `robot_code`를 사용한다.
+`mqtt_id`와 username은 ACL 적용을 위해 같은 값을 사용한다.
 Client ID는 인증·권한 식별자가 아니며 동시에 연결되는 MQTT Client마다 고유해야
-한다. 단일 로봇 프로세스는 `<robot_code>-main` 같은 값을 사용할 수 있다.
+한다. 단일 로봇 프로세스는 `<mqtt_id>-main` 같은 값을 사용할 수 있다.
 비밀번호만 Secret이다. CA 인증서는 공개 가능한 신뢰 정보지만 변조되지 않도록
 서버의 인증서 Fingerprint 또는 승인된 경로로 전달한다.
 
@@ -123,7 +123,7 @@ mode:  0600
 
 ```dotenv
 # 로봇 식별
-ROBOT_ID=RBT-001
+MQTT_ID=RBT-001
 
 # MQTT Broker
 MQTT_BROKER_HOST=mqtt.example.com
@@ -147,7 +147,7 @@ MQTT_CA_CERT=/etc/gilbom/robot/certs/ca.pem
 저장소에는 실제 값이 없는 예제만 둘 수 있다.
 
 ```dotenv
-ROBOT_ID=
+MQTT_ID=
 MQTT_BROKER_HOST=
 MQTT_BROKER_PORT=8883
 MQTT_USERNAME=
@@ -172,7 +172,7 @@ MVP에서는 등록 작업자와 임베디드팀이 다음 절차로 전달한�
 2. 관리자 화면에서 로봇을 등록한다.
 3. Credential을 발급하고 Mosquitto 반영 성공을 확인한다.
 4. 발급 결과를 한 번 표시하거나 Provisioning 파일로 한 번 다운로드한다.
-5. 작업자는 연결 대상 로봇의 Serial Number와 `robot_code`를 다시 확인한다.
+5. 작업자는 연결 대상 로봇의 Serial Number와 `mqtt_id`를 다시 확인한다.
 6. 승인된 로컬 네트워크의 SSH/SCP 또는 물리 USB로 Jetson에 전달한다.
 7. `/etc/gilbom/robot/robot.env`에 설치하고 소유권·권한을 제한한다.
 8. 필요한 경우 CA 인증서를 `/etc/gilbom/robot/certs/ca.pem`에 설치한다.
@@ -237,7 +237,7 @@ MVP에서는 등록 작업자와 임베디드팀이 다음 절차로 전달한�
 - 다른 사용자의 읽기 권한이 제거됐는지
 - CA 인증서 경로가 실제 파일과 일치하는지
 - Broker Host가 인증서의 DNS 이름과 일치하는지
-- `ROBOT_ID`, username, Client ID가 같은 로봇 코드인지
+- `MQTT_ID`와 username이 같은지, Client ID가 해당 로봇에서 고유한지
 - 로봇 시스템 시간이 NTP로 동기화됐는지
 
 비밀번호 원문을 Shell 명령 인자로 넘기지 않는다. 명령 인자는 Process 목록과
@@ -288,7 +288,7 @@ def required_env(name: str) -> str:
 
 @dataclass(frozen=True)
 class MqttSettings:
-    robot_id: str
+    mqtt_id: str
     host: str
     port: int
     username: str
@@ -299,15 +299,15 @@ class MqttSettings:
 
 
 def load_mqtt_settings() -> MqttSettings:
-    robot_id = required_env("ROBOT_ID")
+    mqtt_id = required_env("MQTT_ID")
     username = required_env("MQTT_USERNAME")
     client_id = required_env("MQTT_CLIENT_ID")
 
-    if username != robot_id:
-        raise RuntimeError("MQTT username must match ROBOT_ID")
+    if username != mqtt_id:
+        raise RuntimeError("MQTT username must match MQTT_ID")
 
     return MqttSettings(
-        robot_id=robot_id,
+        mqtt_id=mqtt_id,
         host=required_env("MQTT_BROKER_HOST"),
         port=int(required_env("MQTT_BROKER_PORT")),
         username=username,

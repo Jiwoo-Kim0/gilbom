@@ -17,7 +17,7 @@ public record CommandResultPayload(
         @NotBlank @Pattern(regexp = "2\\.0") String schemaVersion,
         @NotNull UUID resultId,
         @NotNull UUID commandId,
-        @NotBlank String robotId,
+        @NotBlank String mqttId,
         @NotNull Status status,
         @NotNull Instant receivedAt,
         Instant completedAt,

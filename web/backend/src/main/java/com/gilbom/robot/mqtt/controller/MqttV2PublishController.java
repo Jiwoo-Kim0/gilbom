@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @Profile("local")
 @RestController
-@RequestMapping("/api/mqtt/v2/robots/{robotId}")
+@RequestMapping("/api/mqtt/v2/robots/{mqttId}")
 public class MqttV2PublishController {
 
     private final MqttV2Publisher mqttPublisher;
@@ -26,19 +26,19 @@ public class MqttV2PublishController {
     /*For 조종 명령*/
     @PostMapping("/commands/request")
     public ResponseEntity<MqttPublishResponse> publishCommand(
-            @PathVariable String robotId,
+            @PathVariable String mqttId,
             @Valid @RequestBody CommandRequestPayload payload
     ) {
-        return accepted(mqttPublisher.publishCommand(robotId, payload));
+        return accepted(mqttPublisher.publishCommand(mqttId, payload));
     }
     
     /*For 중복 탐사 방지*/
     @PostMapping("/ingest/receipt")
     public ResponseEntity<MqttPublishResponse> publishIngestReceipt(
-            @PathVariable String robotId,
+            @PathVariable String mqttId,
             @Valid @RequestBody IngestReceiptPayload payload
     ) {
-        return accepted(mqttPublisher.publishIngestReceipt(robotId, payload));
+        return accepted(mqttPublisher.publishIngestReceipt(mqttId, payload));
     }
 
     

@@ -12,7 +12,7 @@ import java.util.UUID;
 
 public record PresencePayload(
         @NotBlank @Pattern(regexp = "2\\.0") String schemaVersion,
-        @NotBlank String robotId,
+        @NotBlank String mqttId,
         @NotNull UUID bootId,
         @NotNull Status status,
         Instant connectedAt,

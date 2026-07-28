@@ -19,7 +19,7 @@ import java.util.UUID;
 public record TelemetryPayload(
         @NotBlank @Pattern(regexp = "2\\.0") String schemaVersion,
         @NotNull UUID messageId,
-        @NotBlank String robotId,
+        @NotBlank String mqttId,
         @NotNull UUID bootId,
         @NotNull @PositiveOrZero Long seq,
         @NotNull Instant sampledAt,

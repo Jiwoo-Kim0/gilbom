@@ -34,7 +34,7 @@ public class TelemetryIngestionService {
     @Transactional
     public TelemetryIngestionResult ingest(TelemetryIngestionCommand command) {
         TelemetryPayload payload = command.payload();
-        UUID robotId = findRobotId(payload.robotId());
+        UUID robotId = findRobotId(payload.mqttId());
         OffsetDateTime sampledAt = utc(payload.sampledAt());
         OffsetDateTime receivedAt = utc(command.receivedAt());
 
@@ -58,7 +58,7 @@ public class TelemetryIngestionService {
         eventPublisher.publishEvent(
                 RobotRealtimeEvent.telemetryUpdated(
                         robotId,
-                        payload.robotId(),
+                        payload.mqttId(),
                         payload.sampledAt()));
         return new TelemetryIngestionResult(true, currentStateUpdated);
     }

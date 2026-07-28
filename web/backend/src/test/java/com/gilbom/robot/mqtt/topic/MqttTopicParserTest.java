@@ -18,7 +18,7 @@ class MqttTopicParserTest {
         );
 
         assertThat(parsed.version()).isEqualTo(2);
-        assertThat(parsed.robotId()).isEqualTo("RBT-001");
+        assertThat(parsed.mqttId()).isEqualTo("RBT-001");
         assertThat(parsed.type()).isEqualTo(MqttTopicType.SAFETY_EVENT);
         assertThat(parsed.type().qos()).isEqualTo(1);
         assertThat(parsed.type().retained()).isFalse();

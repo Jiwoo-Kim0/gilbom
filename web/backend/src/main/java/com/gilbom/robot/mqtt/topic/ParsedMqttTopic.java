@@ -4,7 +4,7 @@ import java.util.Objects;
 
 public record ParsedMqttTopic(
         int version,
-        String robotId,
+        String mqttId,
         MqttTopicType type
 ) {
 
@@ -14,8 +14,8 @@ public record ParsedMqttTopic(
         if (version != SUPPORTED_VERSION) {
             throw new IllegalArgumentException("Only MQTT namespace v2 is supported");
         }
-        if (robotId == null || robotId.isBlank()) {
-            throw new IllegalArgumentException("robotId must not be blank");
+        if (mqttId == null || mqttId.isBlank()) {
+            throw new IllegalArgumentException("mqttId must not be blank");
         }
         Objects.requireNonNull(type, "type must not be null");
     }

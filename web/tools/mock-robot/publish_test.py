@@ -25,7 +25,7 @@ DEFAULT_PAYLOAD = json.dumps(
     {
         "schema_version": "2.0",
         "message_id": str(uuid.uuid4()),
-        "robot_id": "robot-test",
+        "mqtt_id": "robot-test",
         "boot_id": str(uuid.uuid4()),
         "seq": 1,
         "sampled_at": datetime.now(timezone.utc)

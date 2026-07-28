@@ -66,9 +66,9 @@ public enum ErrorCode {
             HttpStatus.UNPROCESSABLE_ENTITY,
             "MQTT Payload가 통신 계약을 충족하지 않습니다."
     ),
-    MQTT_ROBOT_ID_MISMATCH(
+    MQTT_ID_MISMATCH(
             HttpStatus.UNPROCESSABLE_ENTITY,
-            "MQTT Topic과 Payload의 로봇 식별자가 일치하지 않습니다."
+            "MQTT Topic과 Payload의 mqtt_id가 일치하지 않습니다."
     ),
     MQTT_QOS_MISMATCH(
             HttpStatus.UNPROCESSABLE_ENTITY,
