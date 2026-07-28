@@ -44,6 +44,7 @@
 | V17 | MQTT Sequence 시작값 | State·Telemetry Sequence를 모든 계층에서 `1` 이상으로 강제 |
 | V18 | Robot Boot Session·Status History | Presence·State·Telemetry의 Boot 수명주기, append-only 상태 이력, 현재 Boot FK와 Replay 보호 기반 추가 |
 | V19 | 결함-로봇 연결·내보내기 job | `defect_observation.robot_id`로 결함을 로봇까지 추적해 `user_robot_assignment` 객체 범위와 `robotId` 필터를 SQL에서 적용하고, `POST /api/v1/defects/export`의 202 접수를 기록. 상세는 [defect-schema.md](defect-schema.md) 참고 |
+| V20 | 런타임 세션 폐기 함수 실행 권한 | `PUBLIC`의 실행 권한은 계속 차단하고 `${applicationRole}`에 `auth.revoke_user_authorization_sessions(UUID)` 함수 하나의 `EXECUTE`만 부여해 관리자 MFA 초기화의 대상 세션 폐기를 허용 |
 
 
 시스템 Role `ADMIN`, `MANAGER`, `OPERATOR`와 18개 세부 permission 및
@@ -61,7 +62,7 @@ docker compose logs backend
 ```
 
 
-Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V19가
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V20이
 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증
