@@ -2,6 +2,7 @@ import { NavLink, Outlet } from 'react-router'
 
 const adminTabs = [
   { to: '/admin/approvals', label: '가입 승인' },
+  { to: '/admin/users', label: '사용자 역할' },
   { to: '/admin/roles', label: '역할·권한' },
   { to: '/admin/mfa-reset', label: 'MFA 초기화' },
 ] as const
@@ -13,7 +14,7 @@ export function AdminWorkspaceLayout() {
         <div>
           <p className="eyebrow">ADMINISTRATION</p>
           <h2 id="admin-page-title">관리자 설정</h2>
-          <p>계정 승인, 역할 권한, MFA 긴급 초기화를 서버 정책에 따라 관리합니다.</p>
+          <p>계정 승인, 사용자 역할, 역할 권한, MFA 초기화를 서버 정책에 따라 관리합니다.</p>
         </div>
       </div>
 
