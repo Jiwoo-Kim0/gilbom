@@ -58,7 +58,7 @@ public class RobotRegistrationController {
 
         RobotRegistrationResponse response = new RobotRegistrationResponse(
                 robot.robotId(),
-                robot.robotCode(),
+                robot.mqttId(),
                 robot.robotName(),
                 robot.serialNumber(),
                 RobotRegistrationResponse.OperationalStatus.valueOf(

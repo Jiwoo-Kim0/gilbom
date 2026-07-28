@@ -86,13 +86,13 @@ public class RobotRegistrationService {
         }
 
         UUID robotId = UUID.randomUUID();
-        String robotCode = nextRobotCode();
+        String mqttId = nextMqttId();
 
         try {
             jdbcTemplate.update("""
                     INSERT INTO robot.robot (
                         robot_id,
-                        robot_code,
+                        mqtt_id,
                         robot_name,
                         serial_number,
                         operational_status,
@@ -100,7 +100,7 @@ public class RobotRegistrationService {
                     ) VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     robotId,
-                    robotCode,
+                    mqttId,
                     command.robotName(),
                     command.serialNumber(),
                     OPERATIONAL_STATUS,
@@ -136,7 +136,7 @@ public class RobotRegistrationService {
                     'ROBOT',
                     ?,
                     jsonb_build_object(
-                        'robotCode', ?,
+                        'mqttId', ?,
                         'operationalStatus', ?,
                         'connectivityStatus', ?
                     ),
@@ -146,13 +146,13 @@ public class RobotRegistrationService {
                 requestId,
                 actorUserId,
                 robotId,
-                robotCode,
+                mqttId,
                 OPERATIONAL_STATUS,
                 CONNECTIVITY_STATUS);
 
         RegisteredRobot registeredRobot = new RegisteredRobot(
                 robotId,
-                robotCode,
+                mqttId,
                 command.robotName(),
                 command.serialNumber(),
                 OPERATIONAL_STATUS,
@@ -175,12 +175,12 @@ public class RobotRegistrationService {
         return Boolean.TRUE.equals(exists);
     }
 
-    private String nextRobotCode() {
+    private String nextMqttId() {
         Long sequence = jdbcTemplate.queryForObject(
-                "SELECT nextval('robot.robot_code_sequence')",
+                "SELECT nextval('robot.mqtt_id_sequence')",
                 Long.class);
         if (sequence == null) {
-            throw new IllegalStateException("Robot code sequence did not return a value");
+            throw new IllegalStateException("MQTT ID sequence did not return a value");
         }
         return "RBT-" + String.format(Locale.ROOT, "%03d", sequence);
     }
@@ -197,7 +197,10 @@ public class RobotRegistrationService {
                             request_path,
                             processing_status,
                             response_body ->> 'robotId' AS robot_id,
-                            response_body ->> 'robotCode' AS robot_code,
+                            COALESCE(
+                                response_body ->> 'mqttId',
+                                response_body ->> 'robotCode'
+                            ) AS mqtt_id,
                             response_body ->> 'robotName' AS robot_name,
                             response_body ->> 'serialNumber' AS serial_number,
                             response_body ->> 'operationalStatus' AS operational_status,
@@ -215,7 +218,7 @@ public class RobotRegistrationService {
                             ? null
                             : new RegisteredRobot(
                                     UUID.fromString(robotId),
-                                    resultSet.getString("robot_code"),
+                                    resultSet.getString("mqtt_id"),
                                     resultSet.getString("robot_name"),
                                     resultSet.getString("serial_number"),
                                     resultSet.getString("operational_status"),
@@ -264,7 +267,7 @@ public class RobotRegistrationService {
                     ),
                     response_body = jsonb_build_object(
                         'robotId', ?::text,
-                        'robotCode', ?,
+                        'mqttId', ?,
                         'robotName', ?,
                         'serialNumber', ?,
                         'operationalStatus', ?,
@@ -277,7 +280,7 @@ public class RobotRegistrationService {
                 """,
                 robot.robotId(),
                 robot.robotId(),
-                robot.robotCode(),
+                robot.mqttId(),
                 robot.robotName(),
                 robot.serialNumber(),
                 robot.operationalStatus(),

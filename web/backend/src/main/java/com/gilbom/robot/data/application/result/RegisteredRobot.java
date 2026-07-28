@@ -4,7 +4,7 @@ import java.util.UUID;
 
 public record RegisteredRobot(
         UUID robotId,
-        String robotCode,
+        String mqttId,
         String robotName,
         String serialNumber,
         String operationalStatus,

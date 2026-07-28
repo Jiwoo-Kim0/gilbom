@@ -683,7 +683,7 @@ class AuthenticationUserRepositoryIntegrationTest {
         jdbcTemplate.update("""
                 INSERT INTO robot.robot (
                     robot_id,
-                    robot_code,
+                    mqtt_id,
                     robot_name,
                     serial_number,
                     operational_status,

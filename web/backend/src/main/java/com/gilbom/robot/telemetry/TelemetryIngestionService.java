@@ -6,6 +6,7 @@ import java.time.ZoneOffset;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,14 +15,20 @@ import com.gilbom.common.error.ErrorCode;
 import com.gilbom.robot.data.application.command.TelemetryIngestionCommand;
 import com.gilbom.robot.data.application.result.TelemetryIngestionResult;
 import com.gilbom.robot.data.mqtt.v2.inbound.TelemetryPayload;
+import com.gilbom.robot.realtime.RobotRealtimeEvent;
 
 @Service
 public class TelemetryIngestionService {
 
     private final JdbcTemplate jdbcTemplate;
+    private final ApplicationEventPublisher eventPublisher;
 
-    public TelemetryIngestionService(JdbcTemplate jdbcTemplate) {
+    public TelemetryIngestionService(
+            JdbcTemplate jdbcTemplate,
+            ApplicationEventPublisher eventPublisher
+    ) {
         this.jdbcTemplate = jdbcTemplate;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -48,20 +55,27 @@ public class TelemetryIngestionService {
                 payload,
                 sampledAt,
                 receivedAt);
+        if (currentStateUpdated) {
+            eventPublisher.publishEvent(
+                    RobotRealtimeEvent.telemetryUpdated(
+                            robotId,
+                            payload.robotId(),
+                            payload.sampledAt()));
+        }
         return new TelemetryIngestionResult(true, currentStateUpdated);
     }
 
-    private UUID findRobotId(String robotCode) {
+    private UUID findRobotId(String mqttId) {
         UUID robotId = jdbcTemplate.query("""
                         SELECT robot_id
                         FROM robot.robot
-                        WHERE robot_code = ?
+                        WHERE mqtt_id = ?
                           AND operational_status <> 'DISABLED'
                         """,
                 resultSet -> resultSet.next()
                         ? resultSet.getObject("robot_id", UUID.class)
                         : null,
-                robotCode);
+                mqttId);
         if (robotId == null) {
             throw new BusinessException(ErrorCode.ROBOT_NOT_FOUND);
         }

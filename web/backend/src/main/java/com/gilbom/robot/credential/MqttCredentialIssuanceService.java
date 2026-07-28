@@ -79,8 +79,8 @@ public class MqttCredentialIssuanceService {
         int credentialVersion = nextCredentialVersion(robotId);
         String password = secretGenerator.generate();
         MqttCredentialProvisioner.ProvisionedMqttCredential provisioned =
-                provisioner.provision(robot.robotCode(), password);
-        registerRollbackCleanup(robot.robotCode());
+                provisioner.provision(robot.mqttId(), password);
+        registerRollbackCleanup(robot.mqttId());
 
         UUID credentialId = UUID.randomUUID();
         String fingerprint = HexFormat.of().formatHex(sha256(password));
@@ -119,7 +119,7 @@ public class MqttCredentialIssuanceService {
                     ?,
                     jsonb_build_object(
                         'robotId', ?::text,
-                        'robotCode', ?,
+                        'mqttId', ?,
                         'credentialType', ?,
                         'credentialVersion', ?,
                         'credentialStatus', 'ACTIVE',
@@ -132,7 +132,7 @@ public class MqttCredentialIssuanceService {
                 actorUserId,
                 credentialId,
                 robotId,
-                robot.robotCode(),
+                robot.mqttId(),
                 CREDENTIAL_TYPE,
                 credentialVersion,
                 Timestamp.from(times.expiresAt()));
@@ -141,7 +141,7 @@ public class MqttCredentialIssuanceService {
                 principalKeyHash,
                 idempotencyKeyHash,
                 credentialId,
-                robot.robotCode(),
+                robot.mqttId(),
                 times.expiresAt(),
                 requestPath);
 
@@ -149,9 +149,9 @@ public class MqttCredentialIssuanceService {
                 credentialId,
                 CREDENTIAL_TYPE,
                 brokerUri,
-                robot.robotCode(),
+                robot.mqttId(),
                 password,
-                robot.robotCode(),
+                robot.mqttId(),
                 times.expiresAt());
     }
 
@@ -234,14 +234,14 @@ public class MqttCredentialIssuanceService {
 
     private RobotCredentialTarget findRobotForUpdate(UUID robotId) {
         return jdbcTemplate.query("""
-                        SELECT robot_code, operational_status
+                        SELECT mqtt_id, operational_status
                         FROM robot.robot
                         WHERE robot_id = ?
                         FOR UPDATE
                         """,
                 resultSet -> resultSet.next()
                         ? new RobotCredentialTarget(
-                                resultSet.getString("robot_code"),
+                                resultSet.getString("mqtt_id"),
                                 resultSet.getString("operational_status"))
                         : null,
                 robotId);
@@ -415,7 +415,7 @@ public class MqttCredentialIssuanceService {
     }
 
     private record RobotCredentialTarget(
-            String robotCode,
+            String mqttId,
             String operationalStatus
     ) {
     }
