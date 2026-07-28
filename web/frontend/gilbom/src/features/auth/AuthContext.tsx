@@ -6,7 +6,11 @@ import {
   useRef,
   type ReactNode,
 } from 'react'
-import { clearCsrfToken, replaceCsrfToken } from '../../shared/api/csrfTokenStore'
+import {
+  clearCsrfToken,
+  replaceCsrfToken,
+  requireCsrfToken,
+} from '../../shared/api/csrfTokenStore'
 import {
   ApiError,
   subscribeToUnauthorized,
@@ -210,6 +214,13 @@ export function AuthenticationProvider({ children }: { children: ReactNode }) {
     try {
       await requestLogout()
       clearAuthentication()
+      try {
+        // 폐기된 인증 세션의 토큰 대신 새 익명 세션에 결합된 토큰을 즉시 준비한다.
+        await requireCsrfToken()
+      } catch {
+        // 로그아웃 자체는 완료됐다. 다음 상태 변경 요청이 토큰 발급을 다시 시도한다.
+        clearCsrfToken()
+      }
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         clearAuthentication()

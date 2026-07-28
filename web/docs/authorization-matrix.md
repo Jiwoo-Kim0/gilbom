@@ -152,21 +152,25 @@ DB trigger도 같은 lock과 판정 함수를 사용해 직접 DML을 방어한�
 
 | Method | Path | CSRF | 감사 |
 |---|---|:---:|---|
+| GET | `/api/v1/admin/registration-requests` |  |  |
+| POST | `/api/v1/admin/registration-requests/{userId}/approve` | O | 승인·역할 부여 |
+| POST | `/api/v1/admin/registration-requests/{userId}/reject` | O | 거절 |
 | GET, POST | `/api/v1/admin/roles` | POST O | 생성 |
 | GET, PATCH, DELETE | `/api/v1/admin/roles/{roleId}` | PATCH·DELETE O | 변경·비활성화 |
 | GET | `/api/v1/admin/permissions` |  |  |
 | GET, PUT | `/api/v1/admin/roles/{roleId}/permissions` | PUT O | O |
-| GET | `/api/v1/admin/access-matrix` |  |  |
 | PUT | `/api/v1/admin/users/{userId}/roles` | O | O |
 | GET, PUT | `/api/v1/admin/users/{userId}/permission-overrides` | PUT O | O |
 | GET, PUT | `/api/v1/admin/users/{userId}/robot-assignments` | PUT O | O |
-| GET, POST | `/api/v1/admin/users` | POST O | 생성 |
-| GET, PATCH, DELETE | `/api/v1/admin/users/{userId}` | PATCH·DELETE O | 변경·비활성화 |
+| GET | `/api/v1/admin/users` |  |  |
+| GET | `/api/v1/admin/users/{userId}` |  |  |
+| PATCH | `/api/v1/admin/users/{userId}/status` | O | 활성화·비활성화 |
 | POST | `/api/v1/admin/users/{userId}/mfa/reset` | O | MFA 초기화·세션 폐기 |
-| GET | `/api/v1/admin/settings` |  |  |
-| PUT | `/api/v1/admin/settings/{settingKey}` | O | O |
 
 역할·권한·배정 변경은 변경자와 대상자를 분리해 감사하고 대상 사용자의 모든 세션을 폐기한다.
+가입 거절은 `REJECTED`, 운영 비활성화는 `DISABLED`로 구분한다. 목록 교체형
+`PUT`은 누락된 활성 관계를 종료하고 요청 목록을 새 활성 상태로 적용하되 과거 행은
+물리 삭제하지 않는다.
 
 ## 8. 로봇·텔레메트리·이벤트 API
 

@@ -10,6 +10,8 @@ info:
 tags:
   - name: Auth
     description: 관리자 서버 세션·CSRF·TOTP 인증
+  - name: Admin
+    description: 가입 승인·사용자·RBAC·로봇 배정 관리자 API
   - name: Robots
     description: 로봇 기준정보 등록 및 관제
   - name: Reports
@@ -61,6 +63,7 @@ x-contract-sources:
   session: session-cookie-csrf.md
   authenticationDefense: authentication-rate-limit-lock-audit.md
   authorization: authorization-matrix.md
+  administration: admin-api.md
   reportStatus: report-status-contract.md
   environment: environment-configuration-strategy.md
   endpointDtoBaseline: ../../docs/길봄_MQTT 통신_SWAGGER REST SSE_API 명세서.pdf
@@ -460,6 +463,8 @@ paths:
       description: |
         인증 완료 또는 pre-auth challenge 세션을 서버에서 폐기하고 세션 쿠키를
         Max-Age=0으로 만료합니다. 폐기한 세션 ID는 다시 사용할 수 없습니다.
+        SPA는 204 응답 후 기존 메모리 CSRF 토큰을 폐기하고 공개 CSRF 발급 API를
+        호출하여 새 익명 세션의 토큰으로 교체합니다.
       security:
         - serverSession: []
       parameters:
@@ -619,9 +624,560 @@ paths:
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
+  /api/v1/admin/registration-requests:
+    get:
+      tags: [Admin]
+      operationId: listRegistrationRequests
+      summary: 가입 승인 대기 목록
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: PENDING_APPROVAL 계정 목록
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserPageResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/admin/registration-requests/{userId}/approve:
+    post:
+      tags: [Admin]
+      operationId: approveRegistration
+      summary: 가입 승인과 역할 부여
+      description: 계정 활성화, 역할 부여, 감사 기록을 같은 트랜잭션으로 처리합니다.
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRegistrationApprovalRequest"
+      responses:
+        "200":
+          description: 가입 승인 완료
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/admin/registration-requests/{userId}/reject:
+    post:
+      tags: [Admin]
+      operationId: rejectRegistration
+      summary: 가입 요청 거절
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminReasonRequest"
+      responses:
+        "204":
+          description: REJECTED 상태 전환 완료
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/admin/users:
+    get:
+      tags: [Admin]
+      operationId: listAdminUsers
+      summary: 관리자 사용자 목록
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+        - name: accountStatus
+          in: query
+          schema:
+            $ref: "#/components/schemas/AdminAccountStatus"
+      responses:
+        "200":
+          description: 사용자 목록
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserPageResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/admin/users/{userId}:
+    get:
+      tags: [Admin]
+      operationId: getAdminUser
+      summary: 관리자 사용자 상세
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+      responses:
+        "200":
+          description: 사용자 상세
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/admin/users/{userId}/status:
+    patch:
+      tags: [Admin]
+      operationId: changeAdminUserStatus
+      summary: 사용자 활성화 또는 비활성화
+      description: 마지막 활성 시스템 ADMIN은 비활성화할 수 없습니다.
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUserStatusRequest"
+      responses:
+        "200":
+          description: 상태 변경 완료
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/admin/users/{userId}/roles:
+    put:
+      tags: [Admin]
+      operationId: replaceAdminUserRoles
+      summary: 사용자 활성 역할 전체 교체
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUserRolesRequest"
+      responses:
+        "200":
+          description: 역할 교체 완료
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/admin/users/{userId}/permission-overrides:
+    get:
+      tags: [Admin]
+      operationId: listAdminUserPermissionOverrides
+      summary: 사용자 활성 permission override 목록
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+      responses:
+        "200":
+          description: 활성 override 목록
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminPermissionOverrideResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Admin]
+      operationId: replaceAdminUserPermissionOverrides
+      summary: 사용자 활성 permission override 전체 교체
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminPermissionOverridesRequest"
+      responses:
+        "200":
+          description: 교체된 활성 override 목록
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminPermissionOverrideResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/admin/users/{userId}/robot-assignments:
+    get:
+      tags: [Admin]
+      operationId: listAdminUserRobotAssignments
+      summary: 사용자 활성 로봇 배정 목록
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+      responses:
+        "200":
+          description: 활성 로봇 배정 목록
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminRobotAssignmentResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Admin]
+      operationId: replaceAdminUserRobotAssignments
+      summary: 사용자 활성 로봇 배정 전체 교체
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRobotAssignmentsRequest"
+      responses:
+        "200":
+          description: 교체된 활성 로봇 배정 목록
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminRobotAssignmentResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/admin/roles:
+    get:
+      tags: [Admin]
+      operationId: listAdminRoles
+      summary: 역할 목록
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      responses:
+        "200":
+          description: 역할 목록
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminRoleResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Admin]
+      operationId: createAdminRole
+      summary: 사용자 정의 역할 생성
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRoleCreateRequest"
+      responses:
+        "201":
+          description: 역할 생성
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRoleResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/admin/roles/{roleId}:
+    get:
+      tags: [Admin]
+      operationId: getAdminRole
+      summary: 역할 상세
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/AdminRoleId"
+      responses:
+        "200":
+          description: 역할 상세
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRoleResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Admin]
+      operationId: updateAdminRole
+      summary: 역할 속성 변경
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/AdminRoleId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRoleUpdateRequest"
+      responses:
+        "200":
+          description: 역할 변경
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRoleResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Admin]
+      operationId: deactivateAdminRole
+      summary: 사용자 정의 역할 비활성화
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/AdminRoleId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminReasonRequest"
+      responses:
+        "204":
+          description: 역할 비활성화
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/admin/permissions:
+    get:
+      tags: [Admin]
+      operationId: listAdminPermissions
+      summary: permission catalog 목록
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      responses:
+        "200":
+          description: permission 목록
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminPermissionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/admin/roles/{roleId}/permissions:
+    get:
+      tags: [Admin]
+      operationId: listAdminRolePermissions
+      summary: 역할의 활성 permission 목록
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/AdminRoleId"
+      responses:
+        "200":
+          description: 역할 permission 목록
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminPermissionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Admin]
+      operationId: replaceAdminRolePermissions
+      summary: 역할의 활성 permission 전체 교체
+      x-required-permission: ADMIN_SETTINGS_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/AdminRoleId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRolePermissionsRequest"
+      responses:
+        "200":
+          description: 교체된 역할 permission 목록
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminPermissionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
   /api/v1/admin/users/{userId}/mfa/reset:
     post:
-      tags: [Auth]
+      tags: [Admin]
       operationId: resetUserTotpAsAdmin
       summary: 다른 관리자의 TOTP 긴급 초기화
       description: ADMIN_SETTINGS_MANAGE와 작업자 자신의 비밀번호·TOTP 재검증이 필요합니다.
@@ -1134,6 +1690,37 @@ components:
       description: 로봇 이미지 업로드 전용 기기별 API Key
 
   parameters:
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    Size:
+      name: size
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    AdminUserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AdminRoleId:
+      name: roleId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     CsrfToken:
       name: X-CSRF-TOKEN
       in: header
@@ -1160,6 +1747,453 @@ components:
         format: uuid
 
   schemas:
+    AdminAccountStatus:
+      type: string
+      enum:
+        - PENDING_APPROVAL
+        - ACTIVE
+        - DISABLED
+        - REJECTED
+        - DELETED
+
+    AdminAssignedRoleResponse:
+      type: object
+      required: [roleId, roleCode, roleName, primary]
+      additionalProperties: false
+      properties:
+        roleId:
+          type: string
+          format: uuid
+        roleCode:
+          type: string
+        roleName:
+          type: string
+        primary:
+          type: boolean
+
+    AdminUserResponse:
+      type: object
+      required:
+        - userId
+        - userCode
+        - email
+        - displayName
+        - accountStatus
+        - active
+        - mfaEnrolled
+        - roles
+        - createdAt
+        - updatedAt
+      additionalProperties: false
+      properties:
+        userId:
+          type: string
+          format: uuid
+        userCode:
+          type: string
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+        departmentName:
+          type: string
+          nullable: true
+        jobTitle:
+          type: string
+          nullable: true
+        officeName:
+          type: string
+          nullable: true
+        accountStatus:
+          $ref: "#/components/schemas/AdminAccountStatus"
+        active:
+          type: boolean
+        mfaEnrolled:
+          type: boolean
+        roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminAssignedRoleResponse"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    AdminUserPageResponse:
+      type: object
+      required: [content, page, size, totalElements, totalPages]
+      additionalProperties: false
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminUserResponse"
+        page:
+          type: integer
+          minimum: 0
+        size:
+          type: integer
+          minimum: 1
+        totalElements:
+          type: integer
+          format: int64
+          minimum: 0
+        totalPages:
+          type: integer
+          minimum: 0
+
+    AdminRegistrationApprovalRequest:
+      type: object
+      required: [roleIds, reason]
+      additionalProperties: false
+      properties:
+        roleIds:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+        primaryRoleId:
+          type: string
+          format: uuid
+          nullable: true
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    AdminReasonRequest:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    AdminUserStatusRequest:
+      type: object
+      required: [status, reason]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [ACTIVE, DISABLED]
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    AdminUserRolesRequest:
+      type: object
+      required: [roleIds, reason]
+      additionalProperties: false
+      properties:
+        roleIds:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+        primaryRoleId:
+          type: string
+          format: uuid
+          nullable: true
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    AdminOverrideEffect:
+      type: string
+      enum: [ALLOW, DENY]
+
+    AdminPermissionOverrideItem:
+      type: object
+      required: [permissionId, effect, reason]
+      additionalProperties: false
+      properties:
+        permissionId:
+          type: string
+          format: uuid
+        effect:
+          $ref: "#/components/schemas/AdminOverrideEffect"
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    AdminPermissionOverridesRequest:
+      type: object
+      required: [overrides, reason]
+      additionalProperties: false
+      properties:
+        overrides:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/AdminPermissionOverrideItem"
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    AdminPermissionOverrideResponse:
+      type: object
+      required:
+        - permissionOverrideId
+        - permissionId
+        - permissionCode
+        - effect
+        - reason
+        - grantedAt
+      additionalProperties: false
+      properties:
+        permissionOverrideId:
+          type: string
+          format: uuid
+        permissionId:
+          type: string
+          format: uuid
+        permissionCode:
+          type: string
+        effect:
+          $ref: "#/components/schemas/AdminOverrideEffect"
+        reason:
+          type: string
+        grantedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    AdminRobotAssignmentType:
+      type: string
+      enum: [VIEWER, OPERATOR, OWNER]
+
+    AdminRobotAssignmentItem:
+      type: object
+      required: [robotId, assignmentType, reason]
+      additionalProperties: false
+      properties:
+        robotId:
+          type: string
+          format: uuid
+        assignmentType:
+          $ref: "#/components/schemas/AdminRobotAssignmentType"
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    AdminRobotAssignmentsRequest:
+      type: object
+      required: [assignments, reason]
+      additionalProperties: false
+      properties:
+        assignments:
+          type: array
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/AdminRobotAssignmentItem"
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    AdminRobotAssignmentResponse:
+      type: object
+      required:
+        - assignmentId
+        - robotId
+        - robotName
+        - assignmentType
+        - reason
+        - assignedAt
+      additionalProperties: false
+      properties:
+        assignmentId:
+          type: string
+          format: uuid
+        robotId:
+          type: string
+          format: uuid
+        robotName:
+          type: string
+        assignmentType:
+          $ref: "#/components/schemas/AdminRobotAssignmentType"
+        reason:
+          type: string
+        assignedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    AdminRoleResponse:
+      type: object
+      required:
+        - roleId
+        - roleCode
+        - roleName
+        - description
+        - system
+        - active
+        - displayOrder
+        - permissionCodes
+        - createdAt
+        - updatedAt
+      additionalProperties: false
+      properties:
+        roleId:
+          type: string
+          format: uuid
+        roleCode:
+          type: string
+        roleName:
+          type: string
+        description:
+          type: string
+        system:
+          type: boolean
+        active:
+          type: boolean
+        displayOrder:
+          type: integer
+          minimum: 0
+        permissionCodes:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    AdminRoleCreateRequest:
+      type: object
+      required:
+        - roleCode
+        - roleName
+        - description
+        - displayOrder
+        - reason
+      additionalProperties: false
+      properties:
+        roleCode:
+          type: string
+          pattern: "^[A-Z][A-Z0-9_]{1,49}$"
+        roleName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          minLength: 1
+          maxLength: 500
+        displayOrder:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    AdminRoleUpdateRequest:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        roleName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          minLength: 1
+          maxLength: 500
+        active:
+          type: boolean
+        displayOrder:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    AdminRolePermissionsRequest:
+      type: object
+      required: [permissionIds, reason]
+      additionalProperties: false
+      properties:
+        permissionIds:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    AdminPermissionResponse:
+      type: object
+      required:
+        - permissionId
+        - permissionCode
+        - permissionName
+        - description
+        - resourceType
+        - system
+        - active
+        - displayOrder
+      additionalProperties: false
+      properties:
+        permissionId:
+          type: string
+          format: uuid
+        permissionCode:
+          type: string
+        permissionName:
+          type: string
+        description:
+          type: string
+        resourceType:
+          type: string
+        system:
+          type: boolean
+        active:
+          type: boolean
+        displayOrder:
+          type: integer
+          minimum: 0
+
     RobotRegistrationRequest:
       type: object
       required: [robotName, serialNumber]
@@ -2126,7 +3160,12 @@ components:
         - AUTH_FORBIDDEN
         - AUTH_PASSWORD_REUSE_NOT_ALLOWED
         - AUTH_MFA_UNAVAILABLE
+        - AUTH_ADMIN_REAUTHENTICATION_FAILED
+        - AUTH_LAST_ADMIN_PROTECTED
         - COMMON_RESOURCE_NOT_FOUND
+        - AUTH_USER_NOT_FOUND
+        - AUTH_ROLE_NOT_FOUND
+        - AUTH_PERMISSION_NOT_FOUND
         - ROBOT_NOT_FOUND
         - DEFECT_NOT_FOUND
         - COMMAND_NOT_FOUND

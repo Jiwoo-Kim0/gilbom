@@ -105,7 +105,9 @@ staging은 prod와 같은 인증·쿠키·IAM·네트워크 정책을 사용하�
 | `SERVER_PORT` |  | 기본 `8080`, 외부 직접 공개 금지 |
 | `GILBOM_PUBLIC_BASE_URL` |  | 환경별 HTTPS 외부 URL |
 | `GILBOM_FRONTEND_ORIGIN` |  | 정확한 단일 Origin 또는 승인 목록 |
-| `GILBOM_CORS_ALLOWED_ORIGINS` |  | staging/prod wildcard 금지 |
+| `GILBOM_CORS_ENABLED` |  | 기본 `false`; Nginx same-origin이면 비활성 유지 |
+| `GILBOM_CORS_ALLOWED_ORIGINS` |  | 활성화 시 exact `http(s)` Origin 목록 필수, wildcard 금지 |
+| `GILBOM_CORS_ALLOW_CREDENTIALS` |  | 세션 cookie 사용 시 `true`, wildcard와 조합 불가 |
 | `GILBOM_REQUEST_ID_HEADER` |  | `X-Request-Id` 고정 |
 | `GILBOM_MAX_REQUEST_BODY_SIZE` |  | 전체 HTTP 요청 본문 상한, 기본 `1MB` |
 | `GILBOM_MAX_REQUEST_HEADER_SIZE` |  | Cookie를 포함한 요청 헤더 상한, 기본 `16KB` |
