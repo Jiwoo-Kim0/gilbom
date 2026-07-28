@@ -38,6 +38,7 @@
 | V11 | Robot, MQTT Credential, Telemetry 이력·현재 상태 | 로봇 통신에 필요한 기준정보·Credential 수명주기와 최신 데이터 보호 기반을 우선 생성 |
 | V12 | defect 스키마 | 점자블록 결함·관측·처리 이력·병합 이력을 추가하고 처리 이력을 append-only로 보호. 상세는 [defect-schema.md](defect-schema.md) 참고 |
 | V13 | 사용자 권한 예외·로봇 객체 범위 | ALLOW/DENY와 만료, VIEWER/OPERATOR/OWNER 배정, 제한 권한 및 마지막 활성 ADMIN 보호를 DB 제약과 trigger로 강제 |
+| V14 | 권한 변경 세션 폐기 | 역할·권한·사용자 override·로봇 배정·계정 상태 변경과 같은 transaction에서 대상 사용자의 기존 session을 폐기 |
 
 
 시스템 Role `ADMIN`, `MANAGER`, `OPERATOR`와 18개 세부 permission 및
@@ -55,7 +56,7 @@ docker compose logs backend
 ```
 
 
-Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V13이
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V14가
 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증
