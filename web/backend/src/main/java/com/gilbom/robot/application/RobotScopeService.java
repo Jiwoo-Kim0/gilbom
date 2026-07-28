@@ -14,7 +14,12 @@ import com.gilbom.common.error.ErrorCode;
 @Service
 public class RobotScopeService {
 
-    private static final String SYSTEM_ADMIN_SCOPE = """
+    /**
+     * 시스템 ADMIN은 전체 객체 범위를 가진다. 로봇에서 파생된 리소스가 아직
+     * 로봇에 연결되지 않은 경우에도 ADMIN 범위는 성립해야 하므로 조건절을
+     * 별도로 공개한다. 이 조건절은 {@code userId}만 바인딩하면 된다.
+     */
+    public static final String SYSTEM_ADMIN_SCOPE = """
             EXISTS (
                 SELECT 1
                 FROM auth.admin_user admin_user
@@ -33,7 +38,12 @@ public class RobotScopeService {
             )
             """;
 
-    static final String VISIBLE_ROBOT_PREDICATE = """
+    /**
+     * 다른 도메인도 로봇에서 파생된 리소스의 범위를 같은 규칙으로 판정해야 하므로
+     * 조건절을 공개한다. 사용하는 질의는 로봇 테이블을 {@code r}로 alias 하고
+     * {@code userId} 파라미터를 바인딩해야 한다.
+     */
+    public static final String VISIBLE_ROBOT_PREDICATE = """
             (
             """ + SYSTEM_ADMIN_SCOPE + """
                 OR EXISTS (
@@ -50,7 +60,7 @@ public class RobotScopeService {
             )
             """;
 
-    static final String OPERABLE_ROBOT_PREDICATE = """
+    public static final String OPERABLE_ROBOT_PREDICATE = """
             (
             """ + SYSTEM_ADMIN_SCOPE + """
                 OR EXISTS (
