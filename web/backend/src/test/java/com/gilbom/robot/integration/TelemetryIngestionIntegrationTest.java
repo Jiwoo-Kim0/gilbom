@@ -96,6 +96,9 @@ class TelemetryIngestionIntegrationTest {
                 "DELETE FROM telemetry.robot_current_state WHERE robot_id = ?",
                 ROBOT_ID);
         jdbcTemplate.update(
+                "DELETE FROM telemetry.robot_boot_session WHERE robot_id = ?",
+                ROBOT_ID);
+        jdbcTemplate.update(
                 "DELETE FROM robot.robot WHERE robot_id = ?",
                 ROBOT_ID);
         createAdmin();
@@ -201,6 +204,51 @@ class TelemetryIngestionIntegrationTest {
         assertThat(currentBatteryPercent()).isEqualTo(80.0);
         assertThat(currentEpoch("telemetry_sampled_at"))
                 .isEqualTo(BASE_SAMPLED_AT.plusSeconds(10).getEpochSecond());
+        verifyNoInteractions(sseService);
+    }
+
+    @Test
+    void acceptsSequenceOneForNewBootAndRejectsPreviousBootReplay() {
+        UUID newBootId =
+                UUID.fromString("6850afcb-d682-4ef6-a90d-f63fcf5c2202");
+        ingest(
+                payload(
+                        UUID.fromString(
+                                "7850afcb-d682-4ef6-a90d-f63fcf5c2201"),
+                        BOOT_ID,
+                        50L,
+                        BASE_SAMPLED_AT,
+                        79.0),
+                BASE_SAMPLED_AT.plusSeconds(1));
+
+        TelemetryIngestionResult newBoot = ingest(
+                payload(
+                        UUID.fromString(
+                                "7850afcb-d682-4ef6-a90d-f63fcf5c2202"),
+                        newBootId,
+                        1L,
+                        BASE_SAMPLED_AT.plusSeconds(10),
+                        80.0),
+                BASE_SAMPLED_AT.plusSeconds(11));
+        clearInvocations(sseService);
+
+        TelemetryIngestionResult previousBootReplay = ingest(
+                payload(
+                        UUID.fromString(
+                                "7850afcb-d682-4ef6-a90d-f63fcf5c2203"),
+                        BOOT_ID,
+                        51L,
+                        BASE_SAMPLED_AT.plusSeconds(20),
+                        10.0),
+                BASE_SAMPLED_AT.plusSeconds(21));
+
+        assertThat(newBoot)
+                .isEqualTo(new TelemetryIngestionResult(true, true));
+        assertThat(previousBootReplay)
+                .isEqualTo(new TelemetryIngestionResult(true, false));
+        assertThat(currentBootId()).isEqualTo(newBootId);
+        assertThat(currentSequence()).isEqualTo(1L);
+        assertThat(currentBatteryPercent()).isEqualTo(80.0);
         verifyNoInteractions(sseService);
     }
 
@@ -336,6 +384,14 @@ class TelemetryIngestionIntegrationTest {
                 "SELECT telemetry_seq FROM telemetry.robot_current_state "
                         + "WHERE robot_id = ?",
                 Long.class,
+                ROBOT_ID);
+    }
+
+    private UUID currentBootId() {
+        return jdbcTemplate.queryForObject(
+                "SELECT current_boot_id FROM telemetry.robot_current_state "
+                        + "WHERE robot_id = ?",
+                UUID.class,
                 ROBOT_ID);
     }
 

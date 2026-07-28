@@ -9,6 +9,7 @@ import com.gilbom.robot.data.mqtt.v2.inbound.SafetyEventPayload;
 import com.gilbom.robot.data.mqtt.v2.inbound.StatePayload;
 import com.gilbom.robot.data.mqtt.v2.inbound.TelemetryPayload;
 import com.gilbom.robot.mqtt.topic.MqttTopicType;
+import com.gilbom.robot.status.RobotStatusIngestionService;
 import com.gilbom.robot.telemetry.TelemetryIngestionService;
 import org.junit.jupiter.api.Test;
 
@@ -23,8 +24,10 @@ class MqttTopicMessageHandlerRegistrationTest {
     @Test
     void bindsEachInboundTopicToItsTypedHandler() {
         List<MqttTopicMessageHandler<?>> handlers = List.of(
-                new PresenceMqttMessageHandler(),
-                new StateMqttMessageHandler(),
+                new PresenceMqttMessageHandler(
+                        mock(RobotStatusIngestionService.class)),
+                new StateMqttMessageHandler(
+                        mock(RobotStatusIngestionService.class)),
                 new TelemetryMqttMessageHandler(
                         mock(TelemetryIngestionService.class)),
                 new IncidentEventMqttMessageHandler(),
