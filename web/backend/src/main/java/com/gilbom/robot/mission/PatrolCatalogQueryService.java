@@ -109,6 +109,27 @@ public class PatrolCatalogQueryService {
         return new PatrolRouteListResponse(routes);
     }
 
+    @Transactional(readOnly = true)
+    public PatrolRouteResponse findRoute(
+            UUID patrolAreaId,
+            UUID patrolRouteId
+    ) {
+        List<PatrolRouteResponse> routes = jdbcTemplate.query("""
+                SELECT
+                """ + ROUTE_COLUMNS + """
+                FROM robot.patrol_route
+                WHERE patrol_area_id = ?
+                  AND patrol_route_id = ?
+                """,
+                (resultSet, rowNumber) -> mapRoute(resultSet),
+                patrolAreaId,
+                patrolRouteId);
+        if (routes.isEmpty()) {
+            throw new BusinessException(ErrorCode.PATROL_ROUTE_NOT_FOUND);
+        }
+        return routes.getFirst();
+    }
+
     private void requireArea(UUID patrolAreaId) {
         Boolean exists = jdbcTemplate.queryForObject("""
                 SELECT EXISTS (

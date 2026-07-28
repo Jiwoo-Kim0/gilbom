@@ -20,6 +20,11 @@ public final class PatrolCatalogDtos {
         INACTIVE
     }
 
+    public enum PatrolRouteCreateLifecycleStatus {
+        DRAFT,
+        ACTIVE
+    }
+
     public record PatrolAreaCreateRequest(
             @NotBlank @Size(max = 50) String areaCode,
             @NotBlank @Size(max = 100) String areaName,
@@ -62,6 +67,22 @@ public final class PatrolCatalogDtos {
 
         public PatrolRouteListResponse {
             routes = List.copyOf(routes);
+        }
+    }
+
+    public record PatrolRouteCreateRequest(
+            @NotBlank @Size(max = 50) String routeCode,
+            @NotBlank @Size(max = 100) String routeName,
+            @NotNull JsonNode routeGeometry,
+            PatrolRouteCreateLifecycleStatus lifecycleStatus
+    ) {
+
+        public PatrolRouteCreateRequest {
+            routeCode = normalize(routeCode);
+            routeName = normalize(routeName);
+            lifecycleStatus = lifecycleStatus == null
+                    ? PatrolRouteCreateLifecycleStatus.ACTIVE
+                    : lifecycleStatus;
         }
     }
 

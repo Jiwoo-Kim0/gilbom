@@ -35,10 +35,13 @@ import com.gilbom.robot.data.api.response.MissionDtos.MissionStatus;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionUpdateRequest;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaCreateRequest;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaResponse;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolRouteCreateRequest;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolRouteResponse;
 import com.gilbom.robot.mission.MissionManagementService;
 import com.gilbom.robot.mission.MissionQueryService;
 import com.gilbom.robot.mission.PatrolAreaManagementService;
 import com.gilbom.robot.mission.PatrolCatalogQueryService;
+import com.gilbom.robot.mission.PatrolRouteManagementService;
 
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(
@@ -88,6 +91,9 @@ class MissionManagementIntegrationTest {
 
     @Autowired
     private PatrolAreaManagementService patrolAreaManagementService;
+
+    @Autowired
+    private PatrolRouteManagementService patrolRouteManagementService;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -420,6 +426,164 @@ class MissionManagementIntegrationTest {
     }
 
     @Test
+    void createsActiveRouteVersionsAndUsesLatestVersionForMission()
+            throws Exception {
+        String routeCode = "ROUTE-VERSION-"
+                + UUID.randomUUID().toString().substring(0, 8);
+        UUID firstRequestId = UUID.randomUUID();
+        PatrolRouteResponse first = patrolRouteManagementService.create(
+                areaId,
+                new PatrolRouteCreateRequest(
+                        routeCode,
+                        "통합 테스트 경로 v1",
+                        objectMapper.readTree("""
+                                {
+                                  "type": "LineString",
+                                  "coordinates": [
+                                    [127.001, 37.001],
+                                    [127.019, 37.019]
+                                  ]
+                                }
+                                """),
+                        null),
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(firstRequestId));
+
+        UUID secondRequestId = UUID.randomUUID();
+        PatrolRouteResponse second = patrolRouteManagementService.create(
+                areaId,
+                new PatrolRouteCreateRequest(
+                        routeCode,
+                        "통합 테스트 경로 v2",
+                        objectMapper.readTree("""
+                                {
+                                  "type": "MultiLineString",
+                                  "coordinates": [
+                                    [
+                                      [127.001, 37.001],
+                                      [127.010, 37.010]
+                                    ],
+                                    [
+                                      [127.010, 37.010],
+                                      [127.019, 37.019]
+                                    ]
+                                  ]
+                                }
+                                """),
+                        null),
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(secondRequestId));
+
+        assertThat(first.routeVersion()).isEqualTo(1);
+        assertThat(second.routeVersion()).isEqualTo(2);
+        assertThat(second.lifecycleStatus()).isEqualTo("ACTIVE");
+        assertThat(second.routeGeometry().path("type").asText())
+                .isEqualTo("MultiLineString");
+        assertThat(queryService.findMission(
+                OWNER_ID,
+                managementService.create(
+                        new MissionCreateRequest(
+                                robotId,
+                                areaId,
+                                second.patrolRouteId(),
+                                Instant.now().plusSeconds(3600)),
+                        OWNER_ID,
+                        AuditRequestContext.requestIdOnly(
+                                UUID.randomUUID()))
+                        .missionId())
+                .patrolRouteId())
+                .isEqualTo(second.patrolRouteId());
+
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT lifecycle_status
+                FROM robot.patrol_route
+                WHERE patrol_route_id = ?
+                """, String.class, first.patrolRouteId()))
+                .isEqualTo("INACTIVE");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM robot.patrol_route
+                WHERE patrol_area_id = ?
+                  AND route_code = ?
+                  AND lifecycle_status = 'ACTIVE'
+                """, Integer.class, areaId, routeCode))
+                .isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM audit.audit_log
+                WHERE request_id = ?
+                  AND action_type = 'PATROL_ROUTE_CREATED'
+                  AND target_type = 'PATROL_ROUTE'
+                  AND target_id = ?
+                  AND after_value ->> 'supersededRouteId' = ?
+                  AND result = 'SUCCESS'
+                """,
+                Integer.class,
+                secondRequestId,
+                second.patrolRouteId(),
+                first.patrolRouteId().toString()))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void rejectsInvalidAndOutsideAreaRoutes() throws Exception {
+        PatrolRouteCreateRequest invalid =
+                new PatrolRouteCreateRequest(
+                        "ROUTE-INVALID-"
+                                + UUID.randomUUID()
+                                        .toString()
+                                        .substring(0, 8),
+                        "점 하나 경로",
+                        objectMapper.readTree("""
+                                {
+                                  "type": "LineString",
+                                  "coordinates": [
+                                    [127.001, 37.001]
+                                  ]
+                                }
+                                """),
+                        null);
+        assertThatThrownBy(() -> patrolRouteManagementService.create(
+                areaId,
+                invalid,
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID())))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(
+                                        ErrorCode.PATROL_ROUTE_GEOMETRY_INVALID));
+
+        PatrolRouteCreateRequest outside =
+                new PatrolRouteCreateRequest(
+                        "ROUTE-OUTSIDE-"
+                                + UUID.randomUUID()
+                                        .toString()
+                                        .substring(0, 8),
+                        "구역 밖 경로",
+                        objectMapper.readTree("""
+                                {
+                                  "type": "LineString",
+                                  "coordinates": [
+                                    [128.001, 38.001],
+                                    [128.019, 38.019]
+                                  ]
+                                }
+                                """),
+                        null);
+        assertThatThrownBy(() -> patrolRouteManagementService.create(
+                areaId,
+                outside,
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID())))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(
+                                        ErrorCode.PATROL_ROUTE_OUTSIDE_AREA));
+    }
+
+    @Test
     void rejectsRouteThatDoesNotBelongToArea() {
         UUID otherAreaId = UUID.randomUUID();
         jdbcTemplate.update("""
@@ -503,7 +667,8 @@ class MissionManagementIntegrationTest {
             MissionQueryService.class,
             MissionManagementService.class,
             PatrolCatalogQueryService.class,
-            PatrolAreaManagementService.class
+            PatrolAreaManagementService.class,
+            PatrolRouteManagementService.class
     })
     static class TestApplication {
     }

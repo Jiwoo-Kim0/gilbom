@@ -121,6 +121,9 @@ HTTP 상태와 응답 형식은 다음 원칙을 따른다.
 | `ROBOT_NOT_FOUND` | 404 | 로봇 없음 |
 | `PATROL_AREA_CODE_CONFLICT` | 409 | 이미 등록된 순찰 구역 코드 |
 | `PATROL_AREA_GEOMETRY_INVALID` | 422 | 순찰 구역 경계가 유효한 Polygon/MultiPolygon 또는 4326 좌표 범위를 충족하지 않음 |
+| `PATROL_ROUTE_VERSION_CONFLICT` | 409 | 동일 순찰 구역·경로 코드의 버전 생성 경합 |
+| `PATROL_ROUTE_GEOMETRY_INVALID` | 422 | 순찰 경로가 유효한 LineString/MultiLineString 또는 4326 좌표 범위를 충족하지 않음 |
+| `PATROL_ROUTE_OUTSIDE_AREA` | 422 | 순찰 경로가 선택한 순찰 구역 경계 밖에 있음 |
 | `DEFECT_NOT_FOUND` | 404 | 결함 없음 |
 | `COMMAND_NOT_FOUND` | 404 | 명령 없음 |
 | `REPORT_NOT_FOUND` | 404 | 보고서 없음 |

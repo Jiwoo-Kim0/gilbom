@@ -18,9 +18,12 @@ import com.gilbom.auth.AuthenticatedUserIdResolver;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaCreateRequest;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaListResponse;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaResponse;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolRouteCreateRequest;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolRouteListResponse;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolRouteResponse;
 import com.gilbom.robot.mission.PatrolAreaManagementService;
 import com.gilbom.robot.mission.PatrolCatalogQueryService;
+import com.gilbom.robot.mission.PatrolRouteManagementService;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -31,15 +34,18 @@ public class PatrolCatalogController {
 
     private final PatrolCatalogQueryService queryService;
     private final PatrolAreaManagementService managementService;
+    private final PatrolRouteManagementService routeManagementService;
     private final AuthenticatedUserIdResolver userIdResolver;
 
     public PatrolCatalogController(
             PatrolCatalogQueryService queryService,
             PatrolAreaManagementService managementService,
+            PatrolRouteManagementService routeManagementService,
             AuthenticatedUserIdResolver userIdResolver
     ) {
         this.queryService = queryService;
         this.managementService = managementService;
+        this.routeManagementService = routeManagementService;
         this.userIdResolver = userIdResolver;
     }
 
@@ -81,5 +87,38 @@ public class PatrolCatalogController {
             @PathVariable UUID patrolAreaId
     ) {
         return queryService.findRoutes(patrolAreaId);
+    }
+
+    @GetMapping("/{patrolAreaId}/routes/{patrolRouteId}")
+    @PreAuthorize("hasAuthority('MISSION_VIEW')")
+    public PatrolRouteResponse findRoute(
+            @PathVariable UUID patrolAreaId,
+            @PathVariable UUID patrolRouteId
+    ) {
+        return queryService.findRoute(
+                patrolAreaId,
+                patrolRouteId);
+    }
+
+    @PostMapping("/{patrolAreaId}/routes")
+    @PreAuthorize("hasAuthority('MISSION_MANAGE')")
+    public ResponseEntity<PatrolRouteResponse> createRoute(
+            @PathVariable UUID patrolAreaId,
+            @Valid @RequestBody PatrolRouteCreateRequest request,
+            Authentication authentication,
+            HttpServletRequest servletRequest
+    ) {
+        PatrolRouteResponse created = routeManagementService.create(
+                patrolAreaId,
+                request,
+                userIdResolver.require(authentication),
+                AuditRequestContext.from(servletRequest));
+        return ResponseEntity
+                .created(URI.create(
+                        "/api/v1/patrol-areas/"
+                                + patrolAreaId
+                                + "/routes/"
+                                + created.patrolRouteId()))
+                .body(created);
     }
 }

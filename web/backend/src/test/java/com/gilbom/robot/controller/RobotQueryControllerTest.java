@@ -52,6 +52,7 @@ import com.gilbom.robot.data.api.response.RobotListItemResponse;
 import com.gilbom.robot.data.api.response.RobotListResponse;
 import com.gilbom.robot.mission.PatrolAreaManagementService;
 import com.gilbom.robot.mission.PatrolCatalogQueryService;
+import com.gilbom.robot.mission.PatrolRouteManagementService;
 import com.gilbom.security.config.SecurityConfig;
 import com.gilbom.security.web.SecurityErrorResponseWriter;
 import com.gilbom.security.web.SecurityHeadersFilter;
@@ -97,6 +98,9 @@ class RobotQueryControllerTest {
 
     @MockitoBean
     private PatrolAreaManagementService patrolAreaManagementService;
+
+    @MockitoBean
+    private PatrolRouteManagementService patrolRouteManagementService;
 
     @MockitoBean
     private SessionSecurityStateRepository sessionSecurityStateRepository;
@@ -362,6 +366,97 @@ class RobotQueryControllerTest {
     }
 
     @Test
+    void returnsSingleRouteWithMissionView() throws Exception {
+        when(patrolCatalogQueryService.findRoute(
+                PATROL_AREA_ID,
+                PATROL_ROUTE_ID))
+                .thenReturn(routeResponse());
+
+        mockMvc.perform(get(
+                        "/api/v1/patrol-areas/{patrolAreaId}"
+                                + "/routes/{patrolRouteId}",
+                        PATROL_AREA_ID,
+                        PATROL_ROUTE_ID)
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_VIEW)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath(
+                        "$.patrolRouteId",
+                        is(PATROL_ROUTE_ID.toString())))
+                .andExpect(jsonPath("$.routeVersion", is(1)));
+    }
+
+    @Test
+    void createsActivePatrolRouteWithMissionManage() throws Exception {
+        when(patrolRouteManagementService.create(
+                eq(PATROL_AREA_ID),
+                any(),
+                eq(USER_ID),
+                any()))
+                .thenReturn(routeResponse());
+
+        mockMvc.perform(post(
+                        "/api/v1/patrol-areas/{patrolAreaId}/routes",
+                        PATROL_AREA_ID)
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_MANAGE))
+                        .with(csrf().asHeader())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "routeCode": " A-MAIN ",
+                                  "routeName": " 주 순찰 경로 ",
+                                  "routeGeometry": {
+                                    "type": "LineString",
+                                    "coordinates": [
+                                      [127.001, 37.001],
+                                      [127.019, 37.019]
+                                    ]
+                                  }
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(header().string(
+                        "Location",
+                        "/api/v1/patrol-areas/"
+                                + PATROL_AREA_ID
+                                + "/routes/"
+                                + PATROL_ROUTE_ID))
+                .andExpect(jsonPath("$.routeCode", is("A-MAIN")))
+                .andExpect(jsonPath("$.routeVersion", is(1)))
+                .andExpect(jsonPath("$.lifecycleStatus", is("ACTIVE")));
+    }
+
+    @Test
+    void requiresMissionManageForPatrolRouteCreation()
+            throws Exception {
+        mockMvc.perform(post(
+                        "/api/v1/patrol-areas/{patrolAreaId}/routes",
+                        PATROL_AREA_ID)
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_VIEW))
+                        .with(csrf().asHeader())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "routeCode": "A-MAIN",
+                                  "routeName": "주 순찰 경로",
+                                  "routeGeometry": {
+                                    "type": "LineString",
+                                    "coordinates": [
+                                      [127.001, 37.001],
+                                      [127.019, 37.019]
+                                    ]
+                                  }
+                                }
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")));
+
+        verifyNoInteractions(patrolRouteManagementService);
+    }
+
+    @Test
     void requiresMissionViewPermissionForPatrolCatalog()
             throws Exception {
         mockMvc.perform(get("/api/v1/patrol-areas")
@@ -387,5 +482,27 @@ class RobotQueryControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code",
                         is("PATROL_AREA_NOT_FOUND")));
+    }
+
+    private PatrolRouteResponse routeResponse() throws Exception {
+        return new PatrolRouteResponse(
+                PATROL_ROUTE_ID,
+                PATROL_AREA_ID,
+                "A-MAIN",
+                "주 순찰 경로",
+                1,
+                new com.fasterxml.jackson.databind.ObjectMapper()
+                        .readTree("""
+                                {
+                                  "type": "LineString",
+                                  "coordinates": [
+                                    [127.001, 37.001],
+                                    [127.019, 37.019]
+                                  ]
+                                }
+                                """),
+                "ACTIVE",
+                Instant.parse("2026-07-29T00:00:00Z"),
+                Instant.parse("2026-07-29T00:00:00Z"));
     }
 }
