@@ -89,6 +89,11 @@ gilbom:
   http:
     # JSON과 chunked body를 포함한 모든 요청 본문의 애플리케이션 전역 상한이다.
     max-request-body-size: ${GILBOM_MAX_REQUEST_BODY_SIZE:1MB}
+  robot:
+    presence:
+      # State는 30초마다 발행하므로 3회 주기 동안 아무 메시지도 없으면 Offline으로 판정한다.
+      offline-timeout: ${GILBOM_ROBOT_OFFLINE_TIMEOUT:90s}
+      offline-scan-interval: ${GILBOM_ROBOT_OFFLINE_SCAN_INTERVAL:30s}
   security:
     cors:
       # Nginx의 /api same-origin proxy가 기본이다. 교차 Origin이 필요한 환경만 명시적으로 연다.
