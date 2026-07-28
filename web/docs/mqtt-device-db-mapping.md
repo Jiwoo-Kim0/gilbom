@@ -83,7 +83,7 @@ MQTT에 보이는 식별자와 DB PK를 동일한 값으로 취급하면 안 된
 
 | MQTT·외부 값 | 예시 | 조회할 DB 칼럼 | 내부에서 사용할 FK |
 |---|---|---|---|
-| `robot_id` | `RBT-001` | `robot.robot.robot_code` | `robot.robot.robot_id` UUID |
+| `mqtt_id` | `RBT-001` | `robot.robot.mqtt_id` | `robot.robot.robot_id` UUID |
 | `mission_id` | `MIS-20260723-001` | `robot.mission.mission_code` | `robot.mission.mission_id` UUID |
 | `requested_by.actor_id` | `ADM-0042` | `auth.admin_user.user_code` | `auth.admin_user.user_id` UUID |
 | `event_id` | UUID | 그대로 사용 | `telemetry.robot_event.event_id` UUID |
@@ -247,7 +247,7 @@ ONLINE과 OFFLINE은 같은 `PresencePayload` 객체로 수신하고 `status`에
 
 | 입력값 | `telemetry.robot_boot_session` | `telemetry.robot_current_state` | 처리 |
 |---|---|---|---|
-| `robot_id` | 코드 조회 후 `robot_id` UUID | `robot_id` UUID | `robot.robot.robot_code`로 조회 |
+| `mqtt_id` | 코드 조회 후 `robot_id` UUID | `robot_id` UUID | `robot.robot.mqtt_id`로 조회 |
 | `boot_id` | PK `boot_id` | `boot_id` | ONLINE과 OFFLINE의 부팅 세션 일치 검증 |
 | `schema_version` | `schema_version` | - | 지원 버전 검증 |
 | `status` | `presence_status` | `presence_status` | 현재 온라인 상태 갱신 |

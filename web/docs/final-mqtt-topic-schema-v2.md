@@ -1,7 +1,7 @@
 # 길봄 Final MQTT Topic Schema v2.0
 
 > 문서 상태: 구현 계약안  
-> Namespace: `tbs/v2/robots/{robot_id}/...`  
+> Namespace: `tbs/v2/robots/{mqtt_id}/...`
 > Payload Version: `"schema_version": "2.0"`  
 > Encoding: UTF-8 JSON  
 > JSON Key: `snake_case`  
@@ -26,6 +26,11 @@ v2에서는 실제 기기가 안정적으로 제공할 수 없는 값과 중복 
 
 ### v2 핵심 결정
 
+- DB 내부 로봇 식별자는 UUID `robot_id`이고 MQTT 외부 식별자는 문자열
+  `mqtt_id`로 명확히 분리한다.
+- `mqtt_id`는 서버가 로봇별로 발급하는 불변·고유 값이며 MQTT username,
+  Topic 경로와 Payload 식별자에 동일하게 사용한다.
+- MQTT 연결 세션 식별자는 별도의 `mqtt_client_id`를 사용한다.
 - 기기는 미션 완료율과 예상 완료시간을 MQTT로 보내지 않는다.
 - 미션 진행률이 필요하면 서버가 계획 경로와 유효 GPS 궤적을 이용해 별도로 계산한다.
 - `position.heading_deg`는 이동 중 GPS RMC Course Over Ground가 유효할 때만 관제용으로 제공한다.
@@ -42,39 +47,39 @@ v2에서는 실제 기기가 안정적으로 제공할 수 없는 값과 중복 
 
 | Topic | QoS | Retain | 발행 조건 | 주요 용도 |
 |---|---:|:---:|---|---|
-| `tbs/v2/robots/{robot_id}/presence` | 1 | O | 연결·종료·LWT | 온라인·오프라인 판정 |
-| `tbs/v2/robots/{robot_id}/state` | 1 | O | 상태 전이 즉시 + 30초 | 현재 운행·미션·배터리·장치 상태 |
-| `tbs/v2/robots/{robot_id}/telemetry` | 0 | X | 5초 주기 | GPS·배터리·Jetson 온도 이력 |
-| `tbs/v2/robots/{robot_id}/events/incident` | 1 | X | 결함 관측 확정 시 1회 | 결함 관측·AI 결과 |
-| `tbs/v2/robots/{robot_id}/events/battery` | 1 | X | 배터리 상태 전이 시 1회 | 선택: 저전력 전이 이력 |
-| `tbs/v2/robots/{robot_id}/events/safety` | 1 | X | 지속 안전 사건 확정·해제 시 1회 | 장애물·센서 고장 사건 |
-| `tbs/v2/robots/{robot_id}/events/mission` | 1 | X | 미션 상태 전이 시 1회 | 미션 시작·정지·완료 이력 |
-| `tbs/v2/robots/{robot_id}/commands/result` | 1 | X | 명령 접수·처리 결과 발생 시 | 명령 ACK·성공·실패 |
+| `tbs/v2/robots/{mqtt_id}/presence` | 1 | O | 연결·종료·LWT | 온라인·오프라인 판정 |
+| `tbs/v2/robots/{mqtt_id}/state` | 1 | O | 상태 전이 즉시 + 30초 | 현재 운행·미션·배터리·장치 상태 |
+| `tbs/v2/robots/{mqtt_id}/telemetry` | 0 | X | 5초 주기 | GPS·배터리·Jetson 온도 이력 |
+| `tbs/v2/robots/{mqtt_id}/events/incident` | 1 | X | 결함 관측 확정 시 1회 | 결함 관측·AI 결과 |
+| `tbs/v2/robots/{mqtt_id}/events/battery` | 1 | X | 배터리 상태 전이 시 1회 | 선택: 저전력 전이 이력 |
+| `tbs/v2/robots/{mqtt_id}/events/safety` | 1 | X | 지속 안전 사건 확정·해제 시 1회 | 장애물·센서 고장 사건 |
+| `tbs/v2/robots/{mqtt_id}/events/mission` | 1 | X | 미션 상태 전이 시 1회 | 미션 시작·정지·완료 이력 |
+| `tbs/v2/robots/{mqtt_id}/commands/result` | 1 | X | 명령 접수·처리 결과 발생 시 | 명령 ACK·성공·실패 |
 
 ### 2.2 서버 → 로봇
 
 | Topic | QoS | Retain | 발행 조건 | 주요 용도 |
 |---|---:|:---:|---|---|
-| `tbs/v2/robots/{robot_id}/commands/request` | 1 | X | 관리자 명령 생성 시 | 미션·긴급정지 명령 전달 |
-| `tbs/v2/robots/{robot_id}/ingest/receipt` | 1 | X | Event DB 처리 완료 시 | 심화: 서버 저장 결과 확인 |
+| `tbs/v2/robots/{mqtt_id}/commands/request` | 1 | X | 관리자 명령 생성 시 | 미션·긴급정지 명령 전달 |
+| `tbs/v2/robots/{mqtt_id}/ingest/receipt` | 1 | X | Event DB 처리 완료 시 | 심화: 서버 저장 결과 확인 |
 
 ### 2.3 방향별 경로
 
 ```json
 {
   "robot_to_server": [
-    "tbs/v2/robots/{robot_id}/presence",
-    "tbs/v2/robots/{robot_id}/state",
-    "tbs/v2/robots/{robot_id}/telemetry",
-    "tbs/v2/robots/{robot_id}/events/incident",
-    "tbs/v2/robots/{robot_id}/events/battery",
-    "tbs/v2/robots/{robot_id}/events/safety",
-    "tbs/v2/robots/{robot_id}/events/mission",
-    "tbs/v2/robots/{robot_id}/commands/result"
+    "tbs/v2/robots/{mqtt_id}/presence",
+    "tbs/v2/robots/{mqtt_id}/state",
+    "tbs/v2/robots/{mqtt_id}/telemetry",
+    "tbs/v2/robots/{mqtt_id}/events/incident",
+    "tbs/v2/robots/{mqtt_id}/events/battery",
+    "tbs/v2/robots/{mqtt_id}/events/safety",
+    "tbs/v2/robots/{mqtt_id}/events/mission",
+    "tbs/v2/robots/{mqtt_id}/commands/result"
   ],
   "server_to_robot": [
-    "tbs/v2/robots/{robot_id}/commands/request",
-    "tbs/v2/robots/{robot_id}/ingest/receipt"
+    "tbs/v2/robots/{mqtt_id}/commands/request",
+    "tbs/v2/robots/{mqtt_id}/ingest/receipt"
   ]
 }
 ```
@@ -114,16 +119,55 @@ v2에서는 실제 기기가 안정적으로 제공할 수 없는 값과 중복 
 | 멤버 | 타입 | 규칙 |
 |---|---|---|
 | `schema_version` | String | v2 Payload는 항상 `"2.0"` |
-| `robot_id` | String | Topic의 `{robot_id}` 및 MQTT username과 일치 |
+| `mqtt_id` | String | Topic의 `{mqtt_id}` 및 MQTT username과 일치 |
 | `boot_id` | UUID String | 로봇 통신 프로그램 시작 시 한 번 생성 |
-| `seq` | Integer | 한 `boot_id` 안에서 State·Telemetry·Event가 공유하는 증가 순번 |
+| `seq` | Integer | `1`부터 시작하며 한 `boot_id` 안에서 State·Telemetry·Event가 공유하는 증가 순번 |
 | `message_id` | UUID String | Telemetry 표본 식별자 |
 | `event_id` | UUID String | Event 재전송 중복 제거 식별자 |
 | `command_id` | UUID String | 명령 요청과 결과 연결 식별자 |
 
-`seq`는 새 `boot_id`가 만들어지면 다시 시작할 수 있다. 서버는 `(robot_id, boot_id, seq)` 조합으로 순서를 확인한다.
+`seq`는 새 `boot_id`가 만들어지면 `1`로 초기화한다. 로봇은 메시지를 새로
+생성할 때마다 값을 1씩 증가시키고, 재전송할 때는 기존 값을 유지한다. Wire에서는
+`(mqtt_id, boot_id, seq)`, DB 저장 후에는 `(robot_id, boot_id, seq)` 조합으로
+순서와 중복을 확인한다.
 
-### 3.3 QoS와 Retain
+### 3.3 MQTT Client 설정과 DB 매핑
+
+로봇 MQTT Client는 최소 다음 설정을 사용한다.
+
+```dotenv
+MQTT_ID=RBT-001
+MQTT_PASSWORD=replace-with-provisioned-secret
+MQTT_CLIENT_ID=RBT-001-main
+MQTT_CA_CERT_PATH=/etc/gilbom/certs/ca.crt
+MQTT_BROKER_HOST=mqtt.example.com
+MQTT_BROKER_PORT=8883
+```
+
+| 설정 | 역할 |
+|---|---|
+| `MQTT_ID` | Broker username, Topic `{mqtt_id}`, Payload `mqtt_id` |
+| `MQTT_PASSWORD` | Broker 인증 Secret, DB 원문 저장 금지 |
+| `MQTT_CLIENT_ID` | MQTT 연결 세션 식별자, `mqtt_id`와 다른 개념 |
+| `MQTT_CA_CERT_PATH` | Broker 인증서를 검증할 CA 파일 경로 |
+| `MQTT_BROKER_HOST` | TLS Broker hostname |
+| `MQTT_BROKER_PORT` | TLS 포트, 기본 `8883` |
+
+Backend는 Topic의 `mqtt_id`로 MQTT Identity를 조회한 뒤 내부 UUID `robot_id`로
+변환하여 Telemetry·Event·Current State의 FK에 저장한다.
+
+```text
+mqtt_id "RBT-001"
+→ robot MQTT Identity 조회
+→ robot_id UUID
+→ 업무·이력 테이블 FK 저장
+```
+
+MQTT Password 원문은 로봇의 Secret 설정과 발급 직후 1회 응답에만 존재한다.
+DB에는 Credential verifier/hash, fingerprint, version, status와 수명주기만 저장한다.
+CA 파일은 로봇별 업무 데이터가 아니라 배포 환경 설정으로 관리한다.
+
+### 3.4 QoS와 Retain
 
 | 데이터 성격 | QoS | Retain | 이유 |
 |---|---:|:---:|---|
@@ -133,9 +177,10 @@ v2에서는 실제 기기가 안정적으로 제공할 수 없는 값과 중복 
 | Command | 1 | X | 제어 명령 유실 방지, 오래된 명령 재실행 금지 |
 | Receipt | 1 | X | Event 처리 결과 전달 |
 
-### 3.4 서버 공통 검증
+### 3.5 서버 공통 검증
 
-- Payload에 `robot_id`가 있는 경우 Topic의 `{robot_id}`, MQTT 인증 username과 같아야 한다.
+- Payload의 `mqtt_id`는 Topic의 `{mqtt_id}`와 같아야 한다.
+- Broker ACL은 인증된 MQTT username과 Topic의 `{mqtt_id}`가 같을 때만 발행을 허용한다.
 - 지원하지 않는 `schema_version`은 처리하지 않는다.
 - State는 기존 `updated_at`보다 새로운 경우에만 현재 상태를 갱신한다.
 - Telemetry는 기존 `sampled_at`보다 오래된 표본이 현재값을 덮어쓰지 않게 한다.
@@ -150,7 +195,7 @@ v2에서는 실제 기기가 안정적으로 제공할 수 없는 값과 중복 
 ### 4.1 경로와 용도
 
 ```text
-tbs/v2/robots/{robot_id}/presence
+tbs/v2/robots/{mqtt_id}/presence
 ```
 
 | 항목 | 값 |
@@ -167,7 +212,7 @@ Presence는 통신 연결 상태만 의미한다. 장치 고장이나 안전 정
 ```json
 {
   "schema_version": "2.0",
-  "robot_id": "RBT-001",
+  "mqtt_id": "RBT-001",
   "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
   "status": "ONLINE",
   "connected_at": "2026-07-26T05:00:00.000Z"
@@ -179,7 +224,7 @@ Presence는 통신 연결 상태만 의미한다. 장치 고장이나 안전 정
 ```json
 {
   "schema_version": "2.0",
-  "robot_id": "RBT-001",
+  "mqtt_id": "RBT-001",
   "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
   "status": "OFFLINE",
   "reason": "UNGRACEFUL_DISCONNECT"
@@ -191,7 +236,7 @@ Presence는 통신 연결 상태만 의미한다. 장치 고장이나 안전 정
 | 멤버 | 타입 | 필수 | 값·용도 |
 |---|---|:---:|---|
 | `schema_version` | String | O | `"2.0"` |
-| `robot_id` | String | O | 등록된 로봇 코드 |
+| `mqtt_id` | String | O | 등록된 MQTT 외부 식별자 |
 | `boot_id` | UUID String | O | 현재 부팅 세션 |
 | `status` | Enum String | O | `ONLINE`, `OFFLINE` |
 | `connected_at` | Date-time String | 조건부 | ONLINE 연결 성공 시각 |
@@ -215,7 +260,7 @@ OFFLINE `reason`:
 ### 5.1 경로와 용도
 
 ```text
-tbs/v2/robots/{robot_id}/state
+tbs/v2/robots/{mqtt_id}/state
 ```
 
 | 항목 | 값 |
@@ -233,7 +278,7 @@ State는 “지금 로봇이 무엇을 하고 있고 왜 그런 상태인지”�
 ```json
 {
   "schema_version": "2.0",
-  "robot_id": "RBT-001",
+  "mqtt_id": "RBT-001",
   "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
   "seq": 84,
   "updated_at": "2026-07-26T05:15:35.000Z",
@@ -272,7 +317,7 @@ State는 “지금 로봇이 무엇을 하고 있고 왜 그런 상태인지”�
 | 멤버 | 타입 | 필수 | 값·용도 |
 |---|---|:---:|---|
 | `schema_version` | String | O | `"2.0"` |
-| `robot_id` | String | O | 로봇 코드 |
+| `mqtt_id` | String | O | 등록된 MQTT 외부 식별자 |
 | `boot_id` | UUID String | O | 현재 부팅 세션 |
 | `seq` | Integer | O | 부팅 내 공용 증가 순번 |
 | `updated_at` | Date-time String | O | 이 상태가 로봇에서 확정된 시각 |
@@ -397,7 +442,7 @@ health.battery = FAULT
 ### 6.1 경로와 용도
 
 ```text
-tbs/v2/robots/{robot_id}/telemetry
+tbs/v2/robots/{mqtt_id}/telemetry
 ```
 
 | 항목 | 값 |
@@ -415,7 +460,7 @@ tbs/v2/robots/{robot_id}/telemetry
 {
   "schema_version": "2.0",
   "message_id": "fb9c4472-226d-4473-b684-f0d8282292bd",
-  "robot_id": "RBT-001",
+  "mqtt_id": "RBT-001",
   "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
   "seq": 4312,
   "sampled_at": "2026-07-26T05:15:35.000Z",
@@ -479,7 +524,7 @@ GPS Fix가 없으면 과거 위치를 복사하지 않는다.
 |---|---|:---:|---|
 | `schema_version` | String | O | `"2.0"` |
 | `message_id` | UUID String | O | 표본마다 새로 생성 |
-| `robot_id` | String | O | 로봇 코드 |
+| `mqtt_id` | String | O | 등록된 MQTT 외부 식별자 |
 | `boot_id` | UUID String | O | 현재 부팅 세션 |
 | `seq` | Integer | O | 부팅 내 공용 증가 순번 |
 | `sampled_at` | Date-time String | O | 센서 표본 구성 시각 |
@@ -553,7 +598,7 @@ Incident·Battery·Safety·Mission Event는 다음 공통 멤버를 사용한다
   "schema_version": "2.0",
   "event_id": "3cf98dc0-424a-4ef0-9423-57e53fcd72fc",
   "event_type": "EVENT_TYPE",
-  "robot_id": "RBT-001",
+  "mqtt_id": "RBT-001",
   "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
   "seq": 1482,
   "source_component": "ai",
@@ -568,7 +613,7 @@ Incident·Battery·Safety·Mission Event는 다음 공통 멤버를 사용한다
 | `schema_version` | String | O | `"2.0"` |
 | `event_id` | UUID String | O | Event 멱등 처리 키 |
 | `event_type` | Enum String | O | Topic별 사건 유형 |
-| `robot_id` | String | O | 로봇 코드 |
+| `mqtt_id` | String | O | 등록된 MQTT 외부 식별자 |
 | `boot_id` | UUID String | O | 사건이 발생한 부팅 세션 |
 | `seq` | Integer | O | 부팅 내 공용 증가 순번 |
 | `source_component` | Enum String | O | `ai`, `power`, `safety`, `mission` |
@@ -585,7 +630,7 @@ Event를 재전송할 때 `event_id`와 `occurred_at`은 바꾸지 않는다.
 ### 8.1 경로와 용도
 
 ```text
-tbs/v2/robots/{robot_id}/events/incident
+tbs/v2/robots/{mqtt_id}/events/incident
 ```
 
 | 항목 | 값 |
@@ -603,7 +648,7 @@ tbs/v2/robots/{robot_id}/events/incident
   "schema_version": "2.0",
   "event_id": "3cf98dc0-424a-4ef0-9423-57e53fcd72fc",
   "event_type": "BRAILLE_BLOCK_INCIDENT_DETECTED",
-  "robot_id": "RBT-001",
+  "mqtt_id": "RBT-001",
   "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
   "seq": 1482,
   "source_component": "ai",
@@ -709,7 +754,7 @@ GPS 위치가 무효여도 결함 Event 자체는 발행할 수 있다.
 ### 9.1 경로와 용도
 
 ```text
-tbs/v2/robots/{robot_id}/events/battery
+tbs/v2/robots/{mqtt_id}/events/battery
 ```
 
 | 항목 | 값 |
@@ -729,7 +774,7 @@ tbs/v2/robots/{robot_id}/events/battery
   "schema_version": "2.0",
   "event_id": "4d42ee50-f8e2-45dc-b348-2b5dd72f83bf",
   "event_type": "BATTERY_LOW",
-  "robot_id": "RBT-001",
+  "mqtt_id": "RBT-001",
   "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
   "seq": 1488,
   "source_component": "power",
@@ -790,7 +835,7 @@ tbs/v2/robots/{robot_id}/events/battery
 ### 10.1 경로와 용도
 
 ```text
-tbs/v2/robots/{robot_id}/events/safety
+tbs/v2/robots/{mqtt_id}/events/safety
 ```
 
 | 항목 | 값 |
@@ -829,7 +874,7 @@ tbs/v2/robots/{robot_id}/events/safety
   "schema_version": "2.0",
   "event_id": "81fd9bd1-8639-47a2-82fd-9f26281dac68",
   "event_type": "SAFETY_STOPPED",
-  "robot_id": "RBT-001",
+  "mqtt_id": "RBT-001",
   "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
   "seq": 1491,
   "source_component": "safety",
@@ -855,7 +900,7 @@ tbs/v2/robots/{robot_id}/events/safety
   "schema_version": "2.0",
   "event_id": "56cd19c7-bdf0-42e5-bfb4-458cd2f5b255",
   "event_type": "SAFETY_CLEARED",
-  "robot_id": "RBT-001",
+  "mqtt_id": "RBT-001",
   "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
   "seq": 1498,
   "source_component": "safety",
@@ -915,7 +960,7 @@ tbs/v2/robots/{robot_id}/events/safety
 ### 11.1 경로와 용도
 
 ```text
-tbs/v2/robots/{robot_id}/events/mission
+tbs/v2/robots/{mqtt_id}/events/mission
 ```
 
 | 항목 | 값 |
@@ -935,7 +980,7 @@ tbs/v2/robots/{robot_id}/events/mission
   "schema_version": "2.0",
   "event_id": "2133612d-c882-446f-a283-72b2597f173e",
   "event_type": "MISSION_COMPLETED",
-  "robot_id": "RBT-001",
+  "mqtt_id": "RBT-001",
   "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
   "seq": 2910,
   "source_component": "mission",
@@ -958,7 +1003,7 @@ tbs/v2/robots/{robot_id}/events/mission
   "schema_version": "2.0",
   "event_id": "1e10253d-eabe-43a8-a425-2815a3d5e279",
   "event_type": "MISSION_PAUSED",
-  "robot_id": "RBT-001",
+  "mqtt_id": "RBT-001",
   "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
   "seq": 1700,
   "source_component": "mission",
@@ -1003,7 +1048,7 @@ tbs/v2/robots/{robot_id}/events/mission
 ### 12.1 경로와 용도
 
 ```text
-tbs/v2/robots/{robot_id}/commands/request
+tbs/v2/robots/{mqtt_id}/commands/request
 ```
 
 | 항목 | 값 |
@@ -1097,7 +1142,7 @@ tbs/v2/robots/{robot_id}/commands/request
 ### 13.1 경로와 용도
 
 ```text
-tbs/v2/robots/{robot_id}/commands/result
+tbs/v2/robots/{mqtt_id}/commands/result
 ```
 
 | 항목 | 값 |
@@ -1115,7 +1160,7 @@ tbs/v2/robots/{robot_id}/commands/result
   "schema_version": "2.0",
   "result_id": "e72802e1-bf90-4f79-aa2a-c98d347710c6",
   "command_id": "95626222-c5c8-47ea-901e-f9e467b275f6",
-  "robot_id": "RBT-001",
+  "mqtt_id": "RBT-001",
   "status": "COMPLETED",
   "received_at": "2026-07-26T05:21:00.130Z",
   "completed_at": "2026-07-26T05:21:00.240Z",
@@ -1134,7 +1179,7 @@ tbs/v2/robots/{robot_id}/commands/result
 | `schema_version` | String | O | `"2.0"` |
 | `result_id` | UUID String | O | Result 메시지 식별자 |
 | `command_id` | UUID String | O | 원본 명령 식별자 |
-| `robot_id` | String | O | 로봇 코드 |
+| `mqtt_id` | String | O | 등록된 MQTT 외부 식별자 |
 | `status` | Enum String | O | 명령 처리 상태 |
 | `received_at` | Date-time String | O | 로봇이 명령을 받은 시각 |
 | `completed_at` | Date-time String 또는 Null | O | 최종 처리 시각, ACCEPTED면 `null` |
@@ -1170,7 +1215,7 @@ tbs/v2/robots/{robot_id}/commands/result
 ### 14.1 경로와 용도
 
 ```text
-tbs/v2/robots/{robot_id}/ingest/receipt
+tbs/v2/robots/{mqtt_id}/ingest/receipt
 ```
 
 | 항목 | 값 |

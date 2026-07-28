@@ -237,7 +237,7 @@ SELECT (
     AND NOT HAS_TABLE_PRIVILEGE(:'application_role', 'audit.audit_log', 'DELETE')
     AND HAS_SEQUENCE_PRIVILEGE(
         :'application_role',
-        'robot.robot_code_sequence',
+        'robot.mqtt_id_sequence',
         'USAGE'
     )
     AND HAS_TABLE_PRIVILEGE(:'application_role', 'robot.robot_credential', 'UPDATE')

@@ -101,7 +101,7 @@ INSERT INTO auth.authentication_rate_limit (
 
 INSERT INTO robot.robot (
     robot_id,
-    robot_code,
+    mqtt_id,
     robot_name,
     serial_number,
     registered_by

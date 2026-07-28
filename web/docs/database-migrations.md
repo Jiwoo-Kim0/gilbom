@@ -56,7 +56,7 @@ docker compose logs backend
 ```
 
 
-Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V14가
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V15가
 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증
