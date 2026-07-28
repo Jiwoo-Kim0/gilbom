@@ -33,7 +33,7 @@ public class RobotScopeService {
             )
             """;
 
-    static final String VISIBLE_ROBOT_PREDICATE = """
+    public static final String VISIBLE_ROBOT_PREDICATE = """
             (
             """ + SYSTEM_ADMIN_SCOPE + """
                 OR EXISTS (
@@ -50,7 +50,7 @@ public class RobotScopeService {
             )
             """;
 
-    static final String OPERABLE_ROBOT_PREDICATE = """
+    public static final String OPERABLE_ROBOT_PREDICATE = """
             (
             """ + SYSTEM_ADMIN_SCOPE + """
                 OR EXISTS (
@@ -121,6 +121,28 @@ public class RobotScopeService {
                 Map.of(
                         "userId", userId,
                         "mqttId", mqttId
+                ),
+                String.class);
+        if (visibleIds.isEmpty()) {
+            throw new BusinessException(ErrorCode.ROBOT_NOT_FOUND);
+        }
+        return visibleIds.getFirst();
+    }
+
+    @Transactional(readOnly = true)
+    public String requireOperableMqttId(
+            UUID userId,
+            UUID robotId
+    ) {
+        List<String> visibleIds = jdbcTemplate.queryForList("""
+                SELECT r.mqtt_id
+                FROM robot.robot r
+                WHERE r.robot_id = :robotId
+                  AND
+                """ + OPERABLE_ROBOT_PREDICATE,
+                Map.of(
+                        "userId", userId,
+                        "robotId", robotId
                 ),
                 String.class);
         if (visibleIds.isEmpty()) {

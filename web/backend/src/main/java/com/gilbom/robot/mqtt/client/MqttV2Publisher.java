@@ -12,6 +12,7 @@ import com.gilbom.robot.mqtt.topic.MqttTopicParser;
 import com.gilbom.robot.mqtt.topic.MqttTopicType;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.util.Objects;
 
 @Service
@@ -37,7 +38,16 @@ public class MqttV2Publisher {
             String mqttId,
             CommandRequestPayload payload
     ) {
-        return publish(MqttTopicType.COMMAND_REQUEST, mqttId, payload);
+        long expirySeconds = Math.max(
+                1,
+                Duration.between(
+                        payload.issuedAt(),
+                        payload.expiresAt()).toSeconds());
+        return publish(
+                MqttTopicType.COMMAND_REQUEST,
+                mqttId,
+                payload,
+                expirySeconds);
     }
 
     public PublishResult publishIngestReceipt(
@@ -60,16 +70,31 @@ public class MqttV2Publisher {
             String mqttId,
             MqttV2Payload payload
     ) {
+        return publish(topicType, mqttId, payload, null);
+    }
+
+    private PublishResult publish(
+            MqttTopicType topicType,
+            String mqttId,
+            MqttV2Payload payload,
+            Long messageExpiryIntervalSeconds
+    ) {
         Objects.requireNonNull(payload, "payload must not be null");
 
         String topic = topicParser.format(topicType, mqttId);//토픽 제조
         String serializedPayload = serialize(payload); //직렬화(json으로)
-        boolean accepted = mqttPublisher.publish(
-                topic,
-                serializedPayload,
-                topicType.qos(),
-                topicType.retained()
-        );
+        boolean accepted = messageExpiryIntervalSeconds == null
+                ? mqttPublisher.publish(
+                        topic,
+                        serializedPayload,
+                        topicType.qos(),
+                        topicType.retained())
+                : mqttPublisher.publish(
+                        topic,
+                        serializedPayload,
+                        topicType.qos(),
+                        topicType.retained(),
+                        messageExpiryIntervalSeconds);
         if (!accepted) {
             throw new BusinessException(ErrorCode.MQTT_UNAVAILABLE);
         }

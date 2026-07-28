@@ -33,7 +33,8 @@ class MqttV2PublisherTest {
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyInt(),
-                org.mockito.ArgumentMatchers.anyBoolean()
+                org.mockito.ArgumentMatchers.anyBoolean(),
+                org.mockito.ArgumentMatchers.anyLong()
         )).thenReturn(true);
 
         MqttV2Publisher.PublishResult result =
@@ -45,14 +46,17 @@ class MqttV2PublisherTest {
                 ),
                 payloadCaptor.capture(),
                 org.mockito.ArgumentMatchers.eq(1),
-                org.mockito.ArgumentMatchers.eq(false)
+                org.mockito.ArgumentMatchers.eq(false),
+                org.mockito.ArgumentMatchers.eq(30L)
         );
         assertThat(payloadCaptor.getValue())
                 .contains("\"schema_version\":\"2.0\"")
                 .contains("\"command_id\":\"" + payload.commandId() + "\"")
                 .contains("\"command_type\":\"EMERGENCY_STOP\"")
                 .doesNotContain("schemaVersion")
-                .doesNotContain("commandId");
+                .doesNotContain("commandId")
+                .doesNotContain("expiry_valid")
+                .doesNotContain("parameters_valid");
         assertThat(result).isEqualTo(new MqttV2Publisher.PublishResult(
                 "tbs/v2/robots/RBT-001/commands/request",
                 1,
@@ -101,7 +105,8 @@ class MqttV2PublisherTest {
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyInt(),
-                org.mockito.ArgumentMatchers.anyBoolean()
+                org.mockito.ArgumentMatchers.anyBoolean(),
+                org.mockito.ArgumentMatchers.anyLong()
         )).thenReturn(false);
 
         assertThatThrownBy(() ->

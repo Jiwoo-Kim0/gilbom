@@ -45,4 +45,16 @@ public record RobotRealtimeEvent(
                 "ROBOT_STATE_UPDATED",
                 observedAt);
     }
+
+    public static RobotRealtimeEvent commandStatusChanged(
+            UUID robotId,
+            String mqttId,
+            Instant observedAt
+    ) {
+        return new RobotRealtimeEvent(
+                robotId,
+                mqttId,
+                "COMMAND_STATUS_CHANGED",
+                observedAt);
+    }
 }

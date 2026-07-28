@@ -1,5 +1,6 @@
 package com.gilbom.robot.data.mqtt.v2.outbound;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.gilbom.robot.data.mqtt.v2.common.MqttV2Payload;
 
 import jakarta.validation.Valid;
@@ -22,11 +23,13 @@ public record CommandRequestPayload(
 ) implements MqttV2Payload {
 
     @AssertTrue(message = "expires_at must be later than issued_at")
+    @JsonIgnore
     public boolean isExpiryValid() {
         return issuedAt == null || expiresAt == null || expiresAt.isAfter(issuedAt);
     }
 
     @AssertTrue(message = "parameters do not match command_type")
+    @JsonIgnore
     public boolean isParametersValid() {
         if (commandType == null || parameters == null) {
             return true;

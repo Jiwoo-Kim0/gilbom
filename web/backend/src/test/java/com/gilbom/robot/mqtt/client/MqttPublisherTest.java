@@ -40,4 +40,28 @@ class MqttPublisherTest {
         assertThat(message.getHeaders().get(MqttHeaders.QOS)).isEqualTo(1);
         assertThat(message.getHeaders().get(MqttHeaders.RETAINED)).isEqualTo(false);
     }
+
+    @Test
+    void publishesCommandWithMqttFiveMessageExpiry() {
+        MessageChannel channel = mock(MessageChannel.class);
+        when(channel.send(any(Message.class))).thenReturn(true);
+
+        MqttPublisher publisher = new MqttPublisher(
+                channel,
+                new MqttProperties());
+
+        publisher.publish(
+                "tbs/v2/robots/RBT-001/commands/request",
+                "{\"schema_version\":\"2.0\"}",
+                1,
+                false,
+                10L);
+
+        ArgumentCaptor<Message<?>> captor =
+                ArgumentCaptor.forClass(Message.class);
+        verify(channel).send(captor.capture());
+        assertThat(captor.getValue().getHeaders().get(
+                MqttHeaders.MESSAGE_EXPIRY_INTERVAL))
+                .isEqualTo(10L);
+    }
 }
