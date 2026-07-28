@@ -9,6 +9,9 @@ import com.gilbom.robot.data.mqtt.v2.inbound.SafetyEventPayload;
 import com.gilbom.robot.data.mqtt.v2.inbound.StatePayload;
 import com.gilbom.robot.data.mqtt.v2.inbound.TelemetryPayload;
 import com.gilbom.robot.command.RobotCommandResultIngestionService;
+import com.gilbom.defect.IncidentEventIngestionService;
+import com.gilbom.robot.event.RobotEventIngestionService;
+import com.gilbom.robot.mission.MissionEventIngestionService;
 import com.gilbom.robot.mqtt.topic.MqttTopicType;
 import com.gilbom.robot.status.RobotStatusIngestionService;
 import com.gilbom.robot.telemetry.TelemetryIngestionService;
@@ -31,10 +34,14 @@ class MqttTopicMessageHandlerRegistrationTest {
                         mock(RobotStatusIngestionService.class)),
                 new TelemetryMqttMessageHandler(
                         mock(TelemetryIngestionService.class)),
-                new IncidentEventMqttMessageHandler(),
-                new BatteryEventMqttMessageHandler(),
-                new SafetyEventMqttMessageHandler(),
-                new MissionEventMqttMessageHandler(),
+                new IncidentEventMqttMessageHandler(
+                        mock(IncidentEventIngestionService.class)),
+                new BatteryEventMqttMessageHandler(
+                        mock(RobotEventIngestionService.class)),
+                new SafetyEventMqttMessageHandler(
+                        mock(RobotEventIngestionService.class)),
+                new MissionEventMqttMessageHandler(
+                        mock(MissionEventIngestionService.class)),
                 new CommandResultMqttMessageHandler(
                         mock(RobotCommandResultIngestionService.class))
         );

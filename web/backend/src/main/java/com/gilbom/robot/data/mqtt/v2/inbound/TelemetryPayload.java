@@ -32,6 +32,11 @@ public record TelemetryPayload(
         @Valid Mission mission
 ) implements RobotIdentifiedPayload {
 
+    @AssertTrue(message = "mission_id and mission must be present or null together")
+    public boolean isMissionPresenceConsistent() {
+        return (missionId == null) == (mission == null);
+    }
+
     public record Position(
             @NotNull Boolean valid,
             @DecimalMin("-90.0") @DecimalMax("90.0") Double lat,
