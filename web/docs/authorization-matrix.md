@@ -1,7 +1,7 @@
 # 역할·권한·API 접근 매트릭스
 
 - 문서 상태: 확정
-- 구현 예정: Day 4 RBAC·관리자
+- 구현 상태: V13 RBAC 저장 구조·DB 보호, V14 변경 세션 폐기, 로그인 유효 권한 계산 완료. 관리자 API·객체 범위 query 적용 예정
 - DB 기준: `auth.role`, `auth.permission`, `auth.role_permission`, `auth.user_permission_override`, `auth.user_robot_assignment`
 
 ## 1. 인가 원칙
@@ -17,24 +17,39 @@
 
 ## 2. 유효 권한 계산
 
-한 사용자의 유효 권한은 다음 순서로 계산한다.
-
-1. 활성 사용자에게 연결된 활성 역할을 구한다.
-2. 활성 역할이 가진 활성 권한의 합집합을 구한다.
-3. 만료되지 않은 사용자별 `ALLOW`를 추가한다.
-4. 만료되지 않은 사용자별 `DENY`를 제거한다.
-5. 같은 권한에 `ALLOW`와 `DENY`가 모두 있으면 `DENY`가 우선한다.
-6. 권한 통과 후 대상 객체 범위를 별도로 검사한다.
-
-```text
-effectivePermissions
-  = (activeRolePermissions ∪ activeOverrideAllows)
-    - activeOverrideDenies
-```
-
 `ADMIN_SETTINGS_MANAGE`는 시스템 `ADMIN` 역할에만 부여한다. 사용자별 `ALLOW`나 사용자 정의 역할로 우회 부여할 수 없다. 마지막 활성 `ADMIN`의 역할 제거, 권한 차단, 계정 비활성화는 거부한다.
 
 역할·권한·예외·로봇 배정이 변경되면 대상 사용자의 활성 세션을 즉시 폐기하여 다음 로그인부터 다시 권한을 계산한다.
+
+로그인 완료 시 권한은 다음 하나의 DB statement에서 계산한다.
+
+```text
+effectivePermissions
+  = (activeRolePermissions ∪ activeUnexpiredAllows)
+    - activeUnexpiredDenies
+```
+
+- `ALLOW`와 `DENY`는 `is_active=TRUE`이면서 `expires_at`이 없거나 현재보다 미래인 행만 사용한다.
+- 같은 permission의 `ALLOW`와 `DENY`가 함께 있으면 활성 `DENY` anti-join이 최종 후보에서 제거한다.
+- role, role-permission, permission 중 하나라도 비활성이면 역할 권한 후보에서 제외한다.
+- 사용자 `ALLOW` 경로에서는 `ADMIN_SETTINGS_MANAGE`를 항상 제외하고, 역할 경로도 활성 시스템 `ADMIN`에서만 허용한다.
+- 권한 코드 통과 후 `user_robot_assignment`를 사용한 객체 범위 검사를 별도로 수행한다.
+- 계산 결과는 인증 session의 authority snapshot이므로 V14 DB trigger가 역할·권한·override·로봇 배정·계정 상태 변경과 같은 transaction에서 관련 session을 폐기한다.
+
+### 2.1 마지막 활성 ADMIN 동시성 기준
+
+마지막 활성 `ADMIN` 수를 감소시킬 수 있는 계정·역할·권한 변경은 다음 순서를
+한 DB transaction에서 지킨다.
+
+1. 첫 DB statement로 `SELECT auth.lock_last_admin_guard()`를 호출한다.
+2. lock을 얻은 뒤 활성 시스템 `ADMIN` 수와 대상 사용자의 유효 권한을 다시 읽는다.
+3. 마지막 `ADMIN`이면 변경을 거부하고, 아니면 보안 변경과 감사 로그를 저장한다.
+4. commit 또는 rollback까지 transaction advisory lock을 유지한다.
+
+DB trigger도 같은 lock과 판정 함수를 사용해 직접 DML을 방어한다. 애플리케이션의
+사전 `count()` 결과만 믿거나 lock 획득 전에 읽은 값을 재사용하지 않는다. 동시 변경
+통합 테스트는 서로 다른 두 transaction이 각기 다른 `ADMIN`을 동시에 해제해도
+최소 한 명이 남고, 한 요청은 거부되는지 검증한다.
 
 ## 3. 시스템 역할별 권한
 
