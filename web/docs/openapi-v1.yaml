@@ -14,6 +14,8 @@ tags:
     description: 가입 승인·사용자·RBAC·로봇 배정 관리자 API
   - name: Robots
     description: 로봇 기준정보 등록 및 관제
+  - name: Missions
+    description: 순찰 구역·경로 조회와 Mission 생성·조회·상태 관리
   - name: Reports
     description: 보고서 생성·버전·검토·승인 상태 계약
   - name: Audit
@@ -1769,6 +1771,316 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /api/v1/patrol-areas:
+    get:
+      tags: [Missions]
+      operationId: listPatrolAreas
+      summary: 순찰 구역 목록 조회
+      x-required-permission: MISSION_VIEW
+      security:
+        - serverSession: []
+      responses:
+        "200":
+          description: 활성 상태와 구역 코드 순으로 정렬한 순찰 구역
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatrolAreaListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/patrol-areas/{patrolAreaId}:
+    get:
+      tags: [Missions]
+      operationId: getPatrolArea
+      summary: 순찰 구역 단건 조회
+      x-required-permission: MISSION_VIEW
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/PatrolAreaId"
+      responses:
+        "200":
+          description: GeoJSON 경계를 포함한 순찰 구역
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatrolAreaResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/patrol-areas/{patrolAreaId}/routes:
+    get:
+      tags: [Missions]
+      operationId: listPatrolRoutes
+      summary: 순찰 구역의 버전별 경로 조회
+      x-required-permission: MISSION_VIEW
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/PatrolAreaId"
+      responses:
+        "200":
+          description: GeoJSON 경로 목록
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatrolRouteListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/missions:
+    get:
+      tags: [Missions]
+      operationId: listMissions
+      summary: Robot 객체 범위 내 Mission 목록 조회
+      description: |
+        기간 조건은 startedAt 기준 UTC 반열림 구간 [startedFrom, startedTo)입니다.
+        ADMIN은 전체, 일반 사용자는 유효한 Robot 배정 범위만 SQL에서 조회합니다.
+      x-required-permission: MISSION_VIEW
+      security:
+        - serverSession: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: robotId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: patrolAreaId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: patrolRouteId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/MissionStatus"
+        - name: startedFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: startedTo
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Mission 페이지
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MissionListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Missions]
+      operationId: createMission
+      summary: 순찰 Mission 생성
+      description: |
+        대상 Robot의 OWNER만 생성할 수 있습니다. 활성 Area와 그 Area에 속한
+        활성 Route만 허용하며 MQTT용 missionCode는 서버가 생성합니다.
+      x-required-permission: MISSION_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MissionCreateRequest"
+      responses:
+        "201":
+          description: CREATED Mission
+          headers:
+            Location:
+              description: 생성된 Mission 조회 경로
+              schema:
+                type: string
+                example: /api/v1/missions/25000000-0000-4000-8000-000000000002
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MissionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/v1/missions/{missionId}:
+    get:
+      tags: [Missions]
+      operationId: getMission
+      summary: Robot 객체 범위 내 Mission 단건 조회
+      x-required-permission: MISSION_VIEW
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/MissionId"
+      responses:
+        "200":
+          description: Mission 상세
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MissionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Missions]
+      operationId: updateMission
+      summary: Mission 계획 또는 관리자 상태 변경
+      description: |
+        대상 Robot OWNER만 변경할 수 있습니다. Area·Route·예약 시각은
+        CREATED/READY에서만 변경하며 관리자 상태 변경은 READY,
+        CANCELLED, FAILED만 허용합니다. 실행 상태는 MQTT Event가 정본입니다.
+      x-required-permission: MISSION_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/MissionId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MissionUpdateRequest"
+      responses:
+        "200":
+          description: 변경된 Mission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MissionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/v1/missions/{missionId}/trajectory:
+    get:
+      tags: [Missions]
+      operationId: getMissionTrajectory
+      summary: Mission 실제 순찰 궤적 조회
+      description: 유효한 GPS Telemetry만 sampledAt 오름차순으로 반환합니다.
+      x-required-permission: MISSION_VIEW
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/MissionId"
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5000
+            default: 1000
+      responses:
+        "200":
+          description: 실제 순찰 좌표
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MissionTrajectoryResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/missions/{missionId}/history:
+    get:
+      tags: [Missions]
+      operationId: getMissionStatusHistory
+      summary: Mission 상태 전이 이력 조회
+      x-required-permission: MISSION_VIEW
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/MissionId"
+      responses:
+        "200":
+          description: 관리자·MQTT·시스템 상태 전이 이력
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MissionStatusHistoryResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /api/v1/stream/robots:
     get:
       tags: [Robots]
@@ -1897,6 +2209,22 @@ components:
       in: path
       required: true
       description: 보고서 내부 식별자
+      schema:
+        type: string
+        format: uuid
+    PatrolAreaId:
+      name: patrolAreaId
+      in: path
+      required: true
+      description: 순찰 구역 UUID
+      schema:
+        type: string
+        format: uuid
+    MissionId:
+      name: missionId
+      in: path
+      required: true
+      description: Mission DB UUID
       schema:
         type: string
         format: uuid
@@ -2769,6 +3097,394 @@ components:
           type: string
           format: date-time
 
+    PatrolAreaResponse:
+      type: object
+      required:
+        - patrolAreaId
+        - areaCode
+        - areaName
+        - boundary
+        - lifecycleStatus
+        - createdAt
+        - updatedAt
+      additionalProperties: false
+      properties:
+        patrolAreaId:
+          type: string
+          format: uuid
+        areaCode:
+          type: string
+        areaName:
+          type: string
+        boundary:
+          type: object
+          description: SRID 4326 Polygon 또는 MultiPolygon GeoJSON
+          additionalProperties: true
+        lifecycleStatus:
+          type: string
+          enum: [ACTIVE, INACTIVE, ARCHIVED]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PatrolAreaListResponse:
+      type: object
+      required: [areas]
+      additionalProperties: false
+      properties:
+        areas:
+          type: array
+          items:
+            $ref: "#/components/schemas/PatrolAreaResponse"
+
+    PatrolRouteResponse:
+      type: object
+      required:
+        - patrolRouteId
+        - patrolAreaId
+        - routeCode
+        - routeName
+        - routeVersion
+        - routeGeometry
+        - lifecycleStatus
+        - createdAt
+        - updatedAt
+      additionalProperties: false
+      properties:
+        patrolRouteId:
+          type: string
+          format: uuid
+        patrolAreaId:
+          type: string
+          format: uuid
+        routeCode:
+          type: string
+        routeName:
+          type: string
+        routeVersion:
+          type: integer
+          minimum: 1
+        routeGeometry:
+          type: object
+          description: SRID 4326 LineString 또는 MultiLineString GeoJSON
+          additionalProperties: true
+        lifecycleStatus:
+          type: string
+          enum: [DRAFT, ACTIVE, INACTIVE, ARCHIVED]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PatrolRouteListResponse:
+      type: object
+      required: [routes]
+      additionalProperties: false
+      properties:
+        routes:
+          type: array
+          items:
+            $ref: "#/components/schemas/PatrolRouteResponse"
+
+    MissionStatus:
+      type: string
+      enum:
+        - CREATED
+        - READY
+        - RUNNING
+        - PAUSED
+        - COMPLETED
+        - CANCELLED
+        - FAILED
+
+    MissionCreateRequest:
+      type: object
+      required: [robotId, patrolAreaId, patrolRouteId]
+      additionalProperties: false
+      properties:
+        robotId:
+          type: string
+          format: uuid
+        patrolAreaId:
+          type: string
+          format: uuid
+        patrolRouteId:
+          type: string
+          format: uuid
+        scheduledStartAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    MissionUpdateRequest:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        patrolAreaId:
+          type: string
+          format: uuid
+        patrolRouteId:
+          type: string
+          format: uuid
+        scheduledStartAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [READY, CANCELLED, FAILED]
+        completionReason:
+          type: string
+          maxLength: 100
+      description: CANCELLED 또는 FAILED에서는 completionReason이 필수입니다.
+
+    MissionResponse:
+      type: object
+      required:
+        - missionId
+        - missionCode
+        - robotId
+        - mqttId
+        - robotName
+        - patrolAreaId
+        - patrolAreaCode
+        - patrolAreaName
+        - patrolRouteId
+        - patrolRouteCode
+        - patrolRouteName
+        - patrolRouteVersion
+        - status
+        - progressPercent
+        - createdBy
+        - updatedBy
+        - createdAt
+        - updatedAt
+      additionalProperties: false
+      properties:
+        missionId:
+          type: string
+          format: uuid
+        missionCode:
+          type: string
+          description: MQTT payload의 문자열 mission_id
+        robotId:
+          type: string
+          format: uuid
+        mqttId:
+          type: string
+        robotName:
+          type: string
+        patrolAreaId:
+          type: string
+          format: uuid
+        patrolAreaCode:
+          type: string
+        patrolAreaName:
+          type: string
+        patrolRouteId:
+          type: string
+          format: uuid
+        patrolRouteCode:
+          type: string
+        patrolRouteName:
+          type: string
+        patrolRouteVersion:
+          type: integer
+          minimum: 1
+        status:
+          $ref: "#/components/schemas/MissionStatus"
+        scheduledStartAt:
+          type: string
+          format: date-time
+          nullable: true
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        endedAt:
+          type: string
+          format: date-time
+          nullable: true
+        progressPercent:
+          type: number
+          minimum: 0
+          maximum: 100
+        estimatedCompletionAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: RUNNING Mission의 누적 시간과 진행률로 계산한 예상 완료 시각
+        completionReason:
+          type: string
+          nullable: true
+        resultDurationSec:
+          type: integer
+          minimum: 0
+          nullable: true
+        resultIncidentCount:
+          type: integer
+          minimum: 0
+          nullable: true
+        resultNormalDetectionCount:
+          type: integer
+          minimum: 0
+          nullable: true
+        resultPayload:
+          type: object
+          nullable: true
+          additionalProperties: true
+        createdBy:
+          type: string
+          format: uuid
+        updatedBy:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    MissionListResponse:
+      type: object
+      required: [content, page, size, totalElements, totalPages]
+      additionalProperties: false
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/MissionResponse"
+        page:
+          type: integer
+          minimum: 0
+        size:
+          type: integer
+          minimum: 1
+          maximum: 100
+        totalElements:
+          type: integer
+          format: int64
+          minimum: 0
+        totalPages:
+          type: integer
+          minimum: 0
+
+    MissionTrajectoryPoint:
+      type: object
+      required:
+        - messageId
+        - sampledAt
+        - receivedAt
+        - latitude
+        - longitude
+        - moving
+      additionalProperties: false
+      properties:
+        messageId:
+          type: string
+          format: uuid
+        sampledAt:
+          type: string
+          format: date-time
+        receivedAt:
+          type: string
+          format: date-time
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        headingDeg:
+          type: number
+          format: double
+          nullable: true
+        moving:
+          type: boolean
+        speedMps:
+          type: number
+          format: double
+          nullable: true
+
+    MissionTrajectoryResponse:
+      type: object
+      required: [missionId, points]
+      additionalProperties: false
+      properties:
+        missionId:
+          type: string
+          format: uuid
+        points:
+          type: array
+          items:
+            $ref: "#/components/schemas/MissionTrajectoryPoint"
+
+    MissionStatusHistoryItem:
+      type: object
+      required:
+        - historyId
+        - transitionSource
+        - afterStatus
+        - occurredAt
+        - receivedAt
+        - createdAt
+      additionalProperties: false
+      properties:
+        historyId:
+          type: string
+          format: uuid
+        transitionSource:
+          type: string
+          enum: [MQTT, ADMIN, SYSTEM]
+        beforeStatus:
+          allOf:
+            - $ref: "#/components/schemas/MissionStatus"
+          nullable: true
+        afterStatus:
+          $ref: "#/components/schemas/MissionStatus"
+        transitionReason:
+          type: string
+          nullable: true
+        changedBy:
+          type: string
+          format: uuid
+          nullable: true
+        changedByUserCode:
+          type: string
+          nullable: true
+        sourceEventId:
+          type: string
+          format: uuid
+          nullable: true
+        occurredAt:
+          type: string
+          format: date-time
+        receivedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    MissionStatusHistoryResponse:
+      type: object
+      required: [missionId, history]
+      additionalProperties: false
+      properties:
+        missionId:
+          type: string
+          format: uuid
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/MissionStatusHistoryItem"
+
     RobotCommandType:
       type: string
       enum:
@@ -3526,6 +4242,9 @@ components:
         - AUTH_ROLE_NOT_FOUND
         - AUTH_PERMISSION_NOT_FOUND
         - ROBOT_NOT_FOUND
+        - PATROL_AREA_NOT_FOUND
+        - PATROL_ROUTE_NOT_FOUND
+        - MISSION_NOT_FOUND
         - DEFECT_NOT_FOUND
         - COMMAND_NOT_FOUND
         - REPORT_NOT_FOUND
@@ -3535,6 +4254,8 @@ components:
         - ROBOT_SERIAL_NUMBER_CONFLICT
         - AUTH_EMAIL_ALREADY_REGISTERED
         - COMMAND_STATE_CONFLICT
+        - MISSION_STATE_CONFLICT
+        - MQTT_EVENT_CONFLICT
         - REPORT_STATE_CONFLICT
         - COMMON_PAYLOAD_TOO_LARGE
         - IMAGE_TOO_LARGE

@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -351,6 +352,30 @@ class RobotCommandLifecycleIntegrationTest {
     }
 
     @Test
+    void linksResumeCommandToThePausedMission() {
+        UUID missionId = createPausedMission();
+
+        RobotCommandResponse command = create(
+                new RobotCommandCreateRequest(
+                        CommandRequestPayload.CommandType.RESUME_MISSION,
+                        new RobotCommandCreateRequest.Parameters(
+                                null,
+                                null,
+                                null)),
+                UUID.randomUUID(),
+                UUID.randomUUID());
+
+        Map<String, Object> stored = jdbcTemplate.queryForMap("""
+                SELECT mission_id, patrol_area_id
+                FROM robot.robot_command
+                WHERE command_id = ?
+                """,
+                command.commandId());
+        assertThat(stored.get("mission_id")).isEqualTo(missionId);
+        assertThat(stored.get("patrol_area_id")).isNotNull();
+    }
+
+    @Test
     void appliesFailedAndRejectedFinalResults() {
         for (CommandResultPayload.Status status : new CommandResultPayload.Status[]{
                 CommandResultPayload.Status.FAILED,
@@ -466,6 +491,101 @@ class RobotCommandLifecycleIntegrationTest {
                         null,
                         null,
                         "integration test emergency stop"));
+    }
+
+    private UUID createPausedMission() {
+        UUID areaId = UUID.randomUUID();
+        UUID routeId = UUID.randomUUID();
+        UUID missionId = UUID.randomUUID();
+        jdbcTemplate.update("""
+                INSERT INTO robot.patrol_area (
+                    patrol_area_id,
+                    area_code,
+                    area_name,
+                    boundary,
+                    lifecycle_status,
+                    created_by,
+                    updated_by
+                ) VALUES (
+                    ?,
+                    ?,
+                    'Command Area',
+                    ST_MakeEnvelope(127, 37, 127.01, 37.01, 4326),
+                    'ACTIVE',
+                    ?,
+                    ?
+                )
+                """,
+                areaId,
+                "AREA-" + areaId.toString().substring(0, 8),
+                USER_ID,
+                USER_ID);
+        jdbcTemplate.update("""
+                INSERT INTO robot.patrol_route (
+                    patrol_route_id,
+                    patrol_area_id,
+                    route_code,
+                    route_name,
+                    route_version,
+                    route_geometry,
+                    lifecycle_status,
+                    created_by,
+                    updated_by
+                ) VALUES (
+                    ?,
+                    ?,
+                    ?,
+                    'Command Route',
+                    1,
+                    ST_GeomFromText(
+                        'LINESTRING(127.001 37.001,127.009 37.009)',
+                        4326
+                    ),
+                    'ACTIVE',
+                    ?,
+                    ?
+                )
+                """,
+                routeId,
+                areaId,
+                "ROUTE-" + routeId.toString().substring(0, 8),
+                USER_ID,
+                USER_ID);
+        jdbcTemplate.update("""
+                INSERT INTO robot.mission (
+                    mission_id,
+                    mission_code,
+                    robot_id,
+                    patrol_area_id,
+                    patrol_route_id,
+                    status,
+                    started_at,
+                    created_by,
+                    updated_by,
+                    created_at,
+                    updated_at
+                ) VALUES (
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    'PAUSED',
+                    NOW() - INTERVAL '30 minutes',
+                    ?,
+                    ?,
+                    NOW() - INTERVAL '1 hour',
+                    NOW()
+                )
+                """,
+                missionId,
+                "MIS-" + missionId,
+                robotId,
+                areaId,
+                routeId,
+                USER_ID,
+                USER_ID);
+        return missionId;
     }
 
     private CommandResultPayload result(

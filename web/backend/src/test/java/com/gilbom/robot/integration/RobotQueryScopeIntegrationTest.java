@@ -32,6 +32,7 @@ import com.gilbom.robot.application.RobotScopeService;
 import com.gilbom.robot.data.application.command.TelemetryIngestionCommand;
 import com.gilbom.robot.data.mqtt.v2.common.BatteryState;
 import com.gilbom.robot.data.mqtt.v2.inbound.TelemetryPayload;
+import com.gilbom.robot.mission.MissionProgressService;
 import com.gilbom.robot.realtime.RobotRealtimeEventListener;
 import com.gilbom.robot.realtime.RobotSseService;
 import com.gilbom.robot.telemetry.TelemetryIngestionService;
@@ -414,6 +415,7 @@ class RobotQueryScopeIntegrationTest {
             RobotQueryService.class,
             RobotScopeService.class,
             TelemetryIngestionService.class,
+            MissionProgressService.class,
             RobotRealtimeEventListener.class
     })
     static class TestApplication {
