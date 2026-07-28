@@ -60,3 +60,6 @@ infra/mosquitto/mosquitto.local.conf
 infra/mosquitto/*.pid
 infra/mosquitto/*.db
 infra/mosquitto/*.bak
+
+# 보안 메타데이터
+*:Zone.Identifier
