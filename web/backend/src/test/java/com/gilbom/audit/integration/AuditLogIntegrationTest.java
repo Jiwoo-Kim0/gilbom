@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
@@ -159,6 +160,7 @@ class AuditLogIntegrationTest {
     }
 
     @Test
+    @Tag("security-acceptance")
     void queriesWithPermissionAndAuditsTheViewWithoutRawFilterValues()
             throws Exception {
         mockMvc.perform(get("/api/v1/audit-logs")

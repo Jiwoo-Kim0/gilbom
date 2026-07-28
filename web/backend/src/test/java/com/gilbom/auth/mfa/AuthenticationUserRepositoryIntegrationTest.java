@@ -17,6 +17,7 @@ import javax.sql.DataSource;
 
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -80,6 +81,7 @@ class AuthenticationUserRepositoryIntegrationTest {
     }
 
     @Test
+    @Tag("security-acceptance")
     void calculatesRoleUnionAllowMinusDenyWithExpiryAndActiveState() {
         UUID userId = uuid(1);
         UUID activeRoleId = uuid(101);
@@ -290,6 +292,7 @@ class AuthenticationUserRepositoryIntegrationTest {
     }
 
     @Test
+    @Tag("security-acceptance")
     void rejectsDeactivationRoleRemovalAndDenyForLastActiveAdmin() {
         UUID adminId = uuid(5);
         UUID adminRoleId = permissionOrRoleId(
@@ -332,6 +335,7 @@ class AuthenticationUserRepositoryIntegrationTest {
     }
 
     @Test
+    @Tag("security-acceptance")
     void serializesConcurrentLastAdminDeactivation() throws Exception {
         UUID firstAdminId = uuid(6);
         UUID secondAdminId = uuid(7);
