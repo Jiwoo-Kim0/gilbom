@@ -1,7 +1,7 @@
 # 역할·권한·API 접근 매트릭스
 
 - 문서 상태: 확정
-- 구현 예정: Day 4 RBAC·관리자
+- 구현 상태: V13 RBAC 저장 구조·DB 보호 완료, 관리자 API·서버 query 적용 예정
 - DB 기준: `auth.role`, `auth.permission`, `auth.role_permission`, `auth.user_permission_override`, `auth.user_robot_assignment`
 
 ## 1. 인가 원칙
@@ -35,6 +35,21 @@ effectivePermissions
 `ADMIN_SETTINGS_MANAGE`는 시스템 `ADMIN` 역할에만 부여한다. 사용자별 `ALLOW`나 사용자 정의 역할로 우회 부여할 수 없다. 마지막 활성 `ADMIN`의 역할 제거, 권한 차단, 계정 비활성화는 거부한다.
 
 역할·권한·예외·로봇 배정이 변경되면 대상 사용자의 활성 세션을 즉시 폐기하여 다음 로그인부터 다시 권한을 계산한다.
+
+### 2.1 마지막 활성 ADMIN 동시성 기준
+
+마지막 활성 `ADMIN` 수를 감소시킬 수 있는 계정·역할·권한 변경은 다음 순서를
+한 DB transaction에서 지킨다.
+
+1. 첫 DB statement로 `SELECT auth.lock_last_admin_guard()`를 호출한다.
+2. lock을 얻은 뒤 활성 시스템 `ADMIN` 수와 대상 사용자의 유효 권한을 다시 읽는다.
+3. 마지막 `ADMIN`이면 변경을 거부하고, 아니면 보안 변경과 감사 로그를 저장한다.
+4. commit 또는 rollback까지 transaction advisory lock을 유지한다.
+
+DB trigger도 같은 lock과 판정 함수를 사용해 직접 DML을 방어한다. 애플리케이션의
+사전 `count()` 결과만 믿거나 lock 획득 전에 읽은 값을 재사용하지 않는다. 동시 변경
+통합 테스트는 서로 다른 두 transaction이 각기 다른 `ADMIN`을 동시에 해제해도
+최소 한 명이 남고, 한 요청은 거부되는지 검증한다.
 
 ## 3. 시스템 역할별 권한
 
