@@ -135,12 +135,17 @@ public class RobotCommandCreationService {
         Instant issuedAt = clock.instant();
         Instant expiresAt = issuedAt.plus(ttl(request.commandType()));
         UUID commandId = UUID.randomUUID();
+        MissionCommandTarget missionTarget = resolveMissionTarget(
+                robotId,
+                request);
 
         jdbcTemplate.update("""
                 INSERT INTO robot.robot_command (
                     command_id,
                     schema_version,
                     robot_id,
+                    mission_id,
+                    patrol_area_id,
                     command_type,
                     command_status,
                     parameters,
@@ -153,6 +158,8 @@ public class RobotCommandCreationService {
                     '2.0',
                     ?,
                     ?,
+                    ?,
+                    ?,
                     'CREATED',
                     ?::jsonb,
                     'ADMIN',
@@ -163,6 +170,8 @@ public class RobotCommandCreationService {
                 """,
                 commandId,
                 robotId,
+                missionTarget == null ? null : missionTarget.missionId(),
+                missionTarget == null ? null : missionTarget.patrolAreaId(),
                 request.commandType().name(),
                 serialize(request.parameters()),
                 actorUserId,
@@ -201,6 +210,108 @@ public class RobotCommandCreationService {
                     "Command requester code does not match actor");
         }
         return new CreatedCommand(command, true);
+    }
+
+    private MissionCommandTarget resolveMissionTarget(
+            UUID robotId,
+            RobotCommandCreateRequest request
+    ) {
+        return switch (request.commandType()) {
+            case START_MISSION -> resolveStartMissionTarget(robotId, request);
+            case PAUSE_MISSION -> resolveActiveMissionTarget(
+                    robotId,
+                    Set.of("RUNNING"));
+            case RESUME_MISSION -> resolveActiveMissionTarget(
+                    robotId,
+                    Set.of("PAUSED"));
+            case CANCEL_MISSION -> resolveActiveMissionTarget(
+                    robotId,
+                    Set.of("READY", "RUNNING", "PAUSED"));
+            case EMERGENCY_STOP, CLEAR_EMERGENCY_STOP -> null;
+        };
+    }
+
+    private MissionCommandTarget resolveStartMissionTarget(
+            UUID robotId,
+            RobotCommandCreateRequest request
+    ) {
+        MissionCommandTarget target = jdbcTemplate.query("""
+                        SELECT
+                            m.mission_id,
+                            m.patrol_area_id,
+                            a.area_code
+                        FROM robot.mission m
+                        JOIN robot.patrol_area a
+                          ON a.patrol_area_id = m.patrol_area_id
+                        WHERE m.mission_code = ?
+                          AND m.robot_id = ?
+                          AND m.status IN ('CREATED', 'READY')
+                        """,
+                resultSet -> resultSet.next()
+                        ? new MissionCommandTarget(
+                                resultSet.getObject(
+                                        "mission_id",
+                                        UUID.class),
+                                resultSet.getObject(
+                                        "patrol_area_id",
+                                        UUID.class),
+                                resultSet.getString("area_code"))
+                        : null,
+                request.parameters().missionId(),
+                robotId);
+        if (target == null) {
+            throw new BusinessException(ErrorCode.MISSION_NOT_FOUND);
+        }
+        if (!target.areaCode().equals(request.parameters().zoneId())) {
+            throw new BusinessException(
+                    ErrorCode.COMMON_BUSINESS_RULE_VIOLATION,
+                    "Mission 순찰 구역과 zoneId가 일치하지 않습니다.");
+        }
+        return target;
+    }
+
+    private MissionCommandTarget resolveActiveMissionTarget(
+            UUID robotId,
+            Set<String> allowedStatuses
+    ) {
+        String statusPlaceholders = String.join(
+                ", ",
+                allowedStatuses.stream().map(ignored -> "?").toList());
+        Object[] arguments = new Object[allowedStatuses.size() + 1];
+        arguments[0] = robotId;
+        int index = 1;
+        for (String status : allowedStatuses) {
+            arguments[index++] = status;
+        }
+
+        MissionCommandTarget target = jdbcTemplate.query("""
+                        SELECT
+                            m.mission_id,
+                            m.patrol_area_id,
+                            a.area_code
+                        FROM robot.mission m
+                        JOIN robot.patrol_area a
+                          ON a.patrol_area_id = m.patrol_area_id
+                        WHERE m.robot_id = ?
+                          AND m.status IN (%s)
+                        ORDER BY m.updated_at DESC, m.mission_id
+                        LIMIT 1
+                        """.formatted(statusPlaceholders),
+                resultSet -> resultSet.next()
+                        ? new MissionCommandTarget(
+                                resultSet.getObject(
+                                        "mission_id",
+                                        UUID.class),
+                                resultSet.getObject(
+                                        "patrol_area_id",
+                                        UUID.class),
+                                resultSet.getString("area_code"))
+                        : null,
+                arguments);
+        if (target == null) {
+            throw new BusinessException(ErrorCode.MISSION_NOT_FOUND);
+        }
+        return target;
     }
 
     private RobotCommandRecord replayOrReject(
@@ -359,6 +470,13 @@ public class RobotCommandCreationService {
             String requestPath,
             String processingStatus,
             UUID commandId
+    ) {
+    }
+
+    private record MissionCommandTarget(
+            UUID missionId,
+            UUID patrolAreaId,
+            String areaCode
     ) {
     }
 }
