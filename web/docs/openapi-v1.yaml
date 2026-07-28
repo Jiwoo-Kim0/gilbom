@@ -1621,7 +1621,8 @@ paths:
       operationId: streamRobotUpdates
       summary: 권한 범위 내 로봇 실시간 갱신 알림
       description: |
-        서버가 CONNECTED, HEARTBEAT, ROBOT_TELEMETRY_UPDATED 이벤트를 전송합니다.
+        서버가 CONNECTED, HEARTBEAT, ROBOT_CONNECTIVITY_CHANGED,
+        ROBOT_STATE_UPDATED, ROBOT_TELEMETRY_UPDATED 이벤트를 전송합니다.
         이벤트는 변경 알림만 제공하며 클라이언트는 REST API로 최신 상태를 다시 조회합니다.
       x-required-permission: ROBOT_STATUS_VIEW
       security:
