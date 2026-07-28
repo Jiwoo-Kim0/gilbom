@@ -15,6 +15,7 @@ import com.gilbom.common.error.ErrorCode;
 import com.gilbom.robot.data.application.command.TelemetryIngestionCommand;
 import com.gilbom.robot.data.application.result.TelemetryIngestionResult;
 import com.gilbom.robot.data.mqtt.v2.inbound.TelemetryPayload;
+import com.gilbom.robot.mission.MissionProgressService;
 import com.gilbom.robot.realtime.RobotRealtimeEvent;
 
 @Service
@@ -22,19 +23,25 @@ public class TelemetryIngestionService {
 
     private final JdbcTemplate jdbcTemplate;
     private final ApplicationEventPublisher eventPublisher;
+    private final MissionProgressService missionProgressService;
 
     public TelemetryIngestionService(
             JdbcTemplate jdbcTemplate,
-            ApplicationEventPublisher eventPublisher
+            ApplicationEventPublisher eventPublisher,
+            MissionProgressService missionProgressService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.eventPublisher = eventPublisher;
+        this.missionProgressService = missionProgressService;
     }
 
     @Transactional
     public TelemetryIngestionResult ingest(TelemetryIngestionCommand command) {
         TelemetryPayload payload = command.payload();
         UUID robotId = findRobotId(payload.mqttId());
+        UUID missionId = findMissionId(
+                robotId,
+                payload.missionId());
         OffsetDateTime sampledAt = utc(payload.sampledAt());
         OffsetDateTime receivedAt = utc(command.receivedAt());
 
@@ -47,6 +54,7 @@ public class TelemetryIngestionService {
         int inserted = insertHistory(
                 robotId,
                 payload,
+                missionId,
                 command.rawPayload(),
                 sampledAt,
                 receivedAt);
@@ -55,6 +63,10 @@ public class TelemetryIngestionService {
             return new TelemetryIngestionResult(false, false);
         }
 
+        updateMissionProgress(
+                missionId,
+                payload,
+                sampledAt);
         touchBootSession(
                 robotId,
                 payload.bootId(),
@@ -79,6 +91,26 @@ public class TelemetryIngestionService {
                             payload.sampledAt()));
         }
         return new TelemetryIngestionResult(true, currentStateUpdated);
+    }
+
+    private void updateMissionProgress(
+            UUID missionId,
+            TelemetryPayload payload,
+            OffsetDateTime sampledAt
+    ) {
+        TelemetryPayload.Position position = payload.position();
+        if (missionId == null
+                || !position.valid()
+                || position.lon() == null
+                || position.lat() == null) {
+            return;
+        }
+        missionProgressService.refresh(
+                missionId,
+                payload.messageId(),
+                sampledAt,
+                position.lon(),
+                position.lat());
     }
 
     private UUID findRobotId(String mqttId) {
@@ -112,6 +144,27 @@ public class TelemetryIngestionService {
             throw new IllegalStateException(
                     "Registered robot does not have a current-state row");
         }
+    }
+
+    private UUID findMissionId(UUID robotId, String missionCode) {
+        if (missionCode == null) {
+            return null;
+        }
+        UUID missionId = jdbcTemplate.query("""
+                        SELECT mission_id
+                        FROM robot.mission
+                        WHERE mission_code = ?
+                          AND robot_id = ?
+                        """,
+                resultSet -> resultSet.next()
+                        ? resultSet.getObject("mission_id", UUID.class)
+                        : null,
+                missionCode,
+                robotId);
+        if (missionId == null) {
+            throw new BusinessException(ErrorCode.MISSION_NOT_FOUND);
+        }
+        return missionId;
     }
 
     private void ensureBootSession(
@@ -187,6 +240,7 @@ public class TelemetryIngestionService {
     private int insertHistory(
             UUID robotId,
             TelemetryPayload payload,
+            UUID missionId,
             String rawPayload,
             OffsetDateTime sampledAt,
             OffsetDateTime receivedAt
@@ -223,6 +277,7 @@ public class TelemetryIngestionService {
                     mission_state,
                     mission_elapsed_sec,
                     mission_incident_count,
+                    mission_id,
                     raw_payload
                 ) VALUES (
                     ?,
@@ -243,6 +298,7 @@ public class TelemetryIngestionService {
                         )
                         ELSE NULL
                     END,
+                    ?,
                     ?,
                     ?,
                     ?,
@@ -290,6 +346,7 @@ public class TelemetryIngestionService {
                 mission == null ? null : mission.state().name(),
                 mission == null ? null : mission.elapsedSec(),
                 mission == null ? null : mission.incidentCount(),
+                missionId,
                 rawPayload);
     }
 
