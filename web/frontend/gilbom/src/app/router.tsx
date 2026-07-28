@@ -5,7 +5,17 @@ import { AuthLayout } from '../features/auth/AuthLayout'
 import {
   RequireAuthenticated,
   RequireAuthenticationState,
+  RequirePermission,
 } from '../features/auth/AuthRouteGuard'
+import {
+  ADMIN_SETTINGS_MANAGE,
+  AUDIT_LOG_VIEW,
+} from '../features/auth/permissions'
+import { AdminWorkspaceLayout } from '../features/admin/AdminWorkspaceLayout'
+import { AdminApprovalsPage } from '../features/admin/AdminApprovalsPage'
+import { AdminMfaResetPage } from '../features/admin/AdminMfaResetPage'
+import { AdminUserRolesPage } from '../features/admin/AdminUserRolesPage'
+import { AuditLogPage } from '../features/audit/AuditLogPage'
 import { InitialPasswordChangePage } from '../features/auth/InitialPasswordChangePage'
 import { LoginPage } from '../features/auth/LoginPage'
 import { MfaEnrollmentPage } from '../features/auth/MfaEnrollmentPage'
@@ -80,7 +90,29 @@ export const router = createBrowserRouter([
       { path: 'defects', element: <DefectManagePage /> },
       { path: 'robots', element: <RobotManagePage /> },
       { path: 'reports', element: <ReportsPage /> },
-      { path: 'admin/roles', element: <RoleManagePage /> },
+      {
+        path: 'admin',
+        element: (
+          <RequirePermission permission={ADMIN_SETTINGS_MANAGE}>
+            <AdminWorkspaceLayout />
+          </RequirePermission>
+        ),
+        children: [
+          { index: true, element: <Navigate replace to="/admin/approvals" /> },
+          { path: 'approvals', element: <AdminApprovalsPage /> },
+          { path: 'users', element: <AdminUserRolesPage /> },
+          { path: 'roles', element: <RoleManagePage /> },
+          { path: 'mfa-reset', element: <AdminMfaResetPage /> },
+        ],
+      },
+      {
+        path: 'audit-logs',
+        element: (
+          <RequirePermission permission={AUDIT_LOG_VIEW}>
+            <AuditLogPage />
+          </RequirePermission>
+        ),
+      },
       { path: 'my', element: <MyPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],

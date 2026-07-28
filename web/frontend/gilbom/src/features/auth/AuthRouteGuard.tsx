@@ -1,7 +1,12 @@
 import type { ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router'
+import { ForbiddenPage } from '../../pages/ForbiddenPage'
 import { useAuthentication } from './authenticationContext'
 import type { AuthenticationStatus } from './authTypes'
+import {
+  hasPermission,
+  type FrontendPermission,
+} from './permissions'
 
 const statusRoutes: Record<Exclude<AuthenticationStatus, 'BOOTSTRAPPING'>, string> = {
   ANONYMOUS: '/login',
@@ -53,6 +58,34 @@ export function RequireAuthenticationState({
   }
   if (!allowed.includes(status)) {
     return <Navigate replace to={statusRoutes[status]} />
+  }
+  return children
+}
+
+export function RequirePermission({
+  permission,
+  children,
+}: {
+  permission: FrontendPermission
+  children: ReactNode
+}) {
+  const { status, user } = useAuthentication()
+  const location = useLocation()
+
+  if (status === 'BOOTSTRAPPING') {
+    return <AuthenticationLoading />
+  }
+  if (status !== 'AUTHENTICATED') {
+    return (
+      <Navigate
+        replace
+        to={statusRoutes[status]}
+        state={{ from: location.pathname }}
+      />
+    )
+  }
+  if (user === null || !hasPermission(user.permissions, permission)) {
+    return <ForbiddenPage />
   }
   return children
 }

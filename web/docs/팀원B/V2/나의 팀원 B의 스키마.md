@@ -387,7 +387,7 @@ Presence와 State에서 연결 상태·운행 모드가 실제로 바뀔 때만 
 | `last_received_at` | `TIMESTAMPTZ` | O | 서버 | 해당 boot의 최종 수신 시각 |
 | `offline_received_at` | `TIMESTAMPTZ` | X | 서버 | OFFLINE 확정 시각 |
 | `offline_reason` | `VARCHAR(50)` | X | Presence·Timeout | OfflineReason |
-| `last_seen_seq` | `BIGINT` | X | State·Telemetry·Event | 수신한 최댓값, 0 이상 |
+| `last_seen_seq` | `BIGINT` | X | State·Telemetry·Event | 수신한 최댓값, 1 이상 |
 | `created_at` | `TIMESTAMPTZ` | O | 서버 | 생성 시각 |
 | `updated_at` | `TIMESTAMPTZ` | O | 서버 | 수정 시각 |
 
@@ -404,7 +404,7 @@ Presence와 State에서 연결 상태·운행 모드가 실제로 바뀔 때만 
 | `schema_version` | `VARCHAR(10)` | O | Payload | 현재 `2.0` |
 | `robot_id` | `UUID` | O | Topic 조회 | `robot.robot` FK |
 | `boot_id` | `UUID` | O | Payload | Boot Session FK |
-| `seq` | `BIGINT` | O | Payload | 0 이상, `(robot_id, boot_id, seq)` UNIQUE |
+| `seq` | `BIGINT` | O | Payload | 1 이상, `(robot_id, boot_id, seq)` UNIQUE |
 | `mission_id` | `UUID` | X | Payload 코드 조회 | V11 제외, Mission migration에서 FK와 함께 추가 |
 | `sampled_at` | `TIMESTAMPTZ` | O | Payload | 로봇 측정 시각 |
 | `received_at` | `TIMESTAMPTZ` | O | 서버 | 서버 수신 시각 |
@@ -500,7 +500,7 @@ B가 저장하는 Battery·Safety·Mission Event의 공통 Envelope다. Incident
 | `event_type` | `VARCHAR(50)` | O | Payload | 카테고리별 EventType |
 | `robot_id` | `UUID` | O | Topic 조회 | `robot.robot` FK |
 | `boot_id` | `UUID` | O | Payload | Boot Session FK |
-| `seq` | `BIGINT` | O | Payload | 0 이상, `(robot_id, boot_id, seq)` UNIQUE |
+| `seq` | `BIGINT` | O | Payload | 1 이상, `(robot_id, boot_id, seq)` UNIQUE |
 | `mission_id` | `UUID` | X | Payload 코드 조회 | 관련 Mission FK |
 | `source_component` | `VARCHAR(20)` | O | Payload | `power`, `safety`, `mission` |
 | `occurred_at` | `TIMESTAMPTZ` | O | Payload | 로봇 발생 시각 |

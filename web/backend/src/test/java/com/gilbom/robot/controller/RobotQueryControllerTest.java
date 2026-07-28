@@ -16,6 +16,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -121,6 +122,7 @@ class RobotQueryControllerTest {
     }
 
     @Test
+    @Tag("security-acceptance")
     void rejectsUnauthenticatedListRequest() throws Exception {
         mockMvc.perform(get("/api/v1/robots"))
                 .andExpect(status().isUnauthorized())
@@ -140,6 +142,7 @@ class RobotQueryControllerTest {
     }
 
     @Test
+    @Tag("security-acceptance")
     void mapsOutOfScopeDetailToSameNotFoundResponse() throws Exception {
         when(queryService.findRobot(USER_ID, ROBOT_ID))
                 .thenThrow(new BusinessException(ErrorCode.ROBOT_NOT_FOUND));

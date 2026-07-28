@@ -6,7 +6,11 @@ const pageTitles: Record<string, string> = {
   '/robots': '로봇 상태 관리',
   '/defects': '점자 보도블록 결함 관리',
   '/reports': '리포트',
-  '/admin/roles': '관리자 패널',
+  '/admin/approvals': '가입 요청 승인',
+  '/admin/users': '사용자 역할 관리',
+  '/admin/roles': '역할·권한 관리',
+  '/admin/mfa-reset': 'MFA 관리자 초기화',
+  '/audit-logs': '감사 로그',
   '/my': '마이페이지',
 }
 
@@ -27,6 +31,7 @@ export function AppLayout() {
             name: user?.displayName ?? '관리자',
             title: '',
             role: primaryRole,
+            permissions: user?.permissions ?? [],
           }}
         />
 

@@ -11,6 +11,7 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 
 import java.time.Instant;
@@ -21,7 +22,7 @@ public record TelemetryPayload(
         @NotNull UUID messageId,
         @NotBlank String mqttId,
         @NotNull UUID bootId,
-        @NotNull @PositiveOrZero Long seq,
+        @NotNull @Positive Long seq,
         @NotNull Instant sampledAt,
         String missionId,
         @NotNull @Valid Position position,

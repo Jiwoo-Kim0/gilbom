@@ -13,6 +13,7 @@ import java.util.OptionalLong;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
@@ -192,6 +193,7 @@ class AdminManagementIntegrationTest {
     }
 
     @Test
+    @Tag("security-acceptance")
     void auditInsertFailureRollsBackApprovalAndRoleAssignment() {
         jdbcTemplate.execute("""
                 CREATE FUNCTION audit.reject_admin_approval_test()
@@ -253,6 +255,81 @@ class AdminManagementIntegrationTest {
                 Integer.class,
                 pendingUserId
         )).isZero();
+    }
+
+    @Test
+    @Tag("security-acceptance")
+    void mfaResetRevokesEveryTargetSessionAndWritesAudit() {
+        UUID actorFactorId = insertActiveFactor(actorId);
+        UUID targetFactorId = insertActiveFactor(mfaTargetId);
+        insertAuthenticatedSession(mfaTargetId);
+        insertMfaRequiredSession(mfaTargetId);
+        when(encryptionService.decrypt(
+                eq(actorId),
+                eq(actorFactorId),
+                any()
+        )).thenReturn(new byte[20]);
+        when(totpService.verify(
+                any(byte[].class),
+                eq("123456"),
+                any(),
+                nullable(Long.class)
+        )).thenReturn(OptionalLong.of(123456L));
+        AuditRequestContext resetContext =
+                AuditRequestContext.requestIdOnly(UUID.randomUUID());
+
+        boolean completed = mfaResetCommitService.attempt(
+                mfaTargetId,
+                new MfaResetRequest(
+                        "integration-admin-password",
+                        "123456",
+                        "분실 신고 확인"
+                ),
+                actorId,
+                resetContext
+        );
+
+        assertThat(completed).isTrue();
+        assertThat(jdbcTemplate.queryForMap(
+                """
+                SELECT factor_status, revoked_at
+                FROM auth.mfa_factor
+                WHERE factor_id = ?
+                """,
+                targetFactorId
+        ))
+                .containsEntry("factor_status", "REVOKED")
+                .doesNotContainEntry("revoked_at", null);
+        assertThat(jdbcTemplate.queryForObject(
+                """
+                SELECT last_successful_totp_time_step
+                FROM auth.mfa_factor
+                WHERE factor_id = ?
+                """,
+                Long.class,
+                actorFactorId
+        )).isEqualTo(123456L);
+        assertThat(targetSessionCount()).isZero();
+        assertThat(jdbcTemplate.queryForMap(
+                """
+                SELECT action_type, target_id, result,
+                       (after_value ->> 'revokedFactorCount')::integer
+                           AS revoked_factor_count,
+                       (after_value ->> 'revokedSessionCount')::integer
+                           AS revoked_session_count
+                FROM audit.audit_log
+                WHERE request_id = ?
+                """,
+                resetContext.requestId()
+        ))
+                .containsEntry(
+                        "action_type",
+                        "AUTH_MFA_RESET_BY_ADMIN"
+                )
+                .containsEntry("target_id", mfaTargetId)
+                .containsEntry("result", "SUCCESS")
+                .containsEntry("revoked_factor_count", 1)
+                .containsEntry("revoked_session_count", 2);
     }
 
     @Test
@@ -335,17 +412,7 @@ class AdminManagementIntegrationTest {
                 Long.class,
                 actorFactorId
         )).isNull();
-        assertThat(jdbcTemplate.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM session_store.spring_session session
-                JOIN session_store.session_security_state state
-                  ON state.session_primary_id = session.primary_id
-                WHERE state.user_id = ?
-                """,
-                Integer.class,
-                mfaTargetId
-        )).isEqualTo(1);
+        assertThat(targetSessionCount()).isEqualTo(1);
     }
 
     private ApprovalRequest approvalRequest() {
@@ -452,6 +519,70 @@ class AdminManagementIntegrationTest {
                 now + 28_800_000,
                 now,
                 now
+        );
+    }
+
+    private void insertMfaRequiredSession(UUID userId) {
+        String primaryId = UUID.randomUUID().toString();
+        String sessionId = UUID.randomUUID().toString();
+        long now = System.currentTimeMillis();
+        long challengeExpiry = now + 300_000;
+        jdbcTemplate.update(
+                """
+                INSERT INTO session_store.spring_session (
+                    primary_id,
+                    session_id,
+                    creation_time,
+                    last_access_time,
+                    max_inactive_interval,
+                    expiry_time,
+                    principal_name
+                ) VALUES (?, ?, ?, ?, 1800, ?, ?)
+                """,
+                primaryId,
+                sessionId,
+                now,
+                now,
+                now + 1_800_000,
+                userId.toString()
+        );
+        jdbcTemplate.update(
+                """
+                INSERT INTO session_store.session_security_state (
+                    session_primary_id,
+                    user_id,
+                    authentication_state,
+                    absolute_expiry_time,
+                    authentication_challenge_started_time,
+                    authentication_challenge_expires_at,
+                    authentication_challenge_failure_count,
+                    created_time,
+                    updated_time
+                ) VALUES (
+                    ?, ?, 'MFA_REQUIRED', ?, ?, ?, 0, ?, ?
+                )
+                """,
+                primaryId,
+                userId,
+                challengeExpiry,
+                now,
+                challengeExpiry,
+                now,
+                now
+        );
+    }
+
+    private Integer targetSessionCount() {
+        return jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM session_store.spring_session session
+                JOIN session_store.session_security_state state
+                  ON state.session_primary_id = session.primary_id
+                WHERE state.user_id = ?
+                """,
+                Integer.class,
+                mfaTargetId
         );
     }
 

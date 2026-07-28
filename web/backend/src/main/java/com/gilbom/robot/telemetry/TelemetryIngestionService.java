@@ -38,28 +38,46 @@ public class TelemetryIngestionService {
         OffsetDateTime sampledAt = utc(payload.sampledAt());
         OffsetDateTime receivedAt = utc(command.receivedAt());
 
+        lockCurrentState(robotId);
+        ensureBootSession(
+                robotId,
+                payload.bootId(),
+                payload.schemaVersion(),
+                receivedAt);
         int inserted = insertHistory(
                 robotId,
                 payload,
                 command.rawPayload(),
                 sampledAt,
                 receivedAt);
-        updateLastReceived(robotId, receivedAt);
 
         if (inserted == 0) {
             return new TelemetryIngestionResult(false, false);
         }
 
+        touchBootSession(
+                robotId,
+                payload.bootId(),
+                payload.seq(),
+                receivedAt);
         boolean currentStateUpdated = updateCurrentState(
                 robotId,
                 payload,
                 sampledAt,
                 receivedAt);
-        eventPublisher.publishEvent(
-                RobotRealtimeEvent.telemetryUpdated(
-                        robotId,
-                        payload.mqttId(),
-                        payload.sampledAt()));
+        if (!currentStateUpdated) {
+            updateLastReceived(
+                    robotId,
+                    payload.bootId(),
+                    receivedAt);
+        }
+        if (currentStateUpdated) {
+            eventPublisher.publishEvent(
+                    RobotRealtimeEvent.telemetryUpdated(
+                            robotId,
+                            payload.mqttId(),
+                            payload.sampledAt()));
+        }
         return new TelemetryIngestionResult(true, currentStateUpdated);
     }
 
@@ -78,6 +96,92 @@ public class TelemetryIngestionService {
             throw new BusinessException(ErrorCode.ROBOT_NOT_FOUND);
         }
         return robotId;
+    }
+
+    private void lockCurrentState(UUID robotId) {
+        boolean found = !jdbcTemplate.queryForList("""
+                        SELECT TRUE
+                        FROM telemetry.robot_current_state
+                        WHERE robot_id = ?
+                        FOR UPDATE
+                        """,
+                Boolean.class,
+                robotId)
+                .isEmpty();
+        if (!found) {
+            throw new IllegalStateException(
+                    "Registered robot does not have a current-state row");
+        }
+    }
+
+    private void ensureBootSession(
+            UUID robotId,
+            UUID bootId,
+            String schemaVersion,
+            OffsetDateTime receivedAt
+    ) {
+        jdbcTemplate.update("""
+                INSERT INTO telemetry.robot_boot_session (
+                    boot_id,
+                    robot_id,
+                    schema_version,
+                    session_status,
+                    first_received_at,
+                    last_received_at,
+                    created_at,
+                    updated_at
+                ) VALUES (?, ?, ?, 'ONLINE', ?, ?, ?, ?)
+                ON CONFLICT (boot_id) DO NOTHING
+                """,
+                bootId,
+                robotId,
+                schemaVersion,
+                receivedAt,
+                receivedAt,
+                receivedAt,
+                receivedAt);
+
+        UUID owner = jdbcTemplate.query("""
+                        SELECT robot_id
+                        FROM telemetry.robot_boot_session
+                        WHERE boot_id = ?
+                        """,
+                resultSet -> resultSet.next()
+                        ? resultSet.getObject("robot_id", UUID.class)
+                        : null,
+                bootId);
+        if (owner != null && !owner.equals(robotId)) {
+            throw new BusinessException(
+                    ErrorCode.MQTT_ID_MISMATCH,
+                    "boot_id is already assigned to another robot");
+        }
+    }
+
+    private void touchBootSession(
+            UUID robotId,
+            UUID bootId,
+            long sequence,
+            OffsetDateTime receivedAt
+    ) {
+        int updated = jdbcTemplate.update("""
+                UPDATE telemetry.robot_boot_session
+                SET last_received_at = GREATEST(last_received_at, ?),
+                    last_seen_seq = GREATEST(
+                        COALESCE(last_seen_seq, 0),
+                        ?
+                    ),
+                    updated_at = GREATEST(updated_at, ?)
+                WHERE robot_id = ?
+                  AND boot_id = ?
+                """,
+                receivedAt,
+                sequence,
+                receivedAt,
+                robotId,
+                bootId);
+        if (updated != 1) {
+            throw new IllegalStateException("Boot session could not be updated");
+        }
     }
 
     private int insertHistory(
@@ -189,8 +293,12 @@ public class TelemetryIngestionService {
                 rawPayload);
     }
 
-    private void updateLastReceived(UUID robotId, OffsetDateTime receivedAt) {
-        int updated = jdbcTemplate.update("""
+    private void updateLastReceived(
+            UUID robotId,
+            UUID bootId,
+            OffsetDateTime receivedAt
+    ) {
+        jdbcTemplate.update("""
                 UPDATE telemetry.robot_current_state
                 SET last_received_at = CASE
                         WHEN last_received_at IS NULL OR last_received_at < ?
@@ -202,16 +310,14 @@ public class TelemetryIngestionService {
                         ELSE updated_at
                     END
                 WHERE robot_id = ?
+                  AND current_boot_id = ?
                 """,
                 receivedAt,
                 receivedAt,
                 receivedAt,
                 receivedAt,
-                robotId);
-        if (updated != 1) {
-            throw new IllegalStateException(
-                    "Registered robot does not have a current-state row");
-        }
+                robotId,
+                bootId);
     }
 
     private boolean updateCurrentState(
@@ -228,7 +334,17 @@ public class TelemetryIngestionService {
         int updated = jdbcTemplate.update("""
                 UPDATE telemetry.robot_current_state
                 SET current_boot_id = ?,
-                    last_seen_seq = ?,
+                    last_seen_seq = (
+                        SELECT last_seen_seq
+                        FROM telemetry.robot_boot_session
+                        WHERE robot_id = ?
+                          AND boot_id = ?
+                    ),
+                    last_received_at = CASE
+                        WHEN last_received_at IS NULL OR last_received_at < ?
+                            THEN ?
+                        ELSE last_received_at
+                    END,
                     mission_status = COALESCE(?, mission_status),
                     battery_valid = ?,
                     battery_percent = ?,
@@ -267,17 +383,33 @@ public class TelemetryIngestionService {
                     END
                 WHERE robot_id = ?
                   AND (
-                      telemetry_seq IS NULL
+                      current_boot_id IS NULL
                       OR (
                           current_boot_id = ?
-                          AND ? > telemetry_seq
                           AND (
-                              telemetry_sampled_at IS NULL
-                              OR ? >= telemetry_sampled_at
+                              telemetry_seq IS NULL
+                              OR (
+                                  ? > telemetry_seq
+                                  AND (
+                                      telemetry_sampled_at IS NULL
+                                      OR ? >= telemetry_sampled_at
+                                  )
+                              )
                           )
                       )
                       OR (
                           current_boot_id IS DISTINCT FROM ?
+                          AND (
+                              SELECT incoming.first_received_at
+                              FROM telemetry.robot_boot_session incoming
+                              WHERE incoming.robot_id = ?
+                                AND incoming.boot_id = ?
+                          ) > (
+                              SELECT current_session.first_received_at
+                              FROM telemetry.robot_boot_session current_session
+                              WHERE current_session.robot_id = ?
+                                AND current_session.boot_id = current_boot_id
+                          )
                           AND (
                               telemetry_sampled_at IS NULL
                               OR ? > telemetry_sampled_at
@@ -286,7 +418,10 @@ public class TelemetryIngestionService {
                   )
                 """,
                 payload.bootId(),
-                payload.seq(),
+                robotId,
+                payload.bootId(),
+                receivedAt,
+                receivedAt,
                 mission == null ? null : mission.state().name(),
                 battery.valid(),
                 battery.percent(),
@@ -317,6 +452,9 @@ public class TelemetryIngestionService {
                 payload.seq(),
                 sampledAt,
                 payload.bootId(),
+                robotId,
+                payload.bootId(),
+                robotId,
                 sampledAt);
         return updated == 1;
     }

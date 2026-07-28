@@ -183,6 +183,21 @@ class MqttMessageParserTest {
     }
 
     @Test
+    void rejectsSequenceZeroBecauseEachBootStartsAtOne() {
+        String payload = validTelemetry("RBT-001")
+                .replace("\"seq\": 4312", "\"seq\": 0");
+
+        assertErrorCode(
+                () -> parser.parse(message(
+                        "tbs/v2/robots/RBT-001/telemetry",
+                        0,
+                        payload
+                )),
+                ErrorCode.MQTT_PAYLOAD_VALIDATION_FAILED
+        );
+    }
+
+    @Test
     void rejectsUnknownJsonMembers() {
         String payload = validTelemetry("RBT-001")
                 .replace("\"mission\": {", "\"unexpected\": true, \"mission\": {");

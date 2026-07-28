@@ -13,7 +13,7 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Positive;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -24,7 +24,7 @@ public record BatteryEventPayload(
         @NotNull EventType eventType,
         @NotBlank String mqttId,
         @NotNull UUID bootId,
-        @NotNull @PositiveOrZero Long seq,
+        @NotNull @Positive Long seq,
         @NotNull EventSource sourceComponent,
         @NotNull Instant occurredAt,
         @NotNull Instant sentAt,

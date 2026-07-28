@@ -97,6 +97,36 @@ pipeline {
             }
         }
 
+        stage('Day 4 security acceptance') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+
+                        project_dir="$(pwd)"
+                        docker_socket_gid="$(
+                            stat -c '%g' /var/run/docker.sock
+                        )"
+
+                        # Docker build 내부에서는 Testcontainers가 DB 테스트를
+                        # 건너뛸 수 있으므로 socket을 연결한 별도 단계에서 실행한다.
+                        docker run --rm \
+                            --user "$(id -u):$(id -g)" \
+                            --group-add "$docker_socket_gid" \
+                            --add-host host.docker.internal:host-gateway \
+                            --env DOCKER_HOST=unix:///var/run/docker.sock \
+                            --env TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock \
+                            --env TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal \
+                            --volume /var/run/docker.sock:/var/run/docker.sock \
+                            --volume "$project_dir/backend:$project_dir/backend" \
+                            --workdir "$project_dir/backend" \
+                            amazoncorretto:21.0.12-alpine3.22 \
+                            sh ./gradlew securityAcceptanceTest --no-daemon
+                    '''
+                }
+            }
+        }
+
         stage('Build and test images') {
             steps {
                 dir(env.APP_DIR) {
