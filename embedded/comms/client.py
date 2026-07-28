@@ -33,6 +33,17 @@ SENT_RETENTION_DAYS = 7
 _EARLY_ACK_LIMIT = 256
 
 
+def _is_failure(reason_code) -> bool:
+    """ReasonCode 든 int 든 실패인지 판정한다.
+
+    paho 2.x VERSION2 는 ReasonCode 객체를 넘기지만, 가짜 클라이언트나 예전
+    콜백 시그니처는 int 를 넘긴다. 둘 다 견뎌야 한다.
+    """
+    if reason_code is None:
+        return False
+    return bool(getattr(reason_code, "is_failure", reason_code != 0))
+
+
 class MqttClient:
     """tbs/v2 발행·구독 클라이언트.
 
@@ -75,12 +86,19 @@ class MqttClient:
         self._ack_lock = threading.Lock()
         self._inflight = {}  # mid -> event_id
         self._early_acks = []  # mid, 최근 것부터 (_EARLY_ACK_LIMIT 로 제한)
+        self._subscribe_mids = {}  # mid -> topic (SUBACK 이 올 때까지)
+        self._subscribe_topic = None  # SUBACK 이 등록보다 빠를 때의 대비책
+        #: 마지막 SUBACK 결과 — 진단용. 계약 payload 에는 싣지 않는다.
+        #: None=아직 모름, True=구독됨, False=브로커가 거부(명령 수신 불가).
+        self.subscribed = None
+        self.subscribe_reason_codes = []
 
         self._client = (client_factory or _build_paho_client)(config)
         self._client.on_connect = self._on_connect
         self._client.on_disconnect = self._on_disconnect
         self._client.on_message = self._on_message
         self._client.on_publish = self._on_publish
+        self._client.on_subscribe = self._on_subscribe
 
     # -- 수명 ------------------------------------------------------------
 
@@ -267,14 +285,14 @@ class MqttClient:
     # -- paho 콜백 -------------------------------------------------------
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
-        if getattr(reason_code, "is_failure", reason_code != 0):
+        if _is_failure(reason_code):
             log.error("connect refused: %s", reason_code)
             return
         self._connected.set()
         log.info("connected to %s:%s", self.config.host, self.config.port)
         # birth — 재접속 때마다 다시 발행해서 retain 된 OFFLINE 을 덮는다.
         self._publish_direct(TopicKind.PRESENCE, self.messages.presence_online())
-        client.subscribe(self.topics.of(TopicKind.COMMAND_REQUEST), qos=SUBSCRIBE_QOS)
+        self._subscribe_command_request(client)
         # 밀린 event 재발행은 네트워크 루프를 막지 않도록 워커에 맡긴다.
         self._wakeup.set()
         # presence 와 구독이 끝난 뒤에 알린다. 훅에서 예외가 올라오면 paho 네트워크
@@ -286,22 +304,81 @@ class MqttClient:
             except Exception:
                 log.exception("on_connected hook failed")
 
+    def _subscribe_command_request(self, client) -> None:
+        """commands/request 구독. SUBACK 은 _on_subscribe 가 확인한다."""
+        topic = self.topics.of(TopicKind.COMMAND_REQUEST)
+        with self._ack_lock:
+            self._subscribe_topic = topic
+            self.subscribed = None
+        result = client.subscribe(topic, qos=SUBSCRIBE_QOS)
+        # paho 는 (rc, mid) 를 돌려준다. 그 밖의 반환값은 mid 없이 넘어간다.
+        if isinstance(result, tuple) and len(result) == 2:
+            with self._ack_lock:
+                self._subscribe_mids[result[1]] = topic
+
+    def _on_subscribe(
+        self, client, userdata, mid, reason_code_list=None, properties=None
+    ):
+        """SUBACK. 거부를 놓치면 '멀쩡해 보이는데 명령을 못 받는 로봇' 이 된다.
+
+        VERSION2 는 두 번째 인자로 ReasonCode 리스트를 넘긴다.
+        """
+        codes = (
+            list(reason_code_list)
+            if isinstance(reason_code_list, (list, tuple))
+            else [reason_code_list]
+        )
+        with self._ack_lock:
+            topic = self._subscribe_mids.pop(mid, None) or self._subscribe_topic
+        failures = [code for code in codes if _is_failure(code)]
+        self.subscribe_reason_codes = codes
+        self.subscribed = not failures
+        if failures:
+            # ACL 로 읽기가 막힌 경우가 대표적이다. 조용히 지나가면
+            # 서버 명령이 영원히 도착하지 않는데도 아무 단서가 없다.
+            log.error(
+                "subscribe refused for %s: %s",
+                topic,
+                ", ".join(str(code) for code in failures),
+            )
+        else:
+            log.info("subscribed to %s", topic)
+
     def _on_disconnect(self, client, userdata, *args):
         self._connected.clear()
         with self._ack_lock:
             # 미확인 mid 는 버린다. 해당 event 는 outbox 에 pending 으로 남아 있다.
             self._inflight.clear()
             self._early_acks.clear()
+            self._subscribe_mids.clear()
         if not self._stopping.is_set():
-            log.warning("disconnected, retrying with backoff")
+            # 이유코드가 없으면 client_id 충돌(session taken over) 같은 원인을
+            # 브로커 로그를 봐야만 알 수 있다.
+            log.warning(
+                "disconnected (reason=%s), retrying with backoff",
+                _disconnect_reason(args),
+            )
 
     def _on_publish(self, client, userdata, mid, reason_code=None, properties=None):
+        # MQTT5 PUBACK 의 이유코드가 여기로 온다 (0x87 Not authorized 등).
+        # 실패를 성공으로 처리하면 브로커가 버린 event 가 Outbox 에서도 지워진다.
+        failed = _is_failure(reason_code)
         with self._ack_lock:
             event_id = self._inflight.pop(mid, None)
-            if event_id is None:
+            if event_id is None and not failed:
                 # PUBACK 이 등록보다 빨랐거나, event 가 아닌 발행이다.
                 self._early_acks.append(mid)
                 del self._early_acks[:-_EARLY_ACK_LIMIT]
+        if failed:
+            # mark_sent 하지 않는다 → Outbox 에 pending 으로 남아 재전송된다.
+            log.error(
+                "publish rejected by broker: reason=%s (mid=%s, event_id=%s),"
+                " kept in outbox",
+                reason_code,
+                mid,
+                event_id,
+            )
+            return
         if event_id is not None:
             self.outbox.mark_sent(event_id)
 
@@ -320,6 +397,19 @@ class MqttClient:
             return
         # 검증·실행·중복 제거는 main.py 몫이다. 여기서는 큐에 넣기만 한다.
         self.commands.put(command)
+
+
+def _disconnect_reason(args):
+    """on_disconnect 의 가변 인자에서 이유코드를 꺼낸다.
+
+    paho 2.x VERSION2 는 (disconnect_flags, reason_code, properties) 로 부르고,
+    옛 시그니처는 (rc,) 만 준다. 둘 다 견딘다.
+    """
+    if len(args) >= 3:
+        return args[1]
+    if args:
+        return args[0]
+    return None
 
 
 def _build_paho_client(config: MqttConfig) -> mqtt.Client:

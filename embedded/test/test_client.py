@@ -5,9 +5,13 @@ paho 클라이언트를 가짜로 갈아끼워 브로커 없이 검증한다.
 """
 
 import json
+import logging
 import queue
+import time
 
 import pytest
+from paho.mqtt.packettypes import PacketTypes
+from paho.mqtt.reasoncodes import ReasonCode
 
 from comms import (
     EVENT_KINDS,
@@ -23,6 +27,19 @@ from comms import (
 from comms.client import RECONNECT_MAX_DELAY_SEC, RECONNECT_MIN_DELAY_SEC
 
 ROBOT_ID = "RBT-001"
+
+#: 실브로커가 실제로 돌려준 거부 사유들 (MQTT5 §3.4.2.1).
+NOT_AUTHORIZED = 0x87
+QUOTA_EXCEEDED = 0x97
+
+
+def reason(packet_type, identifier):
+    """paho 가 콜백으로 넘기는 것과 같은 ReasonCode 객체."""
+    return ReasonCode(packet_type, identifier=identifier)
+
+
+def granted_qos(qos):
+    return reason(PacketTypes.SUBACK, qos)
 
 
 class FakeInfo:
@@ -48,15 +65,21 @@ class FakePahoClient:
         self.on_connect = self.on_disconnect = None
         self.on_message = self.on_publish = None
         self.will = None
+        self.on_subscribe = None
         self.published = []  # (topic, payload, qos, retain, mid)
         self.infos = []  # publish 가 돌려준 FakeInfo
         self.subscriptions = []
+        self.subscribe_mids = []
         self.connect_args = None
         self.reconnect_delay = None
         self.loop_started = False
         self.disconnected = False
         self._mid = 0
         self.auto_ack = True
+        self.ack_reason_code = 0  # auto_ack 이 흉내 낼 PUBACK 이유코드
+        self.auto_suback = True
+        # 실제 브로커는 요청한 QoS 를 승인하며 ReasonCode 객체를 넘긴다.
+        self.suback_reason_codes = [granted_qos(1)]
 
     # -- paho API --------------------------------------------------------
 
@@ -79,7 +102,13 @@ class FakePahoClient:
         self.disconnected = True
 
     def subscribe(self, topic, qos=0):
+        self._mid += 1
+        mid = self._mid
         self.subscriptions.append((topic, qos))
+        self.subscribe_mids.append(mid)
+        if self.auto_suback:
+            self.suback(mid)
+        return (0, mid)  # paho 는 (rc, mid) 를 돌려준다
 
     def publish(self, topic, payload=None, qos=0, retain=False, properties=None):
         self._mid += 1
@@ -87,19 +116,34 @@ class FakePahoClient:
         info = FakeInfo(self._mid)
         self.infos.append(info)
         if self.auto_ack and qos > 0:
-            self.ack(self._mid)
+            self.ack(self._mid, self.ack_reason_code)
+        elif self.auto_ack:
+            # QoS 0 은 paho 가 성공 이유코드로 즉시 콜백을 부른다.
+            self.ack(self._mid, 0)
         return info
 
     # -- 테스트 조작 ------------------------------------------------------
 
-    def ack(self, mid):
-        self.on_publish(self, None, mid, 0, None)
+    def ack(self, mid, reason_code=0):
+        """PUBACK. reason_code 로 브로커의 거부를 흉내 낼 수 있다."""
+        self.on_publish(self, None, mid, reason_code, None)
+
+    def suback(self, mid=None, reason_codes=None):
+        if mid is None:
+            mid = self.subscribe_mids[-1]
+        if reason_codes is None:
+            reason_codes = self.suback_reason_codes
+        self.on_subscribe(self, None, mid, list(reason_codes), None)
 
     def simulate_connect(self):
         self.on_connect(self, None, {}, 0, None)
 
-    def simulate_disconnect(self):
-        self.on_disconnect(self, None, 0)
+    def simulate_disconnect(self, reason_code=0, *, version2=False):
+        """version2=True 면 paho 2.x 모양(flags, reason_code, properties)으로 부른다."""
+        if version2:
+            self.on_disconnect(self, None, {}, reason_code, None)
+        else:
+            self.on_disconnect(self, None, reason_code)
 
     def deliver(self, topic, payload):
         self.on_message(self, None, FakeMessage(topic, payload))
@@ -526,3 +570,199 @@ def test_prune_sent_keeps_pending(client, paho):
     assert client.outbox.pending_count() == 1
     client.outbox.prune_sent(before="2099-01-01T00:00:00.000Z")
     assert client.outbox.pending_count() == 1
+
+
+# --------------------------------------------------------------------------
+# PUBACK 이유코드 — 브로커가 거부한 event 는 Outbox 에 남아야 한다
+#
+# 실제로 겪은 일: commands/request 에 쓰기 권한이 없어 PUBACK 이
+# 0x87 Not authorized 로 돌아왔는데도 event 가 sent 로 지워졌다.
+# --------------------------------------------------------------------------
+
+
+def test_rejected_puback_keeps_event_pending(client, paho):
+    paho.auto_ack = False
+    paho.simulate_connect()
+    client.publish(TopicKind.EVENT_INCIDENT, incident(client))
+    mid = paho.last()[4]
+
+    paho.ack(mid, reason(PacketTypes.PUBACK, NOT_AUTHORIZED))
+
+    # 유실이 아니라 재전송 대상으로 남는다.
+    assert client.outbox.pending_count() == 1
+
+
+def test_rejected_puback_is_logged_with_reason_and_event_id(client, paho, caplog):
+    """조용히 재시도만 돌면 ACL 오설정 같은 영구 거부를 아무도 못 본다."""
+    paho.auto_ack = False
+    paho.simulate_connect()
+    payload = incident(client)
+    client.publish(TopicKind.EVENT_INCIDENT, payload)
+
+    with caplog.at_level(logging.ERROR):
+        paho.ack(paho.last()[4], reason(PacketTypes.PUBACK, NOT_AUTHORIZED))
+
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert errors, "브로커 거부는 error 로 남아야 한다"
+    assert "Not authorized" in caplog.text
+    assert payload["event_id"] in caplog.text
+
+
+def test_rejected_puback_is_detected_from_plain_int_code(client, paho):
+    """이유코드가 ReasonCode 가 아니라 int 로 와도 실패로 본다."""
+    paho.auto_ack = False
+    paho.simulate_connect()
+    client.publish(TopicKind.EVENT_SAFETY, incident(client))
+    paho.ack(paho.last()[4], QUOTA_EXCEEDED)
+    assert client.outbox.pending_count() == 1
+
+
+def test_rejected_event_is_resent_by_flush(client, paho):
+    paho.auto_ack = False
+    paho.simulate_connect()
+    payload = incident(client)
+    client.publish(TopicKind.EVENT_INCIDENT, payload)
+    paho.ack(paho.last()[4], reason(PacketTypes.PUBACK, NOT_AUTHORIZED))
+
+    # 다음 재전송 주기에 같은 event_id 로 다시 나간다.
+    # (fixture 의 주기는 0.05초 — 방금 시도한 건은 그 전에는 다시 안 나간다.)
+    assert client.flush_outbox() == 0
+    time.sleep(0.1)
+    assert client.flush_outbox() == 1
+    resent = paho.payloads_on("tbs/v2/robots/RBT-001/events/incident")
+    assert [p["event_id"] for p in resent] == [payload["event_id"]] * 2
+
+    paho.ack(paho.last()[4])  # 권한이 복구되면 그때 sent
+    assert client.outbox.pending_count() == 0
+
+
+def test_rejected_puback_arriving_before_registration_is_not_sent(client, paho):
+    """PUBACK 이 publish() 반환보다 빠르고 그게 실패인 경우.
+
+    실패한 mid 를 early ack 로 기억하면 _send_stored 가 그걸 보고 sent 로 지운다.
+    """
+    paho.auto_ack = True  # publish() 안에서 즉시 ack
+    paho.ack_reason_code = reason(PacketTypes.PUBACK, NOT_AUTHORIZED)
+    paho.simulate_connect()
+    client.publish(TopicKind.EVENT_BATTERY, incident(client))
+    assert client.outbox.pending_count() == 1
+
+
+def test_successful_puback_still_marks_sent(client, paho):
+    """회귀 방지 — 성공 이유코드는 예전과 똑같이 동작한다."""
+    paho.auto_ack = False
+    paho.simulate_connect()
+    client.publish(TopicKind.EVENT_MISSION, incident(client))
+    paho.ack(paho.last()[4], 0)
+    assert client.outbox.pending_count() == 0
+
+
+def test_qos0_telemetry_is_unaffected(client, paho):
+    """QoS 0 은 paho 가 성공 이유코드로 즉시 콜백을 부른다 — Outbox 와 무관하다."""
+    paho.simulate_connect()
+    client.publish(
+        TopicKind.TELEMETRY,
+        client.messages.telemetry(
+            position_valid=False,
+            moving=False,
+            battery_valid=False,
+            battery_percent=None,
+            battery_state="UNKNOWN",
+        ),
+    )
+    assert client.outbox.pending_count() == 0
+
+
+# --------------------------------------------------------------------------
+# SUBACK — 구독 거부를 감지한다
+#
+# ACL 이 읽기를 막으면 "멀쩡해 보이는데 서버 명령을 영원히 못 받는 로봇" 이 된다.
+# --------------------------------------------------------------------------
+
+
+def test_granted_subscription_is_recorded(client, paho):
+    paho.simulate_connect()
+    assert client.subscribed is True
+
+
+def test_refused_subscription_is_logged(client, paho, caplog):
+    paho.auto_suback = False
+    paho.simulate_connect()
+
+    with caplog.at_level(logging.ERROR):
+        paho.suback(reason_codes=[reason(PacketTypes.SUBACK, NOT_AUTHORIZED)])
+
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert errors, "구독 거부는 error 로 남아야 한다"
+    assert "Not authorized" in caplog.text
+    # 어느 topic 이 막혔는지 알 수 있어야 한다.
+    assert "tbs/v2/robots/RBT-001/commands/request" in caplog.text
+
+
+def test_refused_subscription_is_visible_on_the_client(client, paho):
+    """진단용 — 계약 payload 에는 싣지 않는다."""
+    paho.auto_suback = False
+    paho.simulate_connect()
+    assert client.subscribed is None  # SUBACK 전에는 아직 모른다
+    paho.suback(reason_codes=[reason(PacketTypes.SUBACK, NOT_AUTHORIZED)])
+    assert client.subscribed is False
+    assert [str(code) for code in client.subscribe_reason_codes] == ["Not authorized"]
+
+
+def test_reconnect_resets_subscription_verdict(client, paho):
+    paho.auto_suback = False
+    paho.simulate_connect()
+    paho.suback(reason_codes=[reason(PacketTypes.SUBACK, NOT_AUTHORIZED)])
+    assert client.subscribed is False
+
+    paho.simulate_disconnect()
+    paho.simulate_connect()
+    assert client.subscribed is None
+    paho.suback()
+    assert client.subscribed is True
+
+
+def test_suback_arriving_before_subscribe_returns_still_names_the_topic(
+    client, paho, caplog
+):
+    """SUBACK 이 subscribe() 반환보다 빨라도 topic 을 알 수 있어야 한다."""
+    paho.auto_suback = True  # subscribe() 안에서 즉시 SUBACK
+    paho.suback_reason_codes = [reason(PacketTypes.SUBACK, NOT_AUTHORIZED)]
+    with caplog.at_level(logging.ERROR):
+        paho.simulate_connect()
+    assert "tbs/v2/robots/RBT-001/commands/request" in caplog.text
+    assert client.subscribed is False
+
+
+# --------------------------------------------------------------------------
+# 끊김 이유코드
+#
+# 브로커 로그에는 "session taken over" 가 반복됐는데 우리 로그에는 단서가 없었다.
+# --------------------------------------------------------------------------
+
+
+def test_disconnect_reason_is_logged(client, paho, caplog):
+    paho.simulate_connect()
+    with caplog.at_level(logging.WARNING):
+        paho.simulate_disconnect(
+            reason(PacketTypes.DISCONNECT, 0x8E), version2=True  # Session taken over
+        )
+    assert "Session taken over" in caplog.text
+    assert not client.connected
+
+
+def test_disconnect_reason_is_logged_with_legacy_callback_shape(client, paho, caplog):
+    """가짜 paho 의 예전 시그니처 (client, userdata, rc) 도 견딘다."""
+    paho.simulate_connect()
+    with caplog.at_level(logging.WARNING):
+        paho.simulate_disconnect(142)
+    assert "142" in caplog.text
+
+
+def test_graceful_shutdown_does_not_log_a_disconnect_warning(client, paho, caplog):
+    paho.simulate_connect()
+    client.shutdown()
+    with caplog.at_level(logging.WARNING):
+        paho.simulate_disconnect(reason(PacketTypes.DISCONNECT, 0), version2=True)
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warnings == []
