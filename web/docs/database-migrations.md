@@ -43,6 +43,7 @@
 | V16 | 가입 거절 상태 | 공개 가입 요청의 `REJECTED` 상태 전이와 관리자 처리 계약 지원 |
 | V17 | MQTT Sequence 시작값 | State·Telemetry Sequence를 모든 계층에서 `1` 이상으로 강제 |
 | V18 | Robot Boot Session·Status History | Presence·State·Telemetry의 Boot 수명주기, append-only 상태 이력, 현재 Boot FK와 Replay 보호 기반 추가 |
+| V19 | 결함-로봇 연결·내보내기 job | `defect_observation.robot_id`로 결함을 로봇까지 추적해 `user_robot_assignment` 객체 범위와 `robotId` 필터를 SQL에서 적용하고, `POST /api/v1/defects/export`의 202 접수를 기록. 상세는 [defect-schema.md](defect-schema.md) 참고 |
 
 
 시스템 Role `ADMIN`, `MANAGER`, `OPERATOR`와 18개 세부 permission 및
@@ -60,7 +61,7 @@ docker compose logs backend
 ```
 
 
-Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V18이
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V19가
 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증
