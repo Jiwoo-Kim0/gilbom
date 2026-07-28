@@ -65,7 +65,8 @@ class AuthenticationUserRepositoryIntegrationTest {
                     request_control,
                     robot,
                     telemetry,
-                    defect
+                    defect,
+                    storage
                 CASCADE
                 """);
         Flyway.configure()

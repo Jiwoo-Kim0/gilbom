@@ -47,6 +47,9 @@
 | V20 | 런타임 세션 폐기 함수 실행 권한 | `PUBLIC`의 실행 권한은 계속 차단하고 `${applicationRole}`에 `auth.revoke_user_authorization_sessions(UUID)` 함수 하나의 `EXECUTE`만 부여해 관리자 MFA 초기화의 대상 세션 폐기를 허용 |
 | V21 | Robot Command·Result 생명주기 | 명령 생성·MQTT 발행·ACK·완료·실패·거절·만료 상태와 append-only Result 저장 기반 추가 |
 | V22 | 순찰·Mission·Event·Robot Image 정본 | Patrol Area/Route, 문자열 Mission 코드와 UUID PK 매핑, Telemetry Mission FK, 공통 Robot Event 멱등성, Mission 상태 이력, private JPEG 메타데이터와 통계 인덱스 추가 |
+| V23 | Command·Defect의 Mission 정본 FK 연결 | Command의 Mission/Area와 Defect의 Area/Route, Observation의 Event/Image UUID를 실제 정본에 `NOT VALID` FK로 연결해 신규 데이터 무결성을 적용 |
+| V24 | 시작 전 Mission 실패 시간 제약 보정 | `READY → FAILED` 준비 단계 실패에서 실제 주행 시작 시각인 `started_at`은 `NULL`을 허용하고 `ended_at`은 필수로 유지 |
+| V25 | Robot별 활성 Mission 단일화 | mission_id가 없는 PAUSE·RESUME·CANCEL 명령도 대상을 결정적으로 찾도록 Robot마다 `READY`, `RUNNING`, `PAUSED` Mission을 하나로 제한 |
 
 
 시스템 Role `ADMIN`, `MANAGER`, `OPERATOR`와 18개 세부 permission 및
@@ -64,7 +67,7 @@ docker compose logs backend
 ```
 
 
-Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V22가
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V25가
 순서대로 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증
