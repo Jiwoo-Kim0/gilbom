@@ -75,7 +75,10 @@ invalidate하고 동일한 cookie 이름·Path에 `Max-Age=0`을 명시해 다�
 
 로그아웃은 인증 완료 세션뿐 아니라 비밀번호 변경·MFA 대기 challenge에서도 호출할 수
 있다. 서버 세션 삭제를 먼저 확정하고 로그아웃 감사는 best-effort로 기록한 뒤 쿠키를
-즉시 만료한다.
+즉시 만료한다. 프론트는 로그아웃 `204`를 받은 뒤 기존 메모리 토큰을 먼저 폐기하고
+`GET /api/v1/auth/csrf-token`을 호출한다. 이 호출이 새 익명 세션과 그 세션에 결합된
+CSRF 토큰을 만들므로, 폐기된 인증 세션의 토큰을 재사용하지 않는다. 토큰 선발급이
+실패해도 로그아웃 성공을 되돌리지 않으며 다음 상태 변경 요청이 발급을 다시 시도한다.
 
 ## 5. 쿠키
 
@@ -100,4 +103,22 @@ invalidate하고 동일한 cookie 이름·Path에 `Max-Age=0`을 명시해 다�
 - `localStorage`, `sessionStorage`, IndexedDB, cookie에 CSRF를 복제하지 않는다.
 - MFA 성공 응답은 `replaceCsrfToken`으로 즉시 교체한다.
 - 로그아웃과 공통 401 처리는 `clearCsrfToken`으로 메모리 값을 제거한다.
+- 로그아웃 성공 직후 공개 CSRF API에서 새 익명 세션 토큰을 받아 메모리 값을 교체한다.
+- 이전 비동기 발급 응답은 generation 검사로 폐기하여 새 토큰을 덮어쓰지 못하게 한다.
 - 새로고침으로 메모리가 사라지면 공개 CSRF API에서 다시 발급받는다.
+
+## 7. CORS
+
+기본 배포 경로는 Nginx가 `/api`를 같은 Origin으로 프록시하므로 교차 Origin 요청을
+허용하지 않는다. 별도 Origin 프론트가 꼭 필요한 환경에서만
+`GILBOM_CORS_ENABLED=true`와 `GILBOM_CORS_ALLOWED_ORIGINS`를 함께 설정한다.
+
+- 허용 목록은 쉼표로 구분한 정확한 `http(s)://host[:port]` Origin만 받는다.
+- `*`, 빈 목록, 중복 값, 경로·query·fragment·userinfo가 포함된 값은 기동 시 거부한다.
+- credential 허용 기본값은 `true`이고 wildcard Origin은 어떤 경우에도 허용하지 않는다.
+- 허용 메서드는 `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`로 제한한다.
+- 허용 헤더도 API 계약의 `Accept`, `Content-Type`, `X-CSRF-TOKEN`,
+  `Idempotency-Key`, `X-Request-Id`로 제한한다.
+
+CORS가 비활성화된 상태에서는 preflight에 허용 응답 헤더를 내보내지 않으므로
+cross-origin 브라우저 호출은 닫히고 same-origin 호출만 정상 동작한다.

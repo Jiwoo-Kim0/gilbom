@@ -24,8 +24,19 @@ public enum ErrorCode {
             HttpStatus.SERVICE_UNAVAILABLE,
             "MFA 서비스를 일시적으로 사용할 수 없습니다."
     ),
+    AUTH_ADMIN_REAUTHENTICATION_FAILED(
+            HttpStatus.FORBIDDEN,
+            "관리자 재인증에 실패했습니다."
+    ),
+    AUTH_LAST_ADMIN_PROTECTED(
+            HttpStatus.CONFLICT,
+            "마지막 활성 관리자는 비활성화하거나 관리 권한을 제거할 수 없습니다."
+    ),
 
     COMMON_RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "요청한 리소스를 찾을 수 없습니다."),
+    AUTH_USER_NOT_FOUND(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."),
+    AUTH_ROLE_NOT_FOUND(HttpStatus.NOT_FOUND, "역할을 찾을 수 없습니다."),
+    AUTH_PERMISSION_NOT_FOUND(HttpStatus.NOT_FOUND, "권한을 찾을 수 없습니다."),
     ROBOT_NOT_FOUND(HttpStatus.NOT_FOUND, "로봇을 찾을 수 없습니다."),
     DEFECT_NOT_FOUND(HttpStatus.NOT_FOUND, "결함을 찾을 수 없습니다."),
     COMMAND_NOT_FOUND(HttpStatus.NOT_FOUND, "명령을 찾을 수 없습니다."),

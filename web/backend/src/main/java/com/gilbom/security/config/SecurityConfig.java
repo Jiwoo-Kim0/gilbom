@@ -1,10 +1,13 @@
 package com.gilbom.security.config;
 
 import java.time.Clock;
+import java.time.Duration;
+import java.util.List;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -21,6 +24,9 @@ import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestHandler;
 import org.springframework.security.web.csrf.XorCsrfTokenRequestAttributeHandler;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import com.gilbom.audit.SecurityAuditService;
 import com.gilbom.auth.session.AuthenticationSessionEnforcementFilter;
@@ -30,6 +36,7 @@ import com.gilbom.security.web.SecurityErrorResponseWriter;
 
 @Configuration
 @EnableMethodSecurity
+@EnableConfigurationProperties(GilbomCorsProperties.class)
 public class SecurityConfig {
 
     @Bean
@@ -39,6 +46,7 @@ public class SecurityConfig {
             CsrfTokenRepository csrfTokenRepository,
             CsrfTokenRequestHandler csrfTokenRequestHandler,
             SecurityContextRepository securityContextRepository,
+            CorsConfigurationSource corsConfigurationSource,
             SessionSecurityStateRepository sessionStateRepository,
             ObjectProvider<SecurityAuditService> securityAuditProvider
     ) throws Exception {
@@ -48,6 +56,7 @@ public class SecurityConfig {
                 .httpBasic(basic -> basic.disable())
                 .logout(logout -> logout.disable())
                 .requestCache(cache -> cache.disable())
+                .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .csrf(csrf -> csrf
@@ -165,6 +174,44 @@ public class SecurityConfig {
     @Bean
     public SecurityContextRepository securityContextRepository() {
         return new HttpSessionSecurityContextRepository();
+    }
+
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource(
+            GilbomCorsProperties properties
+    ) {
+        UrlBasedCorsConfigurationSource source =
+                new UrlBasedCorsConfigurationSource();
+        if (!properties.isEnabled()) {
+            return source;
+        }
+
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(properties.getAllowedOrigins());
+        configuration.setAllowCredentials(properties.isAllowCredentials());
+        configuration.setAllowedMethods(List.of(
+                "GET",
+                "HEAD",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE",
+                "OPTIONS"
+        ));
+        configuration.setAllowedHeaders(List.of(
+                "Accept",
+                "Content-Type",
+                "X-CSRF-TOKEN",
+                "Idempotency-Key",
+                "X-Request-Id"
+        ));
+        configuration.setExposedHeaders(List.of(
+                "X-Request-Id",
+                "Retry-After"
+        ));
+        configuration.setMaxAge(Duration.ofMinutes(10));
+        source.registerCorsConfiguration("/api/**", configuration);
+        return source;
     }
 
     @Bean
