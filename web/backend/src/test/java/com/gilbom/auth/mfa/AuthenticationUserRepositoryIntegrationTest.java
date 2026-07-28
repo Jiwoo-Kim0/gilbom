@@ -589,7 +589,7 @@ class AuthenticationUserRepositoryIntegrationTest {
                     ?,
                     ?,
                     CASE
-                        WHEN ? IS NULL THEN NULL
+                        WHEN CAST(? AS TEXT) IS NULL THEN NULL
                         ELSE NOW() + CAST(? AS INTERVAL)
                     END
                 FROM auth.permission

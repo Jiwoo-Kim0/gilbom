@@ -130,7 +130,7 @@ class RobotRegistrationControllerTest {
                         RequestIdFilter.HEADER_NAME,
                         REQUEST_ID.toString()))
                 .andExpect(jsonPath("$.robotId", is(ROBOT_ID.toString())))
-                .andExpect(jsonPath("$.robotCode", is("RBT-001")))
+                .andExpect(jsonPath("$.mqttId", is("RBT-001")))
                 .andExpect(jsonPath("$.robotName", is(command.robotName())))
                 .andExpect(jsonPath("$.serialNumber", is(command.serialNumber())))
                 .andExpect(jsonPath("$.operationalStatus", is("PROVISIONING")))

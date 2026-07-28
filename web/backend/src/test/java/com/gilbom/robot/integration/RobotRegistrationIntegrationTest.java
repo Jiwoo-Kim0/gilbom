@@ -166,7 +166,7 @@ class RobotRegistrationIntegrationTest {
                 .andExpect(header().string(
                         "Location",
                         matchesPattern("^/api/v1/robots/[0-9a-f-]{36}$")))
-                .andExpect(jsonPath("$.robotCode", matchesPattern("^RBT-[0-9]{3,}$")))
+                .andExpect(jsonPath("$.mqttId", matchesPattern("^RBT-[0-9]{3,}$")))
                 .andExpect(jsonPath("$.operationalStatus", is("PROVISIONING")))
                 .andExpect(jsonPath("$.connectivityStatus", is("OFFLINE")))
                 .andReturn()
@@ -175,11 +175,11 @@ class RobotRegistrationIntegrationTest {
 
         JsonNode firstBody = objectMapper.readTree(firstResponse);
         UUID robotId = UUID.fromString(firstBody.get("robotId").asText());
-        String robotCode = firstBody.get("robotCode").asText();
+        String mqttId = firstBody.get("mqttId").asText();
 
         assertThat(jdbcTemplate.queryForMap("""
                 SELECT
-                    robot_code,
+                    mqtt_id,
                     robot_name,
                     serial_number,
                     operational_status,
@@ -187,7 +187,7 @@ class RobotRegistrationIntegrationTest {
                 FROM robot.robot
                 WHERE robot_id = ?
                 """, robotId))
-                .containsEntry("robot_code", robotCode)
+                .containsEntry("mqtt_id", mqttId)
                 .containsEntry("robot_name", "점자블록 순찰 로봇 1호")
                 .containsEntry("serial_number", "SN-JETSON-0001")
                 .containsEntry("operational_status", "PROVISIONING")
@@ -229,7 +229,7 @@ class RobotRegistrationIntegrationTest {
                         .content(validRequest()))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.robotId", is(robotId.toString())))
-                .andExpect(jsonPath("$.robotCode", is(robotCode)))
+                .andExpect(jsonPath("$.mqttId", is(mqttId)))
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
