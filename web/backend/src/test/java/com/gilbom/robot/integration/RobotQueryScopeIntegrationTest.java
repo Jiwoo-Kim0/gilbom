@@ -51,6 +51,10 @@ class RobotQueryScopeIntegrationTest {
             UUID.fromString("17000000-0000-4000-8000-000000000021");
     private static final UUID VIEWER_USER_ID =
             UUID.fromString("17000000-0000-4000-8000-000000000022");
+    private static final UUID OPERATOR_USER_ID =
+            UUID.fromString("17000000-0000-4000-8000-000000000023");
+    private static final UUID EXPIRED_USER_ID =
+            UUID.fromString("17000000-0000-4000-8000-000000000024");
     private static final UUID ASSIGNED_ROBOT_ID =
             UUID.fromString("8750afcb-d682-4ef6-a90d-f63fcf5c2121");
     private static final UUID OUT_OF_SCOPE_ROBOT_ID =
@@ -83,6 +87,9 @@ class RobotQueryScopeIntegrationTest {
     private RobotQueryService queryService;
 
     @Autowired
+    private RobotScopeService scopeService;
+
+    @Autowired
     private TelemetryIngestionService telemetryIngestionService;
 
     @MockitoBean
@@ -92,12 +99,24 @@ class RobotQueryScopeIntegrationTest {
     void setUpScopeFixtures() {
         createUser(ADMIN_USER_ID, "QUERY-ADMIN");
         createUser(VIEWER_USER_ID, "QUERY-VIEWER");
+        createUser(OPERATOR_USER_ID, "QUERY-OPERATOR");
+        createUser(EXPIRED_USER_ID, "QUERY-EXPIRED");
         assignAdminRole(ADMIN_USER_ID);
         createRobot(ASSIGNED_ROBOT_ID, "RBT-021", "Assigned Robot");
         createRobot(OUT_OF_SCOPE_ROBOT_ID, "RBT-022", "Hidden Robot");
         createCurrentState(ASSIGNED_ROBOT_ID, 127.01, 37.51);
         createCurrentState(OUT_OF_SCOPE_ROBOT_ID, 127.02, 37.52);
-        assignRobot(VIEWER_USER_ID, ASSIGNED_ROBOT_ID);
+        assignRobot(
+                VIEWER_USER_ID,
+                ASSIGNED_ROBOT_ID,
+                "VIEWER"
+        );
+        assignRobot(
+                OPERATOR_USER_ID,
+                ASSIGNED_ROBOT_ID,
+                "OPERATOR"
+        );
+        assignExpiredRobot(EXPIRED_USER_ID, OUT_OF_SCOPE_ROBOT_ID);
     }
 
     @Test
@@ -139,6 +158,53 @@ class RobotQueryScopeIntegrationTest {
                 100,
                 null);
         assertThat(adminList.totalElements()).isEqualTo(2);
+    }
+
+    @Test
+    void requiresOperatorAssignmentForStateChangesAndExcludesExpiry() {
+        assertThat(scopeService.canOperate(
+                VIEWER_USER_ID,
+                ASSIGNED_ROBOT_ID
+        )).isFalse();
+        assertThat(scopeService.canOperate(
+                OPERATOR_USER_ID,
+                ASSIGNED_ROBOT_ID
+        )).isTrue();
+        assertThat(scopeService.canOperate(
+                ADMIN_USER_ID,
+                OUT_OF_SCOPE_ROBOT_ID
+        )).isTrue();
+        assertThat(scopeService.canOperate(
+                OPERATOR_USER_ID,
+                OUT_OF_SCOPE_ROBOT_ID
+        )).isFalse();
+        assertThat(scopeService.requireOperableMqttId(
+                OPERATOR_USER_ID,
+                "RBT-021"
+        )).isEqualTo("RBT-021");
+        assertThatThrownBy(() -> scopeService.requireOperableMqttId(
+                VIEWER_USER_ID,
+                "RBT-021"
+        )).isInstanceOfSatisfying(
+                BusinessException.class,
+                exception -> assertThat(exception.errorCode())
+                        .isEqualTo(ErrorCode.ROBOT_NOT_FOUND)
+        );
+
+        assertThat(queryService.findRobots(
+                EXPIRED_USER_ID,
+                0,
+                100,
+                null
+        ).totalElements()).isZero();
+        assertThatThrownBy(() -> queryService.findRobot(
+                EXPIRED_USER_ID,
+                OUT_OF_SCOPE_ROBOT_ID
+        )).isInstanceOfSatisfying(
+                BusinessException.class,
+                exception -> assertThat(exception.errorCode())
+                        .isEqualTo(ErrorCode.ROBOT_NOT_FOUND)
+        );
     }
 
     @Test
@@ -287,7 +353,11 @@ class RobotQueryScopeIntegrationTest {
                 latitude);
     }
 
-    private void assignRobot(UUID userId, UUID robotId) {
+    private void assignRobot(
+            UUID userId,
+            UUID robotId,
+            String assignmentType
+    ) {
         jdbcTemplate.update("""
                 INSERT INTO auth.user_robot_assignment (
                     user_id,
@@ -295,7 +365,38 @@ class RobotQueryScopeIntegrationTest {
                     assignment_type,
                     reason,
                     assigned_by
-                ) VALUES (?, ?, 'VIEWER', 'robot query integration test', ?)
+                ) VALUES (?, ?, ?, 'robot query integration test', ?)
+                ON CONFLICT (user_id, robot_id)
+                    WHERE is_active = TRUE
+                    DO NOTHING
+                """,
+                userId,
+                robotId,
+                assignmentType,
+                ADMIN_USER_ID);
+    }
+
+    private void assignExpiredRobot(UUID userId, UUID robotId) {
+        jdbcTemplate.update("""
+                INSERT INTO auth.user_robot_assignment (
+                    user_id,
+                    robot_id,
+                    assignment_type,
+                    reason,
+                    assigned_by,
+                    assigned_at,
+                    expires_at,
+                    updated_at
+                ) VALUES (
+                    ?,
+                    ?,
+                    'OWNER',
+                    'expired robot query integration test',
+                    ?,
+                    NOW() - INTERVAL '2 days',
+                    NOW() - INTERVAL '1 day',
+                    NOW()
+                )
                 ON CONFLICT (user_id, robot_id)
                     WHERE is_active = TRUE
                     DO NOTHING

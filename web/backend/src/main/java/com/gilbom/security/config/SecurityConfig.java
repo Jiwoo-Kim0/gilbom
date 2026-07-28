@@ -4,6 +4,7 @@ import java.time.Clock;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -19,7 +20,9 @@ import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestHandler;
 import org.springframework.security.web.csrf.XorCsrfTokenRequestAttributeHandler;
+import org.springframework.security.core.context.SecurityContextHolder;
 
+import com.gilbom.audit.SecurityAuditService;
 import com.gilbom.auth.session.AuthenticationSessionEnforcementFilter;
 import com.gilbom.auth.session.SessionSecurityStateRepository;
 import com.gilbom.common.error.ErrorCode;
@@ -36,7 +39,8 @@ public class SecurityConfig {
             CsrfTokenRepository csrfTokenRepository,
             CsrfTokenRequestHandler csrfTokenRequestHandler,
             SecurityContextRepository securityContextRepository,
-            SessionSecurityStateRepository sessionStateRepository
+            SessionSecurityStateRepository sessionStateRepository,
+            ObjectProvider<SecurityAuditService> securityAuditProvider
     ) throws Exception {
         http
                 // SPA가 JSON API를 사용하므로 Spring 기본 HTML login과 Basic 인증은 열지 않는다.
@@ -61,6 +65,10 @@ public class SecurityConfig {
                                 ))
                         .accessDeniedHandler((request, response, exception) -> {
                             if (exception instanceof CsrfException) {
+                                recordCsrfFailure(
+                                        securityAuditProvider,
+                                        request
+                                );
                                 errorWriter.write(
                                         request,
                                         response,
@@ -69,6 +77,10 @@ public class SecurityConfig {
                                 );
                                 return;
                             }
+                            recordAccessDenied(
+                                    securityAuditProvider,
+                                    request
+                            );
                             errorWriter.write(request, response, ErrorCode.AUTH_FORBIDDEN);
                         }))
                 .authorizeHttpRequests(authorize -> authorize
@@ -108,6 +120,32 @@ public class SecurityConfig {
                 );
 
         return http.build();
+    }
+
+    private static void recordCsrfFailure(
+            ObjectProvider<SecurityAuditService> provider,
+            jakarta.servlet.http.HttpServletRequest request
+    ) {
+        SecurityAuditService service = provider.getIfAvailable();
+        if (service != null) {
+            service.recordCsrfFailed(
+                    request,
+                    SecurityContextHolder.getContext().getAuthentication()
+            );
+        }
+    }
+
+    private static void recordAccessDenied(
+            ObjectProvider<SecurityAuditService> provider,
+            jakarta.servlet.http.HttpServletRequest request
+    ) {
+        SecurityAuditService service = provider.getIfAvailable();
+        if (service != null) {
+            service.recordAccessDenied(
+                    request,
+                    SecurityContextHolder.getContext().getAuthentication()
+            );
+        }
     }
 
     @Bean

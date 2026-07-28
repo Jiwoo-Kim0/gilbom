@@ -6,6 +6,14 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.gilbom.audit.AuditAction;
+import com.gilbom.audit.AuditActorType;
+import com.gilbom.audit.AuditLogRecord;
+import com.gilbom.audit.AuditLogService;
+import com.gilbom.audit.AuditRequestContext;
+import com.gilbom.audit.AuditResult;
+import com.gilbom.audit.AuditSnapshot;
+import com.gilbom.audit.AuditTargetType;
 import com.gilbom.auth.account.EmailAddressPolicy;
 import com.gilbom.auth.bootstrap.InitialAdminBootstrapRepository.ExistingAccount;
 import com.gilbom.auth.password.PasswordHashingService;
@@ -16,16 +24,25 @@ public class InitialAdminBootstrapService {
 
     private static final int MAX_DISPLAY_NAME_LENGTH = 100;
     private static final int MAX_USER_CODE_LENGTH = 30;
+    private static final java.util.Set<String> AUDIT_AFTER_FIELDS =
+            java.util.Set.of(
+                    "accountStatus",
+                    "accountOrigin",
+                    "passwordChangeRequired"
+            );
 
     private final InitialAdminBootstrapRepository repository;
     private final PasswordHashingService passwordHashingService;
+    private final AuditLogService auditLogService;
 
     public InitialAdminBootstrapService(
             InitialAdminBootstrapRepository repository,
-            PasswordHashingService passwordHashingService
+            PasswordHashingService passwordHashingService,
+            AuditLogService auditLogService
     ) {
         this.repository = repository;
         this.passwordHashingService = passwordHashingService;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional
@@ -72,7 +89,25 @@ public class InitialAdminBootstrapService {
 
         UUID userId = insertedUserId.orElseThrow();
         repository.assignAdminRole(userId);
-        repository.appendCreationAudit(userId);
+        auditLogService.appendRequired(new AuditLogRecord(
+                AuditRequestContext.system(),
+                null,
+                AuditActorType.SYSTEM,
+                AuditAction.INITIAL_ADMIN_CREATED.databaseValue(),
+                AuditTargetType.USER,
+                userId,
+                null,
+                AuditSnapshot.allow(
+                        AUDIT_AFTER_FIELDS,
+                        java.util.Map.of(
+                                "accountStatus", "ACTIVE",
+                                "accountOrigin", "BOOTSTRAP",
+                                "passwordChangeRequired", true
+                        )
+                ),
+                null,
+                AuditResult.SUCCESS
+        ));
         return InitialAdminBootstrapResult.CREATED;
     }
 

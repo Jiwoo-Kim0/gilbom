@@ -1,51 +1,41 @@
 package com.gilbom.auth.audit;
 
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+
+import com.gilbom.audit.AuditActorType;
+import com.gilbom.audit.AuditLogRecord;
+import com.gilbom.audit.AuditLogRepository;
+import com.gilbom.audit.AuditRequestContext;
+import com.gilbom.audit.AuditResult;
+import com.gilbom.audit.AuditTargetType;
 
 @Repository
 public class AuthenticationAuditRepository {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final AuditLogRepository repository;
 
-    public AuthenticationAuditRepository(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
+    public AuthenticationAuditRepository(AuditLogRepository repository) {
+        this.repository = repository;
     }
 
     public void append(AuthenticationAuditEvent event) {
         AuthenticationRequestAuditContext context =
                 event.requestContext();
-        int affected = jdbcTemplate.update(
-                """
-                INSERT INTO audit.audit_log (
-                    request_id,
-                    actor_user_id,
-                    actor_type,
-                    action_type,
-                    target_type,
-                    target_id,
-                    result,
-                    ip_address,
-                    user_agent
-                ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?,
-                    CAST(? AS inet),
-                    ?
-                )
-                """,
-                context.requestId(),
+        repository.append(new AuditLogRecord(
+                new AuditRequestContext(
+                        context.requestId(),
+                        context.ipAddress(),
+                        context.userAgent()
+                ),
                 event.actorUserId(),
-                event.actorType().name(),
+                AuditActorType.valueOf(event.actorType().name()),
                 event.action().databaseValue(),
-                event.targetType().name(),
+                AuditTargetType.valueOf(event.targetType().name()),
                 event.targetId(),
-                event.result().name(),
-                context.ipAddress(),
-                context.userAgent()
-        );
-        if (affected != 1) {
-            throw new IllegalStateException(
-                    "Authentication audit event was not persisted");
-        }
+                null,
+                null,
+                null,
+                AuditResult.valueOf(event.result().name())
+        ));
     }
 }

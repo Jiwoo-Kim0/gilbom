@@ -8,6 +8,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.any;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -32,6 +34,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.gilbom.api.HealthController;
+import com.gilbom.audit.SecurityAuditService;
 import com.gilbom.auth.password.PasswordHashingConfiguration;
 import com.gilbom.auth.model.AuthenticationState;
 import com.gilbom.auth.session.SessionSecurityState;
@@ -74,6 +77,9 @@ class SecurityConfigTest {
 
     @MockitoBean
     private AuthenticationSessionService authenticationSessionService;
+
+    @MockitoBean
+    private SecurityAuditService securityAuditService;
 
     @BeforeEach
     void setUpAuthenticatedSessionState() {
@@ -181,6 +187,10 @@ class SecurityConfigTest {
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")))
                 .andExpect(jsonPath("$.message", is("요청 검증에 실패했습니다.")));
+        verify(securityAuditService).recordCsrfFailed(
+                any(),
+                any()
+        );
 
         mockMvc.perform(post("/test/security/mutate")
                         .with(user(USER_ID.toString()))
@@ -246,6 +256,10 @@ class SecurityConfigTest {
                         .with(user(USER_ID.toString())))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")));
+        verify(securityAuditService).recordAccessDenied(
+                any(),
+                any()
+        );
 
         mockMvc.perform(get("/test/security/admin")
                         .with(user(USER_ID.toString())

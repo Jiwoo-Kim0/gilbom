@@ -12,6 +12,7 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.MessageSourceResolvable;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.MethodParameter;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -22,6 +23,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.validation.ObjectError;
@@ -43,6 +45,7 @@ import com.gilbom.common.api.ValidationErrorDetail;
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
 import com.gilbom.auth.ratelimit.AuthenticationRateLimitExceededException;
+import com.gilbom.audit.SecurityAuditService;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
@@ -73,6 +76,14 @@ public class GlobalExceptionHandler {
             "recoverycode",
             "privatekey",
             "presignedurl");
+
+    private final ObjectProvider<SecurityAuditService> securityAuditProvider;
+
+    public GlobalExceptionHandler(
+            ObjectProvider<SecurityAuditService> securityAuditProvider
+    ) {
+        this.securityAuditProvider = securityAuditProvider;
+    }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleMethodArgumentNotValid(
@@ -223,6 +234,14 @@ public class GlobalExceptionHandler {
             AccessDeniedException exception,
             HttpServletRequest request) {
         // 메서드 보안(@PreAuthorize) 거부는 MVC 안에서 발생하므로 필터용 handler와 별도로 처리한다.
+        SecurityAuditService auditService =
+                securityAuditProvider.getIfAvailable();
+        if (auditService != null) {
+            auditService.recordAccessDenied(
+                    request,
+                    SecurityContextHolder.getContext().getAuthentication()
+            );
+        }
         return respond(ErrorCode.AUTH_FORBIDDEN, List.of(), request);
     }
 

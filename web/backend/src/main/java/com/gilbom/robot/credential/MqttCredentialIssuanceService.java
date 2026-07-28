@@ -15,6 +15,14 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import com.gilbom.audit.AuditAction;
+import com.gilbom.audit.AuditActorType;
+import com.gilbom.audit.AuditLogRecord;
+import com.gilbom.audit.AuditLogService;
+import com.gilbom.audit.AuditRequestContext;
+import com.gilbom.audit.AuditResult;
+import com.gilbom.audit.AuditSnapshot;
+import com.gilbom.audit.AuditTargetType;
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
 import com.gilbom.robot.data.application.result.IssuedMqttCredential;
@@ -24,22 +32,36 @@ public class MqttCredentialIssuanceService {
 
     private static final String CREDENTIAL_TYPE = "MQTT_PASSWORD";
     private static final String REQUEST_METHOD = "POST";
+    private static final java.util.Set<String> AUDIT_AFTER_FIELDS =
+            java.util.Set.of(
+                    "robotId",
+                    "mqttId",
+                    "credentialId",
+                    "credentialType",
+                    "credentialVersion",
+                    "credentialStatus",
+                    "expiresAt",
+                    "fingerprint"
+            );
 
     private final JdbcTemplate jdbcTemplate;
     private final MqttCredentialSecretGenerator secretGenerator;
     private final MqttCredentialProvisioner provisioner;
     private final MqttCredentialProvisioningProperties properties;
+    private final AuditLogService auditLogService;
 
     public MqttCredentialIssuanceService(
             JdbcTemplate jdbcTemplate,
             MqttCredentialSecretGenerator secretGenerator,
             MqttCredentialProvisioner provisioner,
-            MqttCredentialProvisioningProperties properties
+            MqttCredentialProvisioningProperties properties,
+            AuditLogService auditLogService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.secretGenerator = secretGenerator;
         this.provisioner = provisioner;
         this.properties = properties;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional
@@ -57,16 +79,20 @@ public class MqttCredentialIssuanceService {
         byte[] requestFingerprint = sha256(
                 REQUEST_METHOD + "\u0000" + requestPath);
 
+        RobotCredentialTarget robot = findRobotForUpdate(
+                robotId,
+                actorUserId
+        );
+        if (robot == null) {
+            throw new BusinessException(ErrorCode.ROBOT_NOT_FOUND);
+        }
+
         claimIdempotency(
                 principalKeyHash,
                 idempotencyKeyHash,
                 requestFingerprint,
                 requestPath);
 
-        RobotCredentialTarget robot = findRobotForUpdate(robotId);
-        if (robot == null) {
-            throw new BusinessException(ErrorCode.ROBOT_NOT_FOUND);
-        }
         if ("DISABLED".equals(robot.operationalStatus())) {
             throw new BusinessException(
                     ErrorCode.COMMON_BUSINESS_RULE_VIOLATION,
@@ -100,42 +126,30 @@ public class MqttCredentialIssuanceService {
                 """,
                 robotId);
 
-        jdbcTemplate.update("""
-                INSERT INTO audit.audit_log (
-                    request_id,
-                    actor_user_id,
-                    actor_type,
-                    action_type,
-                    target_type,
-                    target_id,
-                    after_value,
-                    result
-                ) VALUES (
-                    ?,
-                    ?,
-                    'USER',
-                    'ROBOT_CREDENTIAL_ISSUED',
-                    'ROBOT_CREDENTIAL',
-                    ?,
-                    jsonb_build_object(
-                        'robotId', ?::text,
-                        'mqttId', ?,
-                        'credentialType', ?,
-                        'credentialVersion', ?,
-                        'credentialStatus', 'ACTIVE',
-                        'expiresAt', ?::timestamptz
-                    ),
-                    'SUCCESS'
-                )
-                """,
-                requestId,
+        auditLogService.appendRequired(new AuditLogRecord(
+                AuditRequestContext.requestIdOnly(requestId),
                 actorUserId,
+                AuditActorType.USER,
+                AuditAction.ROBOT_CREDENTIAL_ISSUED.databaseValue(),
+                AuditTargetType.ROBOT_CREDENTIAL,
                 credentialId,
-                robotId,
-                robot.mqttId(),
-                CREDENTIAL_TYPE,
-                credentialVersion,
-                Timestamp.from(times.expiresAt()));
+                null,
+                AuditSnapshot.allow(
+                        AUDIT_AFTER_FIELDS,
+                        java.util.Map.of(
+                                "robotId", robotId,
+                                "mqttId", robot.mqttId(),
+                                "credentialId", credentialId,
+                                "credentialType", CREDENTIAL_TYPE,
+                                "credentialVersion", credentialVersion,
+                                "credentialStatus", "ACTIVE",
+                                "expiresAt", times.expiresAt(),
+                                "fingerprint", fingerprint
+                        )
+                ),
+                null,
+                AuditResult.SUCCESS
+        ));
 
         storeSafeIdempotentResponse(
                 principalKeyHash,
@@ -232,18 +246,60 @@ public class MqttCredentialIssuanceService {
                 "동일한 인증정보 발급 요청이 처리 중입니다.");
     }
 
-    private RobotCredentialTarget findRobotForUpdate(UUID robotId) {
+    private RobotCredentialTarget findRobotForUpdate(
+            UUID robotId,
+            UUID actorUserId
+    ) {
         return jdbcTemplate.query("""
-                        SELECT mqtt_id, operational_status
-                        FROM robot.robot
-                        WHERE robot_id = ?
-                        FOR UPDATE
+                        WITH actor_scope AS (
+                            SELECT EXISTS (
+                                SELECT 1
+                                FROM auth.admin_user admin_user
+                                JOIN auth.user_role user_role
+                                  ON user_role.user_id = admin_user.user_id
+                                JOIN auth.role role
+                                  ON role.role_id = user_role.role_id
+                                WHERE admin_user.user_id = ?
+                                  AND admin_user.account_status = 'ACTIVE'
+                                  AND admin_user.is_active = TRUE
+                                  AND admin_user.deleted_at IS NULL
+                                  AND user_role.is_active = TRUE
+                                  AND role.role_code = 'ADMIN'
+                                  AND role.is_system = TRUE
+                                  AND role.is_active = TRUE
+                            ) AS is_system_admin
+                        )
+                        SELECT robot.mqtt_id, robot.operational_status
+                        FROM robot.robot robot
+                        CROSS JOIN actor_scope
+                        LEFT JOIN auth.user_robot_assignment assignment
+                          ON assignment.robot_id = robot.robot_id
+                         AND assignment.user_id = ?
+                         AND assignment.assignment_type IN (
+                             'OPERATOR',
+                             'OWNER'
+                         )
+                         AND assignment.is_active = TRUE
+                         AND (
+                             assignment.expires_at IS NULL
+                             OR assignment.expires_at
+                                > statement_timestamp()
+                         )
+                        WHERE robot.robot_id = ?
+                          AND (
+                              actor_scope.is_system_admin
+                              OR assignment.user_robot_assignment_id
+                                 IS NOT NULL
+                          )
+                        FOR UPDATE OF robot
                         """,
                 resultSet -> resultSet.next()
                         ? new RobotCredentialTarget(
                                 resultSet.getString("mqtt_id"),
                                 resultSet.getString("operational_status"))
                         : null,
+                actorUserId,
+                actorUserId,
                 robotId);
     }
 

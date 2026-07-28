@@ -6,6 +6,14 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.gilbom.audit.AuditAction;
+import com.gilbom.audit.AuditActorType;
+import com.gilbom.audit.AuditLogRecord;
+import com.gilbom.audit.AuditLogService;
+import com.gilbom.audit.AuditRequestContext;
+import com.gilbom.audit.AuditResult;
+import com.gilbom.audit.AuditSnapshot;
+import com.gilbom.audit.AuditTargetType;
 import com.gilbom.auth.account.EmailAddressPolicy;
 import com.gilbom.auth.password.PasswordHashingService;
 import com.gilbom.common.error.BusinessException;
@@ -15,19 +23,28 @@ import com.gilbom.common.error.ErrorCode;
 public class PublicRegistrationService {
 
     private static final int USER_CODE_INSERT_ATTEMPTS = 3;
+    private static final java.util.Set<String> AUDIT_AFTER_FIELDS =
+            java.util.Set.of(
+                    "accountStatus",
+                    "accountOrigin",
+                    "roleAssigned"
+            );
 
     private final PublicRegistrationRepository repository;
     private final PublicRegistrationIdGenerator idGenerator;
     private final PasswordHashingService passwordHashingService;
+    private final AuditLogService auditLogService;
 
     public PublicRegistrationService(
             PublicRegistrationRepository repository,
             PublicRegistrationIdGenerator idGenerator,
-            PasswordHashingService passwordHashingService
+            PasswordHashingService passwordHashingService,
+            AuditLogService auditLogService
     ) {
         this.repository = repository;
         this.idGenerator = idGenerator;
         this.passwordHashingService = passwordHashingService;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional(readOnly = true)
@@ -40,7 +57,8 @@ public class PublicRegistrationService {
 
     @Transactional
     public PublicRegistrationResponse register(
-            PublicRegistrationRequest request
+            PublicRegistrationRequest request,
+            AuditRequestContext auditContext
     ) {
         String normalizedEmail = EmailAddressPolicy.normalize(request.email());
         if (repository.existsByNormalizedEmail(normalizedEmail)) {
@@ -58,7 +76,26 @@ public class PublicRegistrationService {
                     request.email()
             );
             if (insertedUserId.isPresent()) {
-                repository.appendRegistrationAudit(insertedUserId.orElseThrow());
+                UUID userId = insertedUserId.orElseThrow();
+                auditLogService.appendRequired(new AuditLogRecord(
+                        auditContext,
+                        null,
+                        AuditActorType.USER,
+                        AuditAction.PUBLIC_REGISTRATION_CREATED.databaseValue(),
+                        AuditTargetType.USER,
+                        userId,
+                        null,
+                        AuditSnapshot.allow(
+                                AUDIT_AFTER_FIELDS,
+                                java.util.Map.of(
+                                        "accountStatus", "PENDING_APPROVAL",
+                                        "accountOrigin", "PUBLIC_REGISTRATION",
+                                        "roleAssigned", false
+                                )
+                        ),
+                        null,
+                        AuditResult.SUCCESS
+                ));
                 return PublicRegistrationResponse.pendingApproval();
             }
 

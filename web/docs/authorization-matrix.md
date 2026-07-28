@@ -1,7 +1,7 @@
 # 역할·권한·API 접근 매트릭스
 
 - 문서 상태: 확정
-- 구현 상태: V13 RBAC 저장 구조·DB 보호, V14 변경 세션 폐기, 로그인 유효 권한 계산 완료. 관리자 API·객체 범위 query 적용 예정
+- 구현 상태: V13 RBAC 저장 구조·DB 보호, V14 변경 세션 폐기, 로그인 유효 권한 계산, 로봇 객체 범위, 공통 감사 기록과 감사 조회 API 완료. 관리자 API·다른 도메인 객체 범위 적용 예정
 - DB 기준: `auth.role`, `auth.permission`, `auth.role_permission`, `auth.user_permission_override`, `auth.user_robot_assignment`
 
 ## 1. 인가 원칙
@@ -98,6 +98,15 @@ DB trigger도 같은 lock과 판정 함수를 사용해 직접 DML을 방어한�
 - 보고서가 특정 로봇·임무의 근거 파일이나 이미지에 접근하게 하면 해당 원본 리소스 범위를 다시 검사한다.
 - 범용 파일 URL 발급은 파일의 원본 리소스 권한과 객체 범위를 상속한다.
 
+현재 로봇 구현은 목록의 count와 page 조회, 지도, 요약 집계, 단건 조회 모두
+`auth.user_robot_assignment`를 SQL `EXISTS` 조건으로 적용한다. 전체 행을 읽은
+후 Java에서 제거하지 않는다. 시스템 `ADMIN`의 전체 범위도 SQL에서 판정하지만
+컨트롤러의 기능 permission 검사를 생략하지 않는다.
+
+로봇 대상 상태 변경은 대상 행을 조회하는 SQL에서 `OPERATOR` 또는 `OWNER` 배정과
+만료 시각을 함께 검사한다. 미존재와 범위 밖, 부족한 배정 등급은 모두
+`ROBOT_NOT_FOUND`로 처리하여 객체 존재 여부를 숨긴다.
+
 ## 5. 공개·인증 상태 API
 
 `CSRF` 열의 O는 `X-CSRF-TOKEN` 필수라는 뜻이다.
@@ -174,7 +183,7 @@ DB trigger도 같은 lock과 판정 함수를 사용해 직접 DML을 방어한�
 | GET | `/api/v1/robots/{robotId}/boot-sessions` | `ROBOT_STATUS_VIEW` | `VIEWER+` |  |  |
 | GET | `/api/v1/boot-sessions/{bootId}` | `ROBOT_STATUS_VIEW` | 연결 로봇 `VIEWER+` |  |  |
 | GET | `/api/v1/robots/{robotId}/credentials` | `ROBOT_REGISTER` | 전역·secret 미반환 |  | O |
-| POST | `/api/v1/robots/{robotId}/credentials` | `ROBOT_REGISTER` | 전역 | O | O |
+| POST | `/api/v1/robots/{robotId}/credentials` | `ROBOT_REGISTER` | `OPERATOR+`, ADMIN 전체 범위 | O | O |
 | POST | `/api/v1/robots/{robotId}/credentials/{credentialId}/revoke` | `ROBOT_REGISTER` | 전역 | O | O |
 | GET | `/api/v1/robot-events` | `ROBOT_STATUS_VIEW` | 배정 로봇 이벤트 |  |  |
 | PATCH | `/api/v1/robot-events/{eventId}/acknowledge` | `ROBOT_EVENT_ACKNOWLEDGE` | `OPERATOR+` | O | O |
@@ -275,3 +284,8 @@ SSE 연결 시 한 번만 검사하지 않고, 세션 만료·폐기 시 연결�
 - 목록·요약·SSE에 다른 사용자의 객체가 섞이지 않는지 테스트한다.
 - 모든 상태 변경 API의 CSRF 누락·불일치 테스트를 작성한다.
 - 새 API가 이 문서에 등록되지 않으면 CI 권한 계약 테스트가 실패하게 한다.
+
+공개 health·CSRF와 로그인·가입·MFA 상태 전이 API는 명시적 공개 예외다. 그 외
+현재 구현된 컨트롤러 메서드는 클래스 또는 메서드의 `@PreAuthorize` 선언을 계약
+테스트로 검사한다. 로컬 MQTT 명령 발행 API도 `ROBOT_COMMAND_EXECUTE`와 대상
+로봇의 `OPERATOR+` 범위를 모두 요구한다.

@@ -125,36 +125,6 @@ public class InitialAdminBootstrapRepository {
         }
     }
 
-    public void appendCreationAudit(UUID userId) {
-        int affected = jdbcTemplate.update(
-                """
-                INSERT INTO audit.audit_log (
-                    actor_type,
-                    action_type,
-                    target_type,
-                    target_id,
-                    after_value,
-                    result
-                ) VALUES (
-                    'SYSTEM',
-                    'AUTH_INITIAL_ADMIN_CREATED',
-                    'USER',
-                    ?,
-                    jsonb_build_object(
-                        'accountStatus', 'ACTIVE',
-                        'accountOrigin', 'BOOTSTRAP',
-                        'passwordChangeRequired', TRUE
-                    ),
-                    'SUCCESS'
-                )
-                """,
-                userId
-        );
-        if (affected != 1) {
-            throw new IllegalStateException("Initial administrator audit was not persisted");
-        }
-    }
-
     public boolean isBootstrapOrigin(ExistingAccount account) {
         return BOOTSTRAP_ORIGIN.equals(account.accountOrigin());
     }

@@ -37,6 +37,9 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.gilbom.audit.AuditLogRepository;
+import com.gilbom.audit.AuditLogService;
+import com.gilbom.audit.BestEffortAuditLogWriter;
 import com.gilbom.auth.AuthenticatedUserIdResolver;
 import com.gilbom.auth.model.AuthenticationState;
 import com.gilbom.auth.password.PasswordHashingConfiguration;
@@ -253,6 +256,78 @@ class RobotRegistrationIntegrationTest {
         assertThat(passwordEncoder.matches(ADMIN_PASSWORD, storedAdminHash)).isTrue();
     }
 
+    @Test
+    void rollsBackTheEntireRegistrationWhenAuditInsertFails()
+            throws Exception {
+        UUID requestId =
+                UUID.fromString("d5727022-019d-4e16-b4db-4094e91bfca8");
+        UUID idempotencyKey =
+                UUID.fromString("76f8c7e4-2b9e-48ca-a366-e0175a1d9110");
+
+        jdbcTemplate.execute("""
+                CREATE OR REPLACE FUNCTION audit.reject_insert_for_test()
+                RETURNS TRIGGER
+                LANGUAGE plpgsql
+                AS $$
+                BEGIN
+                    RAISE EXCEPTION 'forced audit failure';
+                END;
+                $$
+                """);
+        jdbcTemplate.execute("""
+                CREATE TRIGGER tr_reject_audit_insert_for_test
+                BEFORE INSERT ON audit.audit_log
+                FOR EACH ROW
+                EXECUTE FUNCTION audit.reject_insert_for_test()
+                """);
+        try {
+            mockMvc.perform(post("/api/v1/robots")
+                            .with(user(ADMIN_USER_ID.toString())
+                                    .authorities(ROBOT_REGISTER))
+                            .with(csrf().asHeader())
+                            .header(RequestIdFilter.HEADER_NAME, requestId)
+                            .header("Idempotency-Key", idempotencyKey)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "robotName": "감사 실패 롤백 로봇",
+                                      "serialNumber": "SN-AUDIT-ROLLBACK"
+                                    }
+                                    """))
+                    .andExpect(status().isInternalServerError())
+                    .andExpect(jsonPath(
+                            "$.code",
+                            is("COMMON_INTERNAL_ERROR")
+                    ));
+        } finally {
+            jdbcTemplate.execute("""
+                    DROP TRIGGER IF EXISTS
+                    tr_reject_audit_insert_for_test
+                    ON audit.audit_log
+                    """);
+            jdbcTemplate.execute("""
+                    DROP FUNCTION IF EXISTS
+                    audit.reject_insert_for_test()
+                    """);
+        }
+
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM robot.robot
+                    WHERE serial_number = 'SN-AUDIT-ROLLBACK'
+                )
+                """, Boolean.class)).isFalse();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM request_control.idempotency_request
+                    WHERE request_path = '/api/v1/robots'
+                      AND processing_status = 'PROCESSING'
+                )
+                """, Boolean.class)).isFalse();
+    }
+
     private int count(String qualifiedTableName) {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM " + qualifiedTableName,
@@ -278,6 +353,9 @@ class RobotRegistrationIntegrationTest {
             RequestIdFilter.class,
             RequestBodySizeLimitFilter.class,
             GlobalExceptionHandler.class,
+            AuditLogRepository.class,
+            AuditLogService.class,
+            BestEffortAuditLogWriter.class,
             RobotRegistrationController.class,
             RobotRegistrationService.class,
             AuthenticatedUserIdResolver.class,

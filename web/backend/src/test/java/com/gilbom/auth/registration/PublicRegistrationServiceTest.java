@@ -13,6 +13,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
+import com.gilbom.audit.AuditLogService;
+import com.gilbom.audit.AuditRequestContext;
 import com.gilbom.auth.account.AccountStatus;
 import com.gilbom.auth.password.PasswordHashingService;
 import com.gilbom.common.error.BusinessException;
@@ -22,6 +24,12 @@ class PublicRegistrationServiceTest {
 
     private static final UUID USER_ID =
             UUID.fromString("11000000-0000-4000-8000-000000000001");
+    private static final AuditRequestContext AUDIT_CONTEXT =
+            AuditRequestContext.requestIdOnly(
+                    UUID.fromString(
+                            "11000000-0000-4000-8000-000000000002"
+                    )
+            );
 
     private final PublicRegistrationRepository repository =
             Mockito.mock(PublicRegistrationRepository.class);
@@ -29,11 +37,14 @@ class PublicRegistrationServiceTest {
             Mockito.mock(PublicRegistrationIdGenerator.class);
     private final PasswordHashingService passwordHashingService =
             Mockito.mock(PasswordHashingService.class);
+    private final AuditLogService auditLogService =
+            Mockito.mock(AuditLogService.class);
     private final PublicRegistrationService service =
             new PublicRegistrationService(
                     repository,
                     idGenerator,
-                    passwordHashingService
+                    passwordHashingService,
+                    auditLogService
             );
 
     @Test
@@ -67,13 +78,20 @@ class PublicRegistrationServiceTest {
                 "User@Example.COM"
         )).thenReturn(Optional.of(USER_ID));
 
-        PublicRegistrationResponse response = service.register(request);
+        PublicRegistrationResponse response =
+                service.register(request, AUDIT_CONTEXT);
 
         assertThat(response.accountStatus())
                 .isEqualTo(AccountStatus.PENDING_APPROVAL);
         assertThat(response.nextAction()).isEqualTo("LOGIN");
         verify(passwordHashingService).hashNewPassword("exact password");
-        verify(repository).appendRegistrationAudit(USER_ID);
+        verify(auditLogService).appendRequired(Mockito.argThat(record ->
+                record.targetId().equals(USER_ID)
+                        && record.requestContext().equals(AUDIT_CONTEXT)
+                        && record.afterValue().values()
+                        .get("accountStatus")
+                        .equals("PENDING_APPROVAL")
+        ));
     }
 
     @Test
@@ -82,14 +100,14 @@ class PublicRegistrationServiceTest {
         when(repository.existsByNormalizedEmail("user@example.com"))
                 .thenReturn(true);
 
-        assertThatThrownBy(() -> service.register(request))
+        assertThatThrownBy(() -> service.register(request, AUDIT_CONTEXT))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(
                         ((BusinessException) exception).errorCode()
                 ).isEqualTo(ErrorCode.AUTH_EMAIL_ALREADY_REGISTERED));
 
         verifyNoInteractions(passwordHashingService, idGenerator);
-        verify(repository, never()).appendRegistrationAudit(USER_ID);
+        verifyNoInteractions(auditLogService);
     }
 
     @Test
@@ -107,13 +125,13 @@ class PublicRegistrationServiceTest {
                 "User@Example.COM"
         )).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.register(request))
+        assertThatThrownBy(() -> service.register(request, AUDIT_CONTEXT))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(
                         ((BusinessException) exception).errorCode()
                 ).isEqualTo(ErrorCode.AUTH_EMAIL_ALREADY_REGISTERED));
 
-        verify(repository, never()).appendRegistrationAudit(USER_ID);
+        verifyNoInteractions(auditLogService);
     }
 
     private static PublicRegistrationRequest validRequest() {

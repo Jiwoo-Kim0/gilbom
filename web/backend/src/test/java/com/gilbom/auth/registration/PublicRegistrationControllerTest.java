@@ -22,6 +22,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
+import com.gilbom.audit.AuditRequestContext;
 import com.gilbom.common.web.GlobalExceptionHandler;
 import com.gilbom.common.web.RequestIdFilter;
 import com.gilbom.auth.session.SessionSecurityStateRepository;
@@ -84,7 +85,10 @@ class PublicRegistrationControllerTest {
 
     @Test
     void registersAsPendingAndDoesNotReturnAuthenticationData() throws Exception {
-        when(registrationService.register(any(PublicRegistrationRequest.class)))
+        when(registrationService.register(
+                any(PublicRegistrationRequest.class),
+                any(AuditRequestContext.class)
+        ))
                 .thenReturn(PublicRegistrationResponse.pendingApproval());
 
         mockMvc.perform(post("/api/v1/auth/registrations")
@@ -136,7 +140,10 @@ class PublicRegistrationControllerTest {
 
     @Test
     void duplicateEmailUsesStable409() throws Exception {
-        when(registrationService.register(any(PublicRegistrationRequest.class)))
+        when(registrationService.register(
+                any(PublicRegistrationRequest.class),
+                any(AuditRequestContext.class)
+        ))
                 .thenThrow(new BusinessException(
                         ErrorCode.AUTH_EMAIL_ALREADY_REGISTERED
                 ));

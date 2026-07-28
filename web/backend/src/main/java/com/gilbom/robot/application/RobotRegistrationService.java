@@ -12,6 +12,14 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.gilbom.audit.AuditAction;
+import com.gilbom.audit.AuditActorType;
+import com.gilbom.audit.AuditLogRecord;
+import com.gilbom.audit.AuditLogService;
+import com.gilbom.audit.AuditRequestContext;
+import com.gilbom.audit.AuditResult;
+import com.gilbom.audit.AuditSnapshot;
+import com.gilbom.audit.AuditTargetType;
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
 import com.gilbom.robot.data.application.command.RegisterRobotCommand;
@@ -24,11 +32,22 @@ public class RobotRegistrationService {
     private static final String REQUEST_PATH = "/api/v1/robots";
     private static final String OPERATIONAL_STATUS = "PROVISIONING";
     private static final String CONNECTIVITY_STATUS = "OFFLINE";
+    private static final java.util.Set<String> AUDIT_AFTER_FIELDS =
+            java.util.Set.of(
+                    "mqttId",
+                    "operationalStatus",
+                    "connectivityStatus"
+            );
 
     private final JdbcTemplate jdbcTemplate;
+    private final AuditLogService auditLogService;
 
-    public RobotRegistrationService(JdbcTemplate jdbcTemplate) {
+    public RobotRegistrationService(
+            JdbcTemplate jdbcTemplate,
+            AuditLogService auditLogService
+    ) {
         this.jdbcTemplate = jdbcTemplate;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional
@@ -118,37 +137,25 @@ public class RobotRegistrationService {
                 robotId,
                 CONNECTIVITY_STATUS);
 
-        jdbcTemplate.update("""
-                INSERT INTO audit.audit_log (
-                    request_id,
-                    actor_user_id,
-                    actor_type,
-                    action_type,
-                    target_type,
-                    target_id,
-                    after_value,
-                    result
-                ) VALUES (
-                    ?,
-                    ?,
-                    'USER',
-                    'ROBOT_REGISTERED',
-                    'ROBOT',
-                    ?,
-                    jsonb_build_object(
-                        'mqttId', ?,
-                        'operationalStatus', ?,
-                        'connectivityStatus', ?
-                    ),
-                    'SUCCESS'
-                )
-                """,
-                requestId,
+        auditLogService.appendRequired(new AuditLogRecord(
+                AuditRequestContext.requestIdOnly(requestId),
                 actorUserId,
+                AuditActorType.USER,
+                AuditAction.ROBOT_REGISTERED.databaseValue(),
+                AuditTargetType.ROBOT,
                 robotId,
-                mqttId,
-                OPERATIONAL_STATUS,
-                CONNECTIVITY_STATUS);
+                null,
+                AuditSnapshot.allow(
+                        AUDIT_AFTER_FIELDS,
+                        java.util.Map.of(
+                                "mqttId", mqttId,
+                                "operationalStatus", OPERATIONAL_STATUS,
+                                "connectivityStatus", CONNECTIVITY_STATUS
+                        )
+                ),
+                null,
+                AuditResult.SUCCESS
+        ));
 
         RegisteredRobot registeredRobot = new RegisteredRobot(
                 robotId,

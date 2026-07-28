@@ -1,5 +1,6 @@
 package com.gilbom.robot.application;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -7,26 +8,60 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.gilbom.common.error.BusinessException;
+import com.gilbom.common.error.ErrorCode;
+
 @Service
 public class RobotScopeService {
 
+    private static final String SYSTEM_ADMIN_SCOPE = """
+            EXISTS (
+                SELECT 1
+                FROM auth.admin_user admin_user
+                JOIN auth.user_role user_role
+                  ON user_role.user_id = admin_user.user_id
+                JOIN auth.role role
+                  ON role.role_id = user_role.role_id
+                WHERE admin_user.user_id = :userId
+                  AND admin_user.account_status = 'ACTIVE'
+                  AND admin_user.is_active = TRUE
+                  AND admin_user.deleted_at IS NULL
+                  AND user_role.is_active = TRUE
+                  AND role.role_code = 'ADMIN'
+                  AND role.is_system = TRUE
+                  AND role.is_active = TRUE
+            )
+            """;
+
     static final String VISIBLE_ROBOT_PREDICATE = """
             (
-                EXISTS (
-                    SELECT 1
-                    FROM auth.user_role user_role
-                    JOIN auth.role role
-                      ON role.role_id = user_role.role_id
-                    WHERE user_role.user_id = :userId
-                      AND user_role.is_active = TRUE
-                      AND role.role_code = 'ADMIN'
-                      AND role.is_active = TRUE
-                )
+            """ + SYSTEM_ADMIN_SCOPE + """
                 OR EXISTS (
                     SELECT 1
                     FROM auth.user_robot_assignment assignment
                     WHERE assignment.user_id = :userId
                       AND assignment.robot_id = r.robot_id
+                      AND assignment.is_active = TRUE
+                      AND (
+                          assignment.expires_at IS NULL
+                          OR assignment.expires_at > CURRENT_TIMESTAMP
+                      )
+                )
+            )
+            """;
+
+    static final String OPERABLE_ROBOT_PREDICATE = """
+            (
+            """ + SYSTEM_ADMIN_SCOPE + """
+                OR EXISTS (
+                    SELECT 1
+                    FROM auth.user_robot_assignment assignment
+                    WHERE assignment.user_id = :userId
+                      AND assignment.robot_id = r.robot_id
+                      AND assignment.assignment_type IN (
+                          'OPERATOR',
+                          'OWNER'
+                      )
                       AND assignment.is_active = TRUE
                       AND (
                           assignment.expires_at IS NULL
@@ -56,6 +91,60 @@ public class RobotScopeService {
                 Map.of(
                         "userId", userId,
                         "robotId", robotId),
+                Boolean.class);
+        return Boolean.TRUE.equals(allowed);
+    }
+
+    @Transactional(readOnly = true)
+    public boolean canOperate(UUID userId, UUID robotId) {
+        return hasRobotScope(
+                "r.robot_id = :robotId",
+                Map.of(
+                        "userId", userId,
+                        "robotId", robotId
+                ),
+                OPERABLE_ROBOT_PREDICATE
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public String requireOperableMqttId(
+            UUID userId,
+            String mqttId
+    ) {
+        List<String> visibleIds = jdbcTemplate.queryForList("""
+                SELECT r.mqtt_id
+                FROM robot.robot r
+                WHERE r.mqtt_id = :mqttId
+                  AND
+                """ + OPERABLE_ROBOT_PREDICATE,
+                Map.of(
+                        "userId", userId,
+                        "mqttId", mqttId
+                ),
+                String.class);
+        if (visibleIds.isEmpty()) {
+            throw new BusinessException(ErrorCode.ROBOT_NOT_FOUND);
+        }
+        return visibleIds.getFirst();
+    }
+
+    private boolean hasRobotScope(
+            String targetPredicate,
+            Map<String, ?> parameters,
+            String scopePredicate
+    ) {
+        Boolean allowed = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM robot.robot r
+                    WHERE
+                """ + targetPredicate + """
+                      AND
+                """ + scopePredicate + """
+                )
+                """,
+                parameters,
                 Boolean.class);
         return Boolean.TRUE.equals(allowed);
     }

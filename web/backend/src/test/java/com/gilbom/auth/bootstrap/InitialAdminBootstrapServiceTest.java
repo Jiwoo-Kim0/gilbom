@@ -13,6 +13,7 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 
+import com.gilbom.audit.AuditLogService;
 import com.gilbom.auth.bootstrap.InitialAdminBootstrapRepository.ExistingAccount;
 import com.gilbom.auth.password.PasswordHashingService;
 
@@ -25,8 +26,14 @@ class InitialAdminBootstrapServiceTest {
             mock(InitialAdminBootstrapRepository.class);
     private final PasswordHashingService passwordHashingService =
             mock(PasswordHashingService.class);
+    private final AuditLogService auditLogService =
+            mock(AuditLogService.class);
     private final InitialAdminBootstrapService service =
-            new InitialAdminBootstrapService(repository, passwordHashingService);
+            new InitialAdminBootstrapService(
+                    repository,
+                    passwordHashingService,
+                    auditLogService
+            );
 
     @Test
     void createsOneActiveAdminWithForcedPasswordChangeAndAudit() {
@@ -47,7 +54,14 @@ class InitialAdminBootstrapServiceTest {
 
         assertThat(result).isEqualTo(InitialAdminBootstrapResult.CREATED);
         verify(repository).assignAdminRole(USER_ID);
-        verify(repository).appendCreationAudit(USER_ID);
+        verify(auditLogService).appendRequired(
+                org.mockito.ArgumentMatchers.argThat(record ->
+                        record.targetId().equals(USER_ID)
+                                && record.afterValue().values()
+                                .get("accountOrigin")
+                                .equals("BOOTSTRAP")
+                )
+        );
     }
 
     @Test
@@ -63,7 +77,7 @@ class InitialAdminBootstrapServiceTest {
         assertThat(result).isEqualTo(InitialAdminBootstrapResult.ALREADY_PRESENT);
         verifyNoInteractions(passwordHashingService);
         verify(repository, never()).assignAdminRole(USER_ID);
-        verify(repository, never()).appendCreationAudit(USER_ID);
+        verifyNoInteractions(auditLogService);
     }
 
     @Test

@@ -1,7 +1,7 @@
 # 감사 로그·민감정보 처리 정책
 
 - 문서 상태: 확정
-- 구현 상태: Day 3 인증 감사 공통 서비스 완료, Day 4 RBAC·관리자·업무 연결 예정
+- 구현 상태: 공통 감사 저장·민감정보 필터·인증/인가/CSRF 감사·조회 API 완료. 향후 도메인 변경 API는 공통 서비스에 명시적으로 연결
 - DB 기준: `audit.audit_log`
 
 ## 1. 목적과 구분
@@ -107,6 +107,8 @@ action code는 `UPPER_SNAKE_CASE`로 고정하며 화면 문구로 재사용하�
 | `AUTH_LOGOUT` | 사용자 로그아웃 |
 | `AUTH_SESSION_REVOKED` | 비밀번호·권한·계정 변경 또는 관리자 조치로 세션 폐기 |
 | `AUTH_RATE_LIMITED` | 로그인 또는 MFA 시도 제한 적용 |
+| `AUTH_ACCESS_DENIED` | 인증된 요청이 기능 권한 검사에서 거부됨 |
+| `AUTH_CSRF_FAILED` | 상태 변경 요청이 CSRF 검증에서 거부됨 |
 
 실패 로그인에서 제출된 email, password, TOTP 값은 기록하지 않는다. 존재하는 사용자를 안전하게 식별할 수 있을 때만 대상 사용자 UUID를 `target_id`로 기록한다.
 
@@ -163,10 +165,23 @@ action code는 `UPPER_SNAKE_CASE`로 고정하며 화면 문구로 재사용하�
 - 비동기 작업의 `SUCCESS`는 “요청 접수·영속화 성공”을 뜻한다. MQTT 실행·파일 생성 같은 최종 결과는 별도 이벤트로 기록한다.
 - 감사 로그 자체는 애플리케이션 API로 수정하거나 삭제할 수 없다.
 
+구현에서는 모든 `audit.audit_log` INSERT를 공통 `AuditLogRepository`로 모은다.
+중요 변경 서비스는 부모 트랜잭션이 없으면 실행되지 않는 `appendRequired`를
+명시적으로 호출한다. 조회·접근 거부·CSRF 실패는 이미 완료된 조회나 거부 결과를
+되돌릴 수 없으므로 독립 트랜잭션의 `appendBestEffort`를 사용한다.
+
+`before_value`와 `after_value`는 호출 지점별 필드 allowlist를 통과한 값만 받는다.
+공통 snapshot 필터는 중첩 객체와 배열을 재귀 검사하며 비밀번호, Token, 세션 ID,
+Secret, CSRF, TOTP, 복구 코드, private key와 presigned URL을 `[REDACTED]`로
+치환한다. 자유 입력 사유 안의 `key=value`, `Bearer ...` 형태에도 같은 치환을
+적용한다.
+
 ## 7. 조회·보존
 
 - 감사 로그 조회에는 `AUDIT_LOG_VIEW`가 필요하다.
 - 감사 로그 조회 자체도 `AUDIT_LOG_VIEWED`로 기록하되 검색어 원문과 전체 결과를 저장하지 않는다.
+- 조회 필터는 request ID, actor ID, action, target, result, 발생 기간만 허용하며
+  `AUDIT_LOG_VIEWED`에는 필터 이름·페이지·반환 건수만 기록한다.
 - 기본 온라인 보존 기간은 365일로 한다.
 - 보존 기간 변경과 법적 보존 요구는 운영 정책 변경으로 별도 승인한다.
 - 백업에도 동일 접근 제어와 암호화를 적용한다.

@@ -1,5 +1,6 @@
 package com.gilbom.auth.registration;
 
+import com.gilbom.audit.AuditRequestContext;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -10,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
 
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -42,10 +44,14 @@ public class PublicRegistrationController {
             produces = MediaType.APPLICATION_JSON_VALUE
     )
     public ResponseEntity<PublicRegistrationResponse> register(
-            @Valid @RequestBody PublicRegistrationRequest request
+            @Valid @RequestBody PublicRegistrationRequest request,
+            HttpServletRequest servletRequest
     ) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .cacheControl(CacheControl.noStore())
-                .body(registrationService.register(request));
+                .body(registrationService.register(
+                        request,
+                        AuditRequestContext.from(servletRequest)
+                ));
     }
 }

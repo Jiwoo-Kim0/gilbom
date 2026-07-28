@@ -1,6 +1,7 @@
 package com.gilbom.robot.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.is;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
@@ -44,10 +45,15 @@ import org.testcontainers.utility.DockerImageName;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gilbom.auth.AuthenticatedUserIdResolver;
+import com.gilbom.audit.AuditLogRepository;
+import com.gilbom.audit.AuditLogService;
+import com.gilbom.audit.BestEffortAuditLogWriter;
 import com.gilbom.auth.model.AuthenticationState;
 import com.gilbom.auth.password.PasswordHashingConfiguration;
 import com.gilbom.auth.session.SessionSecurityState;
 import com.gilbom.auth.session.SessionSecurityStateRepository;
+import com.gilbom.common.error.BusinessException;
+import com.gilbom.common.error.ErrorCode;
 import com.gilbom.common.web.GlobalExceptionHandler;
 import com.gilbom.common.web.RequestBodySizeLimitFilter;
 import com.gilbom.common.web.RequestIdFilter;
@@ -77,6 +83,8 @@ class MqttCredentialIssuanceIntegrationTest {
                     .asCompatibleSubstituteFor("postgres");
     private static final UUID ADMIN_USER_ID =
             UUID.fromString("f854f421-f550-40c3-bbe7-6369a17bc994");
+    private static final UUID VIEWER_USER_ID =
+            UUID.fromString("f854f421-f550-40c3-bbe7-6369a17bc995");
     private static final UUID ROBOT_ID =
             UUID.fromString("f59c163e-f080-40ee-81ca-94b9d8f235bf");
     private static final String ROBOT_CODE = "RBT-777";
@@ -118,6 +126,9 @@ class MqttCredentialIssuanceIntegrationTest {
     @Autowired
     private RecordingMqttCredentialProvisioner provisioner;
 
+    @Autowired
+    private MqttCredentialIssuanceService issuanceService;
+
     @MockitoBean
     private SessionSecurityStateRepository sessionSecurityStateRepository;
 
@@ -128,6 +139,9 @@ class MqttCredentialIssuanceIntegrationTest {
                 "DELETE FROM request_control.idempotency_request");
         jdbcTemplate.update(
                 "DELETE FROM robot.robot_credential WHERE robot_id = ?",
+                ROBOT_ID);
+        jdbcTemplate.update(
+                "DELETE FROM auth.user_robot_assignment WHERE robot_id = ?",
                 ROBOT_ID);
         jdbcTemplate.update(
                 "DELETE FROM robot.robot WHERE robot_id = ?",
@@ -164,6 +178,23 @@ class MqttCredentialIssuanceIntegrationTest {
                 "mqtt-credential-integration@example.test");
 
         jdbcTemplate.update("""
+                INSERT INTO auth.user_role (
+                    user_id,
+                    role_id,
+                    is_primary,
+                    is_active,
+                    assigned_by
+                )
+                SELECT ?, role_id, TRUE, TRUE, ?
+                FROM auth.role
+                WHERE role_code = 'ADMIN'
+                  AND is_system = TRUE
+                ON CONFLICT (user_id, role_id) DO NOTHING
+                """,
+                ADMIN_USER_ID,
+                ADMIN_USER_ID);
+
+        jdbcTemplate.update("""
                 INSERT INTO robot.robot (
                     robot_id,
                     mqtt_id,
@@ -179,6 +210,79 @@ class MqttCredentialIssuanceIntegrationTest {
                 "자격증명 발급 테스트 로봇",
                 "SN-CREDENTIAL-777",
                 ADMIN_USER_ID);
+    }
+
+    @Test
+    void hidesRobotFromViewerDuringCredentialStateChange() throws Exception {
+        jdbcTemplate.update("""
+                INSERT INTO auth.admin_user (
+                    user_id,
+                    user_code,
+                    password_hash,
+                    display_name,
+                    email,
+                    is_active,
+                    account_status,
+                    password_change_required,
+                    password_changed_at
+                ) VALUES (?, ?, ?, ?, ?, TRUE, 'ACTIVE', FALSE, NOW())
+                ON CONFLICT (user_id) DO NOTHING
+                """,
+                VIEWER_USER_ID,
+                "USR-CREDENTIAL-VIEWER",
+                passwordEncoder.encode("integration-only-viewer-password"),
+                "MQTT 자격증명 테스트 조회자",
+                "mqtt-credential-viewer@example.test");
+        jdbcTemplate.update("""
+                INSERT INTO auth.user_robot_assignment (
+                    user_id,
+                    robot_id,
+                    assignment_type,
+                    reason,
+                    assigned_by
+                ) VALUES (?, ?, 'VIEWER', ?, ?)
+                """,
+                VIEWER_USER_ID,
+                ROBOT_ID,
+                "credential scope integration test",
+                ADMIN_USER_ID);
+
+        assertThatThrownBy(() -> issuanceService.issue(
+                ROBOT_ID,
+                VIEWER_USER_ID,
+                UUID.fromString("d62f8054-d9e0-4bf9-9753-146755bd324e"),
+                UUID.fromString("c2c4c594-7c21-48e8-a48b-e7fe177bbb18")
+        )).isInstanceOfSatisfying(
+                BusinessException.class,
+                exception -> assertThat(exception.errorCode())
+                        .isEqualTo(ErrorCode.ROBOT_NOT_FOUND)
+        );
+
+        when(sessionSecurityStateRepository.findBySessionId(anyString()))
+                .thenReturn(java.util.Optional.of(new SessionSecurityState(
+                        VIEWER_USER_ID,
+                        AuthenticationState.AUTHENTICATED,
+                        java.time.Instant.parse("2099-01-01T00:00:00Z"),
+                        null,
+                        null,
+                        0
+                )));
+        mockMvc.perform(post(
+                        "/api/v1/robots/{robotId}/credentials",
+                        ROBOT_ID)
+                        .with(user(VIEWER_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER))
+                        .with(csrf().asHeader())
+                        .header(
+                                RequestIdFilter.HEADER_NAME,
+                                "e8123461-bb59-49aa-a5c5-d4bf0d00ee24")
+                        .header(
+                                "Idempotency-Key",
+                                "0dfaa1de-f98d-4f4d-b69a-46f793ca87bc"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code", is("ROBOT_NOT_FOUND")));
+
+        assertThat(provisioner.provisionCount).hasValue(0);
     }
 
     @Test
@@ -352,6 +456,9 @@ class MqttCredentialIssuanceIntegrationTest {
             RequestIdFilter.class,
             RequestBodySizeLimitFilter.class,
             GlobalExceptionHandler.class,
+            AuditLogRepository.class,
+            AuditLogService.class,
+            BestEffortAuditLogWriter.class,
             MqttCredentialIssuanceController.class,
             MqttCredentialIssuanceService.class,
             MqttCredentialSecretGenerator.class,

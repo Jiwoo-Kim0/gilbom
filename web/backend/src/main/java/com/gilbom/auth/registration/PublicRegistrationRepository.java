@@ -70,34 +70,4 @@ public class PublicRegistrationRepository {
         return insertedIds.stream().findFirst();
     }
 
-    public void appendRegistrationAudit(UUID userId) {
-        int affected = jdbcTemplate.update(
-                """
-                INSERT INTO audit.audit_log (
-                    actor_type,
-                    action_type,
-                    target_type,
-                    target_id,
-                    after_value,
-                    result
-                ) VALUES (
-                    'USER',
-                    'AUTH_PUBLIC_REGISTRATION_CREATED',
-                    'USER',
-                    ?,
-                    jsonb_build_object(
-                        'accountStatus', 'PENDING_APPROVAL',
-                        'accountOrigin', 'PUBLIC_REGISTRATION',
-                        'roleAssigned', FALSE
-                    ),
-                    'SUCCESS'
-                )
-                """,
-                userId
-        );
-        if (affected != 1) {
-            throw new IllegalStateException(
-                    "Public registration audit was not persisted");
-        }
-    }
 }
