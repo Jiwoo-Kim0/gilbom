@@ -63,7 +63,7 @@ public class MqttMessageParser {
         MqttV2Payload payload = deserialize(topic.type(), inboundMessage.payload());
         validateSchemaVersion(payload);
         validatePayload(payload);
-        validateRobotId(topic, payload);
+        validateMqttId(topic, payload);
 
         return new ParsedMqttMessage(
                 topic,
@@ -126,10 +126,10 @@ public class MqttMessageParser {
         }
     }
 
-    private void validateRobotId(ParsedMqttTopic topic, MqttV2Payload payload) {
+    private void validateMqttId(ParsedMqttTopic topic, MqttV2Payload payload) {
         if (payload instanceof RobotIdentifiedPayload identified
-                && !topic.robotId().equals(identified.robotId())) {
-            throw new BusinessException(ErrorCode.MQTT_ROBOT_ID_MISMATCH);
+                && !topic.mqttId().equals(identified.mqttId())) {
+            throw new BusinessException(ErrorCode.MQTT_ID_MISMATCH);
         }
     }
 

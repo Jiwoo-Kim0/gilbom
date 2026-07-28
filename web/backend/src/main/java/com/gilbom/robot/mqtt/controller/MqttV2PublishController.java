@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @Profile("local")
 @RestController
-@RequestMapping("/api/mqtt/v2/robots/{robotId}")
+@RequestMapping("/api/mqtt/v2/robots/{mqttId}")
 public class MqttV2PublishController {
 
     private final MqttV2Publisher mqttPublisher;
@@ -39,30 +39,33 @@ public class MqttV2PublishController {
     @PostMapping("/commands/request")
     @PreAuthorize("hasAuthority('ROBOT_COMMAND_EXECUTE')")
     public ResponseEntity<MqttPublishResponse> publishCommand(
-            @PathVariable String robotId,
+            @PathVariable String mqttId,
             @Valid @RequestBody CommandRequestPayload payload,
             Authentication authentication
     ) {
-        String mqttId = scopeService.requireOperableMqttId(
+        String authorizedMqttId = scopeService.requireOperableMqttId(
                 userIdResolver.require(authentication),
-                robotId
+                mqttId
         );
-        return accepted(mqttPublisher.publishCommand(mqttId, payload));
+        return accepted(mqttPublisher.publishCommand(authorizedMqttId, payload));
     }
     
     /*For 중복 탐사 방지*/
     @PostMapping("/ingest/receipt")
     @PreAuthorize("hasAuthority('ROBOT_COMMAND_EXECUTE')")
     public ResponseEntity<MqttPublishResponse> publishIngestReceipt(
-            @PathVariable String robotId,
+            @PathVariable String mqttId,
             @Valid @RequestBody IngestReceiptPayload payload,
             Authentication authentication
     ) {
-        String mqttId = scopeService.requireOperableMqttId(
+        String authorizedMqttId = scopeService.requireOperableMqttId(
                 userIdResolver.require(authentication),
-                robotId
+                mqttId
         );
-        return accepted(mqttPublisher.publishIngestReceipt(mqttId, payload));
+        return accepted(mqttPublisher.publishIngestReceipt(
+                authorizedMqttId,
+                payload
+        ));
     }
 
     

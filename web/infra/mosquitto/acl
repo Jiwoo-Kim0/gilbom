@@ -1,4 +1,4 @@
-# MQTT username must be identical to robot_id so %u limits a robot to itself.
+# MQTT username must be identical to mqtt_id so %u limits a robot to itself.
 pattern write tbs/v2/robots/%u/presence
 pattern write tbs/v2/robots/%u/state
 pattern write tbs/v2/robots/%u/telemetry

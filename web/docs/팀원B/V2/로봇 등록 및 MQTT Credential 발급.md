@@ -67,8 +67,8 @@ firmware_version
 | 값 | 생성·결정 방식 |
 |---|---|
 | `robot_id` | 서버 UUID |
-| `robot_code` | DB Sequence를 사용해 `RBT-001`과 같은 공개 코드를 서버가 생성 |
-| `mqtt_username` | 별도 DB 컬럼 없이 `robot_code` 사용 |
+| `mqtt_id` | DB Sequence를 사용해 `RBT-001`과 같은 MQTT 외부 식별자를 서버가 생성 |
+| `mqtt_username` | 별도 DB 컬럼 없이 `mqtt_id` 사용 |
 | `registered_by` | 로그인한 관리자 `user_id` |
 | `registered_at` | 서버 현재시각 |
 | `operational_status` | 최초 `PROVISIONING` |
@@ -116,7 +116,7 @@ sequenceDiagram
     Admin->>UI: 이름·Serial Number 입력 후 등록
     UI->>API: POST /api/v1/robots
     API->>DB: robot(PROVISIONING) + current_state(OFFLINE) + 감사 로그
-    API-->>UI: robotId, robotCode
+    API-->>UI: robotId, mqttId
 
     UI->>API: POST /api/v1/robots/{robotId}/credentials
     API->>Provisioner: MQTT Credential 생성 요청
@@ -161,12 +161,12 @@ Backend 처리:
 1. 로그인, `ROBOT_REGISTER` 권한, CSRF, 요청 멱등성을 확인한다.
 2. 이름과 Serial Number를 검증한다.
 3. 중복 Serial Number 등록을 차단한다.
-4. `robot_id`, `robot_code`를 생성한다.
+4. 내부 UUID `robot_id`와 외부 식별자 `mqtt_id`를 생성한다.
 5. `robot.robot`을 `PROVISIONING`으로 생성한다.
 6. `robot_current_state`를 `OFFLINE`으로 생성한다.
 7. 같은 DB 트랜잭션에 `ROBOT_REGISTERED` 감사 로그를 저장한다.
 
-`robot_code`는 `robot.robot_code_sequence`의 값을 최소 3자리 숫자로 표시하여
+`mqtt_id`는 `robot.mqtt_id_sequence`의 값을 최소 3자리 숫자로 표시하여
 `RBT-{sequence}` 형식으로 만든다. 예: `1 → RBT-001`, `27 → RBT-027`,
 `1000 → RBT-1000`. Sequence와 DB UNIQUE 제약으로 동시 등록 충돌을 막는다.
 
@@ -175,7 +175,7 @@ Response 예:
 ```json
 {
   "robotId": "8750afcb-d682-4ef6-a90d-f63fcf5c214e",
-  "robotCode": "RBT-001",
+  "mqttId": "RBT-001",
   "robotName": "점자블록 순찰 로봇 1호",
   "serialNumber": "SN-JETSON-0001",
   "operationalStatus": "PROVISIONING",
@@ -311,7 +311,7 @@ MQTT_CA_CERT=/secure/path/ca.pem
 
 ## 8. Topic ACL
 
-username은 `robot_code`와 같아야 한다. 로봇 `RBT-001`은 자기 Topic에만 접근한다.
+username은 `mqtt_id`와 같아야 한다. 로봇 `RBT-001`은 자기 Topic에만 접근한다.
 
 허용:
 
@@ -396,7 +396,7 @@ Credential만 발급되고 Presence가 없으면 `연결 대기`로 표시한다
 
 ## 12. 구현 체크리스트
 
-- [x] `robot_code` 서버 생성 규칙과 동시성 제어
+- [x] `mqtt_id` 서버 생성 규칙과 동시성 제어
 - [x] 등록 화면 입력값을 이름·Serial Number로 제한
 - [x] `registered_by`를 인증 세션에서 자동 설정
 - [x] 로봇·현재 상태·감사 로그의 동일 트랜잭션 저장

@@ -45,10 +45,10 @@ abstract class AbstractLoggingMqttTopicMessageHandler<T extends MqttV2Payload>
 
         T payload = payloadType.cast(message.payload());
         log.info(
-                "MQTT message routed to handler. type={}, robotId={}, qos={}, "
+                "MQTT message routed to handler. type={}, mqttId={}, qos={}, "
                         + "receivedAt={}, payloadType={}",
                 topicType,
-                message.topic().robotId(),
+                message.topic().mqttId(),
                 message.qos(),
                 message.receivedAt(),
                 payloadType.getSimpleName()

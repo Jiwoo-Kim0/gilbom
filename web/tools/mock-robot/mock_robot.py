@@ -42,8 +42,8 @@ def format_instant(value: datetime | None = None) -> str:
     return instant.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def topic(robot_id: str, relative_path: str) -> str:
-    return f"tbs/v2/robots/{robot_id}/{relative_path}"
+def topic(mqtt_id: str, relative_path: str) -> str:
+    return f"tbs/v2/robots/{mqtt_id}/{relative_path}"
 
 
 def parse_instant(value: Any) -> datetime | None:
@@ -67,7 +67,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--port", type=int, default=8883)
-    parser.add_argument("--robot-id", default="robot-test")
+    parser.add_argument(
+        "--mqtt-id",
+        "--robot-id",
+        dest="mqtt_id",
+        default="robot-test",
+        help="MQTT external identity; --robot-id is kept as a compatibility alias.",
+    )
     parser.add_argument("--ca-certificate", type=Path, default=DEFAULT_CA_CERTIFICATE)
     parser.add_argument("--telemetry-interval", type=float, default=5.0)
     parser.add_argument("--latitude", type=float, default=37.5013)
@@ -84,7 +90,7 @@ def parse_args() -> argparse.Namespace:
         "--spring-url",
         default=(
             "http://localhost:8080/api/mqtt/v2/robots/"
-            "{robot_id}/commands/request"
+            "{mqtt_id}/commands/request"
         ),
     )
     parser.add_argument(
@@ -109,7 +115,7 @@ def parse_args() -> argparse.Namespace:
 
 def request_test_command(
     spring_url: str,
-    robot_id: str,
+    mqtt_id: str,
     command_type: str,
 ) -> None:
     issued_at = utc_now()
@@ -134,8 +140,8 @@ def request_test_command(
         },
         "parameters": parameters,
     }
-    encoded_robot_id = urllib.parse.quote(robot_id, safe="")
-    url = spring_url.format(robot_id=encoded_robot_id)
+    encoded_mqtt_id = urllib.parse.quote(mqtt_id, safe="")
+    url = spring_url.format(mqtt_id=encoded_mqtt_id)
     request = urllib.request.Request(
         url,
         data=json.dumps(command_payload, separators=(",", ":")).encode("utf-8"),
@@ -156,7 +162,7 @@ class MockRobot:
 
     def __init__(self, args: argparse.Namespace, password: str) -> None:
         self.args = args
-        self.robot_id = args.robot_id
+        self.mqtt_id = args.mqtt_id
         self.boot_id = str(uuid.uuid4())
         self.sequence = 0
         self.sequence_lock = threading.Lock()
@@ -173,19 +179,19 @@ class MockRobot:
         self.mission_state: str | None = None
         self.mission_started_at: datetime | None = None
 
-        self.presence_topic = topic(self.robot_id, "presence")
-        self.state_topic = topic(self.robot_id, "state")
-        self.telemetry_topic = topic(self.robot_id, "telemetry")
-        self.command_request_topic = topic(self.robot_id, "commands/request")
-        self.command_result_topic = topic(self.robot_id, "commands/result")
-        self.ingest_receipt_topic = topic(self.robot_id, "ingest/receipt")
+        self.presence_topic = topic(self.mqtt_id, "presence")
+        self.state_topic = topic(self.mqtt_id, "state")
+        self.telemetry_topic = topic(self.mqtt_id, "telemetry")
+        self.command_request_topic = topic(self.mqtt_id, "commands/request")
+        self.command_result_topic = topic(self.mqtt_id, "commands/result")
+        self.ingest_receipt_topic = topic(self.mqtt_id, "ingest/receipt")
 
         self.client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-            client_id=f"{self.robot_id}-mock-{uuid.uuid4().hex[:8]}",
+            client_id=f"{self.mqtt_id}-mock-{uuid.uuid4().hex[:8]}",
             protocol=mqtt.MQTTv5,
         )
-        self.client.username_pw_set(self.robot_id, password)
+        self.client.username_pw_set(self.mqtt_id, password)
         self.client.tls_set_context(
             ssl.create_default_context(
                 cafile=str(args.ca_certificate.expanduser().resolve())
@@ -234,7 +240,7 @@ class MockRobot:
     def online_presence(self) -> dict[str, Any]:
         return {
             "schema_version": SCHEMA_VERSION,
-            "robot_id": self.robot_id,
+            "mqtt_id": self.mqtt_id,
             "boot_id": self.boot_id,
             "status": "ONLINE",
             "connected_at": format_instant(),
@@ -243,7 +249,7 @@ class MockRobot:
     def offline_presence(self, reason: str) -> dict[str, Any]:
         return {
             "schema_version": SCHEMA_VERSION,
-            "robot_id": self.robot_id,
+            "mqtt_id": self.mqtt_id,
             "boot_id": self.boot_id,
             "status": "OFFLINE",
             "reason": reason,
@@ -266,7 +272,7 @@ class MockRobot:
                 }
             return {
                 "schema_version": SCHEMA_VERSION,
-                "robot_id": self.robot_id,
+                "mqtt_id": self.mqtt_id,
                 "boot_id": self.boot_id,
                 "seq": self.next_sequence(),
                 "updated_at": format_instant(),
@@ -314,7 +320,7 @@ class MockRobot:
             return {
                 "schema_version": SCHEMA_VERSION,
                 "message_id": str(uuid.uuid4()),
-                "robot_id": self.robot_id,
+                "mqtt_id": self.mqtt_id,
                 "boot_id": self.boot_id,
                 "seq": self.next_sequence(),
                 "sampled_at": format_instant(),
@@ -359,7 +365,7 @@ class MockRobot:
             "schema_version": SCHEMA_VERSION,
             "result_id": str(uuid.uuid4()),
             "command_id": command_id,
-            "robot_id": self.robot_id,
+            "mqtt_id": self.mqtt_id,
             "status": status,
             "received_at": format_instant(received_at),
             "reason_code": reason_code,
@@ -404,7 +410,7 @@ class MockRobot:
         if self.telemetry_thread is None or not self.telemetry_thread.is_alive():
             self.telemetry_thread = threading.Thread(
                 target=self.telemetry_loop,
-                name=f"{self.robot_id}-telemetry",
+                name=f"{self.mqtt_id}-telemetry",
                 daemon=True,
             )
             self.telemetry_thread.start()
@@ -448,7 +454,7 @@ class MockRobot:
             target=request_test_command,
             args=(
                 self.args.spring_url,
-                self.robot_id,
+                self.mqtt_id,
                 self.args.command_type,
             ),
             daemon=True,
@@ -687,7 +693,7 @@ def main() -> int:
         return 2
 
     password = os.getenv("MQTT_PASSWORD") or getpass.getpass(
-        f"MQTT password for {args.robot_id}: "
+        f"MQTT password for {args.mqtt_id}: "
     )
     if not password:
         print("MQTT password must not be empty.", file=sys.stderr)

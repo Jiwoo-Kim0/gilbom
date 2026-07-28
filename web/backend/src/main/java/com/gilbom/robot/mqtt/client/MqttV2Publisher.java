@@ -34,17 +34,17 @@ public class MqttV2Publisher {
     }
     /*ForCustom*/
     public PublishResult publishCommand(
-            String robotId,
+            String mqttId,
             CommandRequestPayload payload
     ) {
-        return publish(MqttTopicType.COMMAND_REQUEST, robotId, payload);
+        return publish(MqttTopicType.COMMAND_REQUEST, mqttId, payload);
     }
 
     public PublishResult publishIngestReceipt(
-            String robotId,
+            String mqttId,
             IngestReceiptPayload payload
     ) {
-        return publish(MqttTopicType.INGEST_RECEIPT, robotId, payload);
+        return publish(MqttTopicType.INGEST_RECEIPT, mqttId, payload);
     }
 
     
@@ -57,12 +57,12 @@ public class MqttV2Publisher {
     /*For Common*/
     private PublishResult publish(
             MqttTopicType topicType,
-            String robotId,
+            String mqttId,
             MqttV2Payload payload
     ) {
         Objects.requireNonNull(payload, "payload must not be null");
 
-        String topic = topicParser.format(topicType, robotId);//토픽 제조
+        String topic = topicParser.format(topicType, mqttId);//토픽 제조
         String serializedPayload = serialize(payload); //직렬화(json으로)
         boolean accepted = mqttPublisher.publish(
                 topic,

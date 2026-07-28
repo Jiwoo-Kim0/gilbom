@@ -86,7 +86,7 @@ class MqttMessageParserTest {
                   "schema_version": "2.0",
                   "event_id": "3cf98dc0-424a-4ef0-9423-57e53fcd72fc",
                   "event_type": "BRAILLE_BLOCK_INCIDENT_DETECTED",
-                  "robot_id": "RBT-001",
+                  "mqtt_id": "RBT-001",
                   "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
                   "seq": 1482,
                   "source_component": "ai",
@@ -133,14 +133,14 @@ class MqttMessageParserTest {
     }
 
     @Test
-    void rejectsRobotIdAndQosMismatchesWithBusinessErrorCodes() {
+    void rejectsMqttIdAndQosMismatchesWithBusinessErrorCodes() {
         assertErrorCode(
                 () -> parser.parse(message(
                         "tbs/v2/robots/RBT-001/telemetry",
                         0,
                         validTelemetry("RBT-999")
                 )),
-                ErrorCode.MQTT_ROBOT_ID_MISMATCH
+                ErrorCode.MQTT_ID_MISMATCH
         );
         assertErrorCode(
                 () -> parser.parse(message(
@@ -197,6 +197,21 @@ class MqttMessageParserTest {
         );
     }
 
+    @Test
+    void rejectsLegacyRobotIdPayloadMember() {
+        String payload = validTelemetry("RBT-001")
+                .replace("\"mqtt_id\"", "\"robot_id\"");
+
+        assertErrorCode(
+                () -> parser.parse(message(
+                        "tbs/v2/robots/RBT-001/telemetry",
+                        0,
+                        payload
+                )),
+                ErrorCode.MQTT_PAYLOAD_MALFORMED
+        );
+    }
+
     private static MqttMessageParser createParser() {
         ObjectMapper objectMapper = new ObjectMapper()
                 .registerModule(new JavaTimeModule());
@@ -218,8 +233,8 @@ class MqttMessageParserTest {
         return new MqttInboundMessage(topic, payload, qos, RECEIVED_AT);
     }
 
-    private static String validTelemetry(String robotId) {
-        return telemetryPayload(robotId, "2.0", """
+    private static String validTelemetry(String mqttId) {
+        return telemetryPayload(mqttId, "2.0", """
                 "valid": true,
                 "lat": 37.4979,
                 "lon": 127.0276,
@@ -228,7 +243,7 @@ class MqttMessageParserTest {
     }
 
     private static String telemetryPayload(
-            String robotId,
+            String mqttId,
             String schemaVersion,
             String position
     ) {
@@ -236,7 +251,7 @@ class MqttMessageParserTest {
                 {
                   "schema_version": "%s",
                   "message_id": "fb9c4472-226d-4473-b684-f0d8282292bd",
-                  "robot_id": "%s",
+                  "mqtt_id": "%s",
                   "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
                   "seq": 4312,
                   "sampled_at": "2026-07-26T05:15:35Z",
@@ -263,7 +278,7 @@ class MqttMessageParserTest {
                     "incident_count": 2
                   }
                 }
-                """.formatted(schemaVersion, robotId, position);
+                """.formatted(schemaVersion, mqttId, position);
     }
 
     private static void assertErrorCode(

@@ -21,7 +21,7 @@ import java.util.UUID;
 
 public record StatePayload(
         @NotBlank @Pattern(regexp = "2\\.0") String schemaVersion,
-        @NotBlank String robotId,
+        @NotBlank String mqttId,
         @NotNull UUID bootId,
         @NotNull @PositiveOrZero Long seq,
         @NotNull Instant updatedAt,

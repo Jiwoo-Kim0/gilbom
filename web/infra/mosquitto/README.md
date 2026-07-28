@@ -101,7 +101,7 @@ docker compose logs --tail 100 mqtt-init mosquitto
 ```text
 MQTT_HOST=<Broker PC의 LAN IPv4>
 MQTT_PORT=8883
-MQTT_USERNAME=<robot_id와 동일>
+MQTT_USERNAME=<mqtt_id와 동일>
 MQTT_PASSWORD=<해당 로봇의 비밀번호>
 MQTT_CA_CERT=local-ca-cert.pem의 로봇 PC 내 경로
 ```
@@ -188,7 +188,7 @@ docker compose up --build --detach --force-recreate mqtt-init mosquitto
 ```text
 MQTT_HOST=0.tcp.ap.ngrok.io
 MQTT_PORT=12345
-MQTT_USERNAME=<robot_id와 동일>
+MQTT_USERNAME=<mqtt_id와 동일>
 MQTT_PASSWORD=<해당 로봇의 비밀번호>
 MQTT_CA_CERT=<전달받은 local-ca-cert.pem 경로>
 ```

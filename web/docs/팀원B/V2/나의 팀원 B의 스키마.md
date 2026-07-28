@@ -4,7 +4,7 @@
 > 작성 기준일: 2026-07-27  
 > 담당: 팀원 B — 로봇 통신·임무·실시간 관제  
 > 대상 DB: PostgreSQL 16 + PostGIS 3.5  
-> MQTT 계약: `tbs/v2/robots/{robot_id}/...`, `schema_version = "2.0"`  
+> MQTT 계약: `tbs/v2/robots/{mqtt_id}/...`, `schema_version = "2.0"`
 > Flyway 구현: `V11__create_robot_credential_and_telemetry_schema.sql`
 
 등록·Credential 발급 절차는
@@ -38,7 +38,7 @@ migration으로 추가하며, 한 번 적용된 V11은 수정하지 않는다.
 - 운영 상태
 - 등록 관리자와 등록 시각
 
-`robot_code`는 `robot.robot_code_sequence`를 사용하여
+`mqtt_id`는 `robot.mqtt_id_sequence`를 사용하여
 `RBT-{최소 3자리 숫자}` 형식으로 서버가 생성한다. 예: `RBT-001`, `RBT-1000`.
 `hardware_model`과 `firmware_version`은 저장하지 않는다.
 
@@ -146,13 +146,13 @@ V11에는 위 네 테이블만 포함한다. `robot_boot_session`이 아직 없�
 ## 4. 공통 컬럼 설계 원칙
 
 - 내부 PK·FK는 `UUID`를 사용한다.
-- Wire의 `robot_id`는 `robot.robot.robot_code`이고 내부 UUID와 구분한다.
+- Wire의 `mqtt_id`는 `robot.robot.mqtt_id`이고 내부 UUID `robot_id`와 구분한다.
 - Wire의 `mission_id`는 `robot.mission.mission_code`이고 내부 UUID와 구분한다.
 - 모든 시각은 `TIMESTAMPTZ`로 저장하고 서버와 DB timezone은 UTC를 사용한다.
 - 로봇 시각과 서버 수신 시각은 분리한다.
 - Clock skew가 있으므로 로봇 시각과 서버 시각의 대소관계를 DB CHECK로 강제하지 않는다.
 - Secret, MQTT 비밀번호, API Key, private key, 세션 값은 업무 테이블과 `raw_payload`에 저장하지 않는다.
-- MQTT username은 `robot_code`와 같으므로 중복 컬럼으로 저장하지 않는다.
+- MQTT username은 `mqtt_id`와 같으므로 중복 컬럼으로 저장하지 않는다.
 - 현재 Backend가 publisher Client ID를 받지 않으므로 `mqtt_client_id`를 저장하지 않는다.
 - 상태값은 `VARCHAR`와 CHECK 제약조건으로 제한한다.
 - 이력 테이블은 원칙적으로 append-only다.
@@ -167,7 +167,7 @@ V11에는 위 네 테이블만 포함한다. `robot_boot_session`이 아직 없�
 | 컬럼 | 타입 | 필수 | 출처 | 제약·용도 |
 |---|---|---|---|---|
 | `robot_id` | `UUID` | O | 서버 생성 | PK, 내부 FK 전용 |
-| `robot_code` | `VARCHAR(128)` | O | 서버 생성 | UNIQUE, Topic·Payload의 `robot_id` |
+| `mqtt_id` | `VARCHAR(128)` | O | 서버 생성 | UNIQUE, MQTT username·Topic·Payload의 외부 식별자 |
 | `robot_name` | `VARCHAR(100)` | O | 관리자 입력 | 화면 표시명, 공백 문자열 금지 |
 | `serial_number` | `VARCHAR(100)` | O | 관리자 입력 | UNIQUE, 물리 로봇 식별 |
 | `operational_status` | `VARCHAR(20)` | O | 관리자·서버 | `PROVISIONING`, `ACTIVE`, `INACTIVE`, `MAINTENANCE`, `DISABLED` |
@@ -191,7 +191,7 @@ mqtt_password
 ### 5.2 `robot.robot_credential`
 
 MQTT 비밀번호 원문이 아니라 Credential의 식별자, Mosquitto 호환 Password Hash,
-발급·활성·폐기 상태만 저장한다. `mqtt_username`은 `robot.robot_code`에서 가져온다.
+발급·활성·폐기 상태만 저장한다. `mqtt_username`은 `robot.robot.mqtt_id`에서 가져온다.
 
 | 컬럼 | 타입 | 필수 | 출처 | 제약·용도 |
 |---|---|---|---|---|
@@ -576,7 +576,7 @@ erDiagram
 
 | 대상 | 인덱스·제약조건 | 목적 |
 |---|---|---|
-| `robot.robot` | UNIQUE `robot_code` | MQTT 로봇 식별 |
+| `robot.robot` | UNIQUE `mqtt_id` | MQTT 로봇 식별 |
 | `robot.robot` | UNIQUE `serial_number` | 물리 로봇 중복 등록 방지 |
 | `robot_credential` | UNIQUE `(robot_id, credential_type, credential_version)` | 회전 이력 식별 |
 | `robot_credential` | 로봇별 ACTIVE Credential Partial UNIQUE | 활성 비밀번호 중복 방지 |
@@ -679,7 +679,7 @@ DB 등록 성공만으로 MQTT Credential 발급 성공 응답을 반환하면 �
 - 관리자는 로봇의 읽기 제한된 환경변수 또는 설정 Secret에 주입한다.
 - 소스코드, Git, Docker Image, 일반 YAML, 메신저에 저장하거나 전달하지 않는다.
 - MQTT 연결은 TLS `8883`만 사용한다.
-- username은 `robot_code`와 같으며 ACL `%u`로 자기 로봇 Topic만 허용한다.
+- username은 `mqtt_id`와 같으며 ACL `%u`로 자기 로봇 Topic만 허용한다.
 - 로봇의 비밀번호를 Backend 서비스 계정과 공유하지 않는다.
 
 ### 10.5 회전·만료·폐기
@@ -714,7 +714,7 @@ DB 등록 성공만으로 MQTT Credential 발급 성공 응답을 반환하면 �
 
 | 구분 | 처리 |
 |---|---|
-| 메시지 식별정보 | `message_id`, `robot_id`, `boot_id`, `seq`, 측정·수신 시각은 필수 |
+| 메시지 식별정보 | `message_id`, `mqtt_id`, `boot_id`, `seq`, 측정·수신 시각은 필수 |
 | 센서 장착 여부가 확실한 값 | Payload 계약 확정 후 타입·단위·범위 CHECK와 함께 컬럼화 |
 | 일시적으로 읽지 못한 센서 | 임의의 `0` 대신 `valid=false` 또는 `NULL` |
 | 아직 계약하지 않은 센서 | CPU·GPU·모터 온도, GPS 정확도 등은 컬럼을 미리 만들지 않음 |
@@ -750,7 +750,7 @@ V11은 Robot·Credential·Current State·Telemetry 이력 네 테이블로 범�
 migration을 시작하기 전에 검수한다.
 
 - [x] 로봇 등록 화면 입력값을 `robot_name`, `serial_number`로 확정
-- [x] `robot_code` 서버 생성 규칙과 동시 등록 충돌 방지 방식 확정
+- [x] `mqtt_id` 서버 생성 규칙과 동시 등록 충돌 방지 방식 확정
 - [x] `registered_by`는 로그인 사용자를 Backend가 자동 설정
 - [ ] 로봇 비활성화 상태와 재활성화 정책 확정
 - [ ] 원형 구역의 최소·최대 `radius_m` 확정
