@@ -43,7 +43,10 @@
 | V16 | 가입 거절 상태 | 공개 가입 요청의 `REJECTED` 상태 전이와 관리자 처리 계약 지원 |
 | V17 | MQTT Sequence 시작값 | State·Telemetry Sequence를 모든 계층에서 `1` 이상으로 강제 |
 | V18 | Robot Boot Session·Status History | Presence·State·Telemetry의 Boot 수명주기, append-only 상태 이력, 현재 Boot FK와 Replay 보호 기반 추가 |
+| V19 | 결함-로봇 연결·내보내기 job | `defect_observation.robot_id`로 결함을 로봇까지 추적해 `user_robot_assignment` 객체 범위와 `robotId` 필터를 SQL에서 적용하고, `POST /api/v1/defects/export`의 202 접수를 기록. 상세는 [defect-schema.md](defect-schema.md) 참고 |
+| V20 | 런타임 세션 폐기 함수 실행 권한 | `PUBLIC`의 실행 권한은 계속 차단하고 `${applicationRole}`에 `auth.revoke_user_authorization_sessions(UUID)` 함수 하나의 `EXECUTE`만 부여해 관리자 MFA 초기화의 대상 세션 폐기를 허용 |
 | V21 | Robot Command·Result 생명주기 | 명령 생성·MQTT 발행·ACK·완료·실패·거절·만료 상태와 append-only Result 저장 기반 추가 |
+| V22 | 순찰·Mission·Event·Robot Image 정본 | Patrol Area/Route, 문자열 Mission 코드와 UUID PK 매핑, Telemetry Mission FK, 공통 Robot Event 멱등성, Mission 상태 이력, private JPEG 메타데이터와 통계 인덱스 추가 |
 
 
 시스템 Role `ADMIN`, `MANAGER`, `OPERATOR`와 18개 세부 permission 및
@@ -61,9 +64,8 @@ docker compose logs backend
 ```
 
 
-현재 브랜치만 기준으로 Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에
-V1~V18과 V21이 `success=true`로 기록된다. 병합 후 V19·V20 Migration이 추가되면
-V1~V21이 순서대로 기록된다.
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V22가
+순서대로 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증
 

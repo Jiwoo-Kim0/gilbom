@@ -7,6 +7,7 @@ const pageTitles: Record<string, string> = {
   '/defects': '점자 보도블록 결함 관리',
   '/reports': '리포트',
   '/admin/approvals': '가입 요청 승인',
+  '/admin/users': '사용자 역할 관리',
   '/admin/roles': '역할·권한 관리',
   '/admin/mfa-reset': 'MFA 관리자 초기화',
   '/audit-logs': '감사 로그',

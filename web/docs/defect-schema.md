@@ -3,7 +3,7 @@
 ## 1. 범위와 원칙
 
 이 문서는 `docs/길봄_DB.pdf`(길봄 DB Specification v1.0) 7장에 정의된 `defect` 스키마 중
-V11 migration(`V11__create_defect_schema.sql`)으로 실제 반영한 부분을 설명한다. PDF는
+V12 migration(`V12__create_defect_schema.sql`)으로 실제 반영한 부분을 설명한다. PDF는
 41개 테이블·9개 스키마 전체를 다루지만, 이 문서와 migration은 그중 **defect 스키마 4개
 테이블만** 다룬다.
 
@@ -43,7 +43,8 @@ V11 migration(`V11__create_defect_schema.sql`)으로 실제 반영한 부분을 
 
 | 컬럼 | 규칙 |
 |---|---|
-| `event_id` | PK. `telemetry.robot_event.event_id`를 참조할 예정이지만 telemetry 스키마가 없어 FK는 없다 |
+| `event_id` | PK. `telemetry.robot_event.event_id`를 참조할 예정이지만 그 테이블이 없어 FK는 없다 |
+| `robot_id` | 관측을 발행한 로봇. `robot.robot` FK, `ON DELETE RESTRICT`. V19에서 추가했다 |
 | `defect_id` | 병합 대상 결함. `defect.defect` FK, `ON DELETE RESTRICT` |
 | `confidence` | AI 신뢰도, 0~1 |
 | `damage_ratio` | 파손 면적 비율, 0~1 (nullable) |
@@ -85,6 +86,27 @@ UUID로 존재하며, 해당 스키마가 생기면 후속 migration에서 FK만
 | `defect.defect_observation.event_id` | `telemetry.robot_event.event_id` | MQTT 사건 원본 |
 | `defect.defect_observation.image_id` | `storage.robot_image.image_id` | 근거 이미지 |
 
+`robot_id`는 V19에서 FK까지 연결했다. `telemetry.robot_event`가 생기면 `event_id`로도
+로봇을 역추적할 수 있어 `robot_id`는 파생 중복 칼럼이 되지만, 범위 판정 질의가 매번
+telemetry를 조인하지 않도록 관측에 그대로 유지한다.
+
+## 3.1 결함 객체 범위
+
+`authorization-matrix.md` 11장은 결함 API의 객체 범위를 "배정 로봇에서 파생된 결함"으로
+정의한다. 결함은 로봇을 직접 가리키지 않으므로 범위는 관측을 통해 판정한다. 즉
+`defect_observation.robot_id`가 `auth.user_robot_assignment` 범위 안에 있는 관측이 그
+결함에 하나라도 있어야 조회·수정할 수 있다.
+
+병합된 결함의 관측은 원본 결함에 그대로 남는다(`defect_observation`에는 `UPDATE` 권한이
+없다). 따라서 대표 결함의 범위·관측 목록·집계는 `merged_into_defect_id` 연결을 따라가며
+자신에게 병합된 결함의 관측까지 포함한다.
+
+## 3.2 `defect.defect_export_job` (V19)
+
+`POST /api/v1/defects/export`는 202로 "비동기 작업 접수"를 응답한다. 접수 사실이
+남지 않으면 202를 반환할 근거가 없으므로 요청자·형식·필터 snapshot을 저장한다.
+`job_status`는 `QUEUED`로만 기록되며, 실제 파일 생성 worker는 아직 없다.
+
 ## 4. 권한
 
 - `defect.defect`: `SELECT, INSERT, UPDATE` — 관리자가 `workflow_status`, `resolution` 등을
@@ -94,10 +116,12 @@ UUID로 존재하며, 해당 스키마가 생기면 후속 migration에서 FK만
   `DELETE`를 이미 DB에서 차단하므로 권한도 동일하게 좁힌다.
 - `defect.defect_merge_history`: `SELECT, INSERT, UPDATE` — 병합 취소 시 `reverted_*`
   컬럼을 같은 행에 채워야 하므로 `UPDATE`가 필요하다.
+- `defect.defect_export_job`: `SELECT, INSERT, UPDATE` — worker가 `job_status`와 결과
+  컬럼을 갱신해야 하므로 `UPDATE`가 필요하다.
 
 ## 5. 마이그레이션
 
-`V11__create_defect_schema.sql`은 V1~V10을 수정하지 않고 다음을 새로 만든다.
+`V12__create_defect_schema.sql`은 앞선 migration을 수정하지 않고 다음을 새로 만든다.
 
 - `defect` 스키마와 4개 테이블(`defect`, `defect_observation`, `defect_status_history`,
   `defect_merge_history`)
@@ -105,5 +129,15 @@ UUID로 존재하며, 해당 스키마가 생기면 후속 migration에서 FK만
 - `auth.admin_user`로 가는 FK(`changed_by`, `merged_by`, `reverted_by`)만 연결하고, 아직
   없는 스키마로 가는 FK는 3절과 같이 보류
 - 스키마·테이블 단위 최소 권한 GRANT
+
+`V19__link_defect_to_robot_and_add_export_job.sql`은 결함 REST API를 붙이면서 다음을
+추가한다.
+
+- `defect_observation.robot_id`(`NOT NULL`)와 `robot.robot` FK, 범위 판정용 index
+- `defect.defect_export_job` 테이블과 최소 권한 GRANT
+
+`robot_id`를 `NOT NULL`로 넣을 수 있는 이유는 이 시점에 `defect_observation`에 쓰는
+코드가 없어 테이블이 비어 있기 때문이다. MQTT `events/incident` 수집 경로를 구현할 때
+`robot_id`를 함께 저장해야 한다.
 
 defect 관련 항목은 `database-migrations.md`의 migration 표에도 반영돼 있다.

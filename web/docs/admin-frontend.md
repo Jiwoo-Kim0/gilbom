@@ -8,6 +8,7 @@
 | 화면 | 경로 | required permission |
 |---|---|---|
 | 가입 요청 승인 | `/admin/approvals` | `ADMIN_SETTINGS_MANAGE` |
+| 사용자 역할 관리 | `/admin/users` | `ADMIN_SETTINGS_MANAGE` |
 | 역할·권한 관리 | `/admin/roles` | `ADMIN_SETTINGS_MANAGE` |
 | MFA 관리자 초기화 | `/admin/mfa-reset` | `ADMIN_SETTINGS_MANAGE` |
 | 감사 로그 | `/audit-logs` | `AUDIT_LOG_VIEW` |
@@ -19,6 +20,9 @@
 ## 화면별 변경 경계
 
 - 가입 승인은 활성 역할과 사유를 함께 전송한다. 거절도 사유를 필수로 받는다.
+- 사용자 역할 관리는 승인 후 `ACTIVE`인 다른 사용자를 대상으로 활성 역할 전체,
+  주 역할과 사유를 전송한다. 성공하면 대상의 기존 세션이 폐기되며 마지막 활성
+  ADMIN 보호는 서버 트랜잭션과 DB trigger가 최종 강제한다.
 - 역할 정보 변경과 role-permission 변경은 서로 다른 서버 트랜잭션·감사 이벤트이므로
   화면에서도 별도 저장 동작으로 분리한다.
 - `ADMIN_SETTINGS_MANAGE`는 사용자 정의 역할에 선택할 수 없게 표시하고 서버가 최종
