@@ -81,6 +81,23 @@ export function getAdminRoles(): Promise<AdminRole[]> {
   return apiJson(`${ADMIN_BASE_PATH}/roles`)
 }
 
+export function replaceAdminUserRoles(
+  userId: string,
+  input: {
+    roleIds: string[]
+    primaryRoleId: string | null
+    reason: string
+  },
+): Promise<AdminUser> {
+  return apiJson(
+    `${ADMIN_BASE_PATH}/users/${encodeURIComponent(userId)}/roles`,
+    {
+      method: 'PUT',
+      body: jsonBody(input),
+    },
+  )
+}
+
 export function getAdminPermissions(): Promise<AdminPermission[]> {
   return apiJson(`${ADMIN_BASE_PATH}/permissions`)
 }

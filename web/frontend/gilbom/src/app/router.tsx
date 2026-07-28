@@ -14,6 +14,7 @@ import {
 import { AdminWorkspaceLayout } from '../features/admin/AdminWorkspaceLayout'
 import { AdminApprovalsPage } from '../features/admin/AdminApprovalsPage'
 import { AdminMfaResetPage } from '../features/admin/AdminMfaResetPage'
+import { AdminUserRolesPage } from '../features/admin/AdminUserRolesPage'
 import { AuditLogPage } from '../features/audit/AuditLogPage'
 import { InitialPasswordChangePage } from '../features/auth/InitialPasswordChangePage'
 import { LoginPage } from '../features/auth/LoginPage'
@@ -99,6 +100,7 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <Navigate replace to="/admin/approvals" /> },
           { path: 'approvals', element: <AdminApprovalsPage /> },
+          { path: 'users', element: <AdminUserRolesPage /> },
           { path: 'roles', element: <RoleManagePage /> },
           { path: 'mfa-reset', element: <AdminMfaResetPage /> },
         ],
