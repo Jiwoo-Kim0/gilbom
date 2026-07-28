@@ -38,6 +38,9 @@ public enum ErrorCode {
     AUTH_ROLE_NOT_FOUND(HttpStatus.NOT_FOUND, "역할을 찾을 수 없습니다."),
     AUTH_PERMISSION_NOT_FOUND(HttpStatus.NOT_FOUND, "권한을 찾을 수 없습니다."),
     ROBOT_NOT_FOUND(HttpStatus.NOT_FOUND, "로봇을 찾을 수 없습니다."),
+    PATROL_AREA_NOT_FOUND(HttpStatus.NOT_FOUND, "순찰 구역을 찾을 수 없습니다."),
+    PATROL_ROUTE_NOT_FOUND(HttpStatus.NOT_FOUND, "순찰 경로를 찾을 수 없습니다."),
+    MISSION_NOT_FOUND(HttpStatus.NOT_FOUND, "임무를 찾을 수 없습니다."),
     DEFECT_NOT_FOUND(HttpStatus.NOT_FOUND, "결함을 찾을 수 없습니다."),
     COMMAND_NOT_FOUND(HttpStatus.NOT_FOUND, "명령을 찾을 수 없습니다."),
     REPORT_NOT_FOUND(HttpStatus.NOT_FOUND, "보고서를 찾을 수 없습니다."),
@@ -60,6 +63,8 @@ public enum ErrorCode {
     AUTH_EMAIL_ALREADY_REGISTERED(HttpStatus.CONFLICT, "이미 사용 중인 이메일입니다."),
 
     COMMAND_STATE_CONFLICT(HttpStatus.CONFLICT, "현재 명령 상태에서는 요청을 수행할 수 없습니다."),
+    MISSION_STATE_CONFLICT(HttpStatus.CONFLICT, "현재 임무 상태에서는 요청을 수행할 수 없습니다."),
+    MQTT_EVENT_CONFLICT(HttpStatus.CONFLICT, "MQTT Event 식별자 또는 순번이 기존 데이터와 충돌합니다."),
     REPORT_STATE_CONFLICT(HttpStatus.CONFLICT, "현재 보고서 상태에서는 요청을 수행할 수 없습니다."),
     DEFECT_STATE_CONFLICT(HttpStatus.CONFLICT, "현재 결함 상태에서는 요청을 수행할 수 없습니다."),
     DEFECT_MERGE_NOT_ALLOWED(HttpStatus.CONFLICT, "요청한 결함은 병합할 수 없습니다."),
