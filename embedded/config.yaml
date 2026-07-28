@@ -24,6 +24,9 @@ mqtt:
   keepalive: 30                 # LTE NAT 매핑이 끊기기 전에 PINGREQ 를 보낸다
   ca_cert: null                 # 브로커 CA 인증서 경로. 운영은 필수 —
                                 # null 이면 TLS 없이 접속한다(로컬 mosquitto 검증 전용).
+  require_tls: false            # true 로 두면 ca_cert 가 비었을 때 기동 시 바로 죽는다.
+                                # 실기·운영 배포에서는 true + ca_cert 경로를 같이 채운다 —
+                                # 안 그러면 평문으로 붙으려다 무한 재접속만 반복한다.
   outbox_path: var/outbox.sqlite3   # 미전송 event 저장소 (커밋 금지)
 
 upload:

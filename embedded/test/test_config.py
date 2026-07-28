@@ -158,6 +158,52 @@ def test_client_id_can_differ_from_the_username(tmp_path):
     assert config.username == "robot-test"  # ACL 은 그대로 지킨다
 
 
+def test_require_tls_rejects_an_empty_ca_cert(tmp_path):
+    """환경변수 하나가 빠져 조용히 평문으로 뜨는 것을 기동 시점에 막는다."""
+    path = write(
+        tmp_path,
+        """
+        robot:
+          id: RBT-001
+        mqtt:
+          host: broker.example.com
+          require_tls: true
+        """,
+    )
+    with pytest.raises(ConfigError, match="ca_cert"):
+        MqttConfig.load(path)
+
+
+def test_require_tls_passes_with_a_ca_cert(tmp_path):
+    path = write(
+        tmp_path,
+        """
+        robot:
+          id: RBT-001
+        mqtt:
+          host: broker.example.com
+          require_tls: true
+          ca_cert: /etc/gilbom/ca.crt
+        """,
+    )
+    config = MqttConfig.load(path)
+    assert config.require_tls is True
+    assert config.tls_enabled is True
+
+
+def test_require_tls_is_off_by_default(tmp_path):
+    path = write(
+        tmp_path,
+        """
+        robot:
+          id: RBT-001
+        mqtt:
+          host: broker.example.com
+        """,
+    )
+    assert MqttConfig.load(path).require_tls is False
+
+
 def test_tls_is_enabled_only_with_ca_cert(tmp_path):
     assert MqttConfig(robot_id="R", host="h", ca_cert="ca.crt").tls_enabled
     assert not MqttConfig(robot_id="R", host="h").tls_enabled

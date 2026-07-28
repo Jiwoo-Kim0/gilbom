@@ -67,6 +67,10 @@ class MqttConfig:
     #: 두 번 붙으면 브로커가 먼저 붙은 쪽을 끊는다("session taken over").
     #: username 은 ACL 때문에 robot_id 와 같아야 하지만 client_id 는 상관없다.
     client_id: str = None
+    #: True 면 ca_cert 없이 기동하지 못한다. 환경변수 하나가 빠졌을 때 조용히 평문으로
+    #: 뜨는 것을 막는다 — 평문은 브로커가 거부하므로 무한 재접속으로만 보인다.
+    #: 운영·실기 배포는 항상 True. 로컬 mosquitto 검증에서만 끈다.
+    require_tls: bool = False
 
     @property
     def tls_enabled(self) -> bool:
@@ -96,6 +100,13 @@ class MqttConfig:
             raise ConfigError(f"unknown mqtt option: {sorted(unknown)}")
         if "host" not in section or not section["host"]:
             raise ConfigError("mqtt.host is required")
+        if bool(section.get("require_tls")) and not section.get("ca_cert"):
+            # 여기서 죽이지 않으면 평문으로 접속을 시도하다 무한 재접속만 반복한다.
+            # 원인이 로그 맨 앞의 경고 한 줄뿐이라 실기에서 찾기 어렵다.
+            raise ConfigError(
+                "mqtt.require_tls is on but mqtt.ca_cert is empty;"
+                " set the broker CA certificate path"
+            )
         return cls(
             robot_id=robot_id,
             host=section["host"],
@@ -106,6 +117,7 @@ class MqttConfig:
             ca_cert=section.get("ca_cert") or None,
             outbox_path=section.get("outbox_path") or "var/outbox.sqlite3",
             client_id=section.get("client_id") or robot_id,
+            require_tls=bool(section.get("require_tls")),
         )
 
     @classmethod
