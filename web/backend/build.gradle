@@ -50,6 +50,25 @@ tasks.named('test') {
     }
 }
 
+tasks.register('securityAcceptanceTest', Test) {
+    group = 'verification'
+    description = 'Runs the Day 4 RBAC, CSRF, scope, audit, and MFA acceptance gate.'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'security-acceptance'
+    }
+    shouldRunAfter tasks.named('test')
+    afterSuite { descriptor, result ->
+        if (descriptor.parent == null && result.skippedTestCount > 0) {
+            throw new GradleException(
+                    "Day 4 security acceptance tests must not be skipped: "
+                            + "${result.skippedTestCount} skipped."
+            )
+        }
+    }
+}
+
 tasks.register('passwordHashLoadTest', Test) {
     group = 'verification'
     description = 'Measures Argon2id hashing and concurrent verification cost.'
