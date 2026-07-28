@@ -311,8 +311,12 @@ class MqttClient:
             return
         try:
             command = codec.decode(message.payload)
-        except (ValueError, UnicodeDecodeError):
-            log.warning("dropping malformed command payload")
+        except (ValueError, UnicodeDecodeError) as exc:
+            # 앞부분을 같이 남긴다. 이게 없으면 "왜 못 받았지" 를 브로커부터 다시
+            # 파야 한다 — 실제로 서버가 JSON 대신 Map.toString() 을 보낸 적이 있다.
+            log.warning(
+                "dropping malformed command payload (%s): %.120s", exc, message.payload
+            )
             return
         # 검증·실행·중복 제거는 main.py 몫이다. 여기서는 큐에 넣기만 한다.
         self.commands.put(command)
@@ -321,7 +325,9 @@ class MqttClient:
 def _build_paho_client(config: MqttConfig) -> mqtt.Client:
     client = mqtt.Client(
         mqtt.CallbackAPIVersion.VERSION2,
-        client_id=config.robot_id,
+        # username 은 ACL 때문에 robot_id 여야 하지만 client_id 는 달라도 된다.
+        # 같은 client_id 로 두 번 붙으면 브로커가 먼저 붙은 쪽을 끊는다.
+        client_id=config.client_id or config.robot_id,
         protocol=mqtt.MQTTv5,
     )
     if config.username:
