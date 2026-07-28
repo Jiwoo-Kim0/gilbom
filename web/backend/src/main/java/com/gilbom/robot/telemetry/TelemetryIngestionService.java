@@ -55,11 +55,13 @@ public class TelemetryIngestionService {
                 payload,
                 sampledAt,
                 receivedAt);
-        eventPublisher.publishEvent(
-                RobotRealtimeEvent.telemetryUpdated(
-                        robotId,
-                        payload.mqttId(),
-                        payload.sampledAt()));
+        if (currentStateUpdated) {
+            eventPublisher.publishEvent(
+                    RobotRealtimeEvent.telemetryUpdated(
+                            robotId,
+                            payload.mqttId(),
+                            payload.sampledAt()));
+        }
         return new TelemetryIngestionResult(true, currentStateUpdated);
     }
 
