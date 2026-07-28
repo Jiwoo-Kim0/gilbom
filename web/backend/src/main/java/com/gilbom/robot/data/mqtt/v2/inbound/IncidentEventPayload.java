@@ -24,7 +24,7 @@ public record IncidentEventPayload(
         @NotNull EventType eventType,
         @NotBlank String mqttId,
         @NotNull UUID bootId,
-        @NotNull @PositiveOrZero Long seq,
+        @NotNull @Positive Long seq,
         @NotNull EventSource sourceComponent,
         @NotNull Instant occurredAt,
         @NotNull Instant sentAt,

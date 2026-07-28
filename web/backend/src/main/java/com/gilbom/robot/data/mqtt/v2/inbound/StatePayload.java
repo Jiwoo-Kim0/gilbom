@@ -14,7 +14,7 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Positive;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -23,7 +23,7 @@ public record StatePayload(
         @NotBlank @Pattern(regexp = "2\\.0") String schemaVersion,
         @NotBlank String mqttId,
         @NotNull UUID bootId,
-        @NotNull @PositiveOrZero Long seq,
+        @NotNull @Positive Long seq,
         @NotNull Instant updatedAt,
         @NotNull RobotMode mode,
         @NotNull RobotStateReason reasonCode,
