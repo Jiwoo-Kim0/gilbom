@@ -349,6 +349,22 @@ def test_malformed_command_is_dropped(client, paho):
     assert client.commands.empty()
 
 
+def test_a_dropped_command_leaves_the_payload_in_the_log(client, paho, caplog):
+    """무엇이 잘못됐는지 로그만 보고 알 수 있어야 한다.
+
+    서버가 JSON 대신 Map.toString() 을 보낸 적이 있다. 그때 로그에 이유가 없어서
+    브로커부터 다시 파야 했다.
+    """
+    paho.simulate_connect()
+    # 따옴표 없는 실제 사례 — 키도 문자열 값도 인용되지 않았다.
+    paho.deliver(
+        client.topics.of(TopicKind.COMMAND_REQUEST),
+        b"{schema_version:2.0,command_type:START_MISSION}",
+    )
+    assert client.commands.empty()
+    assert "schema_version:2.0" in caplog.text
+
+
 def test_message_on_other_topic_is_ignored(client, paho):
     paho.simulate_connect()
     paho.deliver("tbs/v2/robots/RBT-999/commands/request", encode({"a": 1}))

@@ -62,6 +62,11 @@ class MqttConfig:
     keepalive: int = 30
     ca_cert: str = None
     outbox_path: str = "var/outbox.sqlite3"
+    #: MQTT client_id. 기본은 robot_id — 로봇마다 다르므로 그대로 두면 충돌하지 않는다.
+    #: 계정을 공유하는 테스트에서는 접속마다 다른 값을 줘야 한다. 같은 client_id 로
+    #: 두 번 붙으면 브로커가 먼저 붙은 쪽을 끊는다("session taken over").
+    #: username 은 ACL 때문에 robot_id 와 같아야 하지만 client_id 는 상관없다.
+    client_id: str = None
 
     @property
     def tls_enabled(self) -> bool:
@@ -100,6 +105,7 @@ class MqttConfig:
             keepalive=int(section.get("keepalive", 30)),
             ca_cert=section.get("ca_cert") or None,
             outbox_path=section.get("outbox_path") or "var/outbox.sqlite3",
+            client_id=section.get("client_id") or robot_id,
         )
 
     @classmethod

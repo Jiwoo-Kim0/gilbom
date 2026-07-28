@@ -124,6 +124,40 @@ def test_host_is_required(tmp_path):
         MqttConfig.load(path)
 
 
+def test_client_id_defaults_to_robot_id(tmp_path):
+    path = write(
+        tmp_path,
+        """
+        robot:
+          id: RBT-001
+        mqtt:
+          host: broker.example.com
+        """,
+    )
+    assert MqttConfig.load(path).client_id == "RBT-001"
+
+
+def test_client_id_can_differ_from_the_username(tmp_path):
+    """계정을 공유하는 테스트에서 두 클라이언트가 서로 세션을 뺏지 않게 한다.
+
+    같은 client_id 로 두 번 붙으면 브로커가 먼저 붙은 쪽을 끊는다
+    ("session taken over"). username 은 ACL 때문에 robot_id 여야 한다.
+    """
+    path = write(
+        tmp_path,
+        """
+        robot:
+          id: robot-test
+        mqtt:
+          host: broker.example.com
+          client_id: robot-test-orincar
+        """,
+    )
+    config = MqttConfig.load(path)
+    assert config.client_id == "robot-test-orincar"
+    assert config.username == "robot-test"  # ACL 은 그대로 지킨다
+
+
 def test_tls_is_enabled_only_with_ca_cert(tmp_path):
     assert MqttConfig(robot_id="R", host="h", ca_cert="ca.crt").tls_enabled
     assert not MqttConfig(robot_id="R", host="h").tls_enabled
