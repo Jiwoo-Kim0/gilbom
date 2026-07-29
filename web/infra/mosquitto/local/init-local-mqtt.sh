@@ -222,13 +222,13 @@ mosquitto_passwd -b \
 cp "${WORK_DIR}/passwd" "${PASSWORD_FILE}"
 cp "${ACL_SOURCE_FILE}" "${ACL_RUNTIME_FILE}"
 
-chown 1883:1883 "${CREDENTIAL_DIR}" 2>/dev/null || true
+chown 0:1883 "${CREDENTIAL_DIR}" 2>/dev/null || true
 chown 1883:1883 \
   "${CA_CERT_FILE}" \
   "${SERVER_CERT_FILE}" \
   "${SERVER_KEY_FILE}" \
-  "${PASSWORD_FILE}" \
   "${ACL_RUNTIME_FILE}" 2>/dev/null || true
+chown 0:1883 "${PASSWORD_FILE}" 2>/dev/null || true
 chown 0:0 "${CA_KEY_FILE}" 2>/dev/null || true
 
 chmod 644 "${CA_CERT_FILE}" "${SERVER_CERT_FILE}"

@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -14,9 +15,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Clock;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -31,6 +38,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -61,10 +69,14 @@ import com.gilbom.robot.api.MqttCredentialIssuanceController;
 import com.gilbom.robot.credential.MqttCredentialIssuanceService;
 import com.gilbom.robot.credential.MqttCredentialProvisioner;
 import com.gilbom.robot.credential.MqttCredentialProvisioningProperties;
+import com.gilbom.robot.credential.MqttCredentialRegistryService;
 import com.gilbom.robot.credential.MqttCredentialSecretGenerator;
+import com.gilbom.robot.data.api.response.MqttCredentialRegistryStatusResponse;
 import com.gilbom.security.config.SecurityConfig;
 import com.gilbom.security.web.SecurityErrorResponseWriter;
 import com.gilbom.security.web.SecurityHeadersFilter;
+
+import io.micrometer.core.instrument.MeterRegistry;
 
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(
@@ -128,6 +140,12 @@ class MqttCredentialIssuanceIntegrationTest {
 
     @Autowired
     private MqttCredentialIssuanceService issuanceService;
+
+    @Autowired
+    private MqttCredentialRegistryService registryService;
+
+    @Autowired
+    private MeterRegistry meterRegistry;
 
     @MockitoBean
     private SessionSecurityStateRepository sessionSecurityStateRepository;
@@ -286,6 +304,41 @@ class MqttCredentialIssuanceIntegrationTest {
     }
 
     @Test
+    void hidesCredentialListAndRevokeFromViewerScope() {
+        UUID credentialId = issueDirect(
+                "30fe7112-83e4-4f61-8f8c-8e889b237c58",
+                "a7700122-14c6-493f-b504-c97179726e89");
+        createViewerFixture();
+
+        assertThatThrownBy(() -> issuanceService.list(
+                ROBOT_ID,
+                VIEWER_USER_ID))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(ErrorCode.ROBOT_NOT_FOUND));
+        assertThatThrownBy(() -> issuanceService.revoke(
+                ROBOT_ID,
+                credentialId,
+                VIEWER_USER_ID,
+                "UNAUTHORIZED_SCOPE_TEST",
+                UUID.fromString(
+                        "3c46d5bc-2845-42d7-83ba-f325823dd9bf")))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(ErrorCode.ROBOT_NOT_FOUND));
+
+        assertThat(provisioner.revokeCount).hasValue(0);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT credential_status
+                FROM robot.robot_credential
+                WHERE credential_id = ?
+                """, String.class, credentialId))
+                .isEqualTo("ACTIVE");
+    }
+
+    @Test
     void provisionsPersistsAndNeverStoresThePlaintextResponseSecret()
             throws Exception {
         UUID requestId =
@@ -399,6 +452,378 @@ class MqttCredentialIssuanceIntegrationTest {
     }
 
     @Test
+    void rotatesToANewVersionAndListsOnlySafeCredentialFields()
+            throws Exception {
+        UUID firstCredentialId = issueDirect(
+                "f0bc7c66-f797-4f7b-86c8-d352fa4bb6c0",
+                "8c5f6f4e-10c5-49d1-9e0a-36b0614be09d");
+        String previousPasswordHash = provisioner.brokerPasswordHash;
+        provisioner.passwordHash =
+                "$7$101$integration-test-rotated-verifier";
+        UUID requestId =
+                UUID.fromString("756da722-48ff-4383-8b32-46d7cf95e1f2");
+
+        String responseJson = mockMvc.perform(post(
+                        "/api/v1/robots/{robotId}/credentials",
+                        ROBOT_ID)
+                        .with(user(ADMIN_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER))
+                        .with(csrf().asHeader())
+                        .header(RequestIdFilter.HEADER_NAME, requestId)
+                        .header(
+                                "Idempotency-Key",
+                                "c477b464-a29c-42e5-9df7-8d82caf62f3e"))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.mqtt.username", is(ROBOT_CODE)))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        UUID rotatedCredentialId = UUID.fromString(
+                objectMapper.readTree(responseJson)
+                        .get("credentialId")
+                        .asText());
+        assertThat(rotatedCredentialId).isNotEqualTo(firstCredentialId);
+        assertThat(provisioner.provisionCount).hasValue(1);
+        assertThat(provisioner.rotateCount).hasValue(1);
+        assertThat(provisioner.restoreCount).hasValue(0);
+        assertThat(provisioner.brokerPasswordHash)
+                .isEqualTo(provisioner.passwordHash)
+                .isNotEqualTo(previousPasswordHash);
+
+        List<java.util.Map<String, Object>> credentials =
+                jdbcTemplate.queryForList("""
+                        SELECT
+                            credential_id,
+                            credential_version,
+                            credential_status,
+                            revoked_by,
+                            revocation_reason
+                        FROM robot.robot_credential
+                        WHERE robot_id = ?
+                        ORDER BY credential_version
+                        """,
+                        ROBOT_ID);
+        assertThat(credentials).hasSize(2);
+        assertThat(credentials.get(0))
+                .containsEntry("credential_id", firstCredentialId)
+                .containsEntry("credential_version", 1)
+                .containsEntry("credential_status", "REVOKED")
+                .containsEntry("revoked_by", ADMIN_USER_ID)
+                .containsEntry("revocation_reason", "ROTATED");
+        assertThat(credentials.get(1))
+                .containsEntry("credential_id", rotatedCredentialId)
+                .containsEntry("credential_version", 2)
+                .containsEntry("credential_status", "ACTIVE");
+
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM audit.audit_log
+                WHERE request_id = ?
+                  AND action_type = 'ROBOT_CREDENTIAL_ROTATED'
+                  AND target_id = ?
+                  AND result = 'SUCCESS'
+                """, Integer.class, requestId, rotatedCredentialId))
+                .isEqualTo(1);
+
+        String listJson = mockMvc.perform(get(
+                        "/api/v1/robots/{robotId}/credentials",
+                        ROBOT_ID)
+                        .with(user(ADMIN_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER)))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath(
+                        "$.credentials[0].credentialVersion",
+                        is(2)))
+                .andExpect(jsonPath(
+                        "$.credentials[0].credentialStatus",
+                        is("ACTIVE")))
+                .andExpect(jsonPath(
+                        "$.credentials[1].credentialStatus",
+                        is("REVOKED")))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        assertThat(listJson)
+                .doesNotContain("password")
+                .doesNotContain("secretHash")
+                .doesNotContain("secretFingerprint")
+                .doesNotContain(previousPasswordHash)
+                .doesNotContain(provisioner.passwordHash);
+    }
+
+    @Test
+    void revokesBrokerCredentialAndTreatsRepeatedRevokeAsIdempotent()
+            throws Exception {
+        UUID credentialId = issueDirect(
+                "bfebd7f0-1f7d-46fb-8463-bf319cb0ef8e",
+                "4bbb2419-a57a-4f83-b0a4-76f9e9379ced");
+        UUID requestId =
+                UUID.fromString("44257dbf-2d00-4bbd-bf24-b39929f6347f");
+        String requestBody = """
+                {
+                  "reason": "DEVICE_RETIRED"
+                }
+                """;
+
+        mockMvc.perform(post(
+                        "/api/v1/robots/{robotId}/credentials/"
+                                + "{credentialId}/revoke",
+                        ROBOT_ID,
+                        credentialId)
+                        .with(user(ADMIN_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER))
+                        .with(csrf().asHeader())
+                        .header(RequestIdFilter.HEADER_NAME, requestId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath(
+                        "$.credentialStatus",
+                        is("REVOKED")))
+                .andExpect(jsonPath(
+                        "$.revocationReason",
+                        is("DEVICE_RETIRED")))
+                .andExpect(jsonPath("$.secretHash").doesNotExist())
+                .andExpect(jsonPath("$.secretFingerprint").doesNotExist());
+
+        assertThat(provisioner.revokeCount).hasValue(1);
+        assertThat(provisioner.brokerPasswordHash).isNull();
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT
+                    credential_status,
+                    revoked_by,
+                    revocation_reason
+                FROM robot.robot_credential
+                WHERE credential_id = ?
+                """, credentialId))
+                .containsEntry("credential_status", "REVOKED")
+                .containsEntry("revoked_by", ADMIN_USER_ID)
+                .containsEntry("revocation_reason", "DEVICE_RETIRED");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM audit.audit_log
+                WHERE request_id = ?
+                  AND action_type = 'ROBOT_CREDENTIAL_REVOKED'
+                  AND target_id = ?
+                  AND result = 'SUCCESS'
+                """, Integer.class, requestId, credentialId))
+                .isEqualTo(1);
+
+        mockMvc.perform(post(
+                        "/api/v1/robots/{robotId}/credentials/"
+                                + "{credentialId}/revoke",
+                        ROBOT_ID,
+                        credentialId)
+                        .with(user(ADMIN_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER))
+                        .with(csrf().asHeader())
+                        .header(
+                                RequestIdFilter.HEADER_NAME,
+                                "a3b8de9c-e519-4b53-929f-1e8e94570f0f")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath(
+                        "$.credentialStatus",
+                        is("REVOKED")));
+
+        assertThat(provisioner.revokeCount).hasValue(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM audit.audit_log
+                WHERE action_type = 'ROBOT_CREDENTIAL_REVOKED'
+                  AND target_id = ?
+                """, Integer.class, credentialId))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void restoresPreviousBrokerHashWhenRotationTransactionRollsBack()
+            throws Exception {
+        UUID credentialId = issueDirect(
+                "06c719a7-52f6-4586-aafc-95aff340e78f",
+                "23ca4dbf-8c21-4186-bec8-2d264632fa72");
+        String previousPasswordHash = provisioner.brokerPasswordHash;
+        provisioner.passwordHash = "\u0000invalid-rotated-verifier";
+
+        mockMvc.perform(post(
+                        "/api/v1/robots/{robotId}/credentials",
+                        ROBOT_ID)
+                        .with(user(ADMIN_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER))
+                        .with(csrf().asHeader())
+                        .header(
+                                RequestIdFilter.HEADER_NAME,
+                                "64067fd8-8cee-482c-8207-8df6de4d0647")
+                        .header(
+                                "Idempotency-Key",
+                                "f19a105c-9c90-4898-9e0f-0befb49e001f"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code", is("COMMON_INTERNAL_ERROR")));
+
+        assertThat(provisioner.rotateCount).hasValue(1);
+        assertThat(provisioner.restoreCount).hasValue(1);
+        assertThat(provisioner.brokerPasswordHash)
+                .isEqualTo(previousPasswordHash);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM robot.robot_credential
+                WHERE robot_id = ?
+                """, Integer.class, ROBOT_ID))
+                .isEqualTo(1);
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT credential_status, credential_version
+                FROM robot.robot_credential
+                WHERE credential_id = ?
+                """, credentialId))
+                .containsEntry("credential_status", "ACTIVE")
+                .containsEntry("credential_version", 1);
+    }
+
+    @Test
+    void restoresBrokerHashWhenRevocationTransactionRollsBack() {
+        UUID credentialId = issueDirect(
+                "6eb72c25-362e-45c3-b5d6-afbdd3880933",
+                "09a2ab2a-3403-45a6-b5c8-f54814932218");
+        String previousPasswordHash = provisioner.brokerPasswordHash;
+
+        assertThatThrownBy(() -> issuanceService.revoke(
+                ROBOT_ID,
+                credentialId,
+                ADMIN_USER_ID,
+                "invalid\u0000reason",
+                UUID.fromString(
+                        "1c006efb-4f53-4630-a2a9-ec9c585a9c47")))
+                .isInstanceOf(RuntimeException.class);
+
+        assertThat(provisioner.revokeCount).hasValue(1);
+        assertThat(provisioner.restoreCount).hasValue(1);
+        assertThat(provisioner.brokerPasswordHash)
+                .isEqualTo(previousPasswordHash);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT credential_status
+                FROM robot.robot_credential
+                WHERE credential_id = ?
+                """, String.class, credentialId))
+                .isEqualTo("ACTIVE");
+    }
+
+    @Test
+    void rejectsRotationWhenDatabaseAndBrokerHashesDrift()
+            throws Exception {
+        UUID credentialId = issueDirect(
+                "29adbb7d-90e9-491c-82a5-f5cc63577013",
+                "10d34020-2f08-46db-ae26-ab42009c85cd");
+        provisioner.brokerPasswordHash = "$7$101$external-drift";
+
+        mockMvc.perform(post(
+                        "/api/v1/robots/{robotId}/credentials",
+                        ROBOT_ID)
+                        .with(user(ADMIN_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER))
+                        .with(csrf().asHeader())
+                        .header(
+                                RequestIdFilter.HEADER_NAME,
+                                "56691ccd-ef53-45f6-80af-0961f24936bd")
+                        .header(
+                                "Idempotency-Key",
+                                "d3883eb6-6a4f-48c1-80b0-e2566ff922cb"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath(
+                        "$.code",
+                        is("MQTT_CREDENTIAL_REGISTRY_DRIFT")));
+
+        assertThat(provisioner.rotateCount).hasValue(0);
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT credential_status, credential_version
+                FROM robot.robot_credential
+                WHERE credential_id = ?
+                """, credentialId))
+                .containsEntry("credential_status", "ACTIVE")
+                .containsEntry("credential_version", 1);
+    }
+
+    @Test
+    void serializesConcurrentRotationsAndKeepsExactlyOneActiveVersion()
+            throws Exception {
+        issueDirect(
+                "cfe4e451-f934-45ae-8343-85bdc1864a8b",
+                "16437923-b6a5-452d-854a-c58990ffb4f2");
+        provisioner.passwordHash =
+                "$7$101$concurrent-rotation-verifier";
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<UUID> first = executor.submit(() -> {
+                start.await();
+                return issuanceService.issue(
+                        ROBOT_ID,
+                        ADMIN_USER_ID,
+                        UUID.fromString(
+                                "90887138-408a-4bb2-9863-f657f446d7cc"),
+                        UUID.fromString(
+                                "b668528d-fad2-48e6-8d39-c875275658a7"))
+                        .credentialId();
+            });
+            Future<UUID> second = executor.submit(() -> {
+                start.await();
+                return issuanceService.issue(
+                        ROBOT_ID,
+                        ADMIN_USER_ID,
+                        UUID.fromString(
+                                "85e122bd-f754-4a96-8c98-bf8535591ce9"),
+                        UUID.fromString(
+                                "517b5cda-b23d-4636-9602-68103ee2ce75"))
+                        .credentialId();
+            });
+
+            start.countDown();
+            assertThat(first.get()).isNotEqualTo(second.get());
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertThat(provisioner.rotateCount).hasValue(2);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM robot.robot_credential
+                WHERE robot_id = ?
+                """, Integer.class, ROBOT_ID))
+                .isEqualTo(3);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM robot.robot_credential
+                WHERE robot_id = ?
+                  AND credential_status = 'ACTIVE'
+                """, Integer.class, ROBOT_ID))
+                .isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT MAX(credential_version)
+                FROM robot.robot_credential
+                WHERE robot_id = ?
+                """, Integer.class, ROBOT_ID))
+                .isEqualTo(3);
+        assertThat(jdbcTemplate.queryForList("""
+                SELECT issued_at
+                FROM robot.robot_credential
+                WHERE robot_id = ?
+                ORDER BY credential_version
+                """, java.sql.Timestamp.class, ROBOT_ID))
+                .isSorted();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM robot.robot_credential
+                WHERE robot_id = ?
+                  AND revoked_at < issued_at
+                """, Integer.class, ROBOT_ID))
+                .isZero();
+    }
+
+    @Test
     void removesProvisionedBrokerAccountWhenDatabaseTransactionRollsBack()
             throws Exception {
         // PostgreSQL rejects NUL in text after the external provisioner succeeds.
@@ -440,6 +865,198 @@ class MqttCredentialIssuanceIntegrationTest {
                 .isZero();
     }
 
+    @Test
+    void detectsAndReconcilesAnActiveCredentialHashMismatch()
+            throws Exception {
+        UUID credentialId = issueDirect(
+                "36f6dc2a-efb5-4bb9-b3ad-ad9f8d0dc4f0",
+                "60bc6a23-c1ee-4738-a38d-9efe1a44512c");
+        String databaseHash = provisioner.brokerPasswordHash;
+        provisioner.brokerPasswordHash =
+                "$7$101$externally-modified-verifier";
+        UUID reconcileRequestId =
+                UUID.fromString("d8f259b4-d3bc-4fe4-a09f-39bbc10318a0");
+
+        mockMvc.perform(get(
+                        "/api/v1/robots/{robotId}/credentials/"
+                                + "registry-status",
+                        ROBOT_ID)
+                        .with(user(ADMIN_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.registryStatus", is("MISMATCH")))
+                .andExpect(jsonPath("$.driftDetected", is(true)))
+                .andExpect(jsonPath("$.activeCredentialId",
+                        is(credentialId.toString())))
+                .andExpect(jsonPath("$.secretHash").doesNotExist())
+                .andExpect(jsonPath("$.passwordHash").doesNotExist());
+
+        mockMvc.perform(post(
+                        "/api/v1/robots/{robotId}/credentials/"
+                                + "registry-reconcile",
+                        ROBOT_ID)
+                        .with(user(ADMIN_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER))
+                        .with(csrf().asHeader())
+                        .header(
+                                RequestIdFilter.HEADER_NAME,
+                                reconcileRequestId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reason": "BROKER_HASH_DRIFT_RECOVERY"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.registryStatus", is("IN_SYNC")))
+                .andExpect(jsonPath("$.driftDetected", is(false)));
+
+        assertThat(provisioner.restoreCount).hasValue(1);
+        assertThat(provisioner.brokerPasswordHash).isEqualTo(databaseHash);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM audit.audit_log
+                WHERE request_id = ?
+                  AND action_type =
+                      'ROBOT_CREDENTIAL_REGISTRY_RECONCILED'
+                  AND target_id = ?
+                  AND result = 'SUCCESS'
+                """, Integer.class, reconcileRequestId, credentialId))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void removesAnOrphanedBrokerCredentialDuringReconciliation() {
+        UUID credentialId = issueDirect(
+                "4d2f1357-a4cd-4510-b864-c094583470dc",
+                "8f9ce8c3-35dd-4d5e-a8f5-aecaf80995b2");
+        issuanceService.revoke(
+                ROBOT_ID,
+                credentialId,
+                ADMIN_USER_ID,
+                "DEVICE_RETIRED",
+                UUID.fromString(
+                        "dbcd780c-e89d-4f72-83aa-3b5863773858"));
+        provisioner.brokerPasswordHash =
+                "$7$101$orphaned-broker-verifier";
+
+        MqttCredentialRegistryStatusResponse before =
+                registryService.status(ROBOT_ID, ADMIN_USER_ID);
+        assertThat(before.registryStatus()).isEqualTo("ORPHANED");
+        assertThat(before.driftDetected()).isTrue();
+
+        MqttCredentialRegistryStatusResponse after =
+                registryService.reconcile(
+                        ROBOT_ID,
+                        ADMIN_USER_ID,
+                        "ORPHANED_ACCOUNT_RECOVERY",
+                        UUID.fromString(
+                                "7cba24ce-f7bf-480b-ab17-8279470973ba"));
+
+        assertThat(after.registryStatus()).isEqualTo("IN_SYNC");
+        assertThat(after.activeCredentialId()).isNull();
+        assertThat(provisioner.brokerPasswordHash).isNull();
+        assertThat(provisioner.revokeCount).hasValue(2);
+    }
+
+    @Test
+    void restoresThePriorDriftStateWhenReconciliationRollsBack() {
+        issueDirect(
+                "85467123-f895-47cc-9962-4799742dd296",
+                "5357d3fd-d01e-44fc-b2f9-e74d7c204269");
+        String priorBrokerHash = "$7$101$prior-drift-verifier";
+        provisioner.brokerPasswordHash = priorBrokerHash;
+        provisioner.failInspectionAfterNextRestore = true;
+
+        assertThatThrownBy(() -> registryService.reconcile(
+                ROBOT_ID,
+                ADMIN_USER_ID,
+                "VERIFY_ROLLBACK_RECOVERY",
+                UUID.fromString(
+                        "76a7f966-66cb-4749-a197-64f9dfcb4341")))
+                .isInstanceOf(RuntimeException.class);
+
+        assertThat(provisioner.restoreCount).hasValue(2);
+        assertThat(provisioner.brokerPasswordHash)
+                .isEqualTo(priorBrokerHash);
+        assertThat(registryService.status(
+                ROBOT_ID,
+                ADMIN_USER_ID).registryStatus())
+                .isEqualTo("MISMATCH");
+    }
+
+    @Test
+    void scansAllRobotCredentialsAndReportsDriftWithoutHighCardinalityTags() {
+        issueDirect(
+                "449ff9cc-3c30-49e6-b319-e59f673531c7",
+                "002f4e2a-5a4b-480e-b3ee-0f42ed52c682");
+        provisioner.brokerPasswordHash =
+                "$7$101$periodic-scan-drift";
+
+        MqttCredentialRegistryService.ScanSummary summary =
+                registryService.scanRegistry();
+
+        assertThat(summary.checkedCount()).isEqualTo(1);
+        assertThat(summary.driftCount()).isEqualTo(1);
+        assertThat(summary.inspectionErrorCount()).isZero();
+        assertThat(meterRegistry.find(
+                "gilbom.mqtt.credential.registry.drift.current")
+                .gauge()
+                .value()).isEqualTo(1.0);
+        assertThat(meterRegistry.find(
+                "gilbom.mqtt.credential.registry.checks")
+                .meters())
+                .allSatisfy(meter -> assertThat(
+                        meter.getId().getTags())
+                        .extracting(tag -> tag.getKey())
+                        .containsExactly("result"));
+    }
+
+    private UUID issueDirect(String idempotencyKey, String requestId) {
+        return issuanceService.issue(
+                ROBOT_ID,
+                ADMIN_USER_ID,
+                UUID.fromString(idempotencyKey),
+                UUID.fromString(requestId))
+                .credentialId();
+    }
+
+    private void createViewerFixture() {
+        jdbcTemplate.update("""
+                INSERT INTO auth.admin_user (
+                    user_id,
+                    user_code,
+                    password_hash,
+                    display_name,
+                    email,
+                    is_active,
+                    account_status,
+                    password_change_required,
+                    password_changed_at
+                ) VALUES (?, ?, ?, ?, ?, TRUE, 'ACTIVE', FALSE, NOW())
+                ON CONFLICT (user_id) DO NOTHING
+                """,
+                VIEWER_USER_ID,
+                "USR-CREDENTIAL-VIEWER",
+                passwordEncoder.encode(
+                        "integration-only-viewer-password"),
+                "MQTT 자격증명 테스트 조회자",
+                "mqtt-credential-viewer@example.test");
+        jdbcTemplate.update("""
+                INSERT INTO auth.user_robot_assignment (
+                    user_id,
+                    robot_id,
+                    assignment_type,
+                    reason,
+                    assigned_by
+                ) VALUES (?, ?, 'VIEWER', ?, ?)
+                """,
+                VIEWER_USER_ID,
+                ROBOT_ID,
+                "credential scope integration test",
+                ADMIN_USER_ID);
+    }
+
     private String sha256Hex(String value) throws Exception {
         return HexFormat.of().formatHex(
                 MessageDigest.getInstance("SHA-256")
@@ -461,6 +1078,7 @@ class MqttCredentialIssuanceIntegrationTest {
             BestEffortAuditLogWriter.class,
             MqttCredentialIssuanceController.class,
             MqttCredentialIssuanceService.class,
+            MqttCredentialRegistryService.class,
             MqttCredentialSecretGenerator.class,
             AuthenticatedUserIdResolver.class,
             PasswordHashingConfiguration.class,
@@ -476,6 +1094,11 @@ class MqttCredentialIssuanceIntegrationTest {
         RecordingMqttCredentialProvisioner mqttCredentialProvisioner() {
             return new RecordingMqttCredentialProvisioner();
         }
+
+        @Bean
+        Clock registryClock() {
+            return Clock.systemUTC();
+        }
     }
 
     static final class RecordingMqttCredentialProvisioner
@@ -484,9 +1107,15 @@ class MqttCredentialIssuanceIntegrationTest {
         private String passwordHash =
                 "$7$101$integration-test-mosquitto-verifier";
         private final AtomicInteger provisionCount = new AtomicInteger();
+        private final AtomicInteger rotateCount = new AtomicInteger();
+        private final AtomicInteger revokeCount = new AtomicInteger();
+        private final AtomicInteger restoreCount = new AtomicInteger();
         private final AtomicInteger removeCount = new AtomicInteger();
+        private volatile String brokerPasswordHash;
         private volatile String username;
         private volatile String password;
+        private volatile boolean failInspectionAfterNextRestore;
+        private volatile boolean failNextInspection;
 
         @Override
         public ProvisionedMqttCredential provision(
@@ -496,20 +1125,86 @@ class MqttCredentialIssuanceIntegrationTest {
             username = provisionedUsername;
             password = provisionedPassword;
             provisionCount.incrementAndGet();
+            brokerPasswordHash = passwordHash;
             return new ProvisionedMqttCredential(passwordHash);
+        }
+
+        @Override
+        public ProvisionedMqttCredential rotate(
+                String rotatedUsername,
+                String expectedPasswordHash,
+                String rotatedPassword
+        ) {
+            requireExpectedHash(expectedPasswordHash);
+            username = rotatedUsername;
+            password = rotatedPassword;
+            rotateCount.incrementAndGet();
+            brokerPasswordHash = passwordHash;
+            return new ProvisionedMqttCredential(passwordHash);
+        }
+
+        @Override
+        public void revoke(
+                String revokedUsername,
+                String expectedPasswordHash
+        ) {
+            requireExpectedHash(expectedPasswordHash);
+            revokeCount.incrementAndGet();
+            brokerPasswordHash = null;
+        }
+
+        @Override
+        public void restore(
+                String restoredUsername,
+                String restoredPasswordHash
+        ) {
+            restoreCount.incrementAndGet();
+            brokerPasswordHash = restoredPasswordHash;
+            if (failInspectionAfterNextRestore) {
+                failInspectionAfterNextRestore = false;
+                failNextInspection = true;
+            }
         }
 
         @Override
         public void remove(String removedUsername) {
             removeCount.incrementAndGet();
+            brokerPasswordHash = null;
+        }
+
+        @Override
+        public CredentialRegistrySnapshot inspect(
+                String inspectedUsername
+        ) {
+            if (failNextInspection) {
+                failNextInspection = false;
+                throw new BusinessException(
+                        ErrorCode.MQTT_CREDENTIAL_PROVISIONING_UNAVAILABLE);
+            }
+            return new CredentialRegistrySnapshot(brokerPasswordHash);
         }
 
         void reset() {
             passwordHash = "$7$101$integration-test-mosquitto-verifier";
             provisionCount.set(0);
+            rotateCount.set(0);
+            revokeCount.set(0);
+            restoreCount.set(0);
             removeCount.set(0);
+            brokerPasswordHash = null;
             username = null;
             password = null;
+            failInspectionAfterNextRestore = false;
+            failNextInspection = false;
+        }
+
+        private void requireExpectedHash(String expectedPasswordHash) {
+            if (!java.util.Objects.equals(
+                    expectedPasswordHash,
+                    brokerPasswordHash)) {
+                throw new BusinessException(
+                        ErrorCode.MQTT_CREDENTIAL_REGISTRY_DRIFT);
+            }
         }
     }
 }

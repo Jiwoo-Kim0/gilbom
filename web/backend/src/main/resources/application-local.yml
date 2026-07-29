@@ -18,6 +18,7 @@ mqtt:
     process-timeout: ${MQTT_CREDENTIAL_PROCESS_TIMEOUT:10s}
     activation-timeout: ${MQTT_CREDENTIAL_ACTIVATION_TIMEOUT:10s}
     verification-interval: ${MQTT_CREDENTIAL_VERIFICATION_INTERVAL:250ms}
+    registry-scan-interval: ${MQTT_CREDENTIAL_REGISTRY_SCAN_INTERVAL:1m}
   security:
     # mqtt-init issues the broker certificate from the local development CA.
     # Point MQTT_TRUST_CERTIFICATE to infra/mosquitto/local/runtime/certs/local-ca-cert.pem.

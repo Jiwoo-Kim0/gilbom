@@ -119,6 +119,10 @@ HTTP 상태와 응답 형식은 다음 원칙을 따른다.
 | 오류 코드 | HTTP | 의미 |
 |---|---:|---|
 | `ROBOT_NOT_FOUND` | 404 | 로봇 없음 |
+| `ROBOT_CREDENTIAL_NOT_FOUND` | 404 | 지정한 로봇의 Credential 없음 |
+| `ROBOT_CREDENTIAL_CONFLICT` | 409 | DB에 활성 Credential이 없지만 Broker에 같은 MQTT 계정이 이미 존재함 |
+| `ROBOT_CREDENTIAL_SECRET_ALREADY_ISSUED` | 409 | 완료된 발급·회전 멱등 요청의 one-time Secret 재조회 시도 |
+| `ROBOT_CREDENTIAL_STATE_CONFLICT` | 409 | ACTIVE가 아닌 Credential의 폐기 등 현재 상태에서 허용되지 않는 변경 |
 | `PATROL_AREA_CODE_CONFLICT` | 409 | 이미 등록된 순찰 구역 코드 |
 | `PATROL_AREA_STATE_CONFLICT` | 409 | 현재 순찰 구역 상태에서 허용되지 않는 변경·상태 전이 |
 | `PATROL_AREA_IN_USE` | 409 | CREATED·READY·RUNNING·PAUSED Mission이 사용하는 구역의 변경·보관 시도 |
@@ -143,6 +147,8 @@ HTTP 상태와 응답 형식은 다음 원칙을 따른다.
 | `STATISTICS_PERIOD_INVALID` | 422 | 통계 기간이 역전·동일하거나 최대 366일을 초과함 |
 | `DB_UNAVAILABLE` | 503 | 데이터베이스 장애 |
 | `S3_UNAVAILABLE` | 503 | 파일 저장소 장애 |
+| `MQTT_CREDENTIAL_PROVISIONING_UNAVAILABLE` | 503 | Mosquitto Credential 반영·인증 검증 장애 |
+| `MQTT_CREDENTIAL_REGISTRY_DRIFT` | 503 | DB의 활성 hash와 Mosquitto passwd hash 불일치 |
 | `MQTT_UNAVAILABLE` | 503 | MQTT Broker 또는 Adapter 장애 |
 
 `ERROR_400`, `BAD_REQUEST_ERROR`, `INVALID`처럼 HTTP 상태나 모호한 단어만으로 만든 코드는 사용하지 않는다.

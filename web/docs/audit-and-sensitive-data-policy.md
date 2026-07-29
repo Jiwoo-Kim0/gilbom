@@ -135,7 +135,7 @@ action code는 `UPPER_SNAKE_CASE`로 고정하며 화면 문구로 재사용하�
 | action | 기록 시점 |
 |---|---|
 | `ROBOT_REGISTERED`, `ROBOT_UPDATED`, `ROBOT_DISABLED` | 로봇 관리 |
-| `ROBOT_CREDENTIAL_ISSUED`, `ROBOT_CREDENTIAL_REVOKED` | 기기 인증정보 수명주기 |
+| `ROBOT_CREDENTIAL_ISSUED`, `ROBOT_CREDENTIAL_ROTATED`, `ROBOT_CREDENTIAL_REVOKED`, `ROBOT_CREDENTIAL_REGISTRY_RECONCILED` | 기기 인증정보 수명주기와 DB·Broker 정합성 수동 복구 |
 | `ROBOT_COMMAND_ISSUED` | 관리자 명령 접수·저장 |
 | `ROBOT_EVENT_ACKNOWLEDGED` | 경고 확인 |
 | `MISSION_CREATED`, `MISSION_UPDATED` | 임무 생성·수정 |
@@ -147,7 +147,11 @@ action code는 `UPPER_SNAKE_CASE`로 고정하며 화면 문구로 재사용하�
 | `REPORT_SCHEDULE_CHANGED` | 보고서 일정 생성·변경·중지 |
 | `AUDIT_LOG_VIEWED` | 감사 로그 목록·상세 조회 |
 
-`ROBOT_CREDENTIAL_ISSUED`에는 credential ID, type, 만료 시각과 fingerprint만 기록하고 secret 원문을 넣지 않는다. Presigned URL 발급 기록에는 file ID와 만료 시각만 넣고 URL을 넣지 않는다.
+Credential 발급·회전·폐기 감사에는 credential ID, type, version, 상태, 수명주기
+시각과 fingerprint만 기록하고 secret 원문이나 password hash를 넣지 않는다. 회전은
+기존 ACTIVE 버전과 새 ACTIVE 버전의 안전 snapshot을 기록하고, 폐기는
+`revocationReason`을 기록한다. Presigned URL 발급 기록에는 file ID와 만료 시각만
+넣고 URL을 넣지 않는다.
 
 ## 6. 결과와 트랜잭션
 

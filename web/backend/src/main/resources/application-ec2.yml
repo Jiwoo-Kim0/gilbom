@@ -51,6 +51,7 @@ mqtt:
     process-timeout: ${MQTT_CREDENTIAL_PROCESS_TIMEOUT:10s}
     activation-timeout: ${MQTT_CREDENTIAL_ACTIVATION_TIMEOUT:15s}
     verification-interval: ${MQTT_CREDENTIAL_VERIFICATION_INTERVAL:500ms}
+    registry-scan-interval: ${MQTT_CREDENTIAL_REGISTRY_SCAN_INTERVAL:1m}
   security:
     # Public CA certificates can use the JVM default trust store by leaving this empty.
     trust-certificate: ${MQTT_TRUST_CERTIFICATE:}

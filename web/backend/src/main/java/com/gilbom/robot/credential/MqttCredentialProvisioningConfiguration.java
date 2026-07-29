@@ -40,13 +40,44 @@ public class MqttCredentialProvisioningConfiguration {
                     String username,
                     String password
             ) {
-                throw new BusinessException(
-                        ErrorCode.MQTT_CREDENTIAL_PROVISIONING_UNAVAILABLE);
+                throw unavailable();
+            }
+
+            @Override
+            public ProvisionedMqttCredential rotate(
+                    String username,
+                    String expectedPasswordHash,
+                    String password
+            ) {
+                throw unavailable();
+            }
+
+            @Override
+            public void revoke(
+                    String username,
+                    String expectedPasswordHash
+            ) {
+                throw unavailable();
+            }
+
+            @Override
+            public void restore(String username, String passwordHash) {
+                throw unavailable();
             }
 
             @Override
             public void remove(String username) {
                 // Nothing was provisioned when the environment is disabled.
+            }
+
+            @Override
+            public CredentialRegistrySnapshot inspect(String username) {
+                throw unavailable();
+            }
+
+            private BusinessException unavailable() {
+                return new BusinessException(
+                        ErrorCode.MQTT_CREDENTIAL_PROVISIONING_UNAVAILABLE);
             }
         };
     }

@@ -186,9 +186,11 @@ DB trigger도 같은 lock과 판정 함수를 사용해 직접 DML을 방어한�
 | GET | `/api/v1/robots/{robotId}/telemetry` | `ROBOT_STATUS_VIEW` | `VIEWER+` |  |  |
 | GET | `/api/v1/robots/{robotId}/boot-sessions` | `ROBOT_STATUS_VIEW` | `VIEWER+` |  |  |
 | GET | `/api/v1/boot-sessions/{bootId}` | `ROBOT_STATUS_VIEW` | 연결 로봇 `VIEWER+` |  |  |
-| GET | `/api/v1/robots/{robotId}/credentials` | `ROBOT_REGISTER` | 전역·secret 미반환 |  | O |
-| POST | `/api/v1/robots/{robotId}/credentials` | `ROBOT_REGISTER` | `OPERATOR+`, ADMIN 전체 범위 | O | O |
-| POST | `/api/v1/robots/{robotId}/credentials/{credentialId}/revoke` | `ROBOT_REGISTER` | 전역 | O | O |
+| GET | `/api/v1/robots/{robotId}/credentials` | `ROBOT_REGISTER` | `OPERATOR+`, ADMIN 전체 범위·secret 미반환 |  | O |
+| POST | `/api/v1/robots/{robotId}/credentials` | `ROBOT_REGISTER` | `OPERATOR+`, ADMIN 전체 범위·최초 발급/회전 | O | O |
+| GET | `/api/v1/robots/{robotId}/credentials/registry-status` | `ROBOT_REGISTER` | `OPERATOR+`, ADMIN 전체 범위·hash 미반환 |  | O |
+| POST | `/api/v1/robots/{robotId}/credentials/registry-reconcile` | `ROBOT_REGISTER` | `OPERATOR+`, ADMIN 전체 범위·DB 기준 수동 복구 | O | O |
+| POST | `/api/v1/robots/{robotId}/credentials/{credentialId}/revoke` | `ROBOT_REGISTER` | `OPERATOR+`, ADMIN 전체 범위 | O | O |
 | GET | `/api/v1/robot-events` | `ROBOT_STATUS_VIEW` | 배정 로봇 이벤트 |  |  |
 | PATCH | `/api/v1/robot-events/{eventId}/acknowledge` | `ROBOT_EVENT_ACKNOWLEDGE` | `OPERATOR+` | O | O |
 

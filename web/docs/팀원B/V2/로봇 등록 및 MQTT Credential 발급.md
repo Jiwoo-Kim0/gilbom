@@ -185,7 +185,7 @@ Response 예:
 
 이 응답에는 MQTT 비밀번호가 없다.
 
-### 5.3 Credential 발급 API
+### 5.3 Credential 발급·회전 API
 
 ```http
 POST /api/v1/robots/{robotId}/credentials
@@ -202,11 +202,15 @@ Backend와 Provisioner 처리:
 6. 새 username과 원문 비밀번호로 TLS MQTT 로그인을 검증한다.
 7. Mosquitto Password Hash와 SHA-256 Fingerprint를
    `robot_credential(ACTIVE)`에 저장한다.
-8. 로봇 운영 상태를 `ACTIVE`로 변경하고 같은 DB 트랜잭션에 감사 로그
-   `ROBOT_CREDENTIAL_ISSUED`를 저장한다.
-9. DB 트랜잭션이 실패하면 Provisioner가 추가한 Broker 계정을 제거한다.
-10. 원문을 제외한 결과만 멱등성 저장소에 기록한다.
-11. 마지막으로 원문 비밀번호를 한 번만 응답한다.
+8. ACTIVE Credential이 없으면 최초 버전을 만들고 로봇 운영 상태를 `ACTIVE`로
+   변경하며 `ROBOT_CREDENTIAL_ISSUED`를 기록한다.
+9. ACTIVE Credential이 있으면 기존 DB hash와 Broker hash가 일치할 때 같은
+   username의 비밀번호를 교체한다. 기존 버전은 `REVOKED(ROTATED)`, 새 버전은
+   `ACTIVE`로 저장하고 `ROBOT_CREDENTIAL_ROTATED`를 기록한다.
+10. 최초 발급의 DB 트랜잭션이 실패하면 추가한 Broker 계정을 제거한다. 회전의 DB
+    트랜잭션이 실패하면 교체 전 password hash를 복구한다.
+11. 원문을 제외한 결과만 멱등성 저장소에 기록한다.
+12. 마지막으로 원문 비밀번호를 한 번만 응답한다.
 
 성공 Response 예:
 
@@ -239,6 +243,9 @@ Analytics에 넣지 않는다. 화면을 닫으면 같은 원문을 다시 조�
 ```http
 GET  /api/v1/robots/{robotId}/credentials
 POST /api/v1/robots/{robotId}/credentials/{credentialId}/revoke
+Content-Type: application/json
+
+{"reason": "DEVICE_RETIRED"}
 ```
 
 조회 API가 반환할 수 있는 값:
@@ -246,8 +253,9 @@ POST /api/v1/robots/{robotId}/credentials/{credentialId}/revoke
 - Credential ID와 종류
 - 상태
 - 발급자와 발급시각
+- Credential 버전과 활성화 시각
 - 만료시각
-- 폐기시각
+- 폐기자·폐기시각·폐기 사유
 
 조회 API가 반환하면 안 되는 값:
 
@@ -257,6 +265,12 @@ secret_hash
 secret_fingerprint
 Mosquitto passwd 행
 ```
+
+폐기는 ACTIVE Credential에만 Broker 제거와 DB `REVOKED` 전이를 수행한다. 이미
+폐기된 Credential의 반복 요청은 Broker 작업과 감사 로그를 중복 수행하지 않고 현재
+상태를 반환한다. DB 변경이나 필수 감사 저장이 실패하면 이전 password hash를
+복구한다. password-file 방식은 폐기 이후 신규 연결과 재연결을 차단하지만 이미
+맺어진 연결의 즉시 강제 종료는 별도 Broker 운영 통제 경로가 필요하다.
 
 ## 6. 로봇에 Credential 등록
 
@@ -361,7 +375,9 @@ Credential만 발급되고 Presence가 없으면 `연결 대기`로 표시한다
 | Credential 발급 후 로봇 미연결 | `ACTIVE + OFFLINE`, 연결 대기 표시 |
 | 로봇 분실·탈취 | Credential 폐기, 연결 강제 종료, 로봇 `DISABLED` |
 | Credential 만료 | 최대 180일 이내 재발급·교체 |
-| Broker 반영 후 DB 실패 | Broker 계정 제거 보상 작업과 정합성 점검 |
+| 최초 발급 Broker 반영 후 DB 실패 | Broker 계정 제거 보상 작업과 정합성 점검 |
+| 회전·폐기 Broker 반영 후 DB 실패 | 교체·제거 전 password hash 복구와 정합성 점검 |
+| DB/Broker hash 불일치 | `MQTT_CREDENTIAL_REGISTRY_DRIFT`로 실패 폐쇄하고 수동 복구 |
 
 같은 username의 비밀번호를 교체하면 이전 비밀번호가 즉시 무효가 된다. 임베디드
 설정 변경과 Broker 반영 순서를 정한 Cutover 절차가 필요하다.
@@ -375,6 +391,9 @@ Credential만 발급되고 Presence가 없으면 `연결 대기`로 표시한다
 - Backend는 공유된 `local/runtime/credentials/passwd`를 제한된 권한으로 갱신한다.
 - Broker 실행 래퍼는 파일 변경을 감지해 Reload한다.
 - Backend는 새 Credential로 실제 TLS MQTT 로그인을 확인한 뒤 성공을 응답한다.
+- 같은 발급 API가 새 버전 회전을 수행하고, 조회·폐기 API가 Secret 없는 이력과
+  즉시 재연결 차단을 제공한다.
+- Robot 행 잠금으로 동시 회전을 직렬화하며 DB 실패 시 이전 Broker hash를 복구한다.
 - EC2 Profile은 운영 Credential 볼륨과 Reload 절차가 준비되기 전까지
   `MQTT_CREDENTIAL_PROVISIONING_ENABLED=false`로 실패 폐쇄한다.
 
@@ -411,3 +430,22 @@ Credential만 발급되고 Presence가 없으면 `연결 대기`로 표시한다
 - [ ] 최대 180일 회전과 즉시 폐기 절차
 - [ ] 발급·실패·재발급·폐기 감사 로그
 - [ ] EC2 Credential 전용 볼륨과 Reload 배포 구성
+
+## Registry Drift 탐지와 수동 복구 (2026-07-29)
+
+- `GET /api/v1/robots/{robotId}/credentials/registry-status`는
+  `IN_SYNC`, `MISSING`, `MISMATCH`, `ORPHANED` 중 하나만 반환하고 hash나
+  password를 반환하지 않는다.
+- `POST /api/v1/robots/{robotId}/credentials/registry-reconcile`는 DB ACTIVE
+  Credential을 기준으로 Broker verifier를 복구하거나 고아 계정을 제거한다.
+- 두 API는 `ROBOT_REGISTER` 권한과 로봇 객체 범위를 적용하며 변경 API는
+  CSRF와 1~100자 복구 사유가 필수다.
+- 정합성 검사는 기본 1분 주기로 재시도하고 제한된 cardinality Metric으로
+  drift와 검사 장애를 분리한다.
+- 수동 복구의 DB·감사 실패 시 Broker는 복구 전 상태로 보상한다.
+- 로컬 실제 TLS 검증은 다음 명령으로 수행한다.
+
+```bash
+docker compose run --no-deps --rm mqtt-init \
+  /bin/sh /mqtt-local/verify-credential-cutover.sh
+```

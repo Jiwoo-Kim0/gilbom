@@ -92,24 +92,109 @@ final class PasswordFileMqttCredentialProvisioner
                         "MQTT Broker에 이미 같은 로봇 계정이 있습니다.");
             }
 
-            runPasswordCommand(
-                    List.of(passwordCommand, passwordFile.toString(), username),
-                    password + System.lineSeparator()
-                            + password + System.lineSeparator());
-
-            String passwordHash = findPasswordHash(username);
-            if (passwordHash == null) {
-                removeBestEffort(username);
-                throw provisioningUnavailable(null);
-            }
-
             try {
+                runPasswordCommand(
+                        List.of(
+                                passwordCommand,
+                                passwordFile.toString(),
+                                username),
+                        password + System.lineSeparator()
+                                + password + System.lineSeparator());
+
+                String passwordHash = findPasswordHash(username);
+                if (passwordHash == null) {
+                    throw provisioningUnavailable(null);
+                }
                 verifyBrokerAuthentication(username, password);
+                return new ProvisionedMqttCredential(passwordHash);
             } catch (RuntimeException exception) {
                 removeBestEffort(username);
                 throw exception;
             }
-            return new ProvisionedMqttCredential(passwordHash);
+        } finally {
+            PASSWORD_FILE_LOCK.unlock();
+        }
+    }
+
+    @Override
+    public ProvisionedMqttCredential rotate(
+            String username,
+            String expectedPasswordHash,
+            String password
+    ) {
+        validateUsername(username);
+        validatePasswordHash(expectedPasswordHash);
+        if (password == null || password.isBlank()) {
+            throw new IllegalArgumentException("password must not be blank");
+        }
+
+        PASSWORD_FILE_LOCK.lock();
+        try {
+            verifyPasswordFile();
+            requireExpectedPasswordHash(username, expectedPasswordHash);
+
+            try {
+                runPasswordCommand(
+                        List.of(
+                                passwordCommand,
+                                passwordFile.toString(),
+                                username),
+                        password + System.lineSeparator()
+                                + password + System.lineSeparator());
+
+                String passwordHash = findPasswordHash(username);
+                if (passwordHash == null) {
+                    throw provisioningUnavailable(null);
+                }
+                verifyBrokerAuthentication(username, password);
+                return new ProvisionedMqttCredential(passwordHash);
+            } catch (RuntimeException exception) {
+                restoreBestEffort(username, expectedPasswordHash);
+                throw exception;
+            }
+        } finally {
+            PASSWORD_FILE_LOCK.unlock();
+        }
+    }
+
+    @Override
+    public void revoke(String username, String expectedPasswordHash) {
+        validateUsername(username);
+        validatePasswordHash(expectedPasswordHash);
+
+        PASSWORD_FILE_LOCK.lock();
+        try {
+            verifyPasswordFile();
+            requireExpectedPasswordHash(username, expectedPasswordHash);
+            try {
+                runPasswordCommand(
+                        List.of(
+                                passwordCommand,
+                                "-D",
+                                passwordFile.toString(),
+                                username),
+                        "");
+                if (findPasswordHash(username) != null) {
+                    throw provisioningUnavailable(null);
+                }
+            } catch (RuntimeException exception) {
+                restoreBestEffort(username, expectedPasswordHash);
+                throw exception;
+            }
+        } finally {
+            PASSWORD_FILE_LOCK.unlock();
+        }
+    }
+
+    @Override
+    public void restore(String username, String passwordHash) {
+        validateUsername(username);
+        validatePasswordHash(passwordHash);
+
+        PASSWORD_FILE_LOCK.lock();
+        try {
+            verifyPasswordFile();
+            replacePasswordHash(username, passwordHash);
         } finally {
             PASSWORD_FILE_LOCK.unlock();
         }
@@ -120,9 +205,75 @@ final class PasswordFileMqttCredentialProvisioner
         validateUsername(username);
         PASSWORD_FILE_LOCK.lock();
         try {
-            removeBestEffort(username);
+            try {
+                verifyPasswordFile();
+                removeBestEffort(username);
+            } catch (RuntimeException exception) {
+                log.error(
+                        "Could not remove a rolled-back MQTT credential. "
+                                + "username={}",
+                        username);
+            }
         } finally {
             PASSWORD_FILE_LOCK.unlock();
+        }
+    }
+
+    @Override
+    public CredentialRegistrySnapshot inspect(String username) {
+        validateUsername(username);
+        PASSWORD_FILE_LOCK.lock();
+        try {
+            verifyPasswordFile();
+            return new CredentialRegistrySnapshot(
+                    findPasswordHash(username));
+        } finally {
+            PASSWORD_FILE_LOCK.unlock();
+        }
+    }
+
+    private void requireExpectedPasswordHash(
+            String username,
+            String expectedPasswordHash
+    ) {
+        String actualPasswordHash = findPasswordHash(username);
+        if (!expectedPasswordHash.equals(actualPasswordHash)) {
+            throw new BusinessException(
+                    ErrorCode.MQTT_CREDENTIAL_REGISTRY_DRIFT);
+        }
+    }
+
+    private void replacePasswordHash(String username, String passwordHash) {
+        String prefix = username + ":";
+        try {
+            List<String> currentLines = Files.readAllLines(
+                    passwordFile,
+                    StandardCharsets.UTF_8);
+            java.util.ArrayList<String> updatedLines =
+                    new java.util.ArrayList<>(currentLines.size() + 1);
+            boolean replaced = false;
+            for (String line : currentLines) {
+                if (line.startsWith(prefix)) {
+                    if (!replaced) {
+                        updatedLines.add(prefix + passwordHash);
+                        replaced = true;
+                    }
+                    continue;
+                }
+                updatedLines.add(line);
+            }
+            if (!replaced) {
+                updatedLines.add(prefix + passwordHash);
+            }
+            Files.write(
+                    passwordFile,
+                    updatedLines,
+                    StandardCharsets.UTF_8);
+            if (!passwordHash.equals(findPasswordHash(username))) {
+                throw provisioningUnavailable(null);
+            }
+        } catch (IOException exception) {
+            throw provisioningUnavailable(exception);
         }
     }
 
@@ -260,10 +411,30 @@ final class PasswordFileMqttCredentialProvisioner
         }
     }
 
+    private void restoreBestEffort(String username, String passwordHash) {
+        try {
+            replacePasswordHash(username, passwordHash);
+        } catch (RuntimeException exception) {
+            log.error(
+                    "Could not restore a rolled-back MQTT credential. username={}",
+                    username);
+        }
+    }
+
     private void validateUsername(String username) {
         if (username == null
                 || !USERNAME_PATTERN.matcher(username).matches()) {
             throw new IllegalArgumentException("invalid MQTT username");
+        }
+    }
+
+    private void validatePasswordHash(String passwordHash) {
+        if (passwordHash == null
+                || passwordHash.isBlank()
+                || passwordHash.indexOf(':') >= 0
+                || passwordHash.indexOf('\r') >= 0
+                || passwordHash.indexOf('\n') >= 0) {
+            throw new IllegalArgumentException("invalid MQTT password hash");
         }
     }
 

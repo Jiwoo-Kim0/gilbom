@@ -14,6 +14,7 @@ public class MqttCredentialProvisioningProperties {
     private Duration processTimeout = Duration.ofSeconds(10);
     private Duration activationTimeout = Duration.ofSeconds(10);
     private Duration verificationInterval = Duration.ofMillis(250);
+    private Duration registryScanInterval = Duration.ofMinutes(1);
 
     public boolean isEnabled() {
         return enabled;
@@ -69,5 +70,13 @@ public class MqttCredentialProvisioningProperties {
 
     public void setVerificationInterval(Duration verificationInterval) {
         this.verificationInterval = verificationInterval;
+    }
+
+    public Duration getRegistryScanInterval() {
+        return registryScanInterval;
+    }
+
+    public void setRegistryScanInterval(Duration registryScanInterval) {
+        this.registryScanInterval = registryScanInterval;
     }
 }

@@ -45,6 +45,10 @@ public enum ErrorCode {
     COMMAND_NOT_FOUND(HttpStatus.NOT_FOUND, "명령을 찾을 수 없습니다."),
     REPORT_NOT_FOUND(HttpStatus.NOT_FOUND, "보고서를 찾을 수 없습니다."),
     IMAGE_NOT_FOUND(HttpStatus.NOT_FOUND, "이미지를 찾을 수 없습니다."),
+    ROBOT_CREDENTIAL_NOT_FOUND(
+            HttpStatus.NOT_FOUND,
+            "로봇 MQTT 인증정보를 찾을 수 없습니다."
+    ),
 
     COMMON_METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "지원하지 않는 HTTP 메서드입니다."),
 
@@ -62,6 +66,10 @@ public enum ErrorCode {
     ROBOT_CREDENTIAL_SECRET_ALREADY_ISSUED(
             HttpStatus.CONFLICT,
             "이미 처리된 인증정보 발급 요청입니다. 비밀번호는 다시 표시할 수 없습니다."
+    ),
+    ROBOT_CREDENTIAL_STATE_CONFLICT(
+            HttpStatus.CONFLICT,
+            "현재 로봇 MQTT 인증정보 상태에서는 요청을 수행할 수 없습니다."
     ),
 
     AUTH_EMAIL_ALREADY_REGISTERED(HttpStatus.CONFLICT, "이미 사용 중인 이메일입니다."),
@@ -142,6 +150,10 @@ public enum ErrorCode {
     MQTT_CREDENTIAL_PROVISIONING_UNAVAILABLE(
             HttpStatus.SERVICE_UNAVAILABLE,
             "MQTT 인증정보 발급 서비스를 일시적으로 사용할 수 없습니다."
+    ),
+    MQTT_CREDENTIAL_REGISTRY_DRIFT(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "DB와 MQTT Broker 인증정보가 일치하지 않습니다."
     ),
     MQTT_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "MQTT 서비스를 일시적으로 사용할 수 없습니다.");
 

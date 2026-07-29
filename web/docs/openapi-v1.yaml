@@ -1633,6 +1633,229 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /api/v1/robots/{robotId}/credentials:
+    get:
+      tags: [Robots]
+      operationId: listRobotCredentials
+      summary: 로봇 MQTT Credential 이력 조회
+      description: |
+        권한 범위 내 로봇의 Credential을 버전 내림차순으로 반환합니다.
+        password 원문, secret hash, fingerprint와 Mosquitto passwd 행은 반환하지 않습니다.
+      x-required-permission: ROBOT_REGISTER
+      security:
+        - serverSession: []
+      parameters:
+        - name: robotId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Secret이 제거된 Credential 수명주기 이력
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MqttCredentialListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [Robots]
+      operationId: issueOrRotateRobotCredential
+      summary: 로봇 MQTT Credential 최초 발급 또는 회전
+      description: |
+        ACTIVE Credential이 없으면 최초 버전을 발급하고, 있으면 같은 MQTT username의
+        password를 교체한 뒤 기존 버전을 REVOKED(ROTATED), 새 버전을 ACTIVE로 저장합니다.
+        새 password는 이 응답에서 한 번만 반환되며 멱등 재요청으로 다시 조회할 수 없습니다.
+        DB 반영 실패 시 Broker 계정을 제거하거나 이전 password hash로 복구합니다.
+      x-required-permission: ROBOT_REGISTER
+      security:
+        - serverSession: []
+      parameters:
+        - name: robotId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "201":
+          description: 최초 발급 또는 회전 완료
+          headers:
+            Location:
+              description: 생성된 Credential 식별 경로
+              schema:
+                type: string
+            Cache-Control:
+              description: one-time secret 응답 저장 금지
+              schema:
+                type: string
+                example: no-store
+            Pragma:
+              description: 레거시 캐시 저장 금지
+              schema:
+                type: string
+                example: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MqttCredentialIssuanceResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/robots/{robotId}/credentials/registry-status:
+    get:
+      tags: [Robots]
+      operationId: getRobotCredentialRegistryStatus
+      summary: DB·Mosquitto Credential Registry 정합성 조회
+      description: |
+        활성 DB Credential verifier와 Mosquitto password-file의 상태를 비교합니다.
+        verifier, fingerprint, password는 반환하지 않으며 IN_SYNC, MISSING,
+        MISMATCH, ORPHANED 상태만 반환합니다.
+      x-required-permission: ROBOT_REGISTER
+      security:
+        - serverSession: []
+      parameters:
+        - name: robotId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Secret이 제거된 Registry 정합성 상태
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MqttCredentialRegistryStatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/robots/{robotId}/credentials/registry-reconcile:
+    post:
+      tags: [Robots]
+      operationId: reconcileRobotCredentialRegistry
+      summary: DB 기준 Mosquitto Credential Registry 수동 복구
+      description: |
+        DB에 활성 Credential이 있으면 해당 verifier를 Mosquitto에 복구하고,
+        활성 Credential이 없으면 남아 있는 Broker 계정을 제거합니다.
+        작업 뒤 정합성을 다시 검사하며 DB 또는 필수 감사 로그가 실패하면
+        작업 전 Broker 상태로 보상합니다.
+      x-required-permission: ROBOT_REGISTER
+      security:
+        - serverSession: []
+      parameters:
+        - name: robotId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MqttCredentialRegistryReconciliationRequest"
+      responses:
+        "200":
+          description: 복구 뒤 Registry 정합성 상태
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MqttCredentialRegistryStatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/robots/{robotId}/credentials/{credentialId}/revoke:
+    post:
+      tags: [Robots]
+      operationId: revokeRobotCredential
+      summary: 로봇 MQTT Credential 즉시 폐기
+      description: |
+        ACTIVE Credential의 Broker 계정을 제거하고 DB 상태를 REVOKED로 전환합니다.
+        DB 반영이 실패하면 이전 password hash를 복구합니다. 이미 REVOKED인 동일
+        Credential 요청은 Broker와 감사 로그를 다시 변경하지 않고 현재 상태를 반환합니다.
+        password-file 인증 방식에서는 폐기 후 신규 연결과 재연결을 거부하며, 이미 맺어진
+        연결의 강제 종료는 Broker 운영 통제 경로에서 수행합니다.
+      x-required-permission: ROBOT_REGISTER
+      security:
+        - serverSession: []
+      parameters:
+        - name: robotId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: credentialId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MqttCredentialRevocationRequest"
+      responses:
+        "200":
+          description: 폐기된 Credential 안전 메타데이터
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MqttCredentialResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /api/v1/robots/{robotId}/commands:
     get:
       tags: [Robots]
@@ -4362,6 +4585,176 @@ components:
           items:
             $ref: "#/components/schemas/StatisticsByPeriodItem"
 
+    MqttCredentialStatus:
+      type: string
+      enum:
+        - PENDING
+        - ACTIVE
+        - REVOKED
+        - EXPIRED
+        - FAILED
+
+    MqttCredentialResponse:
+      type: object
+      required:
+        - credentialId
+        - credentialType
+        - credentialVersion
+        - credentialStatus
+        - issuedBy
+        - issuedAt
+        - expiresAt
+      additionalProperties: false
+      properties:
+        credentialId:
+          type: string
+          format: uuid
+        credentialType:
+          type: string
+          enum: [MQTT_PASSWORD]
+        credentialVersion:
+          type: integer
+          minimum: 1
+        credentialStatus:
+          $ref: "#/components/schemas/MqttCredentialStatus"
+        issuedBy:
+          type: string
+          format: uuid
+        issuedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        activatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        revokedBy:
+          type: string
+          format: uuid
+          nullable: true
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+        revocationReason:
+          type: string
+          maxLength: 100
+          nullable: true
+
+    MqttCredentialListResponse:
+      type: object
+      required: [credentials]
+      additionalProperties: false
+      properties:
+        credentials:
+          type: array
+          items:
+            $ref: "#/components/schemas/MqttCredentialResponse"
+
+    MqttCredentialRevocationRequest:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 100
+
+    MqttCredentialRegistryStatus:
+      type: string
+      enum:
+        - IN_SYNC
+        - MISSING
+        - MISMATCH
+        - ORPHANED
+
+    MqttCredentialRegistryStatusResponse:
+      type: object
+      required:
+        - robotId
+        - mqttId
+        - registryStatus
+        - driftDetected
+        - checkedAt
+      additionalProperties: false
+      properties:
+        robotId:
+          type: string
+          format: uuid
+        mqttId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        registryStatus:
+          $ref: "#/components/schemas/MqttCredentialRegistryStatus"
+        driftDetected:
+          type: boolean
+        activeCredentialId:
+          type: string
+          format: uuid
+          nullable: true
+        activeCredentialVersion:
+          type: integer
+          minimum: 1
+          nullable: true
+        checkedAt:
+          type: string
+          format: date-time
+
+    MqttCredentialRegistryReconciliationRequest:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 100
+
+    MqttCredentialIssuanceResponse:
+      type: object
+      required:
+        - credentialId
+        - credentialType
+        - mqtt
+        - expiresAt
+      additionalProperties: false
+      properties:
+        credentialId:
+          type: string
+          format: uuid
+        credentialType:
+          type: string
+          enum: [MQTT_PASSWORD]
+        mqtt:
+          $ref: "#/components/schemas/MqttCredentialConnection"
+        expiresAt:
+          type: string
+          format: date-time
+
+    MqttCredentialConnection:
+      type: object
+      required: [brokerUri, username, password, clientId]
+      additionalProperties: false
+      properties:
+        brokerUri:
+          type: string
+          example: ssl://mqtt.example.com:8883
+        username:
+          type: string
+          example: RBT-001
+        password:
+          type: string
+          format: password
+          readOnly: true
+          description: 이 응답에서만 한 번 표시되는 생성 Secret
+        clientId:
+          type: string
+          example: RBT-001
+
     RobotCommandType:
       type: string
       enum:
@@ -5126,6 +5519,7 @@ components:
         - COMMAND_NOT_FOUND
         - REPORT_NOT_FOUND
         - IMAGE_NOT_FOUND
+        - ROBOT_CREDENTIAL_NOT_FOUND
         - COMMON_METHOD_NOT_ALLOWED
         - COMMON_CONFLICT
         - ROBOT_SERIAL_NUMBER_CONFLICT
@@ -5133,6 +5527,9 @@ components:
         - PATROL_AREA_STATE_CONFLICT
         - PATROL_AREA_IN_USE
         - PATROL_ROUTE_VERSION_CONFLICT
+        - ROBOT_CREDENTIAL_CONFLICT
+        - ROBOT_CREDENTIAL_SECRET_ALREADY_ISSUED
+        - ROBOT_CREDENTIAL_STATE_CONFLICT
         - AUTH_EMAIL_ALREADY_REGISTERED
         - COMMAND_STATE_CONFLICT
         - MISSION_STATE_CONFLICT
@@ -5160,6 +5557,8 @@ components:
         - S3_UNAVAILABLE
         - MQTT_CERTIFICATE_NOT_X509
         - MQTT_SECURITY_CONFIGURATION_INVALID
+        - MQTT_CREDENTIAL_PROVISIONING_UNAVAILABLE
+        - MQTT_CREDENTIAL_REGISTRY_DRIFT
         - MQTT_UNAVAILABLE
 
     ValidationErrorDetail:

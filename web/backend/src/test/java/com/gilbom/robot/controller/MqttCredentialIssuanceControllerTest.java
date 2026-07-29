@@ -8,12 +8,14 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -22,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -35,6 +38,9 @@ import com.gilbom.common.web.RequestBodySizeLimitFilter;
 import com.gilbom.common.web.RequestIdFilter;
 import com.gilbom.robot.api.MqttCredentialIssuanceController;
 import com.gilbom.robot.credential.MqttCredentialIssuanceService;
+import com.gilbom.robot.credential.MqttCredentialRegistryService;
+import com.gilbom.robot.data.api.response.MqttCredentialResponse;
+import com.gilbom.robot.data.api.response.MqttCredentialRegistryStatusResponse;
 import com.gilbom.robot.data.application.result.IssuedMqttCredential;
 import com.gilbom.security.config.SecurityConfig;
 import com.gilbom.security.web.SecurityErrorResponseWriter;
@@ -70,6 +76,9 @@ class MqttCredentialIssuanceControllerTest {
 
     @MockitoBean
     private MqttCredentialIssuanceService issuanceService;
+
+    @MockitoBean
+    private MqttCredentialRegistryService registryService;
 
     @MockitoBean
     private SessionSecurityStateRepository sessionSecurityStateRepository;
@@ -168,5 +177,224 @@ class MqttCredentialIssuanceControllerTest {
                 .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")));
 
         verifyNoInteractions(issuanceService);
+    }
+
+    @Test
+    void listsCredentialMetadataWithoutCsrfToken() throws Exception {
+        Instant issuedAt = Instant.parse("2026-07-29T07:00:00Z");
+        Instant expiresAt = Instant.parse("2027-01-25T07:00:00Z");
+        MqttCredentialResponse credential =
+                new MqttCredentialResponse(
+                        CREDENTIAL_ID,
+                        "MQTT_PASSWORD",
+                        1,
+                        "ACTIVE",
+                        ACTOR_USER_ID,
+                        issuedAt,
+                        expiresAt,
+                        issuedAt,
+                        null,
+                        null,
+                        null);
+        when(issuanceService.list(ROBOT_ID, ACTOR_USER_ID))
+                .thenReturn(List.of(credential));
+
+        mockMvc.perform(get(
+                        "/api/v1/robots/{robotId}/credentials",
+                        ROBOT_ID)
+                        .with(user(ACTOR_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER)))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath(
+                        "$.credentials[0].credentialId",
+                        is(CREDENTIAL_ID.toString())))
+                .andExpect(jsonPath(
+                        "$.credentials[0].credentialStatus",
+                        is("ACTIVE")))
+                .andExpect(jsonPath("$.credentials[0].password")
+                        .doesNotExist())
+                .andExpect(jsonPath("$.credentials[0].secretHash")
+                        .doesNotExist())
+                .andExpect(jsonPath(
+                        "$.credentials[0].secretFingerprint")
+                        .doesNotExist());
+
+        verify(issuanceService).list(ROBOT_ID, ACTOR_USER_ID);
+    }
+
+    @Test
+    void revokesCredentialWithReasonAndCsrfProtection()
+            throws Exception {
+        Instant issuedAt = Instant.parse("2026-07-29T07:00:00Z");
+        Instant expiresAt = Instant.parse("2027-01-25T07:00:00Z");
+        Instant revokedAt = Instant.parse("2026-07-29T08:00:00Z");
+        MqttCredentialResponse revoked =
+                new MqttCredentialResponse(
+                        CREDENTIAL_ID,
+                        "MQTT_PASSWORD",
+                        1,
+                        "REVOKED",
+                        ACTOR_USER_ID,
+                        issuedAt,
+                        expiresAt,
+                        issuedAt,
+                        ACTOR_USER_ID,
+                        revokedAt,
+                        "DEVICE_RETIRED");
+        when(issuanceService.revoke(
+                ROBOT_ID,
+                CREDENTIAL_ID,
+                ACTOR_USER_ID,
+                "DEVICE_RETIRED",
+                REQUEST_ID))
+                .thenReturn(revoked);
+
+        mockMvc.perform(post(
+                        "/api/v1/robots/{robotId}/credentials/"
+                                + "{credentialId}/revoke",
+                        ROBOT_ID,
+                        CREDENTIAL_ID)
+                        .with(user(ACTOR_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER))
+                        .with(csrf().asHeader())
+                        .header(RequestIdFilter.HEADER_NAME, REQUEST_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reason": " DEVICE_RETIRED "
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath(
+                        "$.credentialStatus",
+                        is("REVOKED")))
+                .andExpect(jsonPath(
+                        "$.revocationReason",
+                        is("DEVICE_RETIRED")));
+
+        verify(issuanceService).revoke(
+                ROBOT_ID,
+                CREDENTIAL_ID,
+                ACTOR_USER_ID,
+                "DEVICE_RETIRED",
+                REQUEST_ID);
+    }
+
+    @Test
+    void requiresCsrfProtectionForCredentialRevocation()
+            throws Exception {
+        mockMvc.perform(post(
+                        "/api/v1/robots/{robotId}/credentials/"
+                                + "{credentialId}/revoke",
+                        ROBOT_ID,
+                        CREDENTIAL_ID)
+                        .with(user(ACTOR_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reason": "DEVICE_RETIRED"
+                                }
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")));
+
+        verifyNoInteractions(issuanceService);
+    }
+
+    @Test
+    void returnsSafeCredentialRegistryStatusWithoutCsrfToken()
+            throws Exception {
+        Instant checkedAt = Instant.parse("2026-07-29T08:30:00Z");
+        when(registryService.status(ROBOT_ID, ACTOR_USER_ID))
+                .thenReturn(new MqttCredentialRegistryStatusResponse(
+                        ROBOT_ID,
+                        "RBT-001",
+                        "MISMATCH",
+                        true,
+                        CREDENTIAL_ID,
+                        2,
+                        checkedAt));
+
+        mockMvc.perform(get(
+                        "/api/v1/robots/{robotId}/credentials/"
+                                + "registry-status",
+                        ROBOT_ID)
+                        .with(user(ACTOR_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER)))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.registryStatus", is("MISMATCH")))
+                .andExpect(jsonPath("$.driftDetected", is(true)))
+                .andExpect(jsonPath("$.secretHash").doesNotExist())
+                .andExpect(jsonPath("$.passwordHash").doesNotExist());
+
+        verify(registryService).status(ROBOT_ID, ACTOR_USER_ID);
+    }
+
+    @Test
+    void reconcilesCredentialRegistryWithCsrfAndReason()
+            throws Exception {
+        when(registryService.reconcile(
+                ROBOT_ID,
+                ACTOR_USER_ID,
+                "MANUAL_RECOVERY",
+                REQUEST_ID))
+                .thenReturn(new MqttCredentialRegistryStatusResponse(
+                        ROBOT_ID,
+                        "RBT-001",
+                        "IN_SYNC",
+                        false,
+                        CREDENTIAL_ID,
+                        2,
+                        Instant.parse("2026-07-29T08:31:00Z")));
+
+        mockMvc.perform(post(
+                        "/api/v1/robots/{robotId}/credentials/"
+                                + "registry-reconcile",
+                        ROBOT_ID)
+                        .with(user(ACTOR_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER))
+                        .with(csrf().asHeader())
+                        .header(RequestIdFilter.HEADER_NAME, REQUEST_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reason": " MANUAL_RECOVERY "
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.registryStatus", is("IN_SYNC")))
+                .andExpect(jsonPath("$.driftDetected", is(false)));
+
+        verify(registryService).reconcile(
+                ROBOT_ID,
+                ACTOR_USER_ID,
+                "MANUAL_RECOVERY",
+                REQUEST_ID);
+    }
+
+    @Test
+    void requiresCsrfForCredentialRegistryReconciliation()
+            throws Exception {
+        mockMvc.perform(post(
+                        "/api/v1/robots/{robotId}/credentials/"
+                                + "registry-reconcile",
+                        ROBOT_ID)
+                        .with(user(ACTOR_USER_ID.toString())
+                                .authorities(ROBOT_REGISTER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reason": "MANUAL_RECOVERY"
+                                }
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")));
+
+        verifyNoInteractions(registryService);
     }
 }

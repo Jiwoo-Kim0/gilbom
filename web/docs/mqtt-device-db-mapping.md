@@ -742,7 +742,19 @@ topic write tbs/v1/robots/+/ingest/receipt
 | Mosquitto `passwd` | Broker가 로그인 시 실제로 조회하는 Password Verifier |
 | Mosquitto `acl` | 로그인한 Principal이 읽고 쓸 수 있는 Topic 제한 |
 
-따라서 DB에 `robot_credential` 행을 추가하는 것만으로 Broker 계정이 생성되지는 않는다. Credential 발급·회전·폐기 서비스는 DB Registry와 Mosquitto 인증 저장소를 함께 갱신하거나, 이후 두 저장소를 일관되게 관리할 Provisioning 방식을 구현해야 한다.
+따라서 DB에 `robot_credential` 행을 추가하는 것만으로 Broker 계정이 생성되지는
+않는다. 현재 Credential 서비스는 최초 발급 시 Broker 계정 생성 후 DB ACTIVE를
+저장하고, 회전 시 DB의 활성 hash와 Broker hash가 같을 때 같은 username의
+비밀번호를 교체한다. 기존 버전은 `REVOKED(ROTATED)`, 새 버전은 `ACTIVE`가 된다.
+폐기는 예상 hash가 일치하는 ACTIVE 계정을 Broker에서 제거한 뒤 DB를 `REVOKED`로
+전환한다. Robot 행 `FOR UPDATE` 잠금으로 버전을 직렬화하며, Broker 반영 후 DB나
+필수 감사가 실패하면 최초 발급은 계정을 제거하고 회전·폐기는 이전 hash를 복구한다.
+불일치는 `MQTT_CREDENTIAL_REGISTRY_DRIFT`로 실패 폐쇄한다.
+
+이 보상은 요청 단위 정합성 통제다. 주기적 Drift 탐지·경보·자동 복구와 실제 TLS
+Broker에서 이전 Secret 거부·새 Secret 허용·폐기 후 재연결 거부를 확인하는 E2E는
+별도 운영 정합성 작업으로 추적한다. password-file 방식에서 이미 맺어진 연결의 즉시
+강제 종료도 Broker 운영 통제 경로가 담당한다.
 
 ### 12.3 Replay와 명령 안전
 
@@ -909,3 +921,42 @@ Spring MQTT Properties·Connection Config·Contract Test
 10. B의 최종 테이블은 DDL에 있으나 현재 Flyway에는 없으므로 별도 Version Migration이 필요하다.
 11. DB는 Bootstrap, Flyway, Runtime Role을 분리하고 Runtime에는 최소 DML만 부여한다.
 12. MQTT는 TLS, 기기별 계정, 최소 Topic ACL, 명령 TTL·Retain 금지를 적용한다.
+
+---
+
+## DB Registry·Mosquitto Drift 운영 정책 (2026-07-29)
+
+Credential 정합성의 기준은 `robot.robot_credential`의 ACTIVE
+`secret_hash`이며 Mosquitto `passwd`는 실행 Registry다.
+
+| 상태 | 판정 | 수동 복구 |
+| --- | --- | --- |
+| `IN_SYNC` | DB ACTIVE hash와 Broker hash가 같거나 양쪽 모두 없음 | 변경 없음 |
+| `MISSING` | DB ACTIVE는 있으나 Broker 계정 없음 | DB hash를 Broker에 복구 |
+| `MISMATCH` | DB ACTIVE hash와 Broker hash가 다름 | DB hash를 Broker에 복구 |
+| `ORPHANED` | DB ACTIVE는 없으나 Broker 계정이 남음 | Broker 계정 제거 |
+
+- 회전·폐기 요청은 기대 hash가 다르면
+  `MQTT_CREDENTIAL_REGISTRY_DRIFT`로 fail-closed한다.
+- `mqtt.credential-provisioning.registry-scan-interval` 주기로 전체 로봇을
+  재검사하며 기본값은 1분이다. 이 주기 검사가 장애 뒤 자동 재시도다.
+- Metric은 `gilbom.mqtt.credential.registry.checks{result}`와
+  `gilbom.mqtt.credential.registry.drift.current`,
+  `gilbom.mqtt.credential.registry.inspection.errors.current`를 사용한다.
+  robot ID, mqtt ID, credential ID, hash는 tag로 넣지 않는다.
+- 운영 경보는 drift current 또는 inspection errors current가 0보다 큰
+  상태로 2회 연속 수집될 때 발생시키고, 먼저 status API로 상태를 확인한
+  뒤 승인된 관리자가 reconcile API를 호출한다.
+- 수동 복구는 `ROBOT_REGISTER`, 객체 범위, CSRF를 적용하며
+  `ROBOT_CREDENTIAL_REGISTRY_RECONCILED` 필수 감사를 남긴다. 감사 또는 DB
+  트랜잭션이 실패하면 작업 전 Broker verifier 상태로 보상한다.
+- 실제 TLS Cutover는
+  `infra/mosquitto/local/verify-credential-cutover.sh`로 검증한다. 임시
+  계정 외 기존 계정은 수정하지 않으며 평문 Secret을 출력하지 않는다.
+- `S15P11D101-435`의 완료 근거는 로컬 Docker·TLS Mosquitto 검증이다.
+  EC2 운영 환경에서는 공유 password-file 볼륨, UID/GID·파일 권한, TLS
+  인증서·호스트명, Compose 네트워크, Secret 주입과 재배포 후 영속성을
+  동일 절차로 다시 검증한다.
+- Cutover 스크립트와 Credential 회전·폐기·수동 reconcile은 같은
+  password-file을 변경하므로 동시에 실행하지 않는다. 실제 Jetson의 보호된
+  Secret 교체와 재연결은 장비 통합 단계에서 별도로 확인한다.

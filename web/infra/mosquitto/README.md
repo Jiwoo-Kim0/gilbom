@@ -71,6 +71,41 @@ Git에 커밋하지 않는다. 새로 저장소를 받은 개발자는
 
 환경별 실행 방법은 [`PROFILES.md`](./PROFILES.md)를 참고한다.
 
+## Credential 회전·폐기 TLS Cutover 검증
+
+로컬 Mosquitto가 실행 중일 때 `web/`에서 다음 일회성 검증 컨테이너를 실행한다.
+
+```bash
+docker compose run --no-deps --rm mqtt-init \
+  /bin/sh /mqtt-local/verify-credential-cutover.sh
+```
+
+스크립트는 임시 로봇 계정을 생성해 TLS password-file Cutover 전체를 확인한다.
+
+- 최초 Secret 허용
+- 회전 뒤 이전 Secret 거부와 새 Secret 허용
+- 보상 처리 뒤 이전 verifier 복구와 회전 Secret 거부
+- 폐기 뒤 재연결 거부
+
+평문 Secret은 출력하지 않으며 종료 시 임시 계정을 제거한다. password-file을 실제로
+변경하므로 로컬 격리 Broker에서만 실행한다.
+
+Windows Docker Desktop bind mount는 passwd 변경이 Broker 컨테이너에 보일
+때까지 지연될 수 있어 단계별 최대 120초를 기다린다. 필요하면
+`MQTT_CUTOVER_MAX_ATTEMPTS`로 초 단위 재시도 횟수를 조정한다. 제한 시간 안에
+reload되지 않으면 성공으로 간주하지 않고 실패한다.
+보상 verifier를 직접 복구한 뒤에는 password-file을 다시 `root:1883`,
+`0660`으로 맞춘다. Mosquitto의 root-owner 요구를 만족하면서 uid/gid 1883인
+Broker와 Backend가 group 권한으로 읽고 쓸 수 있게 한다.
+
+검증 컨테이너에서 `mosquitto` DNS가 해석되지 않으면 컨테이너가 과거
+`gilbom_default` 네트워크에 남아 있는지 확인하고, 임시 `network connect` 대신
+현재 Compose 명세로 Broker만 재생성한다.
+
+```bash
+docker compose up -d --no-deps --force-recreate mosquitto
+```
+
 ## 로컬 PC와 팀원 로봇 PC의 LAN 통신
 
 두 PC가 같은 Wi-Fi 또는 같은 사설망에 있으면 ngrok이나 공유기 포트포워딩 없이
