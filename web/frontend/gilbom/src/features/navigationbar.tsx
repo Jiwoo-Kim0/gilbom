@@ -2,6 +2,7 @@ import {
   BarChart3,
   Bot,
   CircleDot,
+  ClipboardList,
   FileClock,
   ShieldCheck,
   User,
@@ -11,6 +12,8 @@ import gilbomLogo from '../assets/gilbom_logo.png'
 import {
   ADMIN_SETTINGS_MANAGE,
   AUDIT_LOG_VIEW,
+  MISSION_VIEW,
+  ROBOT_STATUS_VIEW,
   hasPermission,
   type FrontendPermission,
 } from './auth/permissions'
@@ -45,7 +48,13 @@ const navigationItems: readonly NavigationItem[] = [
     to: '/robots',
     label: '로봇 상태 관리',
     icon: Bot,
-    requiredPermission: null,
+    requiredPermission: ROBOT_STATUS_VIEW,
+  },
+  {
+    to: '/missions',
+    label: '순찰 임무 관리',
+    icon: ClipboardList,
+    requiredPermission: MISSION_VIEW,
   },
   {
     to: '/reports',

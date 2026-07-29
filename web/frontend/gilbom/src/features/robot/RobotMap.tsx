@@ -26,17 +26,25 @@ const DEFAULT_ZOOM = 14
 
 const naverMapClientId = import.meta.env.VITE_NAVER_MAP_CLIENT_ID
 
-function createMarkerIcon(maps: typeof naver.maps, status: RobotStatus): naver.maps.MarkerIcon {
+function createMarkerIcon(
+  maps: typeof naver.maps,
+  status: RobotStatus,
+  headingDeg: number | null,
+): naver.maps.MarkerIcon {
+  const heading = headingDeg === null || !Number.isFinite(headingDeg)
+    ? 0
+    : headingDeg
   return {
-    content: `<span style="display:block;width:16px;height:16px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 2px 6px rgba(23,34,28,0.35);background:${statusColor[status]}"></span>`,
-    size: new maps.Size(16, 16),
-    anchor: new maps.Point(8, 16),
+    content: `<span style="display:grid;width:28px;height:28px;border-radius:50%;place-items:center;border:2px solid #fff;box-shadow:0 2px 6px rgba(23,34,28,0.35);color:#fff;background:${statusColor[status]}"><span style="display:block;font-size:14px;line-height:1;transform:rotate(${heading}deg)">↑</span></span>`,
+    size: new maps.Size(28, 28),
+    anchor: new maps.Point(14, 14),
   }
 }
 
 export function RobotMap({ markers = [] }: RobotMapProps) {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<naver.maps.Map | null>(null)
+  const hasCenteredOnRobotRef = useRef(false)
   const [mapStatus, setMapStatus] = useState<'loading' | 'ready' | 'error'>(() =>
     naverMapClientId ? 'loading' : 'error',
   )
@@ -72,13 +80,19 @@ export function RobotMap({ markers = [] }: RobotMapProps) {
 
     const { maps } = window.naver
     const map = mapRef.current
+    if (!hasCenteredOnRobotRef.current && markers.length > 0) {
+      map.setCenter(new maps.LatLng(markers[0].lat, markers[0].lng))
+      hasCenteredOnRobotRef.current = true
+    }
     const markerObjects = markers.map(
       (marker) =>
         new maps.Marker({
           position: new maps.LatLng(marker.lat, marker.lng),
           map,
-          icon: createMarkerIcon(maps, marker.status),
-          title: marker.id,
+          icon: createMarkerIcon(maps, marker.status, marker.headingDeg),
+          title: `${marker.name} · 방위 ${
+            marker.headingDeg === null ? '미수신' : `${marker.headingDeg.toFixed(0)}°`
+          }`,
         }),
     )
 

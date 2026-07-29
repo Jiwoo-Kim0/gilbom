@@ -3,6 +3,7 @@ import type { RobotFleetItem, RobotStatus } from './robotTypes'
 
 interface RobotFleetGridProps {
   robots?: RobotFleetItem[]
+  loading?: boolean
 }
 
 const statusLabel: Record<RobotStatus, string> = {
@@ -12,18 +13,50 @@ const statusLabel: Record<RobotStatus, string> = {
   offline: 'OFFLINE',
 }
 
-export function RobotFleetGrid({ robots = [] }: RobotFleetGridProps) {
+function formatMetric(value: number | null, suffix: string): string {
+  return value === null ? '—' : `${value.toFixed(1)}${suffix}`
+}
+
+function formatLastReceivedAt(value: string | null): string {
+  if (value === null) {
+    return '수신 이력 없음'
+  }
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return value
+  }
+  return new Intl.DateTimeFormat('ko-KR', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(parsed)
+}
+
+export function RobotFleetGrid({
+  robots = [],
+  loading = false,
+}: RobotFleetGridProps) {
   return (
     <section className="robot-fleet-section" aria-label="함대 상세 현황">
-      <h3 className="robot-fleet-heading">함대 상세 현황</h3>
+      <div className="robot-fleet-heading-row">
+        <h3 className="robot-fleet-heading">함대 상세 현황</h3>
+        {loading && <span className="robot-fleet-refreshing">최신 상태 확인 중…</span>}
+      </div>
 
       {robots.length === 0 ? (
         <article className="content-card empty-state robot-fleet-empty">
           <span className="empty-state-icon" aria-hidden="true">
             RO
           </span>
-          <h3>로봇 상세 현황을 연결할 준비가 되었습니다.</h3>
-          <p>로봇 상태 API가 연결되면 배터리·온도·속도·가동 시간을 이 카드에서 확인할 수 있습니다.</p>
+          <h3>{loading ? '로봇 상태를 불러오는 중입니다.' : '조회 가능한 로봇이 없습니다.'}</h3>
+          <p>
+            {loading
+              ? '배정된 로봇의 최신 운영 데이터를 확인하고 있습니다.'
+              : '검색 조건과 사용자 로봇 배정 범위를 확인해주세요.'}
+          </p>
         </article>
       ) : (
         <div className="robot-fleet-grid">
@@ -33,14 +66,17 @@ export function RobotFleetGrid({ robots = [] }: RobotFleetGridProps) {
               className={`content-card robot-fleet-card robot-fleet-card-${robot.status}`}
             >
               <div className="robot-fleet-card-head">
-                <span className="robot-fleet-id">
+                <div className="robot-fleet-identity">
                   <span className="robot-fleet-avatar" aria-hidden="true" />
-                  {robot.id}
-                </span>
+                  <span>
+                    <strong>{robot.name}</strong>
+                    <small>{robot.mqttId}</small>
+                  </span>
+                </div>
                 <button
                   className="robot-fleet-menu-button"
                   type="button"
-                  aria-label={`${robot.id} 옵션`}
+                  aria-label={`${robot.name} 옵션`}
                   disabled
                 >
                   <MoreVertical size={16} aria-hidden="true" />
@@ -57,32 +93,48 @@ export function RobotFleetGrid({ robots = [] }: RobotFleetGridProps) {
                   <div className="robot-battery-bar">
                     <span
                       className="robot-battery-bar-fill"
-                      style={{ width: `${Math.max(0, Math.min(100, robot.batteryPercent))}%` }}
+                      style={{
+                        width: `${
+                          robot.batteryPercent === null
+                            ? 0
+                            : Math.max(0, Math.min(100, robot.batteryPercent))
+                        }%`,
+                      }}
                     />
                   </div>
-                  <strong>{robot.batteryPercent}%</strong>
+                  <strong>
+                    {robot.batteryPercent === null
+                      ? '—'
+                      : `${robot.batteryPercent.toFixed(0)}%`}
+                  </strong>
                 </div>
                 <div className="robot-fleet-metric">
-                  <span>CPU 온도</span>
+                  <span>Jetson 온도</span>
                   <strong>
                     <Thermometer size={14} aria-hidden="true" />
-                    {robot.cpuTempC.toFixed(1)}°C
+                    {formatMetric(robot.jetsonTempC, '°C')}
                   </strong>
                 </div>
                 <div className="robot-fleet-metric">
                   <span>현재 속도</span>
                   <strong>
                     <Gauge size={14} aria-hidden="true" />
-                    {robot.speedMps.toFixed(1)} m/s
+                    {formatMetric(robot.speedMps, ' m/s')}
                   </strong>
                 </div>
                 <div className="robot-fleet-metric">
-                  <span>가동 시간</span>
+                  <span>마지막 통신</span>
                   <strong>
                     <Clock size={14} aria-hidden="true" />
-                    {robot.uptimeLabel}
+                    {formatLastReceivedAt(robot.lastReceivedAt)}
                   </strong>
                 </div>
+              </div>
+
+              <div className="robot-fleet-context">
+                <span>모드 <strong>{robot.robotMode ?? '—'}</strong></span>
+                <span>임무 <strong>{robot.missionStatus ?? '—'}</strong></span>
+                <span>상태 <strong>{robot.overallHealthStatus}</strong></span>
               </div>
             </article>
           ))}

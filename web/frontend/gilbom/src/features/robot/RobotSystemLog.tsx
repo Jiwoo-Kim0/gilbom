@@ -11,6 +11,21 @@ const levelIcon: Record<RobotLogLevel, typeof Info> = {
   success: CheckCircle2,
 }
 
+function formatTimestamp(value: string): string {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return value
+  }
+  return new Intl.DateTimeFormat('ko-KR', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(parsed)
+}
+
 export function RobotSystemLog({ logs = [] }: RobotSystemLogProps) {
   return (
     <article className="content-card robot-log-card">
@@ -26,7 +41,7 @@ export function RobotSystemLog({ logs = [] }: RobotSystemLogProps) {
           <span className="empty-state-icon" aria-hidden="true">
             LOG
           </span>
-          <p>로봇 이벤트 API가 연결되면 실시간 시스템 로그가 이곳에 표시됩니다.</p>
+          <p>실시간 연결 후 수신한 로봇 상태 변경이 이곳에 표시됩니다.</p>
         </div>
       ) : (
         <ul className="robot-log-list">
@@ -40,7 +55,7 @@ export function RobotSystemLog({ logs = [] }: RobotSystemLogProps) {
                 <div className="robot-log-body">
                   <div className="robot-log-meta">
                     <strong>{log.robotId}</strong>
-                    <span>{log.timestamp}</span>
+                    <span>{formatTimestamp(log.timestamp)}</span>
                   </div>
                   <p>{log.message}</p>
                 </div>

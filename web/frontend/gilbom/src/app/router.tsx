@@ -10,6 +10,8 @@ import {
 import {
   ADMIN_SETTINGS_MANAGE,
   AUDIT_LOG_VIEW,
+  MISSION_VIEW,
+  ROBOT_STATUS_VIEW,
 } from '../features/auth/permissions'
 import { AdminWorkspaceLayout } from '../features/admin/AdminWorkspaceLayout'
 import { AdminApprovalsPage } from '../features/admin/AdminApprovalsPage'
@@ -27,6 +29,7 @@ import { NotFoundPage } from '../pages/NotFoundPage'
 import { ReportsPage } from '../features/platform/ReportsPage'
 import { RobotManagePage } from '../features/robot/RobotManagePage'
 import { RoleManagePage } from '../features/platform/RoleManagePage'
+import { MissionManagePage } from '../features/mission/MissionManagePage'
 
 export const router = createBrowserRouter([
   {
@@ -88,7 +91,22 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <Navigate replace to="/defects" /> },
       { path: 'defects', element: <DefectManagePage /> },
-      { path: 'robots', element: <RobotManagePage /> },
+      {
+        path: 'robots',
+        element: (
+          <RequirePermission permission={ROBOT_STATUS_VIEW}>
+            <RobotManagePage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: 'missions',
+        element: (
+          <RequirePermission permission={MISSION_VIEW}>
+            <MissionManagePage />
+          </RequirePermission>
+        ),
+      },
       { path: 'reports', element: <ReportsPage /> },
       {
         path: 'admin',

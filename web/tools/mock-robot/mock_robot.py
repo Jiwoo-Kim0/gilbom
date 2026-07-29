@@ -80,6 +80,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--longitude", type=float, default=127.0396)
     parser.add_argument("--battery-percent", type=float, default=87.0)
     parser.add_argument("--jetson-temp-c", type=float, default=41.5)
+    parser.add_argument(
+        "--jetson-temp-step-c",
+        type=float,
+        default=0.0,
+        help=(
+            "Increase Jetson temperature by this amount after each telemetry "
+            "publish and reverse direction after five steps."
+        ),
+    )
     parser.add_argument("--gps-invalid", action="store_true")
     parser.add_argument(
         "--self-test",
@@ -110,6 +119,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("--telemetry-interval must be greater than zero")
     if not 0.0 <= args.battery_percent <= 100.0:
         parser.error("--battery-percent must be between 0 and 100")
+    if args.jetson_temp_step_c < 0.0:
+        parser.error("--jetson-temp-step-c must be zero or greater")
     return args
 
 
@@ -178,6 +189,8 @@ class MockRobot:
         self.mission_id: str | None = None
         self.mission_state: str | None = None
         self.mission_started_at: datetime | None = None
+        self.jetson_temp_c = args.jetson_temp_c
+        self.jetson_temp_direction = 1
 
         self.presence_topic = topic(self.mqtt_id, "presence")
         self.state_topic = topic(self.mqtt_id, "state")
@@ -342,10 +355,33 @@ class MockRobot:
                     "estimated_runtime_sec": None,
                 },
                 "system": {
-                    "jetson_temp_c": self.args.jetson_temp_c,
+                    "jetson_temp_c": self.jetson_temp_c,
                 },
                 "mission": mission,
             }
+
+    def advance_telemetry_values(self) -> None:
+        step = self.args.jetson_temp_step_c
+        if step == 0.0:
+            return
+
+        with self.state_lock:
+            lower_bound = self.args.jetson_temp_c
+            upper_bound = lower_bound + step * 5
+            next_temperature = (
+                self.jetson_temp_c
+                + step * self.jetson_temp_direction
+            )
+            if (
+                next_temperature > upper_bound
+                or next_temperature < lower_bound
+            ):
+                self.jetson_temp_direction *= -1
+                next_temperature = (
+                    self.jetson_temp_c
+                    + step * self.jetson_temp_direction
+                )
+            self.jetson_temp_c = round(next_temperature, 3)
 
     def current_result_state(self) -> dict[str, str]:
         with self.state_lock:
@@ -650,12 +686,14 @@ class MockRobot:
     def telemetry_loop(self) -> None:
         while not self.stop_event.is_set():
             if self.connected_event.is_set():
-                self.publish_json(
+                result = self.publish_json(
                     self.telemetry_topic,
                     self.telemetry_payload(),
                     qos=0,
                     retain=False,
                 )
+                if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                    self.advance_telemetry_values()
             self.stop_event.wait(self.args.telemetry_interval)
 
     def run(self) -> int:
