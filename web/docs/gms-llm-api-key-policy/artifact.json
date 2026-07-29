@@ -1,0 +1,415 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "GMS LLM API 운영안 — 결함 보고서 초안 생성",
+    "description": "GMS 크레딧 100,000을 기준으로 한 모델 선택, 비용 추정, 환경별 키·예산·보안·데이터 정책 초안",
+    "generatedAt": "2026-07-29T00:00:00+09:00",
+    "cards": [
+      {
+        "id": "recommended_cost_card",
+        "dataset": "recommendation_summary",
+        "sourceId": "gms_pricing_input",
+        "description": "입력 5,000토큰과 출력 1,500토큰을 사용한 표준 결함 보고서 초안 1건의 예상 비용입니다.",
+        "metrics": [
+          {
+            "label": "gpt-5.4-mini 표준 비용, 크레딧/건",
+            "field": "mini_standard_cost",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "total_capacity_card",
+        "dataset": "recommendation_summary",
+        "sourceId": "gms_pricing_input",
+        "description": "재시도·평가·예비비를 제외하고 100,000크레딧을 모두 gpt-5.4-mini 표준 요청에 사용할 때의 이론상 최대치입니다.",
+        "metrics": [
+          {
+            "label": "이론상 초안 수, 건",
+            "field": "mini_capacity_100k",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "production_capacity_card",
+        "dataset": "recommendation_summary",
+        "sourceId": "gms_pricing_input",
+        "description": "제안한 운영 배정 75,000크레딧을 모두 gpt-5.4-mini 표준 요청에 사용할 때의 이론상 최대치입니다.",
+        "metrics": [
+          {
+            "label": "운영 배정 내 초안 수, 건",
+            "field": "mini_capacity_prod_75k",
+            "format": "number"
+          }
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "standard_cost_chart",
+        "title": "표준 결함 보고서 1건당 모델별 크레딧",
+        "subtitle": "입력 5,000토큰·출력 1,500토큰 기준이며, 모델 품질은 GMS의 동일 샘플 평가로 별도 검증해야 합니다.",
+        "intent": "comparison",
+        "question": "동일한 토큰 사용량에서 모델별 크레딧 비용은 얼마나 차이 나는가?",
+        "rationale": "여섯 모델의 단일 비용 지표를 직접 비교하기 위해 정렬 가능한 막대 차트를 사용합니다.",
+        "comparisonContext": {
+          "baseline": "gpt-5.4-mini",
+          "denominator": "결함 보고서 초안 1건",
+          "grain": "모델",
+          "unit": "크레딧"
+        },
+        "type": "bar",
+        "dataset": "model_costs",
+        "sourceId": "gms_pricing_input",
+        "encodings": {
+          "x": {
+            "field": "model",
+            "type": "nominal",
+            "label": "모델"
+          },
+          "y": {
+            "field": "standard_cost",
+            "type": "quantitative",
+            "format": "number",
+            "label": "크레딧/건",
+            "unit": "크레딧"
+          },
+          "tooltip": [
+            {
+              "field": "input_rate",
+              "type": "quantitative",
+              "format": "number",
+              "label": "입력 크레딧/토큰"
+            },
+            {
+              "field": "output_rate",
+              "type": "quantitative",
+              "format": "number",
+              "label": "출력 크레딧/토큰"
+            },
+            {
+              "field": "capacity_100k",
+              "type": "quantitative",
+              "format": "number",
+              "label": "100,000크레딧당 초안 수"
+            }
+          ]
+        },
+        "valueFormat": "number",
+        "unit": "크레딧",
+        "layout": "full",
+        "palette": {
+          "kind": "sequential",
+          "name": "blue"
+        },
+        "labels": {
+          "values": "all"
+        },
+        "settings": {
+          "orientation": "horizontal",
+          "sort": "descending",
+          "showValues": true,
+          "categoryLabelPolicy": "wrap"
+        },
+        "surface": {
+          "surface": "export",
+          "showControls": true,
+          "viewMode": "both"
+        }
+      }
+    ],
+    "tables": [
+      {
+        "id": "model_cost_table",
+        "title": "모델별 단가와 시나리오 비용",
+        "subtitle": "Light 2,000/800, 표준 5,000/1,500, Heavy 10,000/3,000 입력/출력 토큰 기준",
+        "dataset": "model_costs",
+        "sourceId": "gms_pricing_input",
+        "defaultSort": {
+          "field": "standard_cost",
+          "direction": "asc"
+        },
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "model",
+            "label": "모델",
+            "type": "text"
+          },
+          {
+            "field": "input_rate",
+            "label": "입력/토큰",
+            "format": "number",
+            "type": "number"
+          },
+          {
+            "field": "output_rate",
+            "label": "출력/토큰",
+            "format": "number",
+            "type": "number"
+          },
+          {
+            "field": "light_cost",
+            "label": "Light 비용",
+            "format": "number",
+            "type": "number"
+          },
+          {
+            "field": "standard_cost",
+            "label": "표준 비용",
+            "format": "number",
+            "type": "number"
+          },
+          {
+            "field": "heavy_cost",
+            "label": "Heavy 비용",
+            "format": "number",
+            "type": "number"
+          },
+          {
+            "field": "capacity_100k",
+            "label": "표준 초안 수/100k",
+            "format": "number",
+            "type": "number"
+          }
+        ]
+      }
+    ],
+    "sources": [
+      {
+        "id": "gms_pricing_input",
+        "label": "사용자가 제공한 GMS 모델 단가와 크레딧 한도",
+        "query": {
+          "engine": "ANSI SQL",
+          "language": "sql",
+          "executed_at": "2026-07-29T00:00:00+09:00",
+          "description": "사용자가 제공한 모델별 입력·출력 토큰 단가를 VALUES 행으로 재현하고, 토큰 시나리오별 비용과 100,000크레딧 기준 처리량을 계산합니다.",
+          "sql": "WITH pricing(model, input_rate, output_rate) AS (VALUES ('gpt-5.5', 0.1, 0.45), ('gpt-5.5-pro', 0.6, 2.7), ('gpt-5.4', 0.05, 0.225), ('gpt-5.4-pro', 0.6, 2.7), ('gpt-5.4-mini', 0.015, 0.0675), ('gpt-5.4-nano', 0.004, 0.01875)) SELECT model, input_rate, output_rate, 2000 * input_rate + 800 * output_rate AS light_cost, 5000 * input_rate + 1500 * output_rate AS standard_cost, 10000 * input_rate + 3000 * output_rate AS heavy_cost, FLOOR(100000 / (5000 * input_rate + 1500 * output_rate)) AS capacity_100k FROM pricing",
+          "filters": [
+            "총 크레딧 한도 100,000",
+            "Light: 입력 2,000토큰, 출력 800토큰",
+            "표준: 입력 5,000토큰, 출력 1,500토큰",
+            "Heavy: 입력 10,000토큰, 출력 3,000토큰"
+          ],
+          "metric_definitions": [
+            "요청 비용 = 입력 토큰 수 × 입력 크레딧/토큰 + 출력 토큰 수 × 출력 크레딧/토큰",
+            "처리 가능 초안 수 = FLOOR(100,000 ÷ 표준 요청 비용)",
+            "처리 가능 초안 수는 재시도, 실패 요청, 평가 트래픽, 예비비를 차감하지 않은 이론상 최대치"
+          ]
+        }
+      },
+      {
+        "id": "openai_data_controls_reference",
+        "label": "OpenAI API 데이터 제어 문서 — GMS 적용 여부는 별도 확인 필요",
+        "href": "https://developers.openai.com/api/docs/guides/your-data",
+        "query": {
+          "description": "업스트림이 OpenAI API인 경우 참고할 공개 정책입니다. GMS 게이트웨이의 자체 로그·보존·계약 조건까지 증명하지는 않습니다."
+        }
+      },
+      {
+        "id": "openai_production_reference",
+        "label": "OpenAI API 프로덕션 운영 권고 — GMS 기능 지원 여부는 별도 확인 필요",
+        "href": "https://developers.openai.com/api/docs/guides/production-best-practices",
+        "query": {
+          "description": "환경 분리, 키 보관, 사용량 제한의 일반적인 업스트림 참고 자료입니다."
+        }
+      }
+    ],
+    "blocks": [
+      {
+        "id": "report_title",
+        "type": "markdown",
+        "body": "# GMS LLM API 운영안 — 결함 보고서 초안 생성"
+      },
+      {
+        "id": "technical_summary",
+        "type": "markdown",
+        "sourceId": "gms_pricing_input",
+        "body": "## 결론: gpt-5.4-mini를 기본 모델로 시작\n\n`gpt-5.4-mini`를 운영 기본값으로 권고합니다. 결함 보고서는 최종 판정문이 아니라 사람이 검토하는 초안이고, 필수 섹션과 사실 보존을 구조화된 프롬프트로 통제할 수 있기 때문입니다. 표준 요청에서 mini는 **176.25크레딧/건**, `gpt-5.4`는 **587.5크레딧/건**, `gpt-5.5`는 **1,175크레딧/건**입니다. 100,000크레딧의 이론상 처리량은 각각 **567건, 170건, 85건**입니다.\n\n운영에서는 mini를 기본으로 하고, 사전에 정의한 고난도·고위험 건만 `gpt-5.4`로 직접 라우팅하십시오. mini 호출 후 무조건 상위 모델을 다시 호출하면 첫 호출 비용까지 낭비되므로, 심각도·입력 길이·필드 누락·모호성 기준으로 최초 모델을 결정하는 편이 낫습니다. `gpt-5.4-nano`는 가장 저렴하지만 사실 누락과 문장 품질을 아직 검증하지 않았으므로 최종 초안 생성에는 사용하지 않고, 분류·키워드 추출 같은 비결정적 보조 작업 후보로만 둡니다."
+      },
+      {
+        "id": "headline_metrics",
+        "type": "metric-strip",
+        "cardIds": [
+          "recommended_cost_card",
+          "total_capacity_card",
+          "production_capacity_card"
+        ]
+      },
+      {
+        "id": "cost_comparison_heading",
+        "type": "markdown",
+        "body": "## 모델별 비용 비교\n\n비용은 사용자가 제공한 GMS 단가에 `입력 토큰 × 입력 단가 + 출력 토큰 × 출력 단가`를 적용했습니다. 실제 비용은 프롬프트 길이, 원문 로그 크기, 추론 토큰의 과금 포함 방식, 재시도율에 따라 달라집니다."
+      },
+      {
+        "id": "standard_cost_chart_block",
+        "type": "chart",
+        "chartId": "standard_cost_chart"
+      },
+      {
+        "id": "model_cost_table_block",
+        "type": "table",
+        "tableId": "model_cost_table"
+      },
+      {
+        "id": "model_policy",
+        "type": "markdown",
+        "body": "## 허용 모델과 라우팅 정책\n\n- **운영 기본:** `gpt-5.4-mini`\n- **운영 조건부:** `gpt-5.4` — P1/P2 결함, 입력이 길거나 상충하는 경우, 증거와 추론을 분리해야 하는 경우, mini 평가 기준 미달 유형\n- **개발 보조:** `gpt-5.4-nano` — 키워드·태그·간단 분류만 허용하고 최종 보고서 본문 생성은 금지\n- **초기 차단:** `gpt-5.5`, `gpt-5.5-pro`, `gpt-5.4-pro` — 대표 샘플 평가에서 비용 대비 유의미한 품질 향상이 입증되기 전까지 비활성화\n\n모델명은 클라이언트 요청값을 그대로 신뢰하지 말고 서버의 허용 목록에서 선택합니다. 사용자가 임의 모델명을 전달해도 거부하며, 모델 라우팅 결정과 사유를 감사 메타데이터에 기록합니다."
+      },
+      {
+        "id": "environment_keys",
+        "type": "markdown",
+        "body": "## 개발·staging·운영 Key 분리\n\n| 환경 | 키·프로젝트 | 허용 모델 | 접근 주체 | 목적 |\n|---|---|---|---|---|\n| 개발 | `defect-draft-dev` 전용 GMS Key | nano, mini; 5.4는 승인 평가만 | 개발자·CI 개발 잡 | 프롬프트 개발, 단위·통합 테스트 |\n| staging | `defect-draft-stg` 전용 GMS Key | mini, 5.4 | QA·배포 파이프라인 | 익명화된 회귀 평가, 부하·장애 시험 |\n| 운영 | `defect-draft-prod` 전용 GMS Key | mini, 5.4 | 운영 백엔드 서비스 계정만 | 실제 결함 보고서 초안 생성 |\n\n한 키를 여러 환경에서 재사용하지 않습니다. 운영 키는 개발자 로컬 PC, 프론트엔드 번들, CI 로그에 노출하지 않고 비밀관리 시스템에서 런타임 주입합니다. 키 값 자체는 애플리케이션 로그·오류 메시지·APM 태그에 기록하지 않습니다."
+      },
+      {
+        "id": "budget_limits",
+        "type": "markdown",
+        "body": "## 월·일 예산과 요청 제한\n\n100,000크레딧을 1개월 파일럿 총량으로 가정한 권고안입니다.\n\n| 구분 | 월 한도 | 일 한도 | 조치 |\n|---|---:|---:|---|\n| 개발 | 5,000 | 250 | 초과 시 당일 차단 |\n| staging | 10,000 | 500 | 초과 시 당일 차단 |\n| 운영 | 75,000 | 2,250 | 초과 시 P1/P2 승인 건만 허용 |\n| 중앙 예비비 | 10,000 | 자동 사용 금지 | 서비스 책임자와 보안 담당 승인 후 이전 |\n| 전 환경 합계 | 100,000 | 3,000 | 100,000 도달 시 전체 하드 차단 |\n\n- 사용량 알림: 월 한도의 70%, 85%, 95%에서 서비스 책임자·플랫폼 운영·보안 담당에게 알림\n- 요청 상한: 입력 8,000토큰, 출력 1,500토큰, 요청 본문 1MB 이하\n- 호출 제한: 사용자당 5건/시간·20건/일, 운영 전체 burst 20RPM, 동시 실행 5건\n- 재시도: 429·5xx·네트워크 타임아웃만 지수 백오프와 jitter로 최대 1회; 4xx는 재시도 금지\n- 보고서당 모델 호출: 기본 1회, 형식 검증 실패 또는 일시 오류 때만 총 2회까지\n- 출력이 잘려도 자동 무제한 연장하지 않고 사용자가 원문 범위를 줄이거나 승인된 재생성을 수행\n\n일 한도는 월 한도보다 먼저 적용하며, 실패·재시도 요청도 크레딧 사용량에 포함해 집계합니다. GMS가 강제 한도를 제공하지 않으면 애플리케이션 게이트웨이에서 원자적 카운터로 차단합니다."
+      },
+      {
+        "id": "data_policy",
+        "type": "markdown",
+        "body": "## 입력 데이터 보존 및 학습 제외 정책\n\n**정책 목표:** 결함 초안 생성에 필요한 최소 데이터만 GMS로 전송하고, GMS와 업스트림 제공자 모두에서 학습·모델 개선 사용을 명시적으로 제외합니다.\n\n- 입력 전 제거: API Key·세션 토큰·비밀번호·쿠키·주민등록번호·연락처·결제정보·불필요한 사용자 식별자\n- 입력 최소화: 전체 로그 대신 오류 구간, 재현 절차, 예상·실제 결과, 환경·버전, 관련 스택 트레이스만 전송\n- 애플리케이션 저장: 원문과 생성 초안은 기존 결함관리 시스템에만 저장하고 별도 LLM 로그 저장 금지; 임시 큐·캐시는 처리 완료 후 즉시 삭제\n- 관측성: 요청 ID, 환경, 모델, 입력·출력 토큰, 크레딧, 지연, 성공 여부, 라우팅 사유만 저장; 프롬프트·응답 본문과 Authorization 헤더는 수집 금지\n- 학습 제외: GMS 운영팀과 업스트림 제공자로부터 ‘고객 입력·출력을 학습 또는 모델 개선에 사용하지 않음’을 문서로 확인\n- 보존: GMS 게이트웨이의 payload 로그 0일을 목표로 하고, 불가하면 실제 최대 보존 기간·저장 위치·접근자·삭제 절차를 위험 승인 문서에 명시\n- 요청 설정: GMS가 지원하면 상태 저장을 끄는 옵션을 사용하고, 대화·파일·배치처럼 서버측 상태가 남는 기능은 별도 승인 전 금지\n\nOpenAI의 직접 API 공개 문서는 기본적으로 API 데이터를 학습에 사용하지 않고, 남용 모니터링 로그가 원칙적으로 최대 30일 보존될 수 있다고 설명합니다. 그러나 GMS 프록시의 자체 로그와 계약 조건은 이 문서만으로 확인되지 않으므로 [GMS와 업스트림을 별도로 검증](https://developers.openai.com/api/docs/guides/your-data)해야 합니다. 다음 네 항목이 문서로 확인되기 전에는 기밀·개인정보가 포함된 운영 결함 데이터를 전송하지 않습니다: ① GMS payload·헤더 로깅 여부 ② GMS 보존 기간과 삭제 SLA ③ 실제 업스트림 제공자·조직의 학습 제외 ④ 하위 처리자·리전·국외 이전 조건."
+      },
+      {
+        "id": "outbound_policy",
+        "type": "markdown",
+        "body": "## 허용 outbound host\n\n- 애플리케이션 서버의 HTTPS outbound는 `gms.ssafy.io:443`만 허용\n- egress proxy 또는 애플리케이션에서 허용 method/path를 우선 `POST /gmsapi/api.openai.com/v1/chat/completions`로 제한하고, 추가 GMS API는 보안 검토 후 경로별 등록\n- `api.openai.com` 직접 outbound와 임의 외부 LLM 도메인은 차단\n- 프론트엔드·사용자 브라우저에서 GMS를 직접 호출하지 않고 백엔드만 호출\n- TLS 인증서 검증을 강제하고, HTTP downgrade·임의 redirect·사용자 지정 프록시를 금지\n- 방화벽이 FQDN 정책을 지원하면 FQDN/SNI 기반 allowlist를 사용하고, DNS가 바뀔 수 있는 호스트의 IP를 장기 고정하지 않음\n- DNS 응답, 연결 대상 IP, TLS 실패는 메타데이터로 남기되 요청 본문·Authorization 헤더는 남기지 않음"
+      },
+      {
+        "id": "rotation_policy",
+        "type": "markdown",
+        "body": "## Key 폐기·회전 권한\n\n| 행위 | 권한 | 승인·감사 |\n|---|---|---|\n| 개발·staging 키 생성·정기 회전 | 플랫폼 운영자 | 서비스 책임자 승인, 티켓 기록 |\n| 운영 키 생성·정기 회전 | 보안 관리자 또는 플랫폼 관리자 | 2인 승인, 비밀관리 시스템·감사 로그 기록 |\n| 긴급 운영 키 폐기 | 보안 당직자 또는 서비스 당직자 | 단독 즉시 폐기 가능, 24시간 이내 사후 승인 |\n| 예비비 해제·상위 모델 일시 허용 | 서비스 책임자 + 플랫폼 운영자 | 기간·크레딧·모델·사유를 티켓에 명시 |\n| 키 조회 | 원칙적으로 사람에게 금지 | 워크로드 서비스 계정만 런타임 접근 |\n\n정기 회전 주기는 90일로 두고, 노출 의심·퇴사/권한변경·비정상 사용량·저장소 또는 로그 유출 시 즉시 폐기합니다. GMS가 동시 유효 키 두 개를 지원하면 새 키 배포 → 헬스체크 → 24시간 이내 구 키 폐기 순서로 무중단 회전합니다. 단일 키만 지원하면 사전 공지된 짧은 점검창과 롤백 절차를 사용합니다."
+      },
+      {
+        "id": "evaluation_plan",
+        "type": "markdown",
+        "body": "## 적용 순서와 모델 검증\n\n1. 과거 결함 30~50건을 익명화해 대표 평가 세트를 만듭니다. P1~P4, 짧은/긴 로그, 재현 가능/불가능, 프론트/백엔드/인프라 유형을 포함합니다.\n2. 동일 프롬프트로 nano, mini, 5.4, 5.5를 블라인드 비교합니다. pro 모델은 mini·5.4가 기준을 못 넘을 때만 추가합니다.\n3. 필수 통과 조건은 사실 왜곡·근거 없는 재현 절차·존재하지 않는 원인 단정 0건, 필수 섹션 충족률 98% 이상, 민감정보 재노출 0건입니다.\n4. 품질 점수는 사실 보존 40%, 완전성 25%, 환각 방지 20%, 형식 준수 10%, 수정 노력 5%로 평가합니다.\n5. mini가 5.4 대비 종합점수 5점 이내이고 중앙 수정시간이 20% 이상 악화되지 않으면 mini를 기본으로 확정합니다. 그렇지 않으면 실패 유형만 5.4로 라우팅합니다.\n6. 배포 후 주간으로 보고서당 크레딧, 출력 토큰, 재시도율, 인간 수정시간, 사실 오류율, 상위 모델 라우팅률을 점검합니다."
+      },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "body": "## 한계와 확인 필요 사항\n\n- 비용 계산은 제공된 토큰 단가가 GMS의 실제 청구 단위이며 숨은 최소 과금·캐시·추론 토큰·실패 요청 과금이 없다고 가정합니다.\n- 모델명만으로 실제 품질 우열을 확정할 수 없습니다. GMS가 어떤 공급자·버전·추론 설정으로 매핑하는지 확인해야 합니다.\n- 100,000크레딧의 유효기간과 월별 리셋 여부가 제시되지 않아 1개월 파일럿으로 가정했습니다. 유효기간이 다르면 월·일 한도를 비례 조정해야 합니다.\n- GMS가 키별 모델 allowlist, 일·월 hard cap, 사용량 조회 API, 복수 키 회전을 지원하는지 운영팀 확인이 필요합니다.\n- 본 권고는 자동 생성된 초안을 사람이 검토·승인하는 절차를 전제로 합니다. 모델 출력만으로 결함 원인이나 심각도를 확정하지 않습니다."
+      },
+      {
+        "id": "further_questions",
+        "type": "markdown",
+        "body": "## 운영 확정 전 받아야 할 답변\n\n1. 100,000크레딧은 월별 리셋, 일회성, 또는 유효기간이 있는 총량인가?\n2. GMS의 모델별 최대 컨텍스트·출력 길이와 추론 토큰 과금 방식은 무엇인가?\n3. GMS가 키별 모델 allowlist·RPM·일/월 hard cap·사용량 조회를 지원하는가?\n4. GMS가 요청·응답 본문과 Authorization 헤더를 로그에 남기는가? 남긴다면 어디에, 누가, 얼마나 보관하는가?\n5. 실제 업스트림 제공자, 데이터 처리 리전, 학습 제외와 삭제 SLA는 무엇인가?\n6. 무중단 회전을 위한 동시 유효 키와 즉시 폐기 API를 제공하는가?"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-07-29T00:00:00+09:00",
+    "status": "ready",
+    "datasets": {
+      "recommendation_summary": [
+        {
+          "mini_standard_cost": 176.25,
+          "mini_capacity_100k": 567,
+          "mini_capacity_prod_75k": 425
+        }
+      ],
+      "model_costs": [
+        {
+          "model": "gpt-5.5-pro",
+          "input_rate": 0.6,
+          "output_rate": 2.7,
+          "light_cost": 3360,
+          "standard_cost": 7050,
+          "heavy_cost": 14100,
+          "capacity_100k": 14
+        },
+        {
+          "model": "gpt-5.4-pro",
+          "input_rate": 0.6,
+          "output_rate": 2.7,
+          "light_cost": 3360,
+          "standard_cost": 7050,
+          "heavy_cost": 14100,
+          "capacity_100k": 14
+        },
+        {
+          "model": "gpt-5.5",
+          "input_rate": 0.1,
+          "output_rate": 0.45,
+          "light_cost": 560,
+          "standard_cost": 1175,
+          "heavy_cost": 2350,
+          "capacity_100k": 85
+        },
+        {
+          "model": "gpt-5.4",
+          "input_rate": 0.05,
+          "output_rate": 0.225,
+          "light_cost": 280,
+          "standard_cost": 587.5,
+          "heavy_cost": 1175,
+          "capacity_100k": 170
+        },
+        {
+          "model": "gpt-5.4-mini",
+          "input_rate": 0.015,
+          "output_rate": 0.0675,
+          "light_cost": 84,
+          "standard_cost": 176.25,
+          "heavy_cost": 352.5,
+          "capacity_100k": 567
+        },
+        {
+          "model": "gpt-5.4-nano",
+          "input_rate": 0.004,
+          "output_rate": 0.01875,
+          "light_cost": 23,
+          "standard_cost": 48.125,
+          "heavy_cost": 96.25,
+          "capacity_100k": 2077
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "gms_pricing_input",
+      "label": "사용자가 제공한 GMS 모델 단가와 크레딧 한도",
+      "query": {
+        "engine": "ANSI SQL",
+        "language": "sql",
+        "executed_at": "2026-07-29T00:00:00+09:00",
+        "description": "사용자가 제공한 모델별 입력·출력 토큰 단가를 VALUES 행으로 재현하고, 토큰 시나리오별 비용과 100,000크레딧 기준 처리량을 계산합니다.",
+        "sql": "WITH pricing(model, input_rate, output_rate) AS (VALUES ('gpt-5.5', 0.1, 0.45), ('gpt-5.5-pro', 0.6, 2.7), ('gpt-5.4', 0.05, 0.225), ('gpt-5.4-pro', 0.6, 2.7), ('gpt-5.4-mini', 0.015, 0.0675), ('gpt-5.4-nano', 0.004, 0.01875)) SELECT model, input_rate, output_rate, 2000 * input_rate + 800 * output_rate AS light_cost, 5000 * input_rate + 1500 * output_rate AS standard_cost, 10000 * input_rate + 3000 * output_rate AS heavy_cost, FLOOR(100000 / (5000 * input_rate + 1500 * output_rate)) AS capacity_100k FROM pricing",
+        "filters": [
+          "총 크레딧 한도 100,000",
+          "Light: 입력 2,000토큰, 출력 800토큰",
+          "표준: 입력 5,000토큰, 출력 1,500토큰",
+          "Heavy: 입력 10,000토큰, 출력 3,000토큰"
+        ],
+        "metric_definitions": [
+          "요청 비용 = 입력 토큰 수 × 입력 크레딧/토큰 + 출력 토큰 수 × 출력 크레딧/토큰",
+          "처리 가능 초안 수 = FLOOR(100,000 ÷ 표준 요청 비용)",
+          "처리 가능 초안 수는 재시도, 실패 요청, 평가 트래픽, 예비비를 차감하지 않은 이론상 최대치"
+        ]
+      }
+    },
+    {
+      "id": "openai_data_controls_reference",
+      "label": "OpenAI API 데이터 제어 문서 — GMS 적용 여부는 별도 확인 필요",
+      "href": "https://developers.openai.com/api/docs/guides/your-data",
+      "query": {
+        "description": "업스트림이 OpenAI API인 경우 참고할 공개 정책입니다. GMS 게이트웨이의 자체 로그·보존·계약 조건까지 증명하지는 않습니다."
+      }
+    },
+    {
+      "id": "openai_production_reference",
+      "label": "OpenAI API 프로덕션 운영 권고 — GMS 기능 지원 여부는 별도 확인 필요",
+      "href": "https://developers.openai.com/api/docs/guides/production-best-practices",
+      "query": {
+        "description": "환경 분리, 키 보관, 사용량 제한의 일반적인 업스트림 참고 자료입니다."
+      }
+    }
+  ]
+}
