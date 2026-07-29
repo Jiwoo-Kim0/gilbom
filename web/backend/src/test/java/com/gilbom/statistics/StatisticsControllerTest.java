@@ -318,6 +318,19 @@ class StatisticsControllerTest {
     }
 
     @Test
+    void areaStatisticsRejectUnauthenticatedRequest()
+            throws Exception {
+        mockMvc.perform(get("/api/v1/statistics/by-area")
+                        .param("from", FROM.toString())
+                        .param("to", TO.toString()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code",
+                        is("AUTH_UNAUTHENTICATED")));
+
+        verifyNoInteractions(queryService);
+    }
+
+    @Test
     void areaStatisticsRequireMissionViewPermission()
             throws Exception {
         mockMvc.perform(get("/api/v1/statistics/by-area")
@@ -392,6 +405,51 @@ class StatisticsControllerTest {
     }
 
     @Test
+    void areaStatisticsRejectInvalidPageAndSize()
+            throws Exception {
+        when(queryService.findByArea(
+                USER_ID,
+                FROM,
+                TO,
+                null,
+                -1,
+                20))
+                .thenThrow(new BusinessException(
+                        ErrorCode.COMMON_INVALID_REQUEST));
+        when(queryService.findByArea(
+                USER_ID,
+                FROM,
+                TO,
+                null,
+                0,
+                101))
+                .thenThrow(new BusinessException(
+                        ErrorCode.COMMON_INVALID_REQUEST));
+
+        mockMvc.perform(get("/api/v1/statistics/by-area")
+                        .param("from", FROM.toString())
+                        .param("to", TO.toString())
+                        .param("page", "-1")
+                        .with(user(USER_ID.toString()).authorities(
+                                MISSION_VIEW,
+                                DEFECT_STATUS_VIEW)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code",
+                        is("COMMON_INVALID_REQUEST")));
+
+        mockMvc.perform(get("/api/v1/statistics/by-area")
+                        .param("from", FROM.toString())
+                        .param("to", TO.toString())
+                        .param("size", "101")
+                        .with(user(USER_ID.toString()).authorities(
+                                MISSION_VIEW,
+                                DEFECT_STATUS_VIEW)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code",
+                        is("COMMON_INVALID_REQUEST")));
+    }
+
+    @Test
     void returnsPeriodStatisticsWithBothRequiredPermissions()
             throws Exception {
         when(queryService.findByPeriod(
@@ -428,6 +486,19 @@ class StatisticsControllerTest {
                 .andExpect(jsonPath(
                         "$.items[0].metrics.observationCount",
                         is(2)));
+    }
+
+    @Test
+    void periodStatisticsRejectUnauthenticatedRequest()
+            throws Exception {
+        mockMvc.perform(get("/api/v1/statistics/by-period")
+                        .param("from", FROM.toString())
+                        .param("to", TO.toString()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code",
+                        is("AUTH_UNAUTHENTICATED")));
+
+        verifyNoInteractions(queryService);
     }
 
     @Test
