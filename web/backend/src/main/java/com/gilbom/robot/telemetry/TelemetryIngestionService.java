@@ -46,7 +46,7 @@ public class TelemetryIngestionService {
         OffsetDateTime receivedAt = utc(command.receivedAt());
 
         lockCurrentState(robotId);
-        ensureBootSession(
+        ensureBootSession( //upsert
                 robotId,
                 payload.bootId(),
                 payload.schemaVersion(),
@@ -131,6 +131,7 @@ public class TelemetryIngestionService {
     }
 
     private void lockCurrentState(UUID robotId) {
+    	//특정 로봇의 현재 상태 행을 DB에서 잠그는 함수 (해당 Transaction의 lock을 보장)
         boolean found = !jdbcTemplate.queryForList("""
                         SELECT TRUE
                         FROM telemetry.robot_current_state
@@ -139,6 +140,7 @@ public class TelemetryIngestionService {
                         """,
                 Boolean.class,
                 robotId)
+        		// FOR UPDAT는 선택된 행을 잠굽니다.
                 .isEmpty();
         if (!found) {
             throw new IllegalStateException(
@@ -167,7 +169,7 @@ public class TelemetryIngestionService {
         return missionId;
     }
 
-    private void ensureBootSession(
+    private void ensureBootSession( //upsert
             UUID robotId,
             UUID bootId,
             String schemaVersion,
