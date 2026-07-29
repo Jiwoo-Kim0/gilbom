@@ -10,7 +10,9 @@ COPY gradle ./gradle
 RUN ./gradlew dependencies --no-daemon
 
 COPY src ./src
-RUN ./gradlew clean test bootJar --no-daemon
+# Docker build에는 host daemon socket을 주입하지 않는다. 전체 Testcontainers
+# 검증은 scripts/backend-test.sh 및 Jenkins의 선행 gate에서 강제한다.
+RUN ./gradlew clean test bootJar --no-daemon -PallowSkippedTests=true
 
 FROM eclipse-mosquitto:2.1.2-alpine AS mqtt-tools
 
