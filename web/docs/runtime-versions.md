@@ -26,3 +26,23 @@
 - Spring Boot 3.5.16은 3.5 계열의 마지막 OSS 릴리스다. 새로운 OSS patch가
   제공되지 않으므로 Boot 4.x 전환은 호환성 테스트를 포함한 별도 migration으로
   관리한다.
+
+## Backend 전체 테스트
+
+Host에 Java를 별도로 설치하지 않아도 저장소 root에서 다음 명령으로 Backend 전체
+테스트를 실행할 수 있다.
+
+```bash
+./scripts/backend-test.sh
+```
+
+이 스크립트는 고정된 `amazoncorretto:21.0.12-alpine3.22` 안에서 `JAVA_HOME`과
+Java 21을 확인하고, Host Docker socket을 Testcontainers에 연결한 뒤 Gradle
+`test`를 실행한다. Testcontainers가 Docker를 찾지 못해
+`disabledWithoutDocker = true` 테스트가 하나라도 skip되면 빌드를 실패시킨다.
+
+Backend 디렉터리에서 실행하는 일반 `./gradlew test`도 skip을 허용하지 않는다.
+Docker image builder는 daemon socket을 받지 않는 격리된 단계이므로
+`-PallowSkippedTests=true`를 명시하지만, Jenkins가 그 전에 socket을 연결한 전체
+테스트 gate를 반드시 통과시킨다. 이 예외 옵션을 개발자 로컬 성공 기준으로
+사용하지 않는다.

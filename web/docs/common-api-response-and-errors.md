@@ -136,6 +136,7 @@ HTTP 상태와 응답 형식은 다음 원칙을 따른다.
 | `IMAGE_TOO_LARGE` | 413 | 이미지 크기 상한 초과 |
 | `IMAGE_UNSUPPORTED_MEDIA_TYPE` | 415 | Content-Type은 유효하지만 지원하지 않는 이미지 형식 |
 | `REPORT_PERIOD_INVALID` | 422 | 보고서 시작·종료 기간 업무 규칙 위반 |
+| `STATISTICS_PERIOD_INVALID` | 422 | 통계 기간이 역전·동일하거나 최대 366일을 초과함 |
 | `DB_UNAVAILABLE` | 503 | 데이터베이스 장애 |
 | `S3_UNAVAILABLE` | 503 | 파일 저장소 장애 |
 | `MQTT_UNAVAILABLE` | 503 | MQTT Broker 또는 Adapter 장애 |
@@ -211,6 +212,9 @@ Validation 오류 하나는 다음 필드를 사용한다.
 - 존재하지 않는 로봇 → `404 ROBOT_NOT_FOUND`
 - 실행 중인 임무를 다시 시작 → `409 COMMAND_STATE_CONFLICT`
 - 보고서 시작일이 종료일보다 늦음 → `422 REPORT_PERIOD_INVALID`
+- 통계 `from`과 `to`가 같거나 두 Instant의 차이가 366일을 초과함 → `422 STATISTICS_PERIOD_INVALID`
+- 통계 날짜·UUID를 파싱할 수 없음 → `400 COMMON_INVALID_REQUEST`
+- 통계의 `patrolAreaId` UUID가 유효하지만 존재하지 않음 → `404 PATROL_AREA_NOT_FOUND`
 
 ## 6. 백엔드 구현
 
@@ -242,6 +246,7 @@ Validation 오류 하나는 다음 필드를 사용한다.
 throw new BusinessException(ErrorCode.ROBOT_NOT_FOUND);
 throw new BusinessException(ErrorCode.COMMAND_STATE_CONFLICT);
 throw new BusinessException(ErrorCode.REPORT_PERIOD_INVALID);
+throw new BusinessException(ErrorCode.STATISTICS_PERIOD_INVALID);
 ```
 
 `BusinessException`에 전달하는 사용자 정의 메시지는 API에 노출되므로 개인정보나 내부 구현 정보를 포함하면 안 된다.

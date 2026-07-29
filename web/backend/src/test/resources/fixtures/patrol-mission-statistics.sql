@@ -28,6 +28,46 @@ INSERT INTO auth.admin_user (
 )
 ON CONFLICT DO NOTHING;
 
+INSERT INTO auth.admin_user (
+    user_id,
+    user_code,
+    legacy_username,
+    password_hash,
+    display_name,
+    email,
+    account_status,
+    is_active,
+    account_origin
+) VALUES (
+    '10000000-0000-4000-8000-000000000002',
+    'OPR-PATROL-STATS-FIXTURE',
+    'patrol_stats_scoped_viewer',
+    '{argon2}$argon2id$v=19$m=19456,t=2,p=1$fixture-hash',
+    'Patrol Statistics Scoped Viewer',
+    'patrol-stats-viewer@example.invalid',
+    'ACTIVE',
+    TRUE,
+    'ADMIN_CREATED'
+)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO auth.user_role (
+    user_id,
+    role_id,
+    is_primary,
+    is_active,
+    assigned_by,
+    assigned_at
+) VALUES (
+    '10000000-0000-4000-8000-000000000001',
+    '00000000-0000-4000-8000-000000000001',
+    TRUE,
+    TRUE,
+    '10000000-0000-4000-8000-000000000001',
+    '2026-06-30T00:00:00Z'
+)
+ON CONFLICT DO NOTHING;
+
 INSERT INTO robot.robot (
     robot_id,
     mqtt_id,
@@ -54,6 +94,29 @@ INSERT INTO robot.robot (
     'Statistics Robot 2',
     'SN-STATS-002',
     'ACTIVE',
+    '10000000-0000-4000-8000-000000000001',
+    '2026-06-30T00:00:00Z',
+    '2026-06-30T00:00:00Z'
+)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO auth.user_robot_assignment (
+    user_robot_assignment_id,
+    user_id,
+    robot_id,
+    assignment_type,
+    reason,
+    is_active,
+    assigned_by,
+    assigned_at,
+    updated_at
+) VALUES (
+    '11000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000002',
+    '20000000-0000-4000-8000-000000000001',
+    'VIEWER',
+    'Statistics fixture robot scope',
+    TRUE,
     '10000000-0000-4000-8000-000000000001',
     '2026-06-30T00:00:00Z',
     '2026-06-30T00:00:00Z'
@@ -785,6 +848,7 @@ INSERT INTO defect.defect (
     defect_type,
     risk_level,
     workflow_status,
+    merged_into_defect_id,
     location,
     zone_id,
     patrol_area_id,
@@ -804,6 +868,7 @@ INSERT INTO defect.defect (
     'DAMAGED',
     'HIGH',
     'NEW',
+    NULL,
     ST_SetSRID(ST_MakePoint(127.0030, 37.0030), 4326),
     'A-11',
     '30000000-0000-4000-8000-000000000001',
@@ -823,6 +888,7 @@ INSERT INTO defect.defect (
     'BLOCKED',
     'MEDIUM',
     'ACCEPTED',
+    NULL,
     ST_SetSRID(ST_MakePoint(127.0060, 37.0040), 4326),
     'A-11',
     '30000000-0000-4000-8000-000000000001',
@@ -842,6 +908,7 @@ INSERT INTO defect.defect (
     'CONTAMINATED',
     'MEDIUM',
     'IN_PROGRESS',
+    NULL,
     ST_SetSRID(ST_MakePoint(127.0240, 37.0240), 4326),
     'B-22',
     '30000000-0000-4000-8000-000000000002',
@@ -861,6 +928,7 @@ INSERT INTO defect.defect (
     'UPLIFTED',
     'CRITICAL',
     'NEW',
+    NULL,
     ST_SetSRID(ST_MakePoint(127.0270, 37.0270), 4326),
     'B-22',
     '30000000-0000-4000-8000-000000000002',
@@ -872,6 +940,26 @@ INSERT INTO defect.defect (
     FALSE,
     '2026-07-04T01:00:02Z',
     '2026-07-04T01:00:02Z'
+),
+(
+    '80000000-0000-4000-8000-000000000005',
+    'INC-STATS-A-MERGED',
+    'LINEAR',
+    'DAMAGED',
+    'LOW',
+    'RESOLVED',
+    '80000000-0000-4000-8000-000000000001',
+    ST_SetSRID(ST_MakePoint(127.0031, 37.0031), 4326),
+    'A-11',
+    '30000000-0000-4000-8000-000000000001',
+    '31000000-0000-4000-8000-000000000001',
+    '2026-07-01T00:30:00Z',
+    '2026-07-01T00:30:00Z',
+    1,
+    0.700,
+    FALSE,
+    '2026-07-01T00:30:02Z',
+    '2026-07-01T00:30:02Z'
 )
 ON CONFLICT DO NOTHING;
 

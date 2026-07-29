@@ -50,7 +50,40 @@
 | V23 | Command·Defect의 Mission 정본 FK 연결 | Command의 Mission/Area와 Defect의 Area/Route, Observation의 Event/Image UUID를 실제 정본에 `NOT VALID` FK로 연결해 신규 데이터 무결성을 적용 |
 | V24 | 시작 전 Mission 실패 시간 제약 보정 | `READY → FAILED` 준비 단계 실패에서 실제 주행 시작 시각인 `started_at`은 `NULL`을 허용하고 `ended_at`은 필수로 유지 |
 | V25 | Robot별 활성 Mission 단일화 | mission_id가 없는 PAUSE·RESUME·CANCEL 명령도 대상을 결정적으로 찾도록 Robot마다 `READY`, `RUNNING`, `PAUSED` Mission을 하나로 제한 |
+| V26 | 결함 통계 Query 인덱스 | 병합되지 않은 현재 결함의 전체 기간 및 지역·기간 통계를 위해 `last_seen_at`과 `patrol_area_id, last_seen_at` 기반 partial covering index 추가 |
 
+### V26 결함 통계 Query 인덱스
+
+파일:
+`backend/src/main/resources/db/migration/V26__add_statistics_query_indexes.sql`
+
+V12의 `ix_defect_workflow_filter`는 `workflow_status`, `defect_type`,
+`risk_level`이 선두라 기간만 지정하는 통계 Query에서 `last_seen_at` 범위를
+효율적으로 좁히기 어렵고, `patrol_area_id`와 병합 여부가 Filter로 남는다.
+V26은 실제 통계 SQL의 두 access path에 맞춰 다음 인덱스를 추가한다.
+
+| 인덱스 | Key | INCLUDE | Partial 조건 | 대상 Query |
+|---|---|---|---|---|
+| `ix_defect_current_last_seen_stats` | `last_seen_at DESC, defect_id` | `patrol_area_id, defect_type, workflow_status` | `merged_into_defect_id IS NULL` | 상태·유형·UTC 날짜별 전체 기간 통계 |
+| `ix_defect_current_area_last_seen_stats` | `patrol_area_id, last_seen_at DESC, defect_id` | `defect_type, workflow_status` | `merged_into_defect_id IS NULL` | 지역별 기간 통계 |
+
+Partial 조건으로 통계에서 제외되는 병합 원본을 인덱스에 저장하지 않는다.
+`defect_id`는 권한 범위 판정과 `COUNT(DISTINCT defect_id)`에 사용하고,
+`defect_type`, `workflow_status`, `patrol_area_id`는 집계 시 heap 접근을 줄이기
+위한 covering column이다. Index Only Scan 여부는 visibility map 상태에 따라
+달라질 수 있다.
+
+PostGIS Testcontainer 검증에서는 작은 Fixture의 자연 계획이 정상적으로
+Sequential Scan을 선택했다. `enable_seqscan=off` 검증에서 전체 기간과
+지역·기간 인덱스가 각각 대표 Query를 서비스할 수 있고, 지역과 기간 조건이
+`Index Cond`에 포함되는 것을 확인했다. 실행계획 전문과 해석은
+[patrol-mission-statistics-fixture.md](patrol-mission-statistics-fixture.md#결함-통계-실행계획)에
+기록한다.
+
+운영 반영 전에는 실제 Cardinality와 분포를 가진 스테이징 DB에서 자연
+`EXPLAIN (ANALYZE, BUFFERS)`, p95 응답시간, 인덱스 크기와 쓰기 비용을 다시
+측정한다. V26은 일반 `CREATE INDEX`를 사용하므로 큰 운영 테이블에 적용할 때는
+DDL lock 허용 시간과 배포 창도 확인해야 한다.
 
 시스템 Role `ADMIN`, `MANAGER`, `OPERATOR`와 18개 세부 permission 및
 role-permission 관계는 결정적인 UUID로 seed한다. 실제
@@ -67,7 +100,7 @@ docker compose logs backend
 ```
 
 
-Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V25가
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V26이
 순서대로 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증

@@ -34,7 +34,7 @@
 | Mission Status History | 4 | Mission별 마지막 상태 전이 |
 | Telemetry | 8 | Mission별 위치 궤적 2점 |
 | Robot Image | 1 | 첫 Incident의 가상 JPEG 메타데이터 |
-| Defect | 4 | Area별 2건 |
+| Defect | 원천 5, 현재 4 | Area별 현재 결함 2건, 병합 원본 1건 |
 | Defect Observation | 6 | Incident Event와 일대일 원본 연결 |
 
 ## 3. Mission 원본과 예상값
@@ -59,7 +59,8 @@
 | Mission 결과 Incident 합계 | 6 |
 | 실제 Incident Event 수 | 6 |
 | Telemetry 궤적 점 수 | 8 |
-| Defect 수 | 4 |
+| 현재 Defect 수 | 4 |
+| 병합되어 제외되는 원본 Defect 수 | 1 |
 | Defect Observation 수 | 6 |
 
 ### Area별 예상 집계
@@ -68,6 +69,51 @@
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | A-11 | 2 | 1 | 1 | 0 | 5,400 | 3 | 2 | 3 |
 | B-22 | 2 | 1 | 0 | 1 | 6,600 | 3 | 2 | 3 |
+
+Defect 열은 `merged_into_defect_id IS NULL`인 현재 결함만 센다. A-11에는
+`RESOLVED` 상태의 병합 원본 한 건이 추가로 존재하지만 모든 통계에서 제외한다.
+
+### UTC 날짜별 예상 집계
+
+| UTC 날짜 | Mission | 완료 | 취소 | 실패 | 수행시간(초) | Incident Event | Defect | Observation |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2026-07-01 | 1 | 1 | 0 | 0 | 3,600 | 2 | 1 | 2 |
+| 2026-07-02 | 1 | 0 | 1 | 0 | 1,800 | 1 | 1 | 1 |
+| 2026-07-03 | 1 | 0 | 0 | 1 | 1,200 | 0 | 0 | 0 |
+| 2026-07-04 | 1 | 1 | 0 | 0 | 5,400 | 3 | 2 | 3 |
+
+각 열은 Mission `started_at`, Event `occurred_at`, Defect `last_seen_at`,
+Observation `created_at`의 UTC 날짜를 사용한다. 요청과 겹치는 날짜는 원천이
+없어도 반환되며 모든 지표를 0으로 채운다.
+
+### 결함 처리 상태별 예상 집계
+
+| workflowStatus | 전체 ADMIN | Robot 001 VIEWER |
+|---|---:|---:|
+| `NEW` | 2 | 1 |
+| `ACCEPTED` | 1 | 1 |
+| `IN_PROGRESS` | 1 | 0 |
+| `RESOLVED` | 0 | 0 |
+| `FALSE_POSITIVE` | 0 | 0 |
+| `REJECTED` | 0 | 0 |
+
+전체 현재 결함은 4건이고 Robot 001 배정 범위에서는 2건이다. 원천 DB에는
+`RESOLVED` 병합 원본이 한 건 있지만 상태별 통계의 현재 결함에서는 제외한다.
+
+### 결함 유형별 예상 집계
+
+| defectType | 전체 ADMIN | Robot 001 VIEWER |
+|---|---:|---:|
+| `DAMAGED` | 1 | 1 |
+| `CONTAMINATED` | 1 | 0 |
+| `UPLIFTED` | 1 | 0 |
+| `BLOCKED` | 1 | 1 |
+| `MISSING_SUSPECTED` | 0 | 0 |
+| `INSTALLATION_INVALID` | 0 | 0 |
+| `UNKNOWN_ANOMALY` | 0 | 0 |
+
+`DAMAGED` 병합 원본 한 건은 `merged_into_defect_id IS NULL` 조건으로 제외하며,
+각 유형은 `COUNT(DISTINCT defect_id)`로 집계한다.
 
 ### Route별 예상 Mission
 
@@ -108,9 +154,9 @@ ORDER BY m.status;
 실행 환경:
 
 - PostgreSQL 16.9 / PostGIS 3.5 Testcontainer
-- Flyway V1~V23 적용
+- Flyway V1~V26 적용
 - Fixture `ANALYZE` 실행 후
-- 2026-07-28 로컬 통합 테스트
+- 2026-07-29 JDK 21·PostGIS Testcontainer 통합 테스트
 
 ### 자연 실행계획
 
@@ -156,6 +202,58 @@ Planning Time: 0.322 ms
 Execution Time: 0.063 ms
 ```
 
+### 결함 통계 실행계획
+
+V26 적용 전 결함 5건 Fixture의 자연 계획은 비용이 가장 낮은 Sequential Scan을
+선택했다. 이는 작은 테이블에 대한 정상적인 선택이다.
+
+```text
+GroupAggregate
+  Group Key: workflow_status, defect_type
+  ->  Sort
+        ->  Seq Scan on defect d
+              Filter: merged_into_defect_id IS NULL
+                      + last_seen_at UTC range
+              Rows Removed by Filter: 1
+              Buffers: shared hit=1
+Planning Time: 0.333 ms
+Execution Time: 0.086 ms
+```
+
+같은 환경에서 `enable_seqscan=off`만 적용하면 기존
+`ix_defect_workflow_filter`가 선택됐지만 현재 결함 조건과 지역 조건은
+`Index Cond`가 아닌 `Filter`로 남았다.
+
+```text
+Index Scan using ix_defect_workflow_filter on defect d
+  Index Cond: last_seen_at UTC range
+  Filter: merged_into_defect_id IS NULL + patrol_area_id
+  Rows Removed by Filter: 3
+```
+
+V26은 병합되지 않은 현재 결함만 저장하는 두 partial covering index를 추가한다.
+
+| 통계 access path | V26 인덱스 | key / covering |
+| --- | --- | --- |
+| 상태·유형·UTC 날짜별 기간 | `ix_defect_current_last_seen_stats` | `last_seen_at DESC, defect_id` / Area·유형·상태 |
+| 지역·기간 | `ix_defect_current_area_last_seen_stats` | `patrol_area_id, last_seen_at DESC, defect_id` / 유형·상태 |
+
+V26 적용 후 강제 계획에서 지역 조건과 기간 조건이 모두 `Index Cond`로 이동하고
+병합 여부 Filter가 사라졌다.
+
+```text
+Index Only Scan using ix_defect_current_area_last_seen_stats on defect d
+  Index Cond: patrol_area_id + last_seen_at UTC range
+  Heap Fetches: 2
+  Buffers: shared hit=2
+```
+
+전체 기간 전용 인덱스는 `last_seen_at DESC, defect_id` 순서의 대표 조회로,
+지역 인덱스는 `patrol_area_id + last_seen_at` 대표 조회로 각각 사용 가능성을
+자동 검증한다. Fixture에서는 두 partial index의 비용이 거의 같아 날짜별 GROUP BY가
+지역 인덱스를 선택할 수도 있으며, 이는 두 인덱스가 모두 현재 결함만 포함하는 작은
+테스트 데이터 특성 때문이다.
+
 통합 테스트는 다음 대표 조건도 `enable_seqscan=off`에서 해당 인덱스로 서비스할 수
 있는지 실제 `EXPLAIN (ANALYZE, BUFFERS)`로 확인한다.
 
@@ -169,6 +267,8 @@ Execution Time: 0.063 ms
 | Event Mission·기간 | `ix_robot_event_mission_occurred` |
 | Telemetry Mission·기간 | `ix_robot_telemetry_mission_sampled` |
 | Patrol Area Bounding Box | `ix_patrol_area_boundary` |
+| 현재 Defect 기간 | `ix_defect_current_last_seen_stats` |
+| 현재 Defect Area·기간 | `ix_defect_current_area_last_seen_stats` |
 
 운영 성능 판정은 실제 Cardinality와 분포를 반영한 스테이징 데이터에서 자연
 `EXPLAIN (ANALYZE, BUFFERS)`를 다시 수집해야 한다. 강제로 확인한 인덱스 계획은
@@ -186,7 +286,7 @@ Execution Time: 0.063 ms
 최종 결과:
 
 ```text
-tests=4
+tests=10
 skipped=0
 failures=0
 errors=0
@@ -198,5 +298,7 @@ BUILD SUCCESSFUL
 - Fixture 최초 적용과 두 번째 적용의 집계값 동일
 - runtime application role로 Mission·Event·Telemetry·Defect 집계 SELECT 성공
 - 전체·Area·Route별 예상값 일치
+- UTC 날짜별 예상값, 부분 `[from,to)` 경계, 반복 호출과 빈 날짜 zero-fill 일치
+- Robot 001 배정 범위 밖 날짜의 집계가 0인지 확인
 - 자연 실행계획과 인덱스 사용 가능성 실행계획 생성
-- 요구된 B-tree 7개와 GiST 1개가 대표 조회를 지원
+- Mission·Event·Telemetry·Defect B-tree와 Area GiST가 대표 조회를 지원

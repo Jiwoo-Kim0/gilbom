@@ -24,6 +24,7 @@ class ErrorCodeTest {
                 .isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE);
         assertThat(ErrorCode.COMMON_BUSINESS_RULE_VIOLATION.httpStatus())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
-        
+        assertThat(ErrorCode.STATISTICS_PERIOD_INVALID.httpStatus())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
     }
 }

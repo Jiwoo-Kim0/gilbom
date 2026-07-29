@@ -7,6 +7,12 @@ plugins {
 group = 'com.gilbom'
 version = '0.0.1-SNAPSHOT'
 
+if (providers.gradleProperty('isolatedBuildDirectory').isPresent()) {
+    layout.buildDirectory.set(file(
+            providers.gradleProperty('isolatedBuildDirectory').get()
+    ))
+}
+
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
@@ -47,6 +53,28 @@ dependencies {
 tasks.named('test') {
     useJUnitPlatform {
         excludeTags 'password-load'
+    }
+    afterSuite { descriptor, result ->
+        if (descriptor.parent == null) {
+            logger.lifecycle(
+                    "Backend test summary: tests=${result.testCount}, "
+                            + "failures=${result.failedTestCount}, "
+                            + "skipped=${result.skippedTestCount}"
+            )
+        }
+        if (descriptor.parent == null
+                && result.skippedTestCount > 0
+                && !providers.gradleProperty('allowSkippedTests')
+                        .map { it.toBoolean() }
+                        .getOrElse(false)) {
+            throw new GradleException(
+                    "Backend tests must not be skipped: "
+                            + "${result.skippedTestCount} skipped. "
+                            + "Run scripts/backend-test.sh with Docker, or use "
+                            + "-PallowSkippedTests=true only in a build stage "
+                            + "that is preceded by the container-backed test gate."
+            )
+        }
     }
 }
 

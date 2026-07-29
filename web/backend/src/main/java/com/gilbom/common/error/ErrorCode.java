@@ -96,6 +96,7 @@ public enum ErrorCode {
             "순찰 경로는 선택한 순찰 구역 경계 안에 있어야 합니다."
     ),
     REPORT_PERIOD_INVALID(HttpStatus.UNPROCESSABLE_ENTITY, "보고서 조회 기간이 올바르지 않습니다."),
+    STATISTICS_PERIOD_INVALID(HttpStatus.UNPROCESSABLE_ENTITY, "통계 조회 기간이 올바르지 않습니다."),
     MQTT_SCHEMA_VERSION_UNSUPPORTED(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "지원하지 않는 MQTT Payload 버전입니다."
