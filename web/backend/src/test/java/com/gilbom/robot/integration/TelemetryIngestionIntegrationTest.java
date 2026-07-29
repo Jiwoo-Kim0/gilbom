@@ -17,7 +17,6 @@ import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -34,6 +33,7 @@ import com.gilbom.robot.data.application.result.TelemetryIngestionResult;
 import com.gilbom.robot.data.mqtt.v2.common.BatteryState;
 import com.gilbom.robot.data.mqtt.v2.inbound.TelemetryPayload;
 import com.gilbom.robot.mission.MissionProgressService;
+import com.gilbom.robot.mqtt.replay.MqttReplayProtectionService;
 import com.gilbom.robot.realtime.RobotRealtimeEventListener;
 import com.gilbom.robot.realtime.RobotSseService;
 import com.gilbom.robot.telemetry.TelemetryIngestionService;
@@ -155,7 +155,10 @@ class TelemetryIngestionIntegrationTest {
         TelemetryIngestionResult sameMessage = ingest(
                 original,
                 BASE_SAMPLED_AT.plusSeconds(2));
-        TelemetryIngestionResult sameSequence = ingest(
+
+        assertThat(sameMessage)
+                .isEqualTo(new TelemetryIngestionResult(false, false));
+        assertThatThrownBy(() -> ingest(
                 payload(
                         UUID.fromString(
                                 "7850afcb-d682-4ef6-a90d-f63fcf5c2103"),
@@ -163,12 +166,12 @@ class TelemetryIngestionIntegrationTest {
                         1L,
                         BASE_SAMPLED_AT.plusSeconds(1),
                         78.0),
-                BASE_SAMPLED_AT.plusSeconds(3));
-
-        assertThat(sameMessage)
-                .isEqualTo(new TelemetryIngestionResult(false, false));
-        assertThat(sameSequence)
-                .isEqualTo(new TelemetryIngestionResult(false, false));
+                BASE_SAMPLED_AT.plusSeconds(3)))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(
+                                        ErrorCode.MQTT_SEQUENCE_CONFLICT));
         assertThat(historyCount()).isEqualTo(1);
         assertThat(currentSequence()).isEqualTo(1L);
         assertThat(currentBatteryPercent()).isEqualTo(79.0);
@@ -182,7 +185,7 @@ class TelemetryIngestionIntegrationTest {
                         UUID.fromString(
                                 "7850afcb-d682-4ef6-a90d-f63fcf5c2104"),
                         BOOT_ID,
-                        2L,
+                        1L,
                         BASE_SAMPLED_AT.plusSeconds(10),
                         80.0),
                 BASE_SAMPLED_AT.plusSeconds(11));
@@ -193,7 +196,7 @@ class TelemetryIngestionIntegrationTest {
                         UUID.fromString(
                                 "7850afcb-d682-4ef6-a90d-f63fcf5c2105"),
                         BOOT_ID,
-                        3L,
+                        2L,
                         BASE_SAMPLED_AT.plusSeconds(5),
                         20.0),
                 BASE_SAMPLED_AT.plusSeconds(12));
@@ -201,7 +204,7 @@ class TelemetryIngestionIntegrationTest {
         assertThat(staleResult.historyInserted()).isTrue();
         assertThat(staleResult.currentStateUpdated()).isFalse();
         assertThat(historyCount()).isEqualTo(2);
-        assertThat(currentSequence()).isEqualTo(2L);
+        assertThat(currentSequence()).isEqualTo(1L);
         assertThat(currentBatteryPercent()).isEqualTo(80.0);
         assertThat(currentEpoch("telemetry_sampled_at"))
                 .isEqualTo(BASE_SAMPLED_AT.plusSeconds(10).getEpochSecond());
@@ -217,7 +220,7 @@ class TelemetryIngestionIntegrationTest {
                         UUID.fromString(
                                 "7850afcb-d682-4ef6-a90d-f63fcf5c2201"),
                         BOOT_ID,
-                        50L,
+                        1L,
                         BASE_SAMPLED_AT,
                         79.0),
                 BASE_SAMPLED_AT.plusSeconds(1));
@@ -233,23 +236,57 @@ class TelemetryIngestionIntegrationTest {
                 BASE_SAMPLED_AT.plusSeconds(11));
         clearInvocations(sseService);
 
-        TelemetryIngestionResult previousBootReplay = ingest(
+        assertThatThrownBy(() -> ingest(
                 payload(
                         UUID.fromString(
                                 "7850afcb-d682-4ef6-a90d-f63fcf5c2203"),
                         BOOT_ID,
-                        51L,
+                        2L,
                         BASE_SAMPLED_AT.plusSeconds(20),
                         10.0),
-                BASE_SAMPLED_AT.plusSeconds(21));
+                BASE_SAMPLED_AT.plusSeconds(21)))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(
+                                        ErrorCode.MQTT_REPLAY_REJECTED));
 
         assertThat(newBoot)
                 .isEqualTo(new TelemetryIngestionResult(true, true));
-        assertThat(previousBootReplay)
-                .isEqualTo(new TelemetryIngestionResult(true, false));
+        assertThat(historyCount()).isEqualTo(2);
         assertThat(currentBootId()).isEqualTo(newBootId);
         assertThat(currentSequence()).isEqualTo(1L);
         assertThat(currentBatteryPercent()).isEqualTo(80.0);
+        verifyNoInteractions(sseService);
+    }
+
+    @Test
+    void rejectsNewBootWhenFirstSequenceIsNotOneWithoutWritingHistory() {
+        UUID newBootId =
+                UUID.fromString("6850afcb-d682-4ef6-a90d-f63fcf5c2203");
+
+        assertThatThrownBy(() -> ingest(
+                payload(
+                        UUID.fromString(
+                                "7850afcb-d682-4ef6-a90d-f63fcf5c2204"),
+                        newBootId,
+                        2L,
+                        BASE_SAMPLED_AT,
+                        79.0),
+                BASE_SAMPLED_AT.plusSeconds(1)))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(
+                                        ErrorCode.MQTT_REPLAY_REJECTED));
+
+        assertThat(historyCount()).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM telemetry.robot_boot_session "
+                        + "WHERE boot_id = ?",
+                Integer.class,
+                newBootId)).isZero();
+        assertThat(currentBootId()).isNull();
         verifyNoInteractions(sseService);
     }
 
@@ -302,7 +339,7 @@ class TelemetryIngestionIntegrationTest {
     }
 
     @Test
-    void databaseRejectsSequenceZeroEvenIfServiceIsCalledWithoutParser() {
+    void serviceRejectsSequenceZeroEvenIfCalledWithoutParser() {
         assertThatThrownBy(() -> ingest(
                 payload(
                         UUID.fromString(
@@ -312,7 +349,11 @@ class TelemetryIngestionIntegrationTest {
                         BASE_SAMPLED_AT,
                         79.0),
                 BASE_SAMPLED_AT.plusSeconds(1)))
-                .isInstanceOf(DataIntegrityViolationException.class);
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(
+                                        ErrorCode.MQTT_REPLAY_REJECTED));
         assertThat(historyCount()).isZero();
         assertThat(currentSequence()).isNull();
         verifyNoInteractions(sseService);
@@ -481,6 +522,7 @@ class TelemetryIngestionIntegrationTest {
     @Import({
             TelemetryIngestionService.class,
             MissionProgressService.class,
+            MqttReplayProtectionService.class,
             RobotRealtimeEventListener.class
     })
     static class TestApplication {

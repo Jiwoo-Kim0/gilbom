@@ -16,6 +16,10 @@ import com.gilbom.robot.data.application.command.TelemetryIngestionCommand;
 import com.gilbom.robot.data.application.result.TelemetryIngestionResult;
 import com.gilbom.robot.data.mqtt.v2.inbound.TelemetryPayload;
 import com.gilbom.robot.mission.MissionProgressService;
+import com.gilbom.robot.mqtt.replay.MqttReplayProtectionService;
+import com.gilbom.robot.mqtt.replay.MqttReplayProtectionService.ClaimResult;
+import com.gilbom.robot.mqtt.replay.MqttReplayProtectionService.SequenceKind;
+import com.gilbom.robot.mqtt.topic.MqttTopicType;
 import com.gilbom.robot.realtime.RobotRealtimeEvent;
 
 @Service
@@ -24,15 +28,18 @@ public class TelemetryIngestionService {
     private final JdbcTemplate jdbcTemplate;
     private final ApplicationEventPublisher eventPublisher;
     private final MissionProgressService missionProgressService;
+    private final MqttReplayProtectionService replayProtectionService;
 
     public TelemetryIngestionService(
             JdbcTemplate jdbcTemplate,
             ApplicationEventPublisher eventPublisher,
-            MissionProgressService missionProgressService
+            MissionProgressService missionProgressService,
+            MqttReplayProtectionService replayProtectionService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.eventPublisher = eventPublisher;
         this.missionProgressService = missionProgressService;
+        this.replayProtectionService = replayProtectionService;
     }
 
     @Transactional
@@ -46,11 +53,19 @@ public class TelemetryIngestionService {
         OffsetDateTime receivedAt = utc(command.receivedAt());
 
         lockCurrentState(robotId);
-        ensureBootSession( //upsert
+        ClaimResult claim = replayProtectionService.claim(
+                MqttTopicType.TELEMETRY,
+                SequenceKind.TELEMETRY,
                 robotId,
                 payload.bootId(),
+                payload.seq(),
+                payload.messageId(),
                 payload.schemaVersion(),
-                receivedAt);
+                command.rawPayload(),
+                command.receivedAt());
+        if (claim == ClaimResult.DUPLICATE) {
+            return new TelemetryIngestionResult(false, false);
+        }
         int inserted = insertHistory(
                 robotId,
                 payload,
@@ -60,18 +75,14 @@ public class TelemetryIngestionService {
                 receivedAt);
 
         if (inserted == 0) {
-            return new TelemetryIngestionResult(false, false);
+            throw new BusinessException(
+                    ErrorCode.MQTT_SEQUENCE_CONFLICT);
         }
 
         updateMissionProgress(
                 missionId,
                 payload,
                 sampledAt);
-        touchBootSession(
-                robotId,
-                payload.bootId(),
-                payload.seq(),
-                receivedAt);
         boolean currentStateUpdated = updateCurrentState(
                 robotId,
                 payload,
@@ -167,76 +178,6 @@ public class TelemetryIngestionService {
             throw new BusinessException(ErrorCode.MISSION_NOT_FOUND);
         }
         return missionId;
-    }
-
-    private void ensureBootSession( //upsert
-            UUID robotId,
-            UUID bootId,
-            String schemaVersion,
-            OffsetDateTime receivedAt
-    ) {
-        jdbcTemplate.update("""
-                INSERT INTO telemetry.robot_boot_session (
-                    boot_id,
-                    robot_id,
-                    schema_version,
-                    session_status,
-                    first_received_at,
-                    last_received_at,
-                    created_at,
-                    updated_at
-                ) VALUES (?, ?, ?, 'ONLINE', ?, ?, ?, ?)
-                ON CONFLICT (boot_id) DO NOTHING
-                """,
-                bootId,
-                robotId,
-                schemaVersion,
-                receivedAt,
-                receivedAt,
-                receivedAt,
-                receivedAt);
-
-        UUID owner = jdbcTemplate.query("""
-                        SELECT robot_id
-                        FROM telemetry.robot_boot_session
-                        WHERE boot_id = ?
-                        """,
-                resultSet -> resultSet.next()
-                        ? resultSet.getObject("robot_id", UUID.class)
-                        : null,
-                bootId);
-        if (owner != null && !owner.equals(robotId)) {
-            throw new BusinessException(
-                    ErrorCode.MQTT_ID_MISMATCH,
-                    "boot_id is already assigned to another robot");
-        }
-    }
-
-    private void touchBootSession(
-            UUID robotId,
-            UUID bootId,
-            long sequence,
-            OffsetDateTime receivedAt
-    ) {
-        int updated = jdbcTemplate.update("""
-                UPDATE telemetry.robot_boot_session
-                SET last_received_at = GREATEST(last_received_at, ?),
-                    last_seen_seq = GREATEST(
-                        COALESCE(last_seen_seq, 0),
-                        ?
-                    ),
-                    updated_at = GREATEST(updated_at, ?)
-                WHERE robot_id = ?
-                  AND boot_id = ?
-                """,
-                receivedAt,
-                sequence,
-                receivedAt,
-                robotId,
-                bootId);
-        if (updated != 1) {
-            throw new IllegalStateException("Boot session could not be updated");
-        }
     }
 
     private int insertHistory(

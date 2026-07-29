@@ -62,8 +62,9 @@ Day 9까지 흩어진 팀원 B 백로그다.
 | `S15P11D101-375` Telemetry 저장과 현재 상태 갱신 | MQTT Telemetry를 검증해 이력 INSERT와 현재 상태 UPSERT를 같은 트랜잭션에서 수행한다. `observed_at`과 `received_at`을 분리하고 오래된 값이 최신 상태를 덮지 못하게 한다. | **DONE** | V17로 `seq>=1`을 강제하고, 중복·지연·비활성 Robot·Rollback·SSE 통합 테스트와 TLS Mosquitto Mock E2E를 통과했다. 이전 Boot Replay 차단도 `378`과 함께 검증했다. | 실제 Jetson 실기 연결은 Day 7 통합 범위다. |
 | `S15P11D101-376` Robot 관제 조회 REST API | 목록·요약·지도·단건을 제공한다. 목록·집계는 SQL `JOIN/EXISTS`에서 객체 범위를 제한하며 범위 밖 단건은 존재하지 않는 대상과 동일한 `404`를 반환한다. | **DONE** | `/api/v1/robots`, `/summary`, `/map`, `/{robotId}`, `ROBOT_STATUS_VIEW`, SQL Scope, Controller·Scope 통합 테스트, OpenAPI가 있다. | 프론트 연결은 사용자가 현재 제외했으므로 이 Backend Story 완료 판정에 포함하지 않는다. |
 | `S15P11D101-377` Robot 명령·ACK 생명주기와 REST API | REST에서 명령을 생성·조회하고 DB 저장 후 MQTT로 발행한다. `command_id` 멱등성, 만료시간, Retain 금지, ACK/Result 저장, `CREATED→SENT→ACCEPTED→COMPLETED` 및 실패·거절·만료 전이를 관리한다. | **DONE (Backend)** | V21 Command·Result Table, 생성·목록·단건·결과 REST, MQTT 5 Message Expiry, `PUBLISH_FAILED`, ACK 영속화, 지연 결과 보호, Timeout Scheduler, `COMMAND_STATUS_CHANGED` SSE, Permission·SQL Scope를 구현했다. 정상·실패·거절·만료·중복·범위 밖·감사 실패 Rollback 통합 테스트와 전체 323 tests가 실패 없이 통과했다. | 실제 Mock Robot이 명령을 수신하고 Result를 되돌리는 Broker E2E는 `B-STORY-06` 통합 범위로 추적한다. |
-| `S15P11D101-378` Presence·State·Boot Session 저장 | Presence로 연결·단절과 Last Will을 기록하고 State로 mode·health를 저장한다. `boot_id`별 Session과 `seq` 진행을 추적해 재부팅과 Replay를 구분하고 변경을 SSE로 알린다. | **DONE** | V18 Boot Session·append-only Status History, Presence·State Service/Handler, 90초 Timeout, 새 Boot `seq=1`, 이전 Boot Replay 차단, commit 이후 SSE를 구현했다. 전체 308 tests 실패 0이며 TLS Mock에서 ONLINE·State·Telemetry·LWT OFFLINE DB 저장을 확인했다. | 실제 Jetson 단절·재연결 실기와 다중 Backend SSE Fan-out은 Day 7~10 후속 통합 범위다. |
+| `S15P11D101-378` Presence·State·Boot Session 저장 | Presence로 연결·단절과 Last Will을 기록하고 State로 mode·health를 저장한다. `boot_id`별 Session과 `seq` 진행을 추적해 재부팅과 Replay를 구분하고 변경을 SSE로 알린다. | **DONE** | V18 Boot Session·append-only Status History, Presence·State Service/Handler, 90초 Timeout과 commit 이후 SSE를 구현했다. `S15P11D101-432`에서 State·Telemetry·Event 공용 `seq`, 새 Boot `seq=1`, 종료·이전 Boot Replay 차단을 보강했다. | 실제 Jetson 단절·재연결 실기와 다중 Backend SSE Fan-out은 Day 7~10 후속 통합 범위다. |
 | `S15P11D101-379` 순찰 임무와 경로 관리 | 순찰 구역·경로 CRUD, Mission 생성·Robot 배정, 상태 전이·이력, 진행률, 실제 궤적, 충전 후 재개를 관리하고 명령 수명주기와 연결한다. | **IN PROGRESS** | V22~V25 정본·FK·Robot별 활성 Mission 제약, Area 등록·조회·이름/경계 변경·보관 REST, Route 불변 버전·자동 비활성화 정책, Mission 생성·목록·상세·변경·궤적·이력 REST, Telemetry 경로 진행률·예상 완료 시각, START·PAUSE·RESUME·CANCEL Command FK, OpenAPI와 통합 테스트를 구현했다. | 복귀·충전 상태 계약과 실제 Broker E2E가 남았다. |
+| `S15P11D101-432` `boot_id`·`seq` Replay 정책 고정 | State·Telemetry·Event 4종의 Boot별 공용 순번, 정확한 재전송 멱등성, 교차 Topic 충돌과 종료·이전 Boot 차단을 하나의 정책으로 적용한다. | **DONE (Backend)** | 공통 Replay Service가 Current State 행 잠금 아래 세 History Table을 함께 검사한다. 새 Boot `seq=1`, 증가 순번·누락 허용, `REPLACED_BY_NEW_BOOT`, 복구 가능한 Presence 재연결, 제한 Metric과 오류 코드가 구현됐고 집중 4 Suite·30 Test와 전체 98 Suite·514 Test가 실패 없이 통과했다. | 실제 Robot·Mock Publisher가 UUIDv4 Boot와 공용 순번을 계약대로 생성하는지는 Broker E2E에서 확인한다. |
 
 ## 3. Story별 완료 조건
 
@@ -100,8 +101,9 @@ Day 9까지 흩어진 팀원 B 백로그다.
 
 - Presence ONLINE/OFFLINE과 `last_seen_at`이 저장된다.
 - Grace Period 이후 Heartbeat가 없거나 Last Will을 받으면 OFFLINE으로 판정한다.
-- `boot_id`가 바뀌면 새 Boot Session을 열고 `seq=1`부터 다시 허용한다.
-- 같은 Boot Session의 이미 처리한 `seq`는 Replay로 거절한다.
+- `boot_id`가 바뀌면 새 Boot Session을 열고 첫 State·Telemetry·Event의 `seq=1`만 허용한다.
+- 같은 Boot Session에서 새 `seq`는 이전 값보다 커야 하며 누락은 허용한다.
+- State·Telemetry·Event 사이에서 이미 처리한 `seq`를 다른 메시지가 재사용하면 충돌로 거절하고, 정확히 같은 재전송만 멱등 처리한다.
 - State의 mode·health가 Current State와 Status History에 반영된다.
 - Presence·State 변경은 Transaction commit 이후 Scope가 허용된 SSE 연결에만 전달된다.
 
@@ -171,7 +173,8 @@ Day 9까지 흩어진 팀원 B 백로그다.
   - [x] 시간·좌표·재전송 기본 규칙 정의
   - [x] Telemetry·State·Presence·Command·Result Payload 초안
   - [x] Event `ttl_sec` 60~300초와 `occurred_at` 기준 만료 처리 확정
-  - [ ] `(WAITING)` Embedded의 `boot_id`, `seq`, 재시도 ID 정책 확인
+  - [x] Backend의 `boot_id`, 공용 `seq`, 재시도 ID Replay 정책 고정 (`S15P11D101-432`)
+  - [ ] `(WAITING)` Embedded 구현이 UUIDv4 Boot·공용 `seq`·재시도 ID 정책을 따르는지 확인
   - [ ] `(WAITING)` Embedded의 NTP 오차와 발행 주기 확인
   - [ ] `(WAITING)` MQTT Client ID와 동시 접속 정책 확인
   - [ ] `(WAITING)` 팀원 C의 Incident, Image, bbox 계약 확인

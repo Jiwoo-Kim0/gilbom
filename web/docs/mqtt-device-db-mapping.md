@@ -746,6 +746,24 @@ topic write tbs/v1/robots/+/ingest/receipt
 
 ### 12.3 Replay와 명령 안전
 
+- State·Telemetry·Event 4종은 한 Boot Session에서 하나의 `seq`를 공유한다.
+- 새 Boot의 첫 State·Telemetry·Event는 `seq=1`이어야 하며, 이후 새 Claim은
+  `last_seen_seq`보다 커야 한다. QoS 0 유실을 고려해 중간 순번 누락은 허용한다.
+- Backend는 `telemetry.robot_current_state` 행을 `FOR UPDATE`로 잠근 뒤
+  `robot_status_history`, `robot_telemetry`, `robot_event`의
+  `(robot_id, boot_id, seq)`를 함께 조회한다. 별도 Replay Table은 추가하지 않는다.
+- 같은 State JSON, 같은 Telemetry `message_id`·JSON, 같은 Event `event_id`의
+  재수신만 멱등 처리한다. 같은 순번을 다른 Topic 또는 메시지가 사용하면
+  `MQTT_SEQUENCE_CONFLICT`로 거부한다.
+- 새 Boot 승인 시 이전 Boot를 `REPLACED_BY_NEW_BOOT`로 닫고 Current State의
+  Boot별 측정값을 초기화한다. 종료·이전 Boot의 새 메시지나 새 Boot의
+  `seq!=1`은 `MQTT_REPLAY_REJECTED`로 거부한다.
+- Presence에는 `seq`가 없다. `UNGRACEFUL_DISCONNECT`·`HEARTBEAT_TIMEOUT`은 같은
+  Boot의 ONLINE 재연결을 허용하지만, 교체된 Boot의 Retained ONLINE은 무시한다.
+- Replay 판정과 Boot Sequence 갱신은 각 수신 서비스의 History·Mission·Defect
+  업무 처리와 같은 Transaction에 포함한다. 실패하면 전체를 Rollback한다.
+- Replay 거부 Metric은 `gilbom.mqtt.inbound.rejected`의 `topic`, `reason`
+  제한 Tag만 사용하며 Payload·UUID·시각을 Tag에 넣지 않는다.
 - Commands Request는 Retain을 절대 사용하지 않는다.
 - `expires_at`과 MQTT 5 Message Expiry를 함께 적용한다.
 - `command_id` 중복 수신 시 재실행하지 않는다.
@@ -793,8 +811,9 @@ incident / battery / safety / mission
 
 | 입력 | 중복 키 | 처리 |
 |---|---|---|
-| Telemetry | `message_id`, `(robot_id, boot_id, seq)` | 이력 중복 INSERT 방지 |
-| Event 4종 | `event_id`, `(robot_id, boot_id, seq)` | 최초 저장, 재수신 횟수 갱신 |
+| State | `(robot_id, boot_id, seq)`, JSON Payload | 완전히 같은 재수신은 멱등, 다른 Claim은 충돌 |
+| Telemetry | `message_id`, `(robot_id, boot_id, seq)`, JSON Payload | 완전히 같은 재수신은 멱등, 다른 Claim은 충돌 |
+| Event 4종 | `event_id`, `(robot_id, boot_id, seq)` | 같은 Event 재수신은 멱등, 다른 Claim은 충돌 |
 | Command REST | Idempotency Key, `command_id` | 중복 명령 생성 방지 |
 | Command Result | `result_id` | 중복 결과 저장 방지 |
 | Image Upload | `event_id` | 재업로드 시 기존 `image_id` 반환 |

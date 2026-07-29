@@ -8,7 +8,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,6 +35,7 @@ import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
 import com.gilbom.robot.data.application.command.PresenceIngestionCommand;
 import com.gilbom.robot.data.application.command.StateIngestionCommand;
+import com.gilbom.robot.data.application.command.TelemetryIngestionCommand;
 import com.gilbom.robot.data.application.result.RobotStatusIngestionResult;
 import com.gilbom.robot.data.mqtt.v2.common.BatteryState;
 import com.gilbom.robot.data.mqtt.v2.common.HealthStatus;
@@ -37,10 +43,14 @@ import com.gilbom.robot.data.mqtt.v2.common.RobotMode;
 import com.gilbom.robot.data.mqtt.v2.common.RobotStateReason;
 import com.gilbom.robot.data.mqtt.v2.inbound.PresencePayload;
 import com.gilbom.robot.data.mqtt.v2.inbound.StatePayload;
+import com.gilbom.robot.data.mqtt.v2.inbound.TelemetryPayload;
+import com.gilbom.robot.mission.MissionProgressService;
+import com.gilbom.robot.mqtt.replay.MqttReplayProtectionService;
 import com.gilbom.robot.realtime.RobotRealtimeEventListener;
 import com.gilbom.robot.realtime.RobotSseService;
 import com.gilbom.robot.status.RobotOfflineDetectionService;
 import com.gilbom.robot.status.RobotStatusIngestionService;
+import com.gilbom.robot.telemetry.TelemetryIngestionService;
 
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(
@@ -86,6 +96,9 @@ class RobotStatusIngestionIntegrationTest {
     private RobotStatusIngestionService ingestionService;
 
     @Autowired
+    private TelemetryIngestionService telemetryIngestionService;
+
+    @Autowired
     private RobotOfflineDetectionService offlineDetectionService;
 
     @MockitoBean
@@ -96,6 +109,14 @@ class RobotStatusIngestionIntegrationTest {
 
     @BeforeEach
     void setUpRobot() {
+        jdbcTemplate.update("""
+                UPDATE telemetry.robot_boot_session
+                SET session_status = 'OFFLINE',
+                    offline_received_at = last_received_at,
+                    offline_reason = 'MIGRATED_HISTORY',
+                    updated_at = GREATEST(updated_at, last_received_at)
+                WHERE session_status = 'ONLINE'
+                """);
         robotId = UUID.randomUUID();
         mqttId = "RBT-STATUS-" + robotId.toString().substring(0, 8);
         createAdmin();
@@ -135,7 +156,7 @@ class RobotStatusIngestionIntegrationTest {
 
         StatePayload current = state(
                 bootId,
-                2L,
+                1L,
                 BASE_TIME.plusSeconds(10),
                 RobotMode.PATROLLING,
                 HealthStatus.DEGRADED);
@@ -150,7 +171,7 @@ class RobotStatusIngestionIntegrationTest {
         RobotStatusIngestionResult late = ingestState(
                 state(
                         bootId,
-                        3L,
+                        2L,
                         BASE_TIME.plusSeconds(5),
                         RobotMode.READY,
                         HealthStatus.OK),
@@ -163,9 +184,9 @@ class RobotStatusIngestionIntegrationTest {
         assertThat(late)
                 .isEqualTo(new RobotStatusIngestionResult(true, false));
         assertThat(currentMode()).isEqualTo("PATROLLING");
-        assertThat(currentStateSequence()).isEqualTo(2L);
+        assertThat(currentStateSequence()).isEqualTo(1L);
         assertThat(currentOverallHealth()).isEqualTo("WARNING");
-        assertThat(bootLastSeenSequence(bootId)).isEqualTo(3L);
+        assertThat(bootLastSeenSequence(bootId)).isEqualTo(2L);
         assertThat(historyCount("STATE")).isEqualTo(2);
         verifyNoInteractions(sseService);
     }
@@ -180,7 +201,7 @@ class RobotStatusIngestionIntegrationTest {
         ingestState(
                 state(
                         oldBootId,
-                        50L,
+                        1L,
                         BASE_TIME.plusSeconds(2),
                         RobotMode.PATROLLING,
                         HealthStatus.OK),
@@ -199,22 +220,25 @@ class RobotStatusIngestionIntegrationTest {
                 BASE_TIME.plusSeconds(13));
         clearInvocations(sseService);
 
-        RobotStatusIngestionResult oldState = ingestState(
+        assertThatThrownBy(() -> ingestState(
                 state(
                         oldBootId,
-                        51L,
+                        2L,
                         BASE_TIME.plusSeconds(14),
                         RobotMode.ERROR,
                         HealthStatus.FAULT),
-                BASE_TIME.plusSeconds(15));
+                BASE_TIME.plusSeconds(15)))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(
+                                        ErrorCode.MQTT_REPLAY_REJECTED));
         RobotStatusIngestionResult oldLastWill = ingestPresence(
                 offline(oldBootId),
                 BASE_TIME.plusSeconds(16));
 
         assertThat(newBootState)
                 .isEqualTo(new RobotStatusIngestionResult(true, true));
-        assertThat(oldState)
-                .isEqualTo(new RobotStatusIngestionResult(true, false));
         assertThat(oldLastWill)
                 .isEqualTo(new RobotStatusIngestionResult(false, false));
         assertThat(currentBootId()).isEqualTo(newBootId);
@@ -225,6 +249,110 @@ class RobotStatusIngestionIntegrationTest {
         assertThat(bootOfflineReason(oldBootId))
                 .isEqualTo("REPLACED_BY_NEW_BOOT");
         verifyNoInteractions(sseService);
+    }
+
+    @Test
+    void ignoresOnlineReplayForBootClosedByReplacement() {
+        UUID oldBootId = UUID.randomUUID();
+        UUID newBootId = UUID.randomUUID();
+        PresencePayload oldOnline = online(oldBootId, BASE_TIME);
+        ingestPresence(oldOnline, BASE_TIME.plusSeconds(1));
+        ingestPresence(
+                online(newBootId, BASE_TIME.plusSeconds(10)),
+                BASE_TIME.plusSeconds(11));
+        clearInvocations(sseService);
+
+        RobotStatusIngestionResult replay = ingestPresence(
+                new PresencePayload(
+                        "2.0",
+                        mqttId,
+                        oldBootId,
+                        PresencePayload.Status.ONLINE,
+                        BASE_TIME.plusSeconds(20),
+                        null),
+                BASE_TIME.plusSeconds(21));
+
+        assertThat(replay)
+                .isEqualTo(new RobotStatusIngestionResult(false, false));
+        assertThat(currentBootId()).isEqualTo(newBootId);
+        assertThat(currentConnectivity()).isEqualTo("ONLINE");
+        assertThat(bootStatus(oldBootId)).isEqualTo("OFFLINE");
+        assertThat(bootOfflineReason(oldBootId))
+                .isEqualTo("REPLACED_BY_NEW_BOOT");
+        assertThat(historyCount("PRESENCE")).isEqualTo(2);
+        verifyNoInteractions(sseService);
+    }
+
+    @Test
+    void serializesStateAndTelemetryClaimingSameBootSequence()
+            throws Exception {
+        UUID bootId = UUID.randomUUID();
+        ingestPresence(online(bootId, BASE_TIME), BASE_TIME.plusSeconds(1));
+        StatePayload state = state(
+                bootId,
+                1L,
+                BASE_TIME.plusSeconds(2),
+                RobotMode.READY,
+                HealthStatus.OK);
+        TelemetryPayload telemetry = telemetry(
+                bootId,
+                1L,
+                BASE_TIME.plusSeconds(2));
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<String> stateResult = executor.submit(() -> {
+                ready.countDown();
+                start.await();
+                try {
+                    ingestState(state, BASE_TIME.plusSeconds(3));
+                    return "STATE_ACCEPTED";
+                } catch (BusinessException exception) {
+                    return exception.errorCode().name();
+                }
+            });
+            Future<String> telemetryResult = executor.submit(() -> {
+                ready.countDown();
+                start.await();
+                try {
+                    telemetryIngestionService.ingest(
+                            new TelemetryIngestionCommand(
+                                    telemetry,
+                                    "{}",
+                                    BASE_TIME.plusSeconds(3)));
+                    return "TELEMETRY_ACCEPTED";
+                } catch (BusinessException exception) {
+                    return exception.errorCode().name();
+                }
+            });
+
+            ready.await();
+            start.countDown();
+            List<String> results = List.of(
+                    stateResult.get(),
+                    telemetryResult.get());
+
+            assertThat(results)
+                    .filteredOn(result -> result.endsWith("_ACCEPTED"))
+                    .hasSize(1);
+            assertThat(results)
+                    .filteredOn(result -> result.equals(
+                            ErrorCode.MQTT_SEQUENCE_CONFLICT.name()))
+                    .hasSize(1);
+            Integer telemetryCount = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) "
+                            + "FROM telemetry.robot_telemetry "
+                            + "WHERE robot_id = ?",
+                    Integer.class,
+                    robotId);
+            assertThat(historyCount("STATE") + telemetryCount)
+                    .isEqualTo(1);
+            assertThat(bootLastSeenSequence(bootId)).isEqualTo(1L);
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     @Test
@@ -404,6 +532,39 @@ class RobotStatusIngestionIntegrationTest {
                         HealthStatus.OK));
     }
 
+    private TelemetryPayload telemetry(
+            UUID bootId,
+            long sequence,
+            Instant sampledAt
+    ) {
+        return new TelemetryPayload(
+                "2.0",
+                UUID.randomUUID(),
+                mqttId,
+                bootId,
+                sequence,
+                sampledAt,
+                null,
+                new TelemetryPayload.Position(
+                        true,
+                        37.51,
+                        127.01,
+                        90.0),
+                new TelemetryPayload.Motion(true, 0.8),
+                new TelemetryPayload.Battery(
+                        true,
+                        79.0,
+                        BatteryState.NORMAL,
+                        TelemetryPayload.Source.MEASURED,
+                        24.0,
+                        1.2,
+                        false,
+                        41.0,
+                        3600),
+                new TelemetryPayload.SystemMetrics(52.0),
+                null);
+    }
+
     private UUID currentBootId() {
         return currentBootId(robotId);
     }
@@ -548,6 +709,9 @@ class RobotStatusIngestionIntegrationTest {
     @EnableAutoConfiguration
     @Import({
             RobotStatusIngestionService.class,
+            TelemetryIngestionService.class,
+            MissionProgressService.class,
+            MqttReplayProtectionService.class,
             RobotOfflineDetectionService.class,
             RobotRealtimeEventListener.class
     })

@@ -116,12 +116,12 @@
 대화에서 합의했지만 진행 현황 문서에는 아직 반영되지 않은 내용:
 
 - [ ] Telemetry 5초, State 상태 변경 즉시·30초 주기 확정 표시
-- [ ] `boot_id`는 통신 프로그램 시작 시 UUIDv4 생성
-- [ ] MQTT 재연결 시 같은 `boot_id` 유지
-- [ ] State·Telemetry·Event가 한 `boot_id` 안에서 공용 `seq` 사용
-- [ ] 새 `boot_id`에서 `seq=1`
-- [ ] 동일 Event 재전송 시 `event_id`, `boot_id`, `seq`, `occurred_at` 유지
-- [ ] 재전송 시 `sent_at`만 갱신할 수 있도록 명시
+- [x] `boot_id`는 통신 프로그램 시작 시 UUIDv4 생성
+- [x] MQTT 재연결 시 같은 `boot_id` 유지
+- [x] State·Telemetry·Event가 한 `boot_id` 안에서 공용 `seq` 사용
+- [x] 새 `boot_id`에서 `seq=1`
+- [x] 동일 Event 재전송 시 `event_id`, `boot_id`, `seq`, `occurred_at` 유지
+- [x] 재전송 시 `sent_at`만 갱신할 수 있도록 명시
 
 아직 최종 결정·외부 확인이 필요한 내용:
 

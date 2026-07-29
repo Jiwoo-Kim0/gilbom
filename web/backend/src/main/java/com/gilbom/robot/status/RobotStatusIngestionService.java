@@ -18,6 +18,10 @@ import com.gilbom.robot.data.application.result.RobotStatusIngestionResult;
 import com.gilbom.robot.data.mqtt.v2.common.HealthStatus;
 import com.gilbom.robot.data.mqtt.v2.inbound.PresencePayload;
 import com.gilbom.robot.data.mqtt.v2.inbound.StatePayload;
+import com.gilbom.robot.mqtt.replay.MqttReplayProtectionService;
+import com.gilbom.robot.mqtt.replay.MqttReplayProtectionService.ClaimResult;
+import com.gilbom.robot.mqtt.replay.MqttReplayProtectionService.SequenceKind;
+import com.gilbom.robot.mqtt.topic.MqttTopicType;
 import com.gilbom.robot.realtime.RobotRealtimeEvent;
 
 @Service
@@ -25,13 +29,16 @@ public class RobotStatusIngestionService {
 
     private final JdbcTemplate jdbcTemplate;
     private final ApplicationEventPublisher eventPublisher;
+    private final MqttReplayProtectionService replayProtectionService;
 
     public RobotStatusIngestionService(
             JdbcTemplate jdbcTemplate,
-            ApplicationEventPublisher eventPublisher
+            ApplicationEventPublisher eventPublisher,
+            MqttReplayProtectionService replayProtectionService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.eventPublisher = eventPublisher;
+        this.replayProtectionService = replayProtectionService;
     }
 
     @Transactional
@@ -69,11 +76,19 @@ public class RobotStatusIngestionService {
 
         OffsetDateTime observedAt = utc(payload.updatedAt());
         OffsetDateTime receivedAt = utc(command.receivedAt());
-        ensureBootSession(
+        ClaimResult claim = replayProtectionService.claim(
+                MqttTopicType.STATE,
+                SequenceKind.STATE,
                 robot.robotId(),
                 payload.bootId(),
+                payload.seq(),
+                null,
                 payload.schemaVersion(),
-                receivedAt);
+                command.rawPayload(),
+                command.receivedAt());
+        if (claim == ClaimResult.DUPLICATE) {
+            return new RobotStatusIngestionResult(false, false);
+        }
 
         int historyInserted = insertStateHistory(
                 robot.robotId(),
@@ -82,14 +97,9 @@ public class RobotStatusIngestionService {
                 observedAt,
                 receivedAt);
         if (historyInserted == 0) {
-            return new RobotStatusIngestionResult(false, false);
+            throw new BusinessException(
+                    ErrorCode.MQTT_SEQUENCE_CONFLICT);
         }
-
-        touchBootSession(
-                robot.robotId(),
-                payload.bootId(),
-                payload.seq(),
-                receivedAt);
 
         boolean currentStateUpdated = shouldUpdateState(
                 current,
@@ -133,6 +143,9 @@ public class RobotStatusIngestionService {
                 connectedAt,
                 receivedAt);
         BootSession incomingSession = findBootSession(payload.bootId());
+        if (!"ONLINE".equals(incomingSession.status())) {
+            return new RobotStatusIngestionResult(false, false);
+        }
 
         boolean sameBoot = payload.bootId().equals(current.bootId());
         boolean newerBoot = current.bootId() == null
@@ -249,6 +262,13 @@ public class RobotStatusIngestionService {
                     )
                 WHERE telemetry.robot_boot_session.robot_id = EXCLUDED.robot_id
                   AND (
+                      telemetry.robot_boot_session.session_status = 'ONLINE'
+                      OR telemetry.robot_boot_session.offline_reason IN (
+                          'UNGRACEFUL_DISCONNECT',
+                          'HEARTBEAT_TIMEOUT'
+                      )
+                  )
+                  AND (
                       telemetry.robot_boot_session.robot_connected_at IS NULL
                       OR EXCLUDED.robot_connected_at
                           > telemetry.robot_boot_session.robot_connected_at
@@ -310,62 +330,6 @@ public class RobotStatusIngestionService {
                 receivedAt);
         assertBootOwnership(robotId, payload.bootId());
         return changed == 1;
-    }
-
-    private void ensureBootSession(
-            UUID robotId,
-            UUID bootId,
-            String schemaVersion,
-            OffsetDateTime receivedAt
-    ) {
-        jdbcTemplate.update("""
-                INSERT INTO telemetry.robot_boot_session (
-                    boot_id,
-                    robot_id,
-                    schema_version,
-                    session_status,
-                    first_received_at,
-                    last_received_at,
-                    created_at,
-                    updated_at
-                ) VALUES (?, ?, ?, 'ONLINE', ?, ?, ?, ?)
-                ON CONFLICT (boot_id) DO NOTHING
-                """,
-                bootId,
-                robotId,
-                schemaVersion,
-                receivedAt,
-                receivedAt,
-                receivedAt,
-                receivedAt);
-        assertBootOwnership(robotId, bootId);
-    }
-
-    private void touchBootSession(
-            UUID robotId,
-            UUID bootId,
-            long sequence,
-            OffsetDateTime receivedAt
-    ) {
-        int updated = jdbcTemplate.update("""
-                UPDATE telemetry.robot_boot_session
-                SET last_received_at = GREATEST(last_received_at, ?),
-                    last_seen_seq = GREATEST(
-                        COALESCE(last_seen_seq, 0),
-                        ?
-                    ),
-                    updated_at = GREATEST(updated_at, ?)
-                WHERE robot_id = ?
-                  AND boot_id = ?
-                """,
-                receivedAt,
-                sequence,
-                receivedAt,
-                robotId,
-                bootId);
-        if (updated != 1) {
-            throw new IllegalStateException("Boot session could not be updated");
-        }
     }
 
     private int insertStateHistory(
@@ -790,6 +754,7 @@ public class RobotStatusIngestionService {
     private BootSession findBootSession(UUID bootId) {
         BootSession session = jdbcTemplate.query("""
                         SELECT
+                            session_status,
                             COALESCE(robot_connected_at, first_received_at)
                                 AS order_at
                         FROM telemetry.robot_boot_session
@@ -797,6 +762,8 @@ public class RobotStatusIngestionService {
                         """,
                 resultSet -> resultSet.next()
                         ? new BootSession(
+                                resultSet.getString(
+                                        "session_status"),
                                 resultSet.getObject(
                                         "order_at",
                                         OffsetDateTime.class))
@@ -854,6 +821,9 @@ public class RobotStatusIngestionService {
     ) {
     }
 
-    private record BootSession(OffsetDateTime orderAt) {
+    private record BootSession(
+            String status,
+            OffsetDateTime orderAt
+    ) {
     }
 }

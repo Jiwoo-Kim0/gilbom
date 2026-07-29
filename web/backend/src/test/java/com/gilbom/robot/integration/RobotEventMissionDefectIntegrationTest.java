@@ -37,7 +37,10 @@ import com.gilbom.robot.event.RobotEventIngestionResult;
 import com.gilbom.robot.event.RobotEventIngestionService;
 import com.gilbom.robot.mission.MissionEventIngestionService;
 import com.gilbom.robot.mission.MissionProgressService;
+import com.gilbom.robot.mqtt.replay.MqttReplayProtectionService;
 import com.gilbom.robot.telemetry.TelemetryIngestionService;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 @Testcontainers(disabledWithoutDocker = true)
 class RobotEventMissionDefectIntegrationTest {
@@ -68,6 +71,7 @@ class RobotEventMissionDefectIntegrationTest {
                     .withPassword("postgres");
 
     private static JdbcTemplate jdbcTemplate;
+    private static SimpleMeterRegistry meterRegistry;
     private static RobotEventIngestionService eventIngestionService;
     private static MissionEventIngestionService missionIngestionService;
     private static IncidentEventIngestionService incidentIngestionService;
@@ -90,7 +94,14 @@ class RobotEventMissionDefectIntegrationTest {
                 .migrate();
 
         ObjectMapper objectMapper = new ObjectMapper();
-        eventIngestionService = new RobotEventIngestionService(jdbcTemplate);
+        meterRegistry = new SimpleMeterRegistry();
+        MqttReplayProtectionService replayProtectionService =
+                new MqttReplayProtectionService(
+                        jdbcTemplate,
+                        meterRegistry);
+        eventIngestionService = new RobotEventIngestionService(
+                jdbcTemplate,
+                replayProtectionService);
         missionIngestionService = new MissionEventIngestionService(
                 jdbcTemplate,
                 eventIngestionService,
@@ -104,7 +115,8 @@ class RobotEventMissionDefectIntegrationTest {
         telemetryIngestionService = new TelemetryIngestionService(
                 jdbcTemplate,
                 noOpPublisher,
-                new MissionProgressService(jdbcTemplate));
+                new MissionProgressService(jdbcTemplate),
+                replayProtectionService);
     }
 
     @BeforeEach
@@ -261,7 +273,8 @@ class RobotEventMissionDefectIntegrationTest {
                 .isInstanceOfSatisfying(
                         BusinessException.class,
                         exception -> assertThat(exception.errorCode())
-                                .isEqualTo(ErrorCode.MQTT_EVENT_CONFLICT));
+                                .isEqualTo(
+                                        ErrorCode.MQTT_EVENT_CONFLICT));
 
         assertThatThrownBy(() -> eventIngestionService.ingest(
                 missionEvent(
@@ -276,7 +289,8 @@ class RobotEventMissionDefectIntegrationTest {
                 .isInstanceOfSatisfying(
                         BusinessException.class,
                         exception -> assertThat(exception.errorCode())
-                                .isEqualTo(ErrorCode.MQTT_EVENT_CONFLICT));
+                                .isEqualTo(
+                                        ErrorCode.MQTT_SEQUENCE_CONFLICT));
 
         assertThat(count("telemetry.robot_event")).isOne();
         assertThat(count("robot.mission_status_history")).isOne();
@@ -335,7 +349,7 @@ class RobotEventMissionDefectIntegrationTest {
                 UUID.fromString(
                         "23000000-0000-4000-8000-000000000204"),
                 "MIS-20260728-001",
-                1);
+                2);
 
         telemetryIngestionService.ingest(new TelemetryIngestionCommand(
                 telemetry,
@@ -350,6 +364,130 @@ class RobotEventMissionDefectIntegrationTest {
                 Double.class,
                 MISSION_ID);
         assertThat(progress).isBetween(25.0, 30.0);
+    }
+
+    @Test
+    void rejectsCrossTopicSequenceCollisionBeforeMissionSideEffects() {
+        TelemetryPayload telemetry = telemetryPayload(
+                UUID.fromString(
+                        "23000000-0000-4000-8000-000000000205"),
+                "MIS-20260728-001",
+                1);
+        telemetryIngestionService.ingest(new TelemetryIngestionCommand(
+                telemetry,
+                "{}",
+                BASE_TIME.plusSeconds(2)));
+        double before = meterRegistry.counter(
+                "gilbom.mqtt.inbound.rejected",
+                "topic",
+                "MISSION_EVENT",
+                "reason",
+                "sequence_conflict").count();
+
+        assertThatThrownBy(() -> missionIngestionService.ingest(
+                missionEvent(
+                        UUID.fromString(
+                                "23000000-0000-4000-8000-000000000206"),
+                        1,
+                        MissionEventPayload.EventType.MISSION_STARTED,
+                        null),
+                "{\"event_type\":\"MISSION_STARTED\"}",
+                BASE_TIME.plusSeconds(3)))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(
+                                        ErrorCode.MQTT_SEQUENCE_CONFLICT));
+
+        assertThat(count("telemetry.robot_event")).isZero();
+        assertThat(count("robot.mission_status_history")).isZero();
+        assertThat(missionStatus()).isEqualTo("CREATED");
+        assertThat(meterRegistry.counter(
+                "gilbom.mqtt.inbound.rejected",
+                "topic",
+                "MISSION_EVENT",
+                "reason",
+                "sequence_conflict").count()).isEqualTo(before + 1.0);
+    }
+
+    @Test
+    void rejectsEventFromPreviousBootWithoutEventSideEffects() {
+        UUID newBootId = UUID.fromString(
+                "23000000-0000-4000-8000-000000000207");
+        telemetryIngestionService.ingest(new TelemetryIngestionCommand(
+                telemetryPayload(
+                        UUID.fromString(
+                                "23000000-0000-4000-8000-000000000208"),
+                        BOOT_ID,
+                        "MIS-20260728-001",
+                        1),
+                "{}",
+                BASE_TIME.plusSeconds(2)));
+        telemetryIngestionService.ingest(new TelemetryIngestionCommand(
+                telemetryPayload(
+                        UUID.fromString(
+                                "23000000-0000-4000-8000-000000000209"),
+                        newBootId,
+                        "MIS-20260728-001",
+                        1),
+                "{}",
+                BASE_TIME.plusSeconds(3)));
+
+        assertThatThrownBy(() -> eventIngestionService.ingest(
+                missionEvent(
+                        BOOT_ID,
+                        UUID.fromString(
+                                "23000000-0000-4000-8000-000000000210"),
+                        2,
+                        MissionEventPayload.EventType.MISSION_STARTED,
+                        null),
+                MissionEventPayload.EventType.MISSION_STARTED,
+                "{}",
+                BASE_TIME.plusSeconds(4)))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(
+                                        ErrorCode.MQTT_REPLAY_REJECTED));
+
+        assertThat(count("telemetry.robot_event")).isZero();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT session_status
+                FROM telemetry.robot_boot_session
+                WHERE boot_id = ?
+                """,
+                String.class,
+                BOOT_ID)).isEqualTo("OFFLINE");
+    }
+
+    @Test
+    void rejectsEventWhoseNewBootDoesNotStartAtSequenceOne() {
+        UUID unknownBootId = UUID.fromString(
+                "23000000-0000-4000-8000-000000000211");
+
+        assertThatThrownBy(() -> eventIngestionService.ingest(
+                missionEvent(
+                        unknownBootId,
+                        UUID.fromString(
+                                "23000000-0000-4000-8000-000000000212"),
+                        2,
+                        MissionEventPayload.EventType.MISSION_STARTED,
+                        null),
+                MissionEventPayload.EventType.MISSION_STARTED,
+                "{}",
+                BASE_TIME.plusSeconds(2)))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(
+                                        ErrorCode.MQTT_REPLAY_REJECTED));
+
+        assertThat(count("telemetry.robot_event")).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM telemetry.robot_boot_session "
+                        + "WHERE boot_id = ?",
+                Integer.class,
+                unknownBootId)).isZero();
     }
 
     @Test
@@ -426,12 +564,27 @@ class RobotEventMissionDefectIntegrationTest {
             MissionEventPayload.EventType eventType,
             MissionEventPayload.Result result
     ) {
+        return missionEvent(
+                BOOT_ID,
+                eventId,
+                sequence,
+                eventType,
+                result);
+    }
+
+    private static MissionEventPayload missionEvent(
+            UUID bootId,
+            UUID eventId,
+            long sequence,
+            MissionEventPayload.EventType eventType,
+            MissionEventPayload.Result result
+    ) {
         return new MissionEventPayload(
                 "2.0",
                 eventId,
                 eventType,
                 "RBT-EVENT-001",
-                BOOT_ID,
+                bootId,
                 sequence,
                 EventSource.MISSION,
                 BASE_TIME.plusSeconds(sequence - 1),
@@ -489,11 +642,24 @@ class RobotEventMissionDefectIntegrationTest {
             String missionCode,
             long sequence
     ) {
+        return telemetryPayload(
+                messageId,
+                BOOT_ID,
+                missionCode,
+                sequence);
+    }
+
+    private static TelemetryPayload telemetryPayload(
+            UUID messageId,
+            UUID bootId,
+            String missionCode,
+            long sequence
+    ) {
         return new TelemetryPayload(
                 "2.0",
                 messageId,
                 "RBT-EVENT-001",
-                BOOT_ID,
+                bootId,
                 sequence,
                 BASE_TIME.plusSeconds(sequence),
                 missionCode,

@@ -121,6 +121,14 @@ public enum ErrorCode {
             HttpStatus.UNPROCESSABLE_ENTITY,
             "MQTT 메시지의 기준시각이 허용된 미래 오차를 초과했습니다."
     ),
+    MQTT_REPLAY_REJECTED(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "종료되었거나 이전 부팅 세션의 MQTT 메시지입니다."
+    ),
+    MQTT_SEQUENCE_CONFLICT(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "MQTT boot_id와 seq가 다른 메시지에서 이미 사용되었습니다."
+    ),
 
     COMMON_RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "요청 한도를 초과했습니다."),
 

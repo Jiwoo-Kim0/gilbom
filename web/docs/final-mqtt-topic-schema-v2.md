@@ -133,6 +133,25 @@ v2에서는 실제 기기가 안정적으로 제공할 수 없는 값과 중복 
 `(mqtt_id, boot_id, seq)`, DB 저장 후에는 `(robot_id, boot_id, seq)` 조합으로
 순서와 중복을 확인한다.
 
+#### 3.2.1 `boot_id`·`seq` Replay 판정
+
+- Presence에는 `seq`가 없고, State·Telemetry·Event 4종은 한 `boot_id`에서 하나의
+  공용 `seq`를 사용한다.
+- 새 Boot의 첫 State·Telemetry·Event는 반드시 `seq=1`이어야 한다.
+- QoS 0 Telemetry 유실을 허용하므로 순번의 연속성은 요구하지 않는다. 다만 새
+  메시지의 `seq`는 해당 Boot의 `last_seen_seq`보다 커야 한다.
+- 이미 처리한 State는 같은 JSON Payload, Telemetry는 같은 `message_id`와 JSON
+  Payload, Event는 같은 `event_id`와 사건 식별 내용일 때만 재전송으로 보고
+  멱등하게 성공 처리한다. Event 재전송에서는 `sent_at`만 갱신할 수 있다.
+- 같은 `(robot_id, boot_id, seq)`를 다른 Topic이나 다른 메시지 식별자가 다시
+  사용하면 `MQTT_SEQUENCE_CONFLICT`로 거부한다.
+- 새 Boot를 처음 승인하면 이전 Boot를 `REPLACED_BY_NEW_BOOT`로 종료한다. 종료
+  또는 이전 Boot에서 처음 보는 메시지는 `MQTT_REPLAY_REJECTED`로 거부한다.
+- Presence ONLINE은 `UNGRACEFUL_DISCONNECT` 또는 `HEARTBEAT_TIMEOUT`으로 닫힌
+  같은 Boot만 재연결할 수 있다. 교체된 이전 Boot의 Retained ONLINE은 무시한다.
+- Replay 거부는 History·Current State·Mission·Defect 처리 전에 수행하고
+  `gilbom.mqtt.inbound.rejected`에 `topic`과 제한된 `reason`만 기록한다.
+
 ### 3.3 MQTT Client 설정과 DB 매핑
 
 로봇 MQTT Client는 최소 다음 설정을 사용한다.
@@ -196,6 +215,7 @@ CA 파일은 로봇별 업무 데이터가 아니라 배포 환경 설정으로 
   `MQTT_TIMESTAMP_IN_FUTURE`로 거부한다.
 - Presence는 Retain·LWT Payload에 공통 사건시각이 없으므로 TTL 대상에서 제외하고
   `boot_id`·연결 상태·Replay 규칙으로 검증한다.
+- State·Telemetry·Event의 공용 `seq`는 3.2.1의 Replay 판정 규칙을 적용한다.
 - State는 기존 `updated_at`보다 새로운 경우에만 현재 상태를 갱신한다.
 - Telemetry는 기존 `sampled_at`보다 오래된 표본이 현재값을 덮어쓰지 않게 한다.
 - Event는 `event_id`로 멱등 처리한다.

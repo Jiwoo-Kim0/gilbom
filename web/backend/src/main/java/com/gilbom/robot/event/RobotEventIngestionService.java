@@ -13,14 +13,27 @@ import org.springframework.transaction.annotation.Transactional;
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
 import com.gilbom.robot.data.mqtt.v2.common.MqttEventPayload;
+import com.gilbom.robot.data.mqtt.v2.inbound.BatteryEventPayload;
+import com.gilbom.robot.data.mqtt.v2.inbound.IncidentEventPayload;
+import com.gilbom.robot.data.mqtt.v2.inbound.MissionEventPayload;
+import com.gilbom.robot.data.mqtt.v2.inbound.SafetyEventPayload;
+import com.gilbom.robot.mqtt.replay.MqttReplayProtectionService;
+import com.gilbom.robot.mqtt.replay.MqttReplayProtectionService.ClaimResult;
+import com.gilbom.robot.mqtt.replay.MqttReplayProtectionService.SequenceKind;
+import com.gilbom.robot.mqtt.topic.MqttTopicType;
 
 @Service
 public class RobotEventIngestionService {
 
     private final JdbcTemplate jdbcTemplate;
+    private final MqttReplayProtectionService replayProtectionService;
 
-    public RobotEventIngestionService(JdbcTemplate jdbcTemplate) {
+    public RobotEventIngestionService(
+            JdbcTemplate jdbcTemplate,
+            MqttReplayProtectionService replayProtectionService
+    ) {
         this.jdbcTemplate = jdbcTemplate;
+        this.replayProtectionService = replayProtectionService;
     }
 
     @Transactional
@@ -33,12 +46,6 @@ public class RobotEventIngestionService {
         UUID robotId = findRobotId(payload.mqttId());
         UUID missionId = findMissionId(robotId, payload.missionId());
         OffsetDateTime occurredAt = utc(payload.occurredAt());
-
-        ensureBootSession(
-                robotId,
-                payload.bootId(),
-                payload.schemaVersion(),
-                utc(receivedAt));
 
         ExistingEvent existing = findByEventId(payload.eventId());
         if (existing != null) {
@@ -56,8 +63,34 @@ public class RobotEventIngestionService {
                     false);
         }
 
-        if (sequenceExists(robotId, payload.bootId(), payload.seq())) {
-            throw eventConflict();
+        ClaimResult claim = replayProtectionService.claim(
+                eventTopic(payload),
+                SequenceKind.EVENT,
+                robotId,
+                payload.bootId(),
+                payload.seq(),
+                payload.eventId(),
+                payload.schemaVersion(),
+                rawPayload,
+                receivedAt);
+        if (claim == ClaimResult.DUPLICATE) {
+            ExistingEvent duplicate = findByEventId(payload.eventId());
+            if (duplicate == null) {
+                throw new IllegalStateException(
+                        "Duplicate Event could not be found");
+            }
+            requireSameEvent(
+                    duplicate,
+                    payload,
+                    eventType,
+                    robotId,
+                    missionId,
+                    occurredAt);
+            return new RobotEventIngestionResult(
+                    payload.eventId(),
+                    robotId,
+                    missionId,
+                    false);
         }
 
         int inserted;
@@ -105,9 +138,9 @@ public class RobotEventIngestionService {
                     utc(receivedAt),
                     rawPayload);
         } catch (DuplicateKeyException exception) {
-            // event_id 외 UNIQUE, 특히 (robot_id, boot_id, seq) 충돌이다.
-            // PostgreSQL statement 오류 뒤에는 현재 Transaction에서 재조회하지 않는다.
-            throw eventConflict();
+            throw new BusinessException(
+                    ErrorCode.MQTT_SEQUENCE_CONFLICT,
+                    exception);
         }
         if (inserted == 0) {
             ExistingEvent raced = findByEventId(payload.eventId());
@@ -129,11 +162,6 @@ public class RobotEventIngestionService {
                     false);
         }
 
-        touchBootSession(
-                robotId,
-                payload.bootId(),
-                payload.seq(),
-                utc(receivedAt));
         return new RobotEventIngestionResult(
                 payload.eventId(),
                 robotId,
@@ -179,77 +207,6 @@ public class RobotEventIngestionService {
         return missionId;
     }
 
-    private void ensureBootSession(
-            UUID robotId,
-            UUID bootId,
-            String schemaVersion,
-            OffsetDateTime receivedAt
-    ) {
-        jdbcTemplate.update("""
-                INSERT INTO telemetry.robot_boot_session (
-                    boot_id,
-                    robot_id,
-                    schema_version,
-                    session_status,
-                    first_received_at,
-                    last_received_at,
-                    created_at,
-                    updated_at
-                ) VALUES (?, ?, ?, 'ONLINE', ?, ?, ?, ?)
-                ON CONFLICT (boot_id) DO NOTHING
-                """,
-                bootId,
-                robotId,
-                schemaVersion,
-                receivedAt,
-                receivedAt,
-                receivedAt,
-                receivedAt);
-
-        UUID owner = jdbcTemplate.query("""
-                        SELECT robot_id
-                        FROM telemetry.robot_boot_session
-                        WHERE boot_id = ?
-                        """,
-                resultSet -> resultSet.next()
-                        ? resultSet.getObject("robot_id", UUID.class)
-                        : null,
-                bootId);
-        if (owner == null || !owner.equals(robotId)) {
-            throw new BusinessException(
-                    ErrorCode.MQTT_ID_MISMATCH,
-                    "boot_id is already assigned to another robot");
-        }
-    }
-
-    private void touchBootSession(
-            UUID robotId,
-            UUID bootId,
-            long sequence,
-            OffsetDateTime receivedAt
-    ) {
-        int updated = jdbcTemplate.update("""
-                UPDATE telemetry.robot_boot_session
-                SET last_received_at = GREATEST(last_received_at, ?),
-                    last_seen_seq = GREATEST(
-                        COALESCE(last_seen_seq, 0),
-                        ?
-                    ),
-                    updated_at = GREATEST(updated_at, ?)
-                WHERE robot_id = ?
-                  AND boot_id = ?
-                """,
-                receivedAt,
-                sequence,
-                receivedAt,
-                robotId,
-                bootId);
-        if (updated != 1) {
-            throw new IllegalStateException(
-                    "Boot session could not be updated");
-        }
-    }
-
     private ExistingEvent findByEventId(UUID eventId) {
         return jdbcTemplate.query("""
                         SELECT
@@ -283,27 +240,6 @@ public class RobotEventIngestionService {
                 eventId);
     }
 
-    private boolean sequenceExists(
-            UUID robotId,
-            UUID bootId,
-            long sequence
-    ) {
-        Boolean exists = jdbcTemplate.queryForObject("""
-                SELECT EXISTS (
-                    SELECT 1
-                    FROM telemetry.robot_event
-                    WHERE robot_id = ?
-                      AND boot_id = ?
-                      AND seq = ?
-                )
-                """,
-                Boolean.class,
-                robotId,
-                bootId,
-                sequence);
-        return Boolean.TRUE.equals(exists);
-    }
-
     private void requireSameEvent(
             ExistingEvent existing,
             MqttEventPayload payload,
@@ -332,6 +268,24 @@ public class RobotEventIngestionService {
 
     private BusinessException eventConflict() {
         return new BusinessException(ErrorCode.MQTT_EVENT_CONFLICT);
+    }
+
+    private MqttTopicType eventTopic(MqttEventPayload payload) {
+        if (payload instanceof IncidentEventPayload) {
+            return MqttTopicType.INCIDENT_EVENT;
+        }
+        if (payload instanceof BatteryEventPayload) {
+            return MqttTopicType.BATTERY_EVENT;
+        }
+        if (payload instanceof SafetyEventPayload) {
+            return MqttTopicType.SAFETY_EVENT;
+        }
+        if (payload instanceof MissionEventPayload) {
+            return MqttTopicType.MISSION_EVENT;
+        }
+        throw new IllegalArgumentException(
+                "Unsupported MQTT Event payload: "
+                        + payload.getClass().getName());
     }
 
     private OffsetDateTime utc(Instant instant) {
