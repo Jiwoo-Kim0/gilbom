@@ -52,6 +52,7 @@
 | V25 | Robot별 활성 Mission 단일화 | mission_id가 없는 PAUSE·RESUME·CANCEL 명령도 대상을 결정적으로 찾도록 Robot마다 `READY`, `RUNNING`, `PAUSED` Mission을 하나로 제한 |
 | V26 | 결함 통계 Query 인덱스 | 병합되지 않은 현재 결함의 전체 기간 및 지역·기간 통계를 위해 `last_seen_at`과 `patrol_area_id, last_seen_at` 기반 partial covering index 추가 |
 | V27 | V23 제약 검증 승격 | V23이 `NOT VALID`로 걸어둔 Command·Defect·Observation의 FK 6개와 CHECK 1개를 `VALIDATE`해 기존 행까지 무결성을 보장하고 플래너가 제약을 신뢰하게 함. 근거는 [defect-schema.md](defect-schema.md) 3.0.1 |
+| V28 | Incident 수집 무결성 보강 | `INC-YYYYMMDD-NNNNNN` 일자별 Counter와 신규 쓰기 형식 CHECK, GPS·Patrol Area 미확정 Incident 검토 대기열 및 Event·Mission·Image FK를 추가 |
 
 ### V26 결함 통계 Query 인덱스
 
@@ -101,7 +102,7 @@ docker compose logs backend
 ```
 
 
-Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V27이
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V28이
 순서대로 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증

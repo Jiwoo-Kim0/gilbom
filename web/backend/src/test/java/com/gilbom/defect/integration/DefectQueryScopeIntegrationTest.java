@@ -127,18 +127,34 @@ class DefectQueryScopeIntegrationTest {
         assignExpiredRobot(EXPIRED_USER_ID, ASSIGNED_ROBOT_ID);
 
         // 배정된 로봇이 관측한 결함 — VIEWER에게 보여야 한다.
-        createDefect(VISIBLE_DEFECT_ID, "INC-TEST-000001", 127.01, 37.51);
+        createDefect(
+                VISIBLE_DEFECT_ID,
+                "INC-20260729-000101",
+                127.01,
+                37.51);
         createObservation(VISIBLE_DEFECT_ID, ASSIGNED_ROBOT_ID, 1L, true);
 
         // 범위 밖 로봇이 관측한 결함 — VIEWER에게 보이지 않아야 한다.
-        createDefect(HIDDEN_DEFECT_ID, "INC-TEST-000002", 127.02, 37.52);
+        createDefect(
+                HIDDEN_DEFECT_ID,
+                "INC-20260729-000102",
+                127.02,
+                37.52);
         createObservation(HIDDEN_DEFECT_ID, OUT_OF_SCOPE_ROBOT_ID, 1L, true);
 
         // 관측이 아직 없는 결함 — 시스템 ADMIN에게는 보여야 한다.
-        createDefect(ORPHAN_DEFECT_ID, "INC-TEST-000003", 127.03, 37.53);
+        createDefect(
+                ORPHAN_DEFECT_ID,
+                "INC-20260729-000103",
+                127.03,
+                37.53);
 
         // 대표 결함(VISIBLE)에 병합된 결함. 목록에서 빠지고 관측은 대표로 합산된다.
-        createDefect(MERGED_AWAY_DEFECT_ID, "INC-TEST-000004", 127.011, 37.511);
+        createDefect(
+                MERGED_AWAY_DEFECT_ID,
+                "INC-20260729-000104",
+                127.011,
+                37.511);
         createObservation(MERGED_AWAY_DEFECT_ID, ASSIGNED_ROBOT_ID, 2L, false);
         jdbcTemplate.update("""
                 UPDATE defect.defect
@@ -172,7 +188,7 @@ class DefectQueryScopeIntegrationTest {
         assertThat(queryService.findDefect(VIEWER_USER_ID, VISIBLE_DEFECT_ID)
                 .defect()
                 .incidentCode())
-                .isEqualTo("INC-TEST-000001");
+                .isEqualTo("INC-20260729-000101");
     }
 
     @Test
@@ -215,7 +231,7 @@ class DefectQueryScopeIntegrationTest {
         assertThat(queryService.findDefect(ADMIN_USER_ID, ORPHAN_DEFECT_ID)
                 .defect()
                 .incidentCode())
-                .isEqualTo("INC-TEST-000003");
+                .isEqualTo("INC-20260729-000103");
 
         // 반대로 배정 기반 사용자에게는 관측 없는 결함이 보이지 않는다.
         assertThatThrownBy(() -> queryService.findDefect(

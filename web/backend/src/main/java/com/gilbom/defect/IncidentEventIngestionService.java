@@ -1,11 +1,17 @@
 package com.gilbom.defect;
 
+import java.sql.Date;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.ApplicationEventPublisherAware;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -26,6 +32,10 @@ public class IncidentEventIngestionService
         implements ApplicationEventPublisherAware {
 
     private static final double MERGE_RADIUS_METERS = 2.0;
+    private static final ZoneId INCIDENT_CODE_ZONE =
+            ZoneId.of("Asia/Seoul");
+    private static final Logger LOG = LoggerFactory.getLogger(
+            IncidentEventIngestionService.class);
 
     private final JdbcTemplate jdbcTemplate;
     private final RobotEventIngestionService eventIngestionService;
@@ -77,20 +87,44 @@ public class IncidentEventIngestionService
         IncidentContext context = resolveContext(
                 event.missionId(),
                 payload.location().zoneId());
-        if (!payload.location().valid() || context.zoneId() == null) {
-            return new IncidentIngestionResult(event, null, false);
-        }
-
         UUID imageId = linkAvailableImage(
                 payload.evidence().imageId(),
                 event.robotId(),
                 event.eventId());
+        if (!payload.location().valid()) {
+            insertIngestionIssue(
+                    event,
+                    imageId,
+                    payload,
+                    context.zoneId(),
+                    "INVALID_GPS");
+            LOG.warn(
+                    "Incident requires location review. eventId={} "
+                            + "robotId={} issueType=INVALID_GPS",
+                    event.eventId(),
+                    event.robotId());
+            return new IncidentIngestionResult(event, null, false);
+        }
+        if (context.patrolAreaId() == null) {
+            insertIngestionIssue(
+                    event,
+                    imageId,
+                    payload,
+                    context.zoneId(),
+                    "PATROL_AREA_UNRESOLVED");
+            LOG.warn(
+                    "Incident requires location review. eventId={} "
+                            + "robotId={} issueType=PATROL_AREA_UNRESOLVED",
+                    event.eventId(),
+                    event.robotId());
+            return new IncidentIngestionResult(event, null, false);
+        }
         UUID defectId = findMergeCandidate(
                 payload,
                 context.patrolAreaId());
         boolean newDefect = defectId == null;
         if (newDefect) {
-            defectId = createDefect(payload, context);
+            defectId = createDefect(payload, context, receivedAt);
         }
 
         insertObservation(
@@ -345,14 +379,26 @@ public class IncidentEventIngestionService
 
     private UUID createDefect(
             IncidentEventPayload payload,
-            IncidentContext context
+            IncidentContext context,
+            Instant calculatedAt
     ) {
+        Double damageRatio = payload.incident().attributes() == null
+                ? null
+                : payload.incident().attributes().damageRatio();
+        DefectRiskAssessment.Result risk =
+                DefectRiskAssessment.calculate(damageRatio, calculatedAt);
+        boolean reviewRequired = risk.reviewRequired()
+                || payload.incident().confidence() < 0.7;
         return jdbcTemplate.queryForObject("""
                 INSERT INTO defect.defect (
                     incident_code,
                     asset_type,
                     block_type,
                     defect_type,
+                    risk_level,
+                    risk_score,
+                    risk_rule_version,
+                    risk_calculated_at,
                     location,
                     zone_id,
                     patrol_area_id,
@@ -362,6 +408,10 @@ public class IncidentEventIngestionService
                     latest_confidence,
                     review_required
                 ) VALUES (
+                    ?,
+                    ?,
+                    ?,
+                    ?,
                     ?,
                     ?,
                     ?,
@@ -378,10 +428,14 @@ public class IncidentEventIngestionService
                 RETURNING defect_id
                 """,
                 UUID.class,
-                "INC-" + payload.eventId(),
+                nextIncidentCode(payload.occurredAt()),
                 payload.incident().assetType().name(),
                 payload.incident().blockType().name(),
                 payload.incident().defectType().name(),
+                risk.level(),
+                risk.score(),
+                risk.ruleVersion(),
+                utc(risk.calculatedAt()),
                 payload.location().lon(),
                 payload.location().lat(),
                 context.zoneId(),
@@ -390,7 +444,72 @@ public class IncidentEventIngestionService
                 utc(payload.occurredAt()),
                 utc(payload.occurredAt()),
                 payload.incident().confidence(),
-                payload.incident().confidence() < 0.7);
+                reviewRequired);
+    }
+
+    private String nextIncidentCode(Instant occurredAt) {
+        LocalDate incidentDate = occurredAt
+                .atZone(INCIDENT_CODE_ZONE)
+                .toLocalDate();
+        Integer sequence = jdbcTemplate.query("""
+                        INSERT INTO defect.incident_code_counter (
+                            incident_date,
+                            last_value
+                        ) VALUES (?, 1)
+                        ON CONFLICT (incident_date) DO UPDATE
+                        SET last_value =
+                                defect.incident_code_counter.last_value + 1,
+                            updated_at = NOW()
+                        WHERE defect.incident_code_counter.last_value < 999999
+                        RETURNING last_value
+                        """,
+                resultSet -> resultSet.next()
+                        ? resultSet.getInt("last_value")
+                        : null,
+                Date.valueOf(incidentDate));
+        if (sequence == null) {
+            throw new IllegalStateException(
+                    "Daily incident code sequence was exhausted");
+        }
+        return "INC-"
+                + DateTimeFormatter.BASIC_ISO_DATE.format(incidentDate)
+                + "-"
+                + "%06d".formatted(sequence);
+    }
+
+    private void insertIngestionIssue(
+            RobotEventIngestionResult event,
+            UUID imageId,
+            IncidentEventPayload payload,
+            String zoneId,
+            String issueType
+    ) {
+        int inserted = jdbcTemplate.update("""
+                INSERT INTO defect.incident_ingestion_issue (
+                    event_id,
+                    robot_id,
+                    mission_id,
+                    image_id,
+                    issue_type,
+                    zone_id,
+                    detected_defect_type,
+                    confidence,
+                    observed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                event.eventId(),
+                event.robotId(),
+                event.missionId(),
+                imageId,
+                issueType,
+                zoneId,
+                payload.incident().defectType().name(),
+                payload.incident().confidence(),
+                utc(payload.occurredAt()));
+        if (inserted != 1) {
+            throw new IllegalStateException(
+                    "Incident ingestion issue was not persisted");
+        }
     }
 
     private void insertObservation(

@@ -135,7 +135,9 @@ class PatrolMissionSchemaIntegrationTest {
                 "robot.mission",
                 "robot.mission_status_history",
                 "telemetry.robot_event",
-                "storage.robot_image"
+                "storage.robot_image",
+                "defect.incident_code_counter",
+                "defect.incident_ingestion_issue"
         );
 
         for (String table : requiredTables) {
@@ -171,6 +173,9 @@ class PatrolMissionSchemaIntegrationTest {
                 .isTrue();
         assertThat(indexExists(
                 "ix_defect_current_area_last_seen_stats"))
+                .isTrue();
+        assertThat(indexExists(
+                "ix_incident_ingestion_issue_open_created"))
                 .isTrue();
 
         Boolean eventCanUpdate = ownerJdbcTemplate.queryForObject(

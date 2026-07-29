@@ -784,6 +784,10 @@ GPS 위치가 무효여도 결함 Event 자체는 발행할 수 있다.
 }
 ```
 
+서버는 이 경우 공통 Event 원본과 연결 가능한 Image를 먼저 저장하고,
+`INVALID_GPS` 검토 대기 상태를 남긴다. 좌표를 임의의 기본값이나 구역 중심점으로
+대체해 결함을 만들거나 공간 병합하지 않는다.
+
 이미지 업로드가 실패하면 `image_id`만 `null`로 보내고 Event 발행을 계속한다.
 
 ---
@@ -1291,7 +1295,7 @@ PUBACK은 Broker가 메시지를 받았다는 뜻이다. Receipt는 백엔드가
 | `schema_version` | String | O | `"2.0"` |
 | `event_id` | UUID String | O | 로봇이 보낸 원본 Event |
 | `ingest_status` | Enum String | O | DB 처리 결과 |
-| `incident_id` | String 또는 Null | O | Incident 저장·병합 결과, 다른 Event는 `null` |
+| `incident_id` | String 또는 Null | O | Incident 저장·병합 결과. `^INC-[0-9]{8}-[0-9]{6}$`; 다른 Event나 위치 미확정 Incident는 `null` |
 | `received_at` | Date-time String | O | 서버가 Event를 수신·처리한 시각 |
 
 ```json

@@ -73,11 +73,17 @@ class DefectCommandServiceMergeEventTest {
                 eventPublisher);
 
         when(repository.lockForUpdate(eq(USER_ID), eq(TARGET_ID), any()))
-                .thenReturn(java.util.Optional.of(state(TARGET_ID, "INC-T")));
+                .thenReturn(java.util.Optional.of(state(
+                        TARGET_ID,
+                        "INC-20260729-000051")));
         when(repository.lockForUpdate(eq(USER_ID), eq(SOURCE_ONE_ID), any()))
-                .thenReturn(java.util.Optional.of(state(SOURCE_ONE_ID, "INC-S1")));
+                .thenReturn(java.util.Optional.of(state(
+                        SOURCE_ONE_ID,
+                        "INC-20260729-000052")));
         when(repository.lockForUpdate(eq(USER_ID), eq(SOURCE_TWO_ID), any()))
-                .thenReturn(java.util.Optional.of(state(SOURCE_TWO_ID, "INC-S2")));
+                .thenReturn(java.util.Optional.of(state(
+                        SOURCE_TWO_ID,
+                        "INC-20260729-000053")));
         when(repository.markMergedInto(any(), eq(TARGET_ID))).thenReturn(1);
         when(repository.recalculateAggregate(TARGET_ID))
                 .thenReturn(new DefectAggregate(3, NOW, NOW));

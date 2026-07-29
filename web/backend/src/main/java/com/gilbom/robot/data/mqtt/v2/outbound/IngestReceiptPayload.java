@@ -13,7 +13,7 @@ public record IngestReceiptPayload(
         @NotBlank @Pattern(regexp = "2\\.0") String schemaVersion,
         @NotNull UUID eventId,
         @NotNull Status ingestStatus,
-        String incidentId,
+        @Pattern(regexp = "^INC-[0-9]{8}-[0-9]{6}$") String incidentId,
         @NotNull Instant receivedAt
 ) implements MqttV2Payload {
 

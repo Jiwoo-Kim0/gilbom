@@ -4,8 +4,9 @@
 
 이 문서는 `docs/길봄_DB.pdf`(길봄 DB Specification v1.0) 7장에 정의된 `defect` 스키마 중
 V12 migration(`V12__create_defect_schema.sql`)으로 실제 반영한 부분을 설명한다. PDF는
-41개 테이블·9개 스키마 전체를 다루지만, 이 문서와 migration은 그중 **defect 스키마 4개
-테이블만** 다룬다.
+41개 테이블·9개 스키마 전체를 다루지만, V12는 그중 **defect 스키마 4개 테이블**을
+만들었고 V19와 V28이 내보내기 작업·Incident 코드 Counter·미위치 검토 대기열을
+후속으로 추가했다.
 
 - 점자블록 이상은 AI가 보낸 개별 관측(observation)과, 관리자가 실제로 처리하는 결함
   (defect)을 분리해서 저장한다. 같은 위치의 결함을 여러 번 관측해도 관리 대상은 하나다.
@@ -26,8 +27,8 @@ V12 migration(`V12__create_defect_schema.sql`)으로 실제 반영한 부분을 
 
 | 컬럼 | 규칙 |
 |---|---|
-| `incident_code` | 외부 표시 코드. UNIQUE. 예: `INC-20260723-000031` |
-| `risk_level` / `risk_score` | 서버가 계산하는 `LOW`/`MEDIUM`/`HIGH`/`CRITICAL`과 점수. `risk_rule_version`으로 계산 규칙 버전을 함께 남긴다 |
+| `incident_code` | 외부 표시 코드. UNIQUE. `INC-YYYYMMDD-NNNNNN`. 날짜는 `occurred_at`의 Asia/Seoul 일자이며 일자별 DB Counter가 순번을 원자적으로 발급한다 |
+| `risk_level` / `risk_score` | 서버가 계산하는 `LOW`/`MEDIUM`/`HIGH`/`CRITICAL`과 0~100 점수. V1은 `damage_ratio × 100`이며 25/50/75를 등급 경계로 사용하고 `risk_rule_version=DAMAGE_RATIO_V1`을 남긴다 |
 | `workflow_status` | `NEW → ACCEPTED → IN_PROGRESS → RESOLVED`, 또는 `FALSE_POSITIVE`/`REJECTED`. 관리자 REST 처리로만 전이된다 |
 | `resolution` | `RESOLVED` 등으로 종결할 때의 처리 결과. `REPAIRED`, `CLEANED`, `DUPLICATE`, `REINSPECTION_REQUIRED`, `NOT_APPLICABLE` |
 | `location` | 대표 위치(`GEOMETRY(POINT,4326)`). 개별 관측 위치가 아니라 결함의 대표 좌표 |
@@ -52,6 +53,9 @@ V12 migration(`V12__create_defect_schema.sql`)으로 실제 반영한 부분을 
 | `image_id` | `storage.robot_image`를 `(image_id, robot_id)` 복합 FK로 참조한다 (V23). 업로드 실패 시 NULL (계약 11.3 핀 우선 원칙) |
 | `is_representative` | 결함 카드에 보여줄 대표 관측 여부. 결함당 최대 1개(partial UNIQUE index) |
 
+`damage_ratio`가 없으면 AI `confidence`를 위험도로 대체하지 않는다. 점수는 NULL,
+등급은 검토 전 중립값인 `MEDIUM`으로 두고 `review_required=true`로 저장한다.
+
 ### 2.3 `defect.defect_status_history` — 처리 이력 (append-only)
 
 관리자 처리상태·유형·위험도·위치·처리 결과가 바뀔 때마다 전후 값과 사유를 남긴다.
@@ -74,6 +78,26 @@ V12 migration(`V12__create_defect_schema.sql`)으로 실제 반영한 부분을 
 | `merge_status` | `MERGED` 또는 `REVERTED` |
 | 생명주기 제약 | `MERGED`면 `reverted_by`/`reverted_at`이 모두 NULL이어야 하고, `REVERTED`면 둘 다 채워져 있고 `reverted_at >= merged_at`이어야 한다 |
 
+### 2.5 `defect.incident_ingestion_issue` — 위치 미확정 검토 대기열
+
+GPS 좌표가 무효이거나 활성 Patrol Area를 결정할 수 없는 Incident는 가짜 좌표로
+결함을 만들지 않는다. 공통 `telemetry.robot_event` 원본과 Image 연결은 같은
+Transaction에 보존하고 다음 필드를 검토 대기열에 남긴다.
+
+| 컬럼 | 규칙 |
+|---|---|
+| `event_id`, `robot_id` | 공통 Event와 발행 Robot의 복합 FK. Event당 최대 1개 Issue |
+| `issue_type` | `INVALID_GPS` 또는 `PATROL_AREA_UNRESOLVED` |
+| `issue_status` | `OPEN`, `RESOLVED`, `DISMISSED` |
+| `mission_id`, `image_id` | 같은 Robot의 Mission·Image만 참조할 수 있는 복합 FK |
+| `detected_defect_type`, `confidence`, `observed_at` | 목록·후속 검토에 필요한 최소 구조화 정보 |
+
+### 2.6 `defect.incident_code_counter` — 외부 표시 코드 순번
+
+`occurred_at`을 Asia/Seoul 일자로 변환한 날짜별 마지막 순번을 보관한다.
+`INSERT ... ON CONFLICT DO UPDATE ... RETURNING`으로 같은 날짜의 동시 생성도 서로
+다른 순번을 받으며, 결함 저장이 실패하면 Counter 증가도 함께 Rollback된다.
+
 ## 3. 외부 스키마로 가는 FK
 
 V12 시점에는 참조 대상 테이블이 없어 UUID만 보관했으나, V22가 Patrol·Mission·Event·
@@ -86,6 +110,9 @@ Image 정본을 만들고 V23이 FK를 모두 연결했다. 현재 defect 스키
 | `defect.defect_observation.robot_id` | `robot.robot (robot_id)` | V19 `fk_observation_robot` |
 | `defect.defect_observation.event_id` | `telemetry.robot_event (event_id, robot_id)` | V23 `fk_observation_robot_event` |
 | `defect.defect_observation.image_id` | `storage.robot_image (image_id, robot_id)` | V23 `fk_observation_robot_image` |
+| `defect.incident_ingestion_issue.event_id` | `telemetry.robot_event (event_id, robot_id)` | V28 `fk_incident_ingestion_issue_event` |
+| `defect.incident_ingestion_issue.mission_id` | `robot.mission (mission_id, robot_id)` | V28 `fk_incident_ingestion_issue_mission` |
+| `defect.incident_ingestion_issue.image_id` | `storage.robot_image (image_id, robot_id)` | V28 `fk_incident_ingestion_issue_image` |
 
 `event_id`와 `image_id`는 `robot_id`를 포함한 **복합 FK**다. 덕분에 "같은 로봇이 발행한
 이벤트·업로드한 이미지만 참조할 수 있다"는 제약까지 DB가 보장한다. 즉 V19의 `robot_id`는
@@ -149,6 +176,10 @@ V27 적용 후 이 질의는 defect·robot_command 관련 행을 반환하지 �
   컬럼을 같은 행에 채워야 하므로 `UPDATE`가 필요하다.
 - `defect.defect_export_job`: `SELECT, INSERT, UPDATE` — worker가 `job_status`와 결과
   컬럼을 갱신해야 하므로 `UPDATE`가 필요하다.
+- `defect.incident_code_counter`: `SELECT, INSERT, UPDATE` — 신규 결함 Transaction에서
+  일자별 순번을 원자적으로 증가시킨다.
+- `defect.incident_ingestion_issue`: `SELECT, INSERT, UPDATE` — 수신 시 `OPEN`으로
+  저장하고 후속 검토가 `RESOLVED` 또는 `DISMISSED`로 전이한다.
 
 ## 5. 마이그레이션
 
@@ -173,6 +204,13 @@ V27 적용 후 이 질의는 defect·robot_command 관련 행을 반환하지 �
 
 `V23__link_defect_and_command_to_patrol_mission.sql`이 남은 FK를 모두 연결한다. V23의
 제약은 `NOT VALID`로 추가되었고, V27이 이를 `VALIDATE`로 승격한다 (3.0.1 참고).
+
+`V28__harden_incident_ingestion.sql`은 다음을 추가한다.
+
+- 신규 `incident_code`를 `INC-YYYYMMDD-NNNNNN` 형식으로 제한하는 `NOT VALID`
+  CHECK와 일자별 Counter
+- 기존 비정형 코드는 즉시 변경하지 않되 이미 정형인 코드의 최대 순번으로 Counter Seed
+- GPS·Patrol Area를 확정하지 못한 Incident의 검토 대기열과 Event·Mission·Image FK
 
 ### 5.1 V19와 V23의 실행 순서 (번호 변경 금지)
 

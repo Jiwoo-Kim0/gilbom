@@ -863,7 +863,7 @@ INSERT INTO defect.defect (
 ) VALUES
 (
     '80000000-0000-4000-8000-000000000001',
-    'INC-STATS-A-001',
+    'INC-20260701-000001',
     'LINEAR',
     'DAMAGED',
     'HIGH',
@@ -883,7 +883,7 @@ INSERT INTO defect.defect (
 ),
 (
     '80000000-0000-4000-8000-000000000002',
-    'INC-STATS-A-002',
+    'INC-20260701-000002',
     'DOT',
     'BLOCKED',
     'MEDIUM',
@@ -903,7 +903,7 @@ INSERT INTO defect.defect (
 ),
 (
     '80000000-0000-4000-8000-000000000003',
-    'INC-STATS-B-001',
+    'INC-20260701-000003',
     'LINEAR',
     'CONTAMINATED',
     'MEDIUM',
@@ -923,7 +923,7 @@ INSERT INTO defect.defect (
 ),
 (
     '80000000-0000-4000-8000-000000000004',
-    'INC-STATS-B-002',
+    'INC-20260701-000004',
     'DOT',
     'UPLIFTED',
     'CRITICAL',
@@ -943,7 +943,7 @@ INSERT INTO defect.defect (
 ),
 (
     '80000000-0000-4000-8000-000000000005',
-    'INC-STATS-A-MERGED',
+    'INC-20260701-000005',
     'LINEAR',
     'DAMAGED',
     'LOW',

@@ -89,7 +89,7 @@ class MqttV2PublishControllerTest {
                 "2.0",
                 UUID.fromString("93bd80e4-082f-4578-92b1-8ad95ad39ca3"),
                 IngestReceiptPayload.Status.STORED,
-                "INC-001",
+                "INC-20260729-000001",
                 ISSUED_AT
         );
         MqttV2Publisher.PublishResult result = new MqttV2Publisher.PublishResult(

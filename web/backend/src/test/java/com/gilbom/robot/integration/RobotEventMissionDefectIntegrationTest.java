@@ -3,6 +3,7 @@ package com.gilbom.robot.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -123,10 +124,12 @@ class RobotEventMissionDefectIntegrationTest {
     void createFixture() {
         jdbcTemplate.execute("""
                 TRUNCATE TABLE
+                    defect.incident_ingestion_issue,
                     defect.defect_observation,
                     defect.defect_status_history,
                     defect.defect_merge_history,
                     defect.defect,
+                    defect.incident_code_counter,
                     robot.mission_status_history,
                     telemetry.robot_event,
                     telemetry.robot_telemetry,
@@ -533,10 +536,96 @@ class RobotEventMissionDefectIntegrationTest {
                 """,
                 Integer.class,
                 first.defectId())).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT incident_code
+                FROM defect.defect
+                WHERE defect_id = ?
+                """,
+                String.class,
+                first.defectId())).isEqualTo("INC-20260728-000001");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT risk_level
+                FROM defect.defect
+                WHERE defect_id = ?
+                """,
+                String.class,
+                first.defectId())).isEqualTo("MEDIUM");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT risk_score
+                FROM defect.defect
+                WHERE defect_id = ?
+                """,
+                BigDecimal.class,
+                first.defectId())).isEqualByComparingTo("32.00");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT risk_rule_version
+                FROM defect.defect
+                WHERE defect_id = ?
+                """,
+                String.class,
+                first.defectId())).isEqualTo("DAMAGE_RATIO_V1");
     }
 
     @Test
-    void preservesInvalidLocationIncidentAsRawEventOnly() {
+    void calculatesRiskBandsAndDailyIncidentCodeSequence() {
+        IncidentIngestionResult low = incidentIngestionService.ingest(
+                incidentEvent(
+                        UUID.fromString(
+                                "23000000-0000-4000-8000-000000000311"),
+                        1,
+                        127.027600,
+                        37.497900,
+                        0.90,
+                        0.10),
+                "{\"incident\":{\"attributes\":{\"damage_ratio\":0.10}}}",
+                BASE_TIME.plusSeconds(2));
+        IncidentIngestionResult critical = incidentIngestionService.ingest(
+                incidentEvent(
+                        UUID.fromString(
+                                "23000000-0000-4000-8000-000000000312"),
+                        2,
+                        127.028600,
+                        37.498900,
+                        0.90,
+                        0.80),
+                "{\"incident\":{\"attributes\":{\"damage_ratio\":0.80}}}",
+                BASE_TIME.plusSeconds(3));
+
+        Map<String, Object> lowDefect = jdbcTemplate.queryForMap("""
+                SELECT
+                    incident_code,
+                    risk_level,
+                    risk_score,
+                    risk_rule_version,
+                    risk_calculated_at
+                FROM defect.defect
+                WHERE defect_id = ?
+                """,
+                low.defectId());
+        Map<String, Object> criticalDefect = jdbcTemplate.queryForMap("""
+                SELECT incident_code, risk_level, risk_score
+                FROM defect.defect
+                WHERE defect_id = ?
+                """,
+                critical.defectId());
+
+        assertThat(lowDefect.get("incident_code"))
+                .isEqualTo("INC-20260728-000001");
+        assertThat(lowDefect.get("risk_level")).isEqualTo("LOW");
+        assertThat((BigDecimal) lowDefect.get("risk_score"))
+                .isEqualByComparingTo("10.00");
+        assertThat(lowDefect.get("risk_rule_version"))
+                .isEqualTo("DAMAGE_RATIO_V1");
+        assertThat(lowDefect.get("risk_calculated_at")).isNotNull();
+        assertThat(criticalDefect.get("incident_code"))
+                .isEqualTo("INC-20260728-000002");
+        assertThat(criticalDefect.get("risk_level")).isEqualTo("CRITICAL");
+        assertThat((BigDecimal) criticalDefect.get("risk_score"))
+                .isEqualByComparingTo("80.00");
+    }
+
+    @Test
+    void preservesInvalidLocationIncidentAsReviewIssueWithoutDefect() {
         IncidentEventPayload payload = incidentEvent(
                 UUID.fromString(
                         "23000000-0000-4000-8000-000000000303"),
@@ -556,6 +645,22 @@ class RobotEventMissionDefectIntegrationTest {
         assertThat(count("telemetry.robot_event")).isOne();
         assertThat(count("defect.defect")).isZero();
         assertThat(count("defect.defect_observation")).isZero();
+        assertThat(count("defect.incident_ingestion_issue")).isOne();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT issue_type
+                FROM defect.incident_ingestion_issue
+                WHERE event_id = ?
+                """,
+                String.class,
+                payload.eventId())).isEqualTo("INVALID_GPS");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT issue_status
+                FROM defect.incident_ingestion_issue
+                WHERE event_id = ?
+                """,
+                String.class,
+                payload.eventId())).isEqualTo("OPEN");
+        assertThat(count("defect.incident_code_counter")).isZero();
     }
 
     private static MissionEventPayload missionEvent(
@@ -601,6 +706,23 @@ class RobotEventMissionDefectIntegrationTest {
             Double latitude,
             double confidence
     ) {
+        return incidentEvent(
+                eventId,
+                sequence,
+                longitude,
+                latitude,
+                confidence,
+                0.32);
+    }
+
+    private static IncidentEventPayload incidentEvent(
+            UUID eventId,
+            long sequence,
+            Double longitude,
+            Double latitude,
+            double confidence,
+            Double damageRatio
+    ) {
         boolean valid = longitude != null && latitude != null;
         return new IncidentEventPayload(
                 "2.0",
@@ -625,7 +747,7 @@ class RobotEventMissionDefectIntegrationTest {
                         IncidentEventPayload.BlockType.LINEAR,
                         IncidentEventPayload.DefectType.DAMAGED,
                         confidence,
-                        new IncidentEventPayload.Attributes(0.32)),
+                        new IncidentEventPayload.Attributes(damageRatio)),
                 new IncidentEventPayload.Evidence(
                         null,
                         BASE_TIME.plusSeconds(sequence - 1),
