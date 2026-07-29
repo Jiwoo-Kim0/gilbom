@@ -29,6 +29,7 @@ import com.gilbom.audit.AuditRequestContext;
 import com.gilbom.audit.BestEffortAuditLogWriter;
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
+import com.gilbom.defect.DefectAccessService;
 import com.gilbom.defect.DefectCommandService;
 import com.gilbom.defect.DefectDtos.DefectStatusUpdateRequest;
 import com.gilbom.defect.DefectFilter;
@@ -565,6 +566,7 @@ class DefectQueryScopeIntegrationTest {
     @Import({
             DefectQueryService.class,
             DefectCommandService.class,
+            DefectAccessService.class,
             DefectRepository.class,
             RobotScopeService.class,
             AuditLogService.class,

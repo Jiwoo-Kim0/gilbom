@@ -95,13 +95,31 @@ Image 정본을 만들고 V23이 FK를 모두 연결했다. 현재 defect 스키
 `defect.defect.patrol_route_id`는 `ck_defect_route_requires_area`로 경로만 있고 구역이
 없는 상태를 막는다.
 
-### 3.0.1 `NOT VALID` 상태
+### 3.0.1 제약 검증 (V23 `NOT VALID` → V27 `VALIDATE`)
 
-V23이 추가한 FK 4개와 CHECK 1개는 `NOT VALID`다. 신규 쓰기에는 관계 무결성이 적용되지만
-V23 이전에 들어간 행은 검사하지 않았고, 플래너도 이 제약을 신뢰하지 않는다. V23 주석이
-정한 대로 **기존 데이터 정리 후 별도 배포에서 `VALIDATE CONSTRAINT`** 해야 한다.
-orphan이 하나라도 있으면 VALIDATE가 실패해 기동이 막히므로, 실행 전에 orphan 수를 먼저
-확인한다.
+V23은 FK 6개와 CHECK 1개를 `NOT VALID`로 걸었다. `NOT VALID`는 신규 INSERT·UPDATE에는
+관계 무결성을 적용하지만 제약을 걸기 전에 이미 있던 행은 검사하지 않고, 플래너도 제약을
+신뢰하지 않는다. V23 주석이 예고한 "기존 데이터 정리 후 별도 배포"가
+`V27__validate_defect_and_command_constraints.sql`이다.
+
+V27이 안전한 근거는 세 가지다.
+
+1. V23 이후에 쓰인 행은 이미 FK가 적용된 상태로 들어갔으므로 orphan일 수 없다.
+2. 따라서 위험은 V23 적용 시점에 이미 있던 행뿐인데, 참조 대상 테이블은 V22에서 처음
+   생겼다. 그 전에는 이 칼럼들을 채울 방법이 없었다.
+3. 적용 대상 DB에서 `defect.defect`, `defect.defect_observation`,
+   `robot.robot_command`가 모두 0행임을 확인했다.
+
+`VALIDATE`는 `SHARE UPDATE EXCLUSIVE` 락만 잡아 읽기·쓰기를 막지 않는다. 위반 행이 있으면
+migration이 실패해 기동이 막히므로, 데이터가 쌓인 환경에 적용할 때는 먼저 orphan 수를
+센다.
+
+```sql
+SELECT conrelid::regclass AS table_name, conname, contype
+FROM pg_constraint WHERE NOT convalidated ORDER BY 1, 2;
+```
+
+V27 적용 후 이 질의는 defect·robot_command 관련 행을 반환하지 않아야 한다.
 
 ## 3.1 결함 객체 범위
 
@@ -154,7 +172,7 @@ orphan이 하나라도 있으면 VALIDATE가 실패해 기동이 막히므로, �
 `robot_id`를 함께 저장한다.
 
 `V23__link_defect_and_command_to_patrol_mission.sql`이 남은 FK를 모두 연결한다. V23의
-제약은 `NOT VALID`로 추가되었고 VALIDATE는 아직 수행되지 않았다 (3.0.1 참고).
+제약은 `NOT VALID`로 추가되었고, V27이 이를 `VALIDATE`로 승격한다 (3.0.1 참고).
 
 ### 5.1 V19와 V23의 실행 순서 (번호 변경 금지)
 
