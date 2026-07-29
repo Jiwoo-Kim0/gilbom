@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.gilbom.auth.AuthenticatedUserIdResolver;
 import com.gilbom.statistics.StatisticsDtos.StatisticsByAreaResponse;
 import com.gilbom.statistics.StatisticsDtos.StatisticsByDefectTypeResponse;
+import com.gilbom.statistics.StatisticsDtos.StatisticsByPeriodResponse;
 import com.gilbom.statistics.StatisticsDtos.StatisticsByStatusResponse;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -33,6 +34,8 @@ public class StatisticsController {
             Set.of("from", "to");
     private static final Set<String> AREA_PARAMETERS =
             Set.of("from", "to", "patrolAreaId", "page", "size");
+    private static final Set<String> PERIOD_PARAMETERS =
+            Set.of("from", "to", "granularity");
 
     private final StatisticsQueryService queryService;
     private final AuthenticatedUserIdResolver userIdResolver;
@@ -114,5 +117,30 @@ public class StatisticsController {
                 patrolAreaId,
                 page,
                 size);
+    }
+
+    @GetMapping("/by-period")
+    @PreAuthorize(
+            "hasAuthority('MISSION_VIEW')"
+                    + " and hasAuthority('DEFECT_STATUS_VIEW')")
+    public StatisticsByPeriodResponse findByPeriod(
+            @RequestParam
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+            Instant from,
+            @RequestParam
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+            Instant to,
+            @RequestParam(defaultValue = "DAY") String granularity,
+            Authentication authentication,
+            HttpServletRequest request
+    ) {
+        StatisticsQuery.requireOnlyParameters(
+                request.getParameterMap().keySet(),
+                PERIOD_PARAMETERS);
+        return queryService.findByPeriod(
+                userIdResolver.require(authentication),
+                from,
+                to,
+                granularity);
     }
 }

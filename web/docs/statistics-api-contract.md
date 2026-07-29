@@ -13,7 +13,7 @@
 | `GET /api/v1/statistics/by-status` | 결함 처리 상태별 현재 결함 수 | `DEFECT_STATUS_VIEW` |
 | `GET /api/v1/statistics/by-defect-type` | 결함 유형별 현재 결함 수 | `DEFECT_STATUS_VIEW` |
 | `GET /api/v1/statistics/by-area` | 지역별 Mission·Incident·결함·Observation | `MISSION_VIEW` AND `DEFECT_STATUS_VIEW` |
-| `GET /api/v1/statistics/by-period` | UTC 날짜별 Mission·Incident·결함 | `MISSION_VIEW` AND `DEFECT_STATUS_VIEW` |
+| `GET /api/v1/statistics/by-period` | UTC 날짜별 Mission·Incident·결함·Observation | `MISSION_VIEW` AND `DEFECT_STATUS_VIEW` |
 
 두 권한이 표시된 API는 둘 다 보유해야 한다. 조회 가능한 원천 행은 현재 사용자에게
 유효한 `auth.user_robot_assignment`를 SQL 조건으로 적용한 후 집계한다. 시스템
@@ -88,6 +88,7 @@ Mission의 `result_incident_count`는 기기 결과 요약이므로 Incident 통
 - 각 날짜 D의 실제 집계 구간은
   `[max(from, D 00:00Z), min(to, D+1 00:00Z))`다.
 - 요청 구간과 겹치는 UTC 날짜는 데이터가 없어도 모두 포함하고 지표를 0으로 채운다.
+- Observation은 공통 지표 계약에 맞춰 `created_at`의 UTC 날짜로 집계한다.
 
 첫날과 마지막 날을 요청 경계에서 자르면 임의 offset 요청도 `[from,to)` 밖의 데이터를
 섞지 않으면서 UTC 일별 시계열을 유지할 수 있다.
@@ -126,11 +127,9 @@ Mission의 `result_incident_count`는 기기 결과 요약이므로 Incident 통
 | `StatisticsDtos` | OpenAPI 성공 응답 DTO와 공개 enum |
 | `StatisticsPeriod` | 필수 경계, UTC Instant, `[from,to)`, 최대 366일 |
 | `StatisticsQuery` | 지역 페이지 offset과 기간 granularity의 검증된 query 값 |
-| `StatisticsRepository` | `NamedParameterJdbcTemplate` 기반 지역 존재 확인과 권한 범위가 적용된 상태·유형별 집계 SQL |
+| `StatisticsRepository` | `NamedParameterJdbcTemplate` 기반 원천별 권한 범위와 상태·유형·지역·UTC 일별 집계 SQL |
 
-`by-status`, `by-defect-type`, `by-area`는 실제 집계, 권한, 오류 및 계약 테스트와
-함께 활성화됐다. 아직 구현하지 않은 `by-period`는 빈 200 응답이나
-`UnsupportedOperationException`으로 노출하지 않고 수직 구현 작업에서 활성화한다.
+네 통계 endpoint는 실제 집계, 권한, 오류 및 계약 테스트와 함께 활성화됐다.
 
 ### 7.1 상태별 통계 구현
 
@@ -172,3 +171,33 @@ Mission의 `result_incident_count`는 기기 결과 요약이므로 Incident 통
   존재하지 않는 UUID는 집계 SQL 전에 `404 PATROL_AREA_NOT_FOUND`로 차단한다.
 - Fixture는 A-11과 B-22의 Mission 2, Incident 3, Defect 2, Observation 3을
   정확히 비교하며 Robot 001 VIEWER에게 B-22 원천 집계가 모두 0인지 검증한다.
+
+### 7.4 기간별 통계 구현
+
+- Controller는 `MISSION_VIEW`와 `DEFECT_STATUS_VIEW`를 모두 검사하고 `from`,
+  `to`, `granularity`만 허용한다.
+- Repository는 `generate_series`로 요청 구간과 겹치는 UTC 날짜 bucket을 만든다.
+  `to`가 정확히 자정이면 그 날짜 bucket은 생성하지 않는다.
+- Mission·Incident·Defect·Observation은 각각 가시 원천 CTE에서 `[from,to)`
+  조건을 적용한 뒤 UTC 날짜로 집계하고, 집계 결과만 bucket에 LEFT JOIN한다.
+- SQL identifier는 요청 문자열로 만들지 않는다. `DAY` enum switch가 고정된
+  일별 SQL만 선택하며 나머지 granularity는 DB 접근 전에 거부한다.
+- 첫날과 마지막 날이 부분 구간이어도 bucket 날짜만 확장할 뿐, 원천 행 조건은
+  항상 요청의 실제 `from <= timestamp AND timestamp < to`를 사용한다.
+- Fixture는 7월 1~4일의 일별 예상값, Robot 001 범위, 반복 호출 결정성,
+  부분 경계 포함·제외, 빈 날짜 zero-fill과 잘못된 기간 차단을 검증한다.
+
+### 7.5 통계 인덱스와 성능 검증
+
+- Mission 기간·지역·상태 조회는 V22의 기존 복합 인덱스를 사용한다.
+- V26은 `merged_into_defect_id IS NULL`인 현재 결함만 포함하는 partial index를
+  추가한다. 전체 기간은 `last_seen_at`, 지역 기간은
+  `patrol_area_id, last_seen_at`을 선두 key로 사용한다.
+- `defect_id`는 권한 범위와 distinct 집계를 위해 key에 포함하고,
+  `defect_type`, `workflow_status`, 필요 Area 칼럼은 covering column으로 둔다.
+- 작은 Fixture의 자연 `Seq Scan`은 정상으로 인정한다. 통합 테스트는 자연
+  `EXPLAIN (ANALYZE, BUFFERS)`를 기록하고 `enable_seqscan=off` 환경에서 각
+  인덱스가 대표 Query를 실제로 서비스할 수 있는지 별도로 검증한다.
+- 강제 계획은 인덱스 호환성의 증거일 뿐 운영 Planner 선택이나 처리량을 보장하지
+  않는다. 최종 성능 평가는 실제 Cardinality와 분포를 가진 스테이징 데이터에서
+  자연 실행계획과 p95 응답시간을 다시 측정한다.

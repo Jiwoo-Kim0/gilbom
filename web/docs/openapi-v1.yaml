@@ -2380,11 +2380,13 @@ paths:
     get:
       tags: [Statistics]
       operationId: getStatisticsByPeriod
-      summary: UTC 일별 Mission·Incident·결함 통계
+      summary: UTC 일별 Mission·Incident·결함·Observation 통계
       description: |
         요청 구간과 겹치는 UTC 날짜를 빠짐없이 오름차순으로 반환합니다.
         첫날과 마지막 날은 요청 [from,to)와 겹치는 부분만 집계하며 빈 날짜도
-        0 집계로 반환합니다. v1의 granularity는 DAY만 지원합니다.
+        0 집계로 반환합니다. Mission은 started_at, Incident는 occurred_at,
+        결함은 last_seen_at, Observation은 created_at을 기준으로 합니다.
+        v1의 granularity는 DAY만 지원합니다.
       x-required-permissions: [MISSION_VIEW, DEFECT_STATUS_VIEW]
       security:
         - serverSession: []
@@ -2399,6 +2401,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StatisticsByPeriodResponse"
+              example:
+                from: "2026-07-01T00:00:00Z"
+                to: "2026-07-03T00:00:00Z"
+                granularity: DAY
+                items:
+                  - date: "2026-07-01"
+                    metrics:
+                      missionCount: 1
+                      completedMissionCount: 1
+                      cancelledMissionCount: 0
+                      failedMissionCount: 0
+                      completionRatePercent: 100.00
+                      totalMissionDurationSeconds: 3600
+                      incidentEventCount: 2
+                      defectCount: 1
+                      observationCount: 2
+                  - date: "2026-07-02"
+                    metrics:
+                      missionCount: 1
+                      completedMissionCount: 0
+                      cancelledMissionCount: 1
+                      failedMissionCount: 0
+                      completionRatePercent: 0.00
+                      totalMissionDurationSeconds: 1800
+                      incidentEventCount: 1
+                      defectCount: 1
+                      observationCount: 1
         "400":
           $ref: "#/components/responses/StatisticsBadRequest"
         "401":

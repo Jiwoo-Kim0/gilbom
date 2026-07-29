@@ -21,6 +21,8 @@ import com.gilbom.statistics.StatisticsDtos.StatisticsByAreaItem;
 import com.gilbom.statistics.StatisticsDtos.StatisticsByAreaResponse;
 import com.gilbom.statistics.StatisticsDtos.StatisticsByDefectTypeItem;
 import com.gilbom.statistics.StatisticsDtos.StatisticsByDefectTypeResponse;
+import com.gilbom.statistics.StatisticsDtos.StatisticsByPeriodItem;
+import com.gilbom.statistics.StatisticsDtos.StatisticsByPeriodResponse;
 import com.gilbom.statistics.StatisticsDtos.StatisticsByStatusItem;
 import com.gilbom.statistics.StatisticsDtos.StatisticsByStatusResponse;
 
@@ -162,6 +164,28 @@ public class StatisticsQueryService {
                 granularity);
     }
 
+    @Transactional(readOnly = true)
+    public StatisticsByPeriodResponse findByPeriod(
+            UUID userId,
+            Instant from,
+            Instant to,
+            String granularity
+    ) {
+        StatisticsQuery.ByPeriod query = requirePeriodQuery(
+                from,
+                to,
+                granularity);
+        List<StatisticsByPeriodItem> items =
+                repository.findPeriodStatistics(userId, query).stream()
+                        .map(StatisticsQueryService::toPeriodItem)
+                        .toList();
+        return new StatisticsByPeriodResponse(
+                query.period().from(),
+                query.period().to(),
+                query.granularity(),
+                items);
+    }
+
     private static StatisticsByAreaItem toAreaItem(
             StatisticsRepository.AreaStatisticsRow row
     ) {
@@ -169,6 +193,25 @@ public class StatisticsQueryService {
                 row.patrolAreaId(),
                 row.areaCode(),
                 row.areaName(),
+                new StatisticsAggregateMetrics(
+                        row.missionCount(),
+                        row.completedMissionCount(),
+                        row.cancelledMissionCount(),
+                        row.failedMissionCount(),
+                        completionRate(
+                                row.completedMissionCount(),
+                                row.missionCount()),
+                        row.totalMissionDurationSeconds(),
+                        row.incidentEventCount(),
+                        row.defectCount(),
+                        row.observationCount()));
+    }
+
+    private static StatisticsByPeriodItem toPeriodItem(
+            StatisticsRepository.PeriodStatisticsRow row
+    ) {
+        return new StatisticsByPeriodItem(
+                row.date(),
                 new StatisticsAggregateMetrics(
                         row.missionCount(),
                         row.completedMissionCount(),

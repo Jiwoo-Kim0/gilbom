@@ -2,6 +2,7 @@ package com.gilbom.statistics;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -230,6 +231,164 @@ public class StatisticsRepository {
             ORDER BY area.area_code, area.patrol_area_id
             """;
 
+    private static final String STATISTICS_BY_DAY_SQL = """
+            WITH buckets AS (
+                SELECT
+                    series.bucket_start::date AS bucket_date
+                FROM generate_series(
+                    date_trunc(
+                        'day',
+                        CAST(:from AS timestamptz) AT TIME ZONE 'UTC'
+                    ),
+                    date_trunc(
+                        'day',
+                        CAST(:to AS timestamptz) AT TIME ZONE 'UTC'
+                    ),
+                    INTERVAL '1 day'
+                ) AS series(bucket_start)
+                WHERE series.bucket_start
+                    < CAST(:to AS timestamptz) AT TIME ZONE 'UTC'
+            ),
+            visible_mission_source AS (
+                SELECT
+                    mission.mission_id,
+                    (
+                        mission.started_at AT TIME ZONE 'UTC'
+                    )::date AS bucket_date,
+                    mission.status,
+                    mission.result_duration_sec
+                FROM robot.mission mission
+                JOIN robot.robot r
+                  ON r.robot_id = mission.robot_id
+                WHERE
+            """ + RobotScopeService.VISIBLE_ROBOT_PREDICATE + """
+                  AND mission.started_at >= :from
+                  AND mission.started_at < :to
+            ),
+            mission_aggregate AS (
+                SELECT
+                    bucket_date,
+                    COUNT(*) AS mission_count,
+                    COUNT(*) FILTER (
+                        WHERE status = 'COMPLETED'
+                    ) AS completed_mission_count,
+                    COUNT(*) FILTER (
+                        WHERE status = 'CANCELLED'
+                    ) AS cancelled_mission_count,
+                    COUNT(*) FILTER (
+                        WHERE status = 'FAILED'
+                    ) AS failed_mission_count,
+                    COALESCE(
+                        SUM(COALESCE(result_duration_sec, 0)),
+                        0
+                    ) AS total_mission_duration_seconds
+                FROM visible_mission_source
+                GROUP BY bucket_date
+            ),
+            visible_incident_source AS (
+                SELECT
+                    event.event_id,
+                    (
+                        event.occurred_at AT TIME ZONE 'UTC'
+                    )::date AS bucket_date
+                FROM telemetry.robot_event event
+                JOIN robot.robot r
+                  ON r.robot_id = event.robot_id
+                WHERE
+            """ + RobotScopeService.VISIBLE_ROBOT_PREDICATE + """
+                  AND event.event_type =
+                      'BRAILLE_BLOCK_INCIDENT_DETECTED'
+                  AND event.occurred_at >= :from
+                  AND event.occurred_at < :to
+            ),
+            incident_aggregate AS (
+                SELECT
+                    bucket_date,
+                    COUNT(DISTINCT event_id) AS incident_event_count
+                FROM visible_incident_source
+                GROUP BY bucket_date
+            ),
+            visible_defect_source AS (
+                SELECT
+                    d.defect_id,
+                    (
+                        d.last_seen_at AT TIME ZONE 'UTC'
+                    )::date AS bucket_date
+                FROM defect.defect d
+                WHERE
+            """ + DefectScopeService.VISIBLE_DEFECT_PREDICATE + """
+                  AND d.merged_into_defect_id IS NULL
+                  AND d.last_seen_at >= :from
+                  AND d.last_seen_at < :to
+            ),
+            defect_aggregate AS (
+                SELECT
+                    bucket_date,
+                    COUNT(DISTINCT defect_id) AS defect_count
+                FROM visible_defect_source
+                GROUP BY bucket_date
+            ),
+            visible_observation_source AS (
+                SELECT
+                    observation.event_id,
+                    (
+                        observation.created_at AT TIME ZONE 'UTC'
+                    )::date AS bucket_date
+                FROM defect.defect_observation observation
+                JOIN robot.robot r
+                  ON r.robot_id = observation.robot_id
+                WHERE
+            """ + RobotScopeService.VISIBLE_ROBOT_PREDICATE + """
+                  AND observation.created_at >= :from
+                  AND observation.created_at < :to
+            ),
+            observation_aggregate AS (
+                SELECT
+                    bucket_date,
+                    COUNT(DISTINCT event_id) AS observation_count
+                FROM visible_observation_source
+                GROUP BY bucket_date
+            )
+            SELECT
+                bucket.bucket_date,
+                COALESCE(mission.mission_count, 0) AS mission_count,
+                COALESCE(
+                    mission.completed_mission_count,
+                    0
+                ) AS completed_mission_count,
+                COALESCE(
+                    mission.cancelled_mission_count,
+                    0
+                ) AS cancelled_mission_count,
+                COALESCE(
+                    mission.failed_mission_count,
+                    0
+                ) AS failed_mission_count,
+                COALESCE(
+                    mission.total_mission_duration_seconds,
+                    0
+                ) AS total_mission_duration_seconds,
+                COALESCE(
+                    incident.incident_event_count,
+                    0
+                ) AS incident_event_count,
+                COALESCE(defect.defect_count, 0) AS defect_count,
+                COALESCE(
+                    observation.observation_count,
+                    0
+                ) AS observation_count
+            FROM buckets bucket
+            LEFT JOIN mission_aggregate mission
+              ON mission.bucket_date = bucket.bucket_date
+            LEFT JOIN incident_aggregate incident
+              ON incident.bucket_date = bucket.bucket_date
+            LEFT JOIN defect_aggregate defect
+              ON defect.bucket_date = bucket.bucket_date
+            LEFT JOIN observation_aggregate observation
+              ON observation.bucket_date = bucket.bucket_date
+            ORDER BY bucket.bucket_date ASC
+            """;
+
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
     public StatisticsRepository(
@@ -299,6 +458,23 @@ public class StatisticsRepository {
                         mapAreaStatisticsRow(resultSet));
     }
 
+    public List<PeriodStatisticsRow> findPeriodStatistics(
+            UUID userId,
+            StatisticsQuery.ByPeriod query
+    ) {
+        String sql = switch (query.granularity()) {
+            case DAY -> STATISTICS_BY_DAY_SQL;
+        };
+        MapSqlParameterSource parameters = query.period().bind(
+                new MapSqlParameterSource()
+                        .addValue("userId", userId));
+        return jdbcTemplate.query(
+                sql,
+                parameters,
+                (resultSet, rowNumber) ->
+                        mapPeriodStatisticsRow(resultSet));
+    }
+
     private static WorkflowStatusCount mapWorkflowStatusCount(
             ResultSet resultSet
     ) throws SQLException {
@@ -333,6 +509,21 @@ public class StatisticsRepository {
                 resultSet.getLong("observation_count"));
     }
 
+    private static PeriodStatisticsRow mapPeriodStatisticsRow(
+            ResultSet resultSet
+    ) throws SQLException {
+        return new PeriodStatisticsRow(
+                resultSet.getObject("bucket_date", LocalDate.class),
+                resultSet.getLong("mission_count"),
+                resultSet.getLong("completed_mission_count"),
+                resultSet.getLong("cancelled_mission_count"),
+                resultSet.getLong("failed_mission_count"),
+                resultSet.getLong("total_mission_duration_seconds"),
+                resultSet.getLong("incident_event_count"),
+                resultSet.getLong("defect_count"),
+                resultSet.getLong("observation_count"));
+    }
+
     record WorkflowStatusCount(
             DefectWorkflowStatus workflowStatus,
             long defectCount
@@ -349,6 +540,19 @@ public class StatisticsRepository {
             UUID patrolAreaId,
             String areaCode,
             String areaName,
+            long missionCount,
+            long completedMissionCount,
+            long cancelledMissionCount,
+            long failedMissionCount,
+            long totalMissionDurationSeconds,
+            long incidentEventCount,
+            long defectCount,
+            long observationCount
+    ) {
+    }
+
+    record PeriodStatisticsRow(
+            LocalDate date,
             long missionCount,
             long completedMissionCount,
             long cancelledMissionCount,

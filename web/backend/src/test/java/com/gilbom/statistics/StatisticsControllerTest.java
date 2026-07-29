@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -43,8 +44,11 @@ import com.gilbom.statistics.StatisticsDtos.StatisticsByAreaItem;
 import com.gilbom.statistics.StatisticsDtos.StatisticsByAreaResponse;
 import com.gilbom.statistics.StatisticsDtos.StatisticsByDefectTypeItem;
 import com.gilbom.statistics.StatisticsDtos.StatisticsByDefectTypeResponse;
+import com.gilbom.statistics.StatisticsDtos.StatisticsByPeriodItem;
+import com.gilbom.statistics.StatisticsDtos.StatisticsByPeriodResponse;
 import com.gilbom.statistics.StatisticsDtos.StatisticsByStatusItem;
 import com.gilbom.statistics.StatisticsDtos.StatisticsByStatusResponse;
+import com.gilbom.statistics.StatisticsDtos.StatisticsGranularity;
 
 @WebMvcTest(controllers = StatisticsController.class)
 @Import({
@@ -387,6 +391,114 @@ class StatisticsControllerTest {
                         is("PATROL_AREA_NOT_FOUND")));
     }
 
+    @Test
+    void returnsPeriodStatisticsWithBothRequiredPermissions()
+            throws Exception {
+        when(queryService.findByPeriod(
+                USER_ID,
+                FROM,
+                TO,
+                "DAY"))
+                .thenReturn(periodResponse());
+
+        mockMvc.perform(get("/api/v1/statistics/by-period")
+                        .param("from", "2026-07-01T09:00:00+09:00")
+                        .param("to", "2026-07-05T09:00:00+09:00")
+                        .with(user(USER_ID.toString()).authorities(
+                                MISSION_VIEW,
+                                DEFECT_STATUS_VIEW)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.from",
+                        is("2026-07-01T00:00:00Z")))
+                .andExpect(jsonPath("$.to",
+                        is("2026-07-05T00:00:00Z")))
+                .andExpect(jsonPath("$.granularity", is("DAY")))
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.items[0].date",
+                        is("2026-07-01")))
+                .andExpect(jsonPath(
+                        "$.items[0].metrics.missionCount",
+                        is(1)))
+                .andExpect(jsonPath(
+                        "$.items[0].metrics.incidentEventCount",
+                        is(2)))
+                .andExpect(jsonPath(
+                        "$.items[0].metrics.defectCount",
+                        is(1)))
+                .andExpect(jsonPath(
+                        "$.items[0].metrics.observationCount",
+                        is(2)));
+    }
+
+    @Test
+    void periodStatisticsRequireBothPermissions()
+            throws Exception {
+        mockMvc.perform(get("/api/v1/statistics/by-period")
+                        .param("from", FROM.toString())
+                        .param("to", TO.toString())
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_VIEW)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")));
+
+        mockMvc.perform(get("/api/v1/statistics/by-period")
+                        .param("from", FROM.toString())
+                        .param("to", TO.toString())
+                        .with(user(USER_ID.toString())
+                                .authorities(DEFECT_STATUS_VIEW)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")));
+
+        verifyNoInteractions(queryService);
+    }
+
+    @Test
+    void periodStatisticsRejectUnsupportedGranularity()
+            throws Exception {
+        when(queryService.findByPeriod(
+                USER_ID,
+                FROM,
+                TO,
+                "DAY; DROP TABLE robot.mission"))
+                .thenThrow(new BusinessException(
+                        ErrorCode.COMMON_INVALID_REQUEST));
+
+        mockMvc.perform(get("/api/v1/statistics/by-period")
+                        .param("from", FROM.toString())
+                        .param("to", TO.toString())
+                        .param(
+                                "granularity",
+                                "DAY; DROP TABLE robot.mission")
+                        .with(user(USER_ID.toString()).authorities(
+                                MISSION_VIEW,
+                                DEFECT_STATUS_VIEW)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code",
+                        is("COMMON_INVALID_REQUEST")));
+    }
+
+    @Test
+    void periodStatisticsMapInvalidPeriodTo422()
+            throws Exception {
+        when(queryService.findByPeriod(
+                USER_ID,
+                FROM,
+                FROM,
+                "DAY"))
+                .thenThrow(new BusinessException(
+                        ErrorCode.STATISTICS_PERIOD_INVALID));
+
+        mockMvc.perform(get("/api/v1/statistics/by-period")
+                        .param("from", FROM.toString())
+                        .param("to", FROM.toString())
+                        .with(user(USER_ID.toString()).authorities(
+                                MISSION_VIEW,
+                                DEFECT_STATUS_VIEW)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code",
+                        is("STATISTICS_PERIOD_INVALID")));
+    }
+
     private static StatisticsByStatusResponse response() {
         return new StatisticsByStatusResponse(
                 FROM,
@@ -450,6 +562,25 @@ class StatisticsControllerTest {
                 20,
                 2,
                 1);
+    }
+
+    private static StatisticsByPeriodResponse periodResponse() {
+        return new StatisticsByPeriodResponse(
+                FROM,
+                TO,
+                StatisticsGranularity.DAY,
+                List.of(new StatisticsByPeriodItem(
+                        LocalDate.of(2026, 7, 1),
+                        new StatisticsAggregateMetrics(
+                                1,
+                                1,
+                                0,
+                                0,
+                                new BigDecimal("100.00"),
+                                3_600,
+                                2,
+                                1,
+                                2))));
     }
 
     private static StatisticsAggregateMetrics metrics(

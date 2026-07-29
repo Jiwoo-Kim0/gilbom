@@ -3,10 +3,14 @@ package com.gilbom.robot.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -34,6 +38,7 @@ import com.gilbom.robot.mission.PatrolCatalogQueryService;
 import com.gilbom.statistics.StatisticsDtos.DefectType;
 import com.gilbom.statistics.StatisticsDtos.DefectWorkflowStatus;
 import com.gilbom.statistics.StatisticsDtos.StatisticsByAreaItem;
+import com.gilbom.statistics.StatisticsDtos.StatisticsByPeriodItem;
 import com.gilbom.statistics.StatisticsQueryService;
 import com.gilbom.statistics.StatisticsRepository;
 
@@ -159,6 +164,11 @@ class PatrolMissionSchemaIntegrationTest {
         assertThat(indexExists("ix_robot_event_robot_occurred")).isTrue();
         assertThat(indexExists("ix_robot_event_mission_occurred")).isTrue();
         assertThat(indexExists("ix_robot_telemetry_mission_sampled")).isTrue();
+        assertThat(indexExists("ix_defect_current_last_seen_stats"))
+                .isTrue();
+        assertThat(indexExists(
+                "ix_defect_current_area_last_seen_stats"))
+                .isTrue();
 
         Boolean eventCanUpdate = ownerJdbcTemplate.queryForObject(
                 "SELECT has_table_privilege(?, "
@@ -529,6 +539,90 @@ class PatrolMissionSchemaIntegrationTest {
                 "PATROL_STATISTICS_INDEX_EVIDENCE\n"
                         + indexEvidence);
 
+        String defectNaturalExplain = explain("""
+                SELECT
+                    d.workflow_status,
+                    d.defect_type,
+                    COUNT(DISTINCT d.defect_id)
+                FROM defect.defect d
+                WHERE d.merged_into_defect_id IS NULL
+                  AND d.last_seen_at >=
+                    TIMESTAMPTZ '2026-07-01T00:00:00Z'
+                  AND d.last_seen_at <
+                    TIMESTAMPTZ '2026-07-05T00:00:00Z'
+                GROUP BY d.workflow_status, d.defect_type
+                """);
+        System.out.println(
+                "DEFECT_STATISTICS_NATURAL_EXPLAIN\n"
+                        + defectNaturalExplain);
+
+        String defectCurrentIndexEvidence =
+                explainWithSeqScanDisabled("""
+                        SELECT
+                            d.workflow_status,
+                            d.defect_type,
+                            COUNT(DISTINCT d.defect_id)
+                        FROM defect.defect d
+                        WHERE d.merged_into_defect_id IS NULL
+                          AND d.last_seen_at >=
+                            TIMESTAMPTZ '2026-07-01T00:00:00Z'
+                          AND d.last_seen_at <
+                            TIMESTAMPTZ '2026-07-05T00:00:00Z'
+                        GROUP BY
+                            d.workflow_status,
+                            d.defect_type
+                        """);
+        System.out.println(
+                "DEFECT_STATISTICS_CURRENT_INDEX_EVIDENCE\n"
+                        + defectCurrentIndexEvidence);
+
+        String defectPeriodIndexEvidence =
+                explainWithSeqScanDisabled("""
+                        SELECT
+                            (
+                                d.last_seen_at AT TIME ZONE 'UTC'
+                            )::date AS bucket_date,
+                            COUNT(DISTINCT d.defect_id)
+                        FROM defect.defect d
+                        WHERE d.merged_into_defect_id IS NULL
+                          AND d.last_seen_at >=
+                            TIMESTAMPTZ '2026-07-01T00:00:00Z'
+                          AND d.last_seen_at <
+                            TIMESTAMPTZ '2026-07-05T00:00:00Z'
+                        GROUP BY bucket_date
+                        ORDER BY bucket_date
+                        """);
+        assertThat(defectPeriodIndexEvidence)
+                .contains("Index Only Scan")
+                .contains("ix_defect_current_");
+        System.out.println(
+                "DEFECT_PERIOD_STATISTICS_INDEX_EVIDENCE\n"
+                        + defectPeriodIndexEvidence);
+
+        String defectAreaCurrentIndexEvidence =
+                explainWithSeqScanDisabled("""
+                        SELECT
+                            d.workflow_status,
+                            d.defect_type,
+                            COUNT(DISTINCT d.defect_id)
+                        FROM defect.defect d
+                        WHERE d.merged_into_defect_id IS NULL
+                          AND d.patrol_area_id =
+                            '30000000-0000-4000-8000-000000000001'
+                          AND d.last_seen_at >=
+                            TIMESTAMPTZ '2026-07-01T00:00:00Z'
+                          AND d.last_seen_at <
+                            TIMESTAMPTZ '2026-07-05T00:00:00Z'
+                        GROUP BY
+                            d.workflow_status,
+                            d.defect_type
+                        """);
+        assertThat(defectAreaCurrentIndexEvidence)
+                .contains("ix_defect_current_area_last_seen_stats");
+        System.out.println(
+                "DEFECT_AREA_STATISTICS_CURRENT_INDEX_EVIDENCE\n"
+                        + defectAreaCurrentIndexEvidence);
+
         assertIndexCanServe("ix_mission_robot_started", """
                 SELECT mission_id
                 FROM robot.mission
@@ -539,6 +633,37 @@ class PatrolMissionSchemaIntegrationTest {
                   AND started_at <
                     TIMESTAMPTZ '2026-07-05T00:00:00Z'
                 ORDER BY started_at DESC
+                """);
+        assertIndexCanServe("ix_defect_current_last_seen_stats", """
+                SELECT
+                    defect_id,
+                    patrol_area_id,
+                    defect_type,
+                    workflow_status
+                FROM defect.defect
+                WHERE merged_into_defect_id IS NULL
+                  AND last_seen_at >=
+                    TIMESTAMPTZ '2026-07-01T00:00:00Z'
+                  AND last_seen_at <
+                    TIMESTAMPTZ '2026-07-05T00:00:00Z'
+                ORDER BY last_seen_at DESC, defect_id
+                """);
+        assertIndexCanServe(
+                "ix_defect_current_area_last_seen_stats",
+                """
+                SELECT
+                    defect_id,
+                    defect_type,
+                    workflow_status
+                FROM defect.defect
+                WHERE merged_into_defect_id IS NULL
+                  AND patrol_area_id =
+                    '30000000-0000-4000-8000-000000000001'
+                  AND last_seen_at >=
+                    TIMESTAMPTZ '2026-07-01T00:00:00Z'
+                  AND last_seen_at <
+                    TIMESTAMPTZ '2026-07-05T00:00:00Z'
+                ORDER BY last_seen_at DESC, defect_id
                 """);
         assertIndexCanServe("ix_mission_area_started", """
                 SELECT mission_id
@@ -818,6 +943,134 @@ class PatrolMissionSchemaIntegrationTest {
     }
 
     @Test
+    void periodStatisticsUseUtcHalfOpenBucketsScopeAndZeroFill() {
+        Instant from = Instant.parse("2026-07-01T00:00:00Z");
+        Instant to = Instant.parse("2026-07-05T00:00:00Z");
+        UUID fixtureAdminId = UUID.fromString(
+                "10000000-0000-4000-8000-000000000001");
+        UUID scopedViewerId = UUID.fromString(
+                "10000000-0000-4000-8000-000000000002");
+
+        var all = statisticsQueryService.findByPeriod(
+                fixtureAdminId,
+                from,
+                to,
+                "DAY");
+        assertThat(all.items())
+                .extracting(StatisticsByPeriodItem::date)
+                .containsExactly(
+                        LocalDate.of(2026, 7, 1),
+                        LocalDate.of(2026, 7, 2),
+                        LocalDate.of(2026, 7, 3),
+                        LocalDate.of(2026, 7, 4));
+        assertPeriodMetrics(
+                all.items().get(0),
+                1, 1, 0, 0,
+                3_600, 2, 1, 2);
+        assertPeriodMetrics(
+                all.items().get(1),
+                1, 0, 1, 0,
+                1_800, 1, 1, 1);
+        assertPeriodMetrics(
+                all.items().get(2),
+                1, 0, 0, 1,
+                1_200, 0, 0, 0);
+        assertPeriodMetrics(
+                all.items().get(3),
+                1, 1, 0, 0,
+                5_400, 3, 2, 3);
+
+        var repeated = statisticsQueryService.findByPeriod(
+                fixtureAdminId,
+                from,
+                to,
+                "DAY");
+        assertThat(repeated).isEqualTo(all);
+
+        var exactBoundary = statisticsQueryService.findByPeriod(
+                fixtureAdminId,
+                from,
+                Instant.parse("2026-07-02T00:00:00Z"),
+                "DAY");
+        assertThat(exactBoundary.items()).singleElement()
+                .satisfies(item -> {
+                    assertThat(item.date())
+                            .isEqualTo(LocalDate.of(2026, 7, 1));
+                    assertPeriodMetrics(
+                            item,
+                            1, 1, 0, 0,
+                            3_600, 2, 1, 2);
+                });
+
+        var partialBoundary = statisticsQueryService.findByPeriod(
+                fixtureAdminId,
+                Instant.parse("2026-07-01T00:20:00Z"),
+                Instant.parse("2026-07-02T00:10:00Z"),
+                "DAY");
+        assertThat(partialBoundary.items())
+                .extracting(StatisticsByPeriodItem::date)
+                .containsExactly(
+                        LocalDate.of(2026, 7, 1),
+                        LocalDate.of(2026, 7, 2));
+        assertPeriodMetrics(
+                partialBoundary.items().get(0),
+                0, 0, 0, 0,
+                0, 2, 1, 2);
+        assertPeriodMetrics(
+                partialBoundary.items().get(1),
+                1, 0, 1, 0,
+                1_800, 0, 0, 0);
+
+        var scoped = statisticsQueryService.findByPeriod(
+                scopedViewerId,
+                from,
+                to,
+                "DAY");
+        assertThat(scoped.items().subList(0, 2))
+                .isEqualTo(all.items().subList(0, 2));
+        assertThat(scoped.items().subList(2, 4))
+                .allSatisfy(item -> assertPeriodMetrics(
+                        item,
+                        0, 0, 0, 0,
+                        0, 0, 0, 0));
+
+        var empty = statisticsQueryService.findByPeriod(
+                fixtureAdminId,
+                Instant.parse("2026-08-01T00:00:00Z"),
+                Instant.parse("2026-08-03T00:00:00Z"),
+                "DAY");
+        assertThat(empty.items())
+                .extracting(StatisticsByPeriodItem::date)
+                .containsExactly(
+                        LocalDate.of(2026, 8, 1),
+                        LocalDate.of(2026, 8, 2));
+        assertThat(empty.items())
+                .allSatisfy(item -> assertPeriodMetrics(
+                        item,
+                        0, 0, 0, 0,
+                        0, 0, 0, 0));
+
+        assertInvalidStatisticsPeriod(
+                () -> statisticsQueryService.findByPeriod(
+                        fixtureAdminId,
+                        from,
+                        from,
+                        "DAY"));
+        assertInvalidStatisticsPeriod(
+                () -> statisticsQueryService.findByPeriod(
+                        fixtureAdminId,
+                        to,
+                        from,
+                        "DAY"));
+        assertInvalidStatisticsPeriod(
+                () -> statisticsQueryService.findByPeriod(
+                        fixtureAdminId,
+                        from,
+                        from.plus(Duration.ofDays(366)).plusNanos(1),
+                        "DAY"));
+    }
+
+    @Test
     void runtimeCatalogReturnsAreaAndRouteGeoJson() {
         PatrolAreaResponse area = patrolCatalogQueryService.findArea(
                 UUID.fromString(
@@ -925,6 +1178,51 @@ class PatrolMissionSchemaIntegrationTest {
                 FROM defect.defect
                 WHERE merged_into_defect_id IS NULL
                 """, Integer.class)).isEqualTo(4);
+    }
+
+    private static void assertPeriodMetrics(
+            StatisticsByPeriodItem item,
+            long missionCount,
+            long completedMissionCount,
+            long cancelledMissionCount,
+            long failedMissionCount,
+            long totalMissionDurationSeconds,
+            long incidentEventCount,
+            long defectCount,
+            long observationCount
+    ) {
+        assertThat(item.metrics().missionCount()).isEqualTo(missionCount);
+        assertThat(item.metrics().completedMissionCount())
+                .isEqualTo(completedMissionCount);
+        assertThat(item.metrics().cancelledMissionCount())
+                .isEqualTo(cancelledMissionCount);
+        assertThat(item.metrics().failedMissionCount())
+                .isEqualTo(failedMissionCount);
+        assertThat(item.metrics().completionRatePercent())
+                .isEqualByComparingTo(missionCount == 0
+                        ? BigDecimal.ZERO.setScale(2)
+                        : BigDecimal.valueOf(completedMissionCount)
+                                .multiply(BigDecimal.valueOf(100))
+                                .divide(
+                                        BigDecimal.valueOf(missionCount),
+                                        2,
+                                        RoundingMode.HALF_UP));
+        assertThat(item.metrics().totalMissionDurationSeconds())
+                .isEqualTo(totalMissionDurationSeconds);
+        assertThat(item.metrics().incidentEventCount())
+                .isEqualTo(incidentEventCount);
+        assertThat(item.metrics().defectCount()).isEqualTo(defectCount);
+        assertThat(item.metrics().observationCount())
+                .isEqualTo(observationCount);
+    }
+
+    private static void assertInvalidStatisticsPeriod(Runnable action) {
+        assertThatThrownBy(action::run)
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(
+                                        ErrorCode.STATISTICS_PERIOD_INVALID));
     }
 
     private static int missionCountForArea(String areaCode) {

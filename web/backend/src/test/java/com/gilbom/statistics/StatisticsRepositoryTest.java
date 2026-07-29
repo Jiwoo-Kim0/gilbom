@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
@@ -265,5 +266,74 @@ class StatisticsRepositoryTest {
                 .isEqualTo(25);
         assertThat(parameters.getValue().getValue("offset"))
                 .isEqualTo(50L);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void generatesUtcDayBucketsAndAggregatesEachVisibleSourceSeparately() {
+        when(jdbcTemplate.query(
+                anyString(),
+                any(MapSqlParameterSource.class),
+                any(RowMapper.class)))
+                .thenReturn(List.of(
+                        new StatisticsRepository.PeriodStatisticsRow(
+                                LocalDate.of(2026, 7, 1),
+                                1, 1, 0, 0,
+                                3_600, 2, 1, 2)));
+        StatisticsRepository repository =
+                new StatisticsRepository(jdbcTemplate);
+        StatisticsPeriod period = new StatisticsPeriod(
+                Instant.parse("2026-07-01T00:00:00Z"),
+                Instant.parse("2026-07-02T00:00:00Z"));
+        StatisticsQuery.ByPeriod query =
+                StatisticsQuery.byPeriod(period, "DAY");
+
+        assertThat(repository.findPeriodStatistics(
+                PATROL_AREA_ID,
+                query))
+                .singleElement()
+                .extracting(row -> row.date())
+                .isEqualTo(LocalDate.of(2026, 7, 1));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<MapSqlParameterSource> parameters =
+                ArgumentCaptor.forClass(MapSqlParameterSource.class);
+        verify(jdbcTemplate).query(
+                sql.capture(),
+                parameters.capture(),
+                any(RowMapper.class));
+        assertThat(sql.getValue())
+                .contains("generate_series(")
+                .contains("AT TIME ZONE 'UTC'")
+                .contains("visible_mission_source AS")
+                .contains("mission_aggregate AS")
+                .contains("visible_incident_source AS")
+                .contains("incident_aggregate AS")
+                .contains("visible_defect_source AS")
+                .contains("defect_aggregate AS")
+                .contains("visible_observation_source AS")
+                .contains("observation_aggregate AS")
+                .contains("mission.started_at >= :from")
+                .contains("mission.started_at < :to")
+                .contains("event.occurred_at >= :from")
+                .contains("event.occurred_at < :to")
+                .contains("d.last_seen_at >= :from")
+                .contains("d.last_seen_at < :to")
+                .contains("observation.created_at >= :from")
+                .contains("observation.created_at < :to")
+                .contains("auth.user_robot_assignment")
+                .contains("LEFT JOIN mission_aggregate")
+                .contains("LEFT JOIN incident_aggregate")
+                .contains("LEFT JOIN defect_aggregate")
+                .contains("LEFT JOIN observation_aggregate")
+                .contains("ORDER BY bucket.bucket_date ASC")
+                .doesNotContain(period.from().toString())
+                .doesNotContain(period.to().toString());
+        assertThat(parameters.getValue().getValue("userId"))
+                .isEqualTo(PATROL_AREA_ID);
+        assertThat(parameters.getValue().getValue("from"))
+                .isEqualTo(period.from().atOffset(ZoneOffset.UTC));
+        assertThat(parameters.getValue().getValue("to"))
+                .isEqualTo(period.to().atOffset(ZoneOffset.UTC));
     }
 }

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -349,6 +350,79 @@ class StatisticsQueryServiceTest {
                 });
     }
 
+    @Test
+    void mapsOrderedPeriodRowsAndCalculatesCompletionRate() {
+        when(repository.findPeriodStatistics(
+                eq(PATROL_AREA_ID),
+                any(StatisticsQuery.ByPeriod.class)))
+                .thenReturn(List.of(
+                        periodRow(
+                                LocalDate.of(2026, 7, 1),
+                                2, 1, 1, 0,
+                                5_400, 3, 2, 3),
+                        periodRow(
+                                LocalDate.of(2026, 7, 2),
+                                0, 0, 0, 0,
+                                0, 0, 0, 0)));
+
+        var response = service.findByPeriod(
+                PATROL_AREA_ID,
+                FROM,
+                TO,
+                "DAY");
+
+        assertThat(response.from()).isEqualTo(FROM);
+        assertThat(response.to()).isEqualTo(TO);
+        assertThat(response.granularity())
+                .isEqualTo(StatisticsGranularity.DAY);
+        assertThat(response.items())
+                .extracting(item -> item.date())
+                .containsExactly(
+                        LocalDate.of(2026, 7, 1),
+                        LocalDate.of(2026, 7, 2));
+        assertThat(response.items().getFirst().metrics())
+                .satisfies(metrics -> {
+                    assertThat(metrics.completionRatePercent())
+                            .isEqualByComparingTo("50.00");
+                    assertThat(metrics.incidentEventCount()).isEqualTo(3);
+                    assertThat(metrics.defectCount()).isEqualTo(2);
+                    assertThat(metrics.observationCount()).isEqualTo(3);
+                });
+        assertThat(response.items().getLast().metrics())
+                .satisfies(metrics -> {
+                    assertThat(metrics.missionCount()).isZero();
+                    assertThat(metrics.completionRatePercent())
+                            .isEqualByComparingTo("0.00");
+                    assertThat(metrics.incidentEventCount()).isZero();
+                    assertThat(metrics.defectCount()).isZero();
+                    assertThat(metrics.observationCount()).isZero();
+                });
+    }
+
+    @Test
+    void rejectsInvalidPeriodQueryBeforeRepositoryAccess() {
+        assertThatThrownBy(() -> service.findByPeriod(
+                PATROL_AREA_ID,
+                FROM,
+                FROM,
+                "DAY"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception ->
+                        ((BusinessException) exception).errorCode())
+                .isEqualTo(ErrorCode.STATISTICS_PERIOD_INVALID);
+        assertThatThrownBy(() -> service.findByPeriod(
+                PATROL_AREA_ID,
+                FROM,
+                TO,
+                "HOUR"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception ->
+                        ((BusinessException) exception).errorCode())
+                .isEqualTo(ErrorCode.COMMON_INVALID_REQUEST);
+
+        verifyNoInteractions(repository);
+    }
+
     private static StatisticsRepository.AreaStatisticsRow areaRow(
             String patrolAreaId,
             String areaCode,
@@ -365,6 +439,29 @@ class StatisticsQueryServiceTest {
                 UUID.fromString(patrolAreaId),
                 areaCode,
                 "Fixture " + areaCode,
+                missionCount,
+                completedMissionCount,
+                cancelledMissionCount,
+                failedMissionCount,
+                totalMissionDurationSeconds,
+                incidentEventCount,
+                defectCount,
+                observationCount);
+    }
+
+    private static StatisticsRepository.PeriodStatisticsRow periodRow(
+            LocalDate date,
+            long missionCount,
+            long completedMissionCount,
+            long cancelledMissionCount,
+            long failedMissionCount,
+            long totalMissionDurationSeconds,
+            long incidentEventCount,
+            long defectCount,
+            long observationCount
+    ) {
+        return new StatisticsRepository.PeriodStatisticsRow(
+                date,
                 missionCount,
                 completedMissionCount,
                 cancelledMissionCount,
