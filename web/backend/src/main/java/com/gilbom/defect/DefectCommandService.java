@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,6 +34,7 @@ import com.gilbom.defect.DefectRepository.DefectAggregate;
 import com.gilbom.defect.DefectRepository.DefectAttributeChange;
 import com.gilbom.defect.DefectRepository.DefectHistoryEntry;
 import com.gilbom.defect.DefectRepository.DefectState;
+import com.gilbom.defect.realtime.DefectRealtimeEvent;
 
 /**
  * Swagger 21.10의 결함 변경 계약을 구현한다.
@@ -48,15 +50,18 @@ public class DefectCommandService {
     private final DefectRepository repository;
     private final DefectQueryService queryService;
     private final AuditLogService auditLogService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public DefectCommandService(
             DefectRepository repository,
             DefectQueryService queryService,
-            AuditLogService auditLogService
+            AuditLogService auditLogService,
+            ApplicationEventPublisher eventPublisher
     ) {
         this.repository = repository;
         this.queryService = queryService;
         this.auditLogService = auditLogService;
+        this.eventPublisher = eventPublisher;
     }
 
     // ------------------------------------------------ 유형·심각도·위치 수정
@@ -114,7 +119,10 @@ public class DefectCommandService {
                 request.reason(),
                 AuditResult.SUCCESS));
 
-        return queryService.findDefect(userId, defectId);
+        DefectDetailResponse detail = queryService.findDefect(userId, defectId);
+        // 계약 24장: 유형·위치 변경도 defect.updated로 발행한다.
+        publishUpdated(detail, null, null, changedFieldsOf(change));
+        return detail;
     }
 
     // -------------------------------------------------------- 처리 상태 변경
@@ -197,7 +205,14 @@ public class DefectCommandService {
                 request.reason(),
                 AuditResult.SUCCESS));
 
-        return queryService.findDefect(userId, defectId);
+        DefectDetailResponse detail = queryService.findDefect(userId, defectId);
+        // 계약 22.6: 상태 변경의 마지막 단계로 SSE defect.updated를 발행한다.
+        publishUpdated(
+                detail,
+                before.workflowStatus(),
+                afterStatus,
+                List.of("workflowStatus"));
+        return detail;
     }
 
     // ------------------------------------------------------------- 병합
@@ -581,5 +596,63 @@ public class DefectCommandService {
 
     private static AuditSnapshot snapshot(Map<String, ?> values) {
         return AuditSnapshot.allow(values.keySet(), values);
+    }
+
+    /**
+     * 트랜잭션 안에서 발행하지만 {@code DefectRealtimeEventListener}가
+     * AFTER_COMMIT에 수신하므로, 롤백되면 스트림으로 나가지 않는다.
+     */
+    private void publishUpdated(
+            DefectDetailResponse detail,
+            String beforeStatus,
+            String afterStatus,
+            List<String> changedFields
+    ) {
+        var defect = detail.defect();
+        eventPublisher.publishEvent(DefectRealtimeEvent.updated(
+                defect.defectId(),
+                defect.incidentCode(),
+                defect.patrolAreaId(),
+                defect.defectType(),
+                defect.riskLevel(),
+                defect.workflowStatus(),
+                defect.location() == null ? null : defect.location().longitude(),
+                defect.location() == null ? null : defect.location().latitude(),
+                beforeStatus,
+                afterStatus,
+                changedFields,
+                detail.updatedAt()));
+    }
+
+    /**
+     * 계약의 "before/after 요약"에 실을 변경 항목 이름이다.
+     */
+    private static List<String> changedFieldsOf(DefectAttributeChange change) {
+        List<String> fields = new ArrayList<>();
+        if (change.defectType() != null) {
+            fields.add("defectType");
+        }
+        if (change.blockType() != null) {
+            fields.add("blockType");
+        }
+        if (change.riskLevel() != null) {
+            fields.add("riskLevel");
+        }
+        if (change.longitude() != null || change.latitude() != null) {
+            fields.add("location");
+        }
+        if (change.zoneId() != null) {
+            fields.add("zoneId");
+        }
+        if (change.locationLabel() != null) {
+            fields.add("locationLabel");
+        }
+        if (change.locationAccuracyM() != null) {
+            fields.add("locationAccuracyM");
+        }
+        if (change.reviewRequired() != null) {
+            fields.add("reviewRequired");
+        }
+        return List.copyOf(fields);
     }
 }

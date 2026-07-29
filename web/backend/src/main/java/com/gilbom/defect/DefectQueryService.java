@@ -73,15 +73,18 @@ public class DefectQueryService {
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final DefectImageUrlIssuer imageUrlIssuer;
+    private final DefectAccessService accessService;
 
     public DefectQueryService(
             NamedParameterJdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
-            DefectImageUrlIssuer imageUrlIssuer
+            DefectImageUrlIssuer imageUrlIssuer,
+            DefectAccessService accessService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.imageUrlIssuer = imageUrlIssuer;
+        this.accessService = accessService;
     }
 
     // ------------------------------------------------------------ summary
@@ -480,18 +483,7 @@ public class DefectQueryService {
     }
 
     private void requireVisibleDefect(UUID userId, UUID defectId) {
-        Boolean visible = jdbcTemplate.queryForObject("""
-                SELECT EXISTS (
-                    SELECT 1
-                    FROM defect.defect d
-                    WHERE d.defect_id = :defectId
-                      AND
-                """ + DefectScopeService.VISIBLE_DEFECT_PREDICATE + """
-                )
-                """,
-                Map.of("userId", userId, "defectId", defectId),
-                Boolean.class);
-        if (!Boolean.TRUE.equals(visible)) {
+        if (!accessService.canView(userId, defectId)) {
             throw new BusinessException(ErrorCode.DEFECT_NOT_FOUND);
         }
     }
