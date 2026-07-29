@@ -13,9 +13,9 @@ V12 migration(`V12__create_defect_schema.sql`)으로 실제 반영한 부분을 
   다른 값이다. 둘을 같은 컬럼에 섞지 않는다.
 - 관리자 처리 상태(`workflow_status`)와 그 변경 이력은 `defect_status_history`에 별도로
   남기며, 이 이력 테이블은 감사 로그·보고서 버전과 동일하게 append-only로 보호한다.
-- `robot`, `telemetry`, `storage` 스키마는 아직 이 백엔드에 없다. PDF 설계상 그 스키마를
-  참조하는 컬럼은 FK 없이 UUID 값만 보관하고, 해당 스키마가 추가되는 시점에 FK를 이어
-  붙인다. 아래 3절에 그 목록을 정리한다.
+- V12 시점에는 `robot`, `telemetry`, `storage` 스키마가 없어 그 스키마를 참조하는 컬럼을
+  FK 없이 UUID로만 보관했다. V19·V22·V23으로 대상 테이블과 FK가 모두 생겼으므로 현재
+  미연결 FK는 없다. 연결 현황은 아래 3절에 정리한다.
 
 ## 2. 테이블 구조
 
@@ -31,7 +31,7 @@ V12 migration(`V12__create_defect_schema.sql`)으로 실제 반영한 부분을 
 | `workflow_status` | `NEW → ACCEPTED → IN_PROGRESS → RESOLVED`, 또는 `FALSE_POSITIVE`/`REJECTED`. 관리자 REST 처리로만 전이된다 |
 | `resolution` | `RESOLVED` 등으로 종결할 때의 처리 결과. `REPAIRED`, `CLEANED`, `DUPLICATE`, `REINSPECTION_REQUIRED`, `NOT_APPLICABLE` |
 | `location` | 대표 위치(`GEOMETRY(POINT,4326)`). 개별 관측 위치가 아니라 결함의 대표 좌표 |
-| `zone_id` | `A-01` 형식 구역 코드. 정규식 `^[A-Z]-[0-9]{2}$`로 형식만 검증하고, `robot.patrol_area` FK는 아직 걸지 않는다 |
+| `zone_id` | `A-01` 형식 구역 코드. 정규식 `^[A-Z]-[0-9]{2}$`로 형식만 검증한다. 구역 실체는 `patrol_area_id` FK가 담당하므로 `zone_id`에는 FK를 걸지 않는다 |
 | `observation_count` | 이 결함으로 병합된 관측 수 캐시. 최소 1 |
 | `merged_into_defect_id` | 다른 결함에 흡수 병합된 경우의 대표 결함. 자기 자신을 가리킬 수 없다 |
 
@@ -43,13 +43,13 @@ V12 migration(`V12__create_defect_schema.sql`)으로 실제 반영한 부분을 
 
 | 컬럼 | 규칙 |
 |---|---|
-| `event_id` | PK. `telemetry.robot_event.event_id`를 참조할 예정이지만 그 테이블이 없어 FK는 없다 |
+| `event_id` | PK. `telemetry.robot_event`를 `(event_id, robot_id)` 복합 FK로 참조한다 (V23) |
 | `robot_id` | 관측을 발행한 로봇. `robot.robot` FK, `ON DELETE RESTRICT`. V19에서 추가했다 |
 | `defect_id` | 병합 대상 결함. `defect.defect` FK, `ON DELETE RESTRICT` |
 | `confidence` | AI 신뢰도, 0~1 |
 | `damage_ratio` | 파손 면적 비율, 0~1 (nullable) |
 | `bbox_norm` | `[x_min,y_min,x_max,y_max]` 정규화 좌표 JSON 배열. `JSONB_TYPEOF = 'array'`로 형식 검증 |
-| `image_id` | `storage.robot_image.image_id`를 참조할 예정이지만 storage 스키마가 없어 FK는 없다 |
+| `image_id` | `storage.robot_image`를 `(image_id, robot_id)` 복합 FK로 참조한다 (V23). 업로드 실패 시 NULL (계약 11.3 핀 우선 원칙) |
 | `is_representative` | 결함 카드에 보여줄 대표 관측 여부. 결함당 최대 1개(partial UNIQUE index) |
 
 ### 2.3 `defect.defect_status_history` — 처리 이력 (append-only)
@@ -74,21 +74,34 @@ V12 migration(`V12__create_defect_schema.sql`)으로 실제 반영한 부분을 
 | `merge_status` | `MERGED` 또는 `REVERTED` |
 | 생명주기 제약 | `MERGED`면 `reverted_by`/`reverted_at`이 모두 NULL이어야 하고, `REVERTED`면 둘 다 채워져 있고 `reverted_at >= merged_at`이어야 한다 |
 
-## 3. 아직 걸지 않은 FK (스키마 추가 대기)
+## 3. 외부 스키마로 가는 FK
 
-PDF 설계에는 있지만 이 백엔드에는 아직 없는 스키마를 참조하는 컬럼이다. 컬럼 자체는
-UUID로 존재하며, 해당 스키마가 생기면 후속 migration에서 FK만 추가하면 된다.
+V12 시점에는 참조 대상 테이블이 없어 UUID만 보관했으나, V22가 Patrol·Mission·Event·
+Image 정본을 만들고 V23이 FK를 모두 연결했다. 현재 defect 스키마에 미연결 FK는 없다.
 
-| 컬럼 | 참조 예정 대상 | 비고 |
+| 컬럼 | 참조 대상 | 연결 |
 |---|---|---|
-| `defect.defect.patrol_area_id` | `robot.patrol_area.patrol_area_id` | 순찰 구역 |
-| `defect.defect.patrol_route_id` | `robot.patrol_route.patrol_route_id` | 순찰 경로 |
-| `defect.defect_observation.event_id` | `telemetry.robot_event.event_id` | MQTT 사건 원본 |
-| `defect.defect_observation.image_id` | `storage.robot_image.image_id` | 근거 이미지 |
+| `defect.defect.patrol_area_id` | `robot.patrol_area (patrol_area_id)` | V23 `fk_defect_patrol_area` |
+| `defect.defect.patrol_route_id` | `robot.patrol_route (patrol_route_id, patrol_area_id)` | V23 `fk_defect_patrol_route_area` |
+| `defect.defect_observation.robot_id` | `robot.robot (robot_id)` | V19 `fk_observation_robot` |
+| `defect.defect_observation.event_id` | `telemetry.robot_event (event_id, robot_id)` | V23 `fk_observation_robot_event` |
+| `defect.defect_observation.image_id` | `storage.robot_image (image_id, robot_id)` | V23 `fk_observation_robot_image` |
 
-`robot_id`는 V19에서 FK까지 연결했다. `telemetry.robot_event`가 생기면 `event_id`로도
-로봇을 역추적할 수 있어 `robot_id`는 파생 중복 칼럼이 되지만, 범위 판정 질의가 매번
-telemetry를 조인하지 않도록 관측에 그대로 유지한다.
+`event_id`와 `image_id`는 `robot_id`를 포함한 **복합 FK**다. 덕분에 "같은 로봇이 발행한
+이벤트·업로드한 이미지만 참조할 수 있다"는 제약까지 DB가 보장한다. 즉 V19의 `robot_id`는
+범위 판정용 칼럼이면서 이 복합 FK의 구성 요소이기도 하므로, `telemetry.robot_event`가
+생긴 뒤에도 파생 중복 칼럼으로 취급해 제거하지 않는다.
+
+`defect.defect.patrol_route_id`는 `ck_defect_route_requires_area`로 경로만 있고 구역이
+없는 상태를 막는다.
+
+### 3.0.1 `NOT VALID` 상태
+
+V23이 추가한 FK 4개와 CHECK 1개는 `NOT VALID`다. 신규 쓰기에는 관계 무결성이 적용되지만
+V23 이전에 들어간 행은 검사하지 않았고, 플래너도 이 제약을 신뢰하지 않는다. V23 주석이
+정한 대로 **기존 데이터 정리 후 별도 배포에서 `VALIDATE CONSTRAINT`** 해야 한다.
+orphan이 하나라도 있으면 VALIDATE가 실패해 기동이 막히므로, 실행 전에 orphan 수를 먼저
+확인한다.
 
 ## 3.1 결함 객체 범위
 
@@ -126,8 +139,8 @@ telemetry를 조인하지 않도록 관측에 그대로 유지한다.
 - `defect` 스키마와 4개 테이블(`defect`, `defect_observation`, `defect_status_history`,
   `defect_merge_history`)
 - `defect_status_history`에 대한 append-only 함수·trigger
-- `auth.admin_user`로 가는 FK(`changed_by`, `merged_by`, `reverted_by`)만 연결하고, 아직
-  없는 스키마로 가는 FK는 3절과 같이 보류
+- `auth.admin_user`로 가는 FK(`changed_by`, `merged_by`, `reverted_by`)만 연결하고, 당시
+  존재하지 않던 스키마로 가는 FK는 보류 (V19·V23에서 연결 완료, 3절 참고)
 - 스키마·테이블 단위 최소 권한 GRANT
 
 `V19__link_defect_to_robot_and_add_export_job.sql`은 결함 REST API를 붙이면서 다음을
@@ -136,8 +149,34 @@ telemetry를 조인하지 않도록 관측에 그대로 유지한다.
 - `defect_observation.robot_id`(`NOT NULL`)와 `robot.robot` FK, 범위 판정용 index
 - `defect.defect_export_job` 테이블과 최소 권한 GRANT
 
-`robot_id`를 `NOT NULL`로 넣을 수 있는 이유는 이 시점에 `defect_observation`에 쓰는
-코드가 없어 테이블이 비어 있기 때문이다. MQTT `events/incident` 수집 경로를 구현할 때
-`robot_id`를 함께 저장해야 한다.
+`robot_id`를 `NOT NULL`로 넣을 수 있었던 이유는 그 시점에 `defect_observation`에 쓰는
+코드가 없어 테이블이 비어 있었기 때문이다. 현재는 `IncidentEventIngestionService`가
+`robot_id`를 함께 저장한다.
+
+`V23__link_defect_and_command_to_patrol_mission.sql`이 남은 FK를 모두 연결한다. V23의
+제약은 `NOT VALID`로 추가되었고 VALIDATE는 아직 수행되지 않았다 (3.0.1 참고).
+
+### 5.1 V19와 V23의 실행 순서 (번호 변경 금지)
+
+`defect_observation.robot_id`는 V23이 추가하는 두 복합 FK의 구성 요소다.
+
+| V23 제약 | 참조 대상 | 대상의 UNIQUE |
+|---|---|---|
+| `(event_id, robot_id)` | `telemetry.robot_event` | `uq_robot_event_robot_identity` |
+| `(image_id, robot_id)` | `storage.robot_image` | `uq_robot_image_robot_identity` |
+
+즉 V22가 이 복합 FK를 받기 위해 대상 테이블에 복합 UNIQUE를 만들어 뒀고, V19가
+`robot_id`를 만든다. **V19를 V23 이후 번호로 옮기면 V23이
+`column robot_id does not exist`로 실패한다.** 반대로 V19가 없으면 V22·V23도 성립하지
+않으므로, 세 migration은 이 순서를 전제로 읽어야 한다.
+
+이 복합 FK 덕분에 "같은 로봇이 발행한 이벤트·업로드한 이미지만 참조할 수 있다"는 제약이
+DB에서 보장된다. `telemetry.robot_event`가 생긴 뒤에는 `event_id`로도 로봇을 역추적할 수
+있어 `robot_id`가 형식상 파생 중복 칼럼이 되지만, 위 제약의 근거이자 범위 판정 질의가
+매번 telemetry를 조인하지 않게 하는 칼럼이므로 제거하지 않는다.
+
+> V19는 이미 배포·적용된 migration이므로 위 설명을 파일 주석으로 넣지 않고 이 문서에
+> 둔다. 적용된 `V*.sql`을 고치면 Flyway checksum이 달라져 이미 적용한 모든 DB의 기동이
+> 막힌다.
 
 defect 관련 항목은 `database-migrations.md`의 migration 표에도 반영돼 있다.
