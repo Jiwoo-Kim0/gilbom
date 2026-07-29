@@ -274,6 +274,24 @@ Index Only Scan using ix_defect_current_area_last_seen_stats on defect d
 `EXPLAIN (ANALYZE, BUFFERS)`를 다시 수집해야 한다. 강제로 확인한 인덱스 계획은
 인덱스가 Query 조건을 지원한다는 증거이지 운영 Planner 선택을 보장하지 않는다.
 
+### 실제 API Query 실행계획
+
+`actualStatisticsRepositoryQueriesHaveReviewableExecutionPlans`는 테스트용으로
+SQL을 다시 작성하지 않는다. `StatisticsRepository`가 상태·유형·지역·기간 조회에
+실제로 전달한 SQL과 `SqlParameterSource`를 캡처하고, runtime application role로
+각 쿼리에 `EXPLAIN (ANALYZE, BUFFERS)`를 적용한다.
+
+| 실제 Query | Fixture 자연 계획의 주요 확인점 |
+|---|---|
+| `by-status` | 사용자 결함 범위 조건과 `ix_defect_current_area_last_seen_stats`의 기간 `Index Cond`, 상태 `GroupAggregate` |
+| `by-defect-type` | 사용자 결함 범위 조건, 현재 결함 partial index, 유형·`defect_id` distinct 집계 |
+| `by-area` | Area `Limit/Sort`, 네 원천의 개별 `GroupAggregate`, 집계 결과끼리의 LEFT JOIN |
+| `by-period` | `generate_series` bucket, 네 원천의 개별 UTC 날짜 집계와 LEFT JOIN |
+
+네 계획 모두 `Planning Time`과 `Execution Time`이 존재해야 테스트가 통과한다.
+Fixture에서 자연 Seq Scan이 선택된 작은 원천은 정상이며, V26 인덱스 호환성은 위의
+강제 계획 검증과 함께 해석한다.
+
 ## 6. 자동 검증 결과
 
 실행 명령:
@@ -286,7 +304,7 @@ Index Only Scan using ix_defect_current_area_last_seen_stats on defect d
 최종 결과:
 
 ```text
-tests=10
+tests=11
 skipped=0
 failures=0
 errors=0
@@ -300,5 +318,6 @@ BUILD SUCCESSFUL
 - 전체·Area·Route별 예상값 일치
 - UTC 날짜별 예상값, 부분 `[from,to)` 경계, 반복 호출과 빈 날짜 zero-fill 일치
 - Robot 001 배정 범위 밖 날짜의 집계가 0인지 확인
+- 실제 Repository SQL 네 건의 자연 실행계획 생성
 - 자연 실행계획과 인덱스 사용 가능성 실행계획 생성
 - Mission·Event·Telemetry·Defect B-tree와 Area GiST가 대표 조회를 지원
