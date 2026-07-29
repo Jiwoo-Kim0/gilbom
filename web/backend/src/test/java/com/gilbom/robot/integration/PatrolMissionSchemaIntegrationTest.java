@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -29,6 +31,11 @@ import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaResponse;
 import com.gilbom.robot.mission.PatrolCatalogQueryService;
+import com.gilbom.statistics.StatisticsDtos.DefectType;
+import com.gilbom.statistics.StatisticsDtos.DefectWorkflowStatus;
+import com.gilbom.statistics.StatisticsDtos.StatisticsByAreaItem;
+import com.gilbom.statistics.StatisticsQueryService;
+import com.gilbom.statistics.StatisticsRepository;
 
 @Testcontainers(disabledWithoutDocker = true)
 class PatrolMissionSchemaIntegrationTest {
@@ -66,6 +73,7 @@ class PatrolMissionSchemaIntegrationTest {
     private static JdbcTemplate applicationJdbcTemplate;
     private static DataSource ownerDataSource;
     private static PatrolCatalogQueryService patrolCatalogQueryService;
+    private static StatisticsQueryService statisticsQueryService;
 
     @BeforeAll
     static void migrateAndCreateFixture() throws Exception {
@@ -94,15 +102,21 @@ class PatrolMissionSchemaIntegrationTest {
                 .load()
                 .migrate();
 
-        applicationJdbcTemplate = new JdbcTemplate(dataSource(
+        DataSource applicationDataSource = dataSource(
                 APPLICATION_ROLE,
                 APPLICATION_PASSWORD
-        ));
+        );
+        applicationJdbcTemplate =
+                new JdbcTemplate(applicationDataSource);
         createFixture();
         runStatisticsFixture();
         patrolCatalogQueryService = new PatrolCatalogQueryService(
                 applicationJdbcTemplate,
                 new ObjectMapper());
+        statisticsQueryService = new StatisticsQueryService(
+                new StatisticsRepository(
+                        new NamedParameterJdbcTemplate(
+                                applicationDataSource)));
     }
 
     @Test
@@ -605,6 +619,205 @@ class PatrolMissionSchemaIntegrationTest {
     }
 
     @Test
+    void statusStatisticsApplyScopeExcludeMergedAndZeroFillEnums() {
+        Instant from = Instant.parse("2026-07-01T00:00:00Z");
+        Instant to = Instant.parse("2026-07-05T00:00:00Z");
+        UUID fixtureAdminId = UUID.fromString(
+                "10000000-0000-4000-8000-000000000001");
+        UUID scopedViewerId = UUID.fromString(
+                "10000000-0000-4000-8000-000000000002");
+
+        var all = statisticsQueryService.findByStatus(
+                fixtureAdminId,
+                from,
+                to);
+        assertThat(all.totalDefectCount()).isEqualTo(4);
+        assertThat(all.items())
+                .extracting(
+                        item -> item.workflowStatus(),
+                        item -> item.defectCount())
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(
+                                DefectWorkflowStatus.NEW, 2L),
+                        org.assertj.core.groups.Tuple.tuple(
+                                DefectWorkflowStatus.ACCEPTED, 1L),
+                        org.assertj.core.groups.Tuple.tuple(
+                                DefectWorkflowStatus.IN_PROGRESS, 1L),
+                        org.assertj.core.groups.Tuple.tuple(
+                                DefectWorkflowStatus.RESOLVED, 0L),
+                        org.assertj.core.groups.Tuple.tuple(
+                                DefectWorkflowStatus.FALSE_POSITIVE, 0L),
+                        org.assertj.core.groups.Tuple.tuple(
+                                DefectWorkflowStatus.REJECTED, 0L));
+
+        var scoped = statisticsQueryService.findByStatus(
+                scopedViewerId,
+                from,
+                to);
+        assertThat(scoped.totalDefectCount()).isEqualTo(2);
+        assertThat(scoped.items())
+                .extracting(item -> item.defectCount())
+                .containsExactly(1L, 1L, 0L, 0L, 0L, 0L);
+
+        var empty = statisticsQueryService.findByStatus(
+                fixtureAdminId,
+                Instant.parse("2026-08-01T00:00:00Z"),
+                Instant.parse("2026-08-02T00:00:00Z"));
+        assertThat(empty.totalDefectCount()).isZero();
+        assertThat(empty.items())
+                .hasSize(DefectWorkflowStatus.values().length)
+                .allMatch(item -> item.defectCount() == 0);
+    }
+
+    @Test
+    void defectTypeStatisticsApplyScopeExcludeMergedAndZeroFillEnums() {
+        Instant from = Instant.parse("2026-07-01T00:00:00Z");
+        Instant to = Instant.parse("2026-07-05T00:00:00Z");
+        UUID fixtureAdminId = UUID.fromString(
+                "10000000-0000-4000-8000-000000000001");
+        UUID scopedViewerId = UUID.fromString(
+                "10000000-0000-4000-8000-000000000002");
+
+        var all = statisticsQueryService.findByDefectType(
+                fixtureAdminId,
+                from,
+                to);
+        assertThat(all.totalDefectCount()).isEqualTo(4);
+        assertThat(all.items())
+                .extracting(
+                        item -> item.defectType(),
+                        item -> item.defectCount())
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(
+                                DefectType.DAMAGED, 1L),
+                        org.assertj.core.groups.Tuple.tuple(
+                                DefectType.CONTAMINATED, 1L),
+                        org.assertj.core.groups.Tuple.tuple(
+                                DefectType.UPLIFTED, 1L),
+                        org.assertj.core.groups.Tuple.tuple(
+                                DefectType.BLOCKED, 1L),
+                        org.assertj.core.groups.Tuple.tuple(
+                                DefectType.MISSING_SUSPECTED, 0L),
+                        org.assertj.core.groups.Tuple.tuple(
+                                DefectType.INSTALLATION_INVALID, 0L),
+                        org.assertj.core.groups.Tuple.tuple(
+                                DefectType.UNKNOWN_ANOMALY, 0L));
+
+        var scoped = statisticsQueryService.findByDefectType(
+                scopedViewerId,
+                from,
+                to);
+        assertThat(scoped.totalDefectCount()).isEqualTo(2);
+        assertThat(scoped.items())
+                .extracting(item -> item.defectCount())
+                .containsExactly(1L, 0L, 0L, 1L, 0L, 0L, 0L);
+
+        var empty = statisticsQueryService.findByDefectType(
+                fixtureAdminId,
+                Instant.parse("2026-08-01T00:00:00Z"),
+                Instant.parse("2026-08-02T00:00:00Z"));
+        assertThat(empty.totalDefectCount()).isZero();
+        assertThat(empty.items())
+                .hasSize(DefectType.values().length)
+                .allMatch(item -> item.defectCount() == 0);
+    }
+
+    @Test
+    void areaStatisticsAggregateSourcesBeforeJoiningAndApplyScope() {
+        Instant from = Instant.parse("2026-07-01T00:00:00Z");
+        Instant to = Instant.parse("2026-07-05T00:00:00Z");
+        UUID fixtureAdminId = UUID.fromString(
+                "10000000-0000-4000-8000-000000000001");
+        UUID scopedViewerId = UUID.fromString(
+                "10000000-0000-4000-8000-000000000002");
+
+        var all = statisticsQueryService.findByArea(
+                fixtureAdminId,
+                from,
+                to,
+                null,
+                0,
+                20);
+        assertThat(all.totalElements()).isEqualTo(3);
+        assertThat(all.totalPages()).isEqualTo(1);
+        assertThat(all.items())
+                .extracting(StatisticsByAreaItem::areaCode)
+                .containsExactly("A-01", "A-11", "B-22");
+
+        StatisticsByAreaItem areaA = all.items().get(1);
+        assertThat(areaA.metrics().missionCount()).isEqualTo(2);
+        assertThat(areaA.metrics().completedMissionCount()).isEqualTo(1);
+        assertThat(areaA.metrics().cancelledMissionCount()).isEqualTo(1);
+        assertThat(areaA.metrics().failedMissionCount()).isZero();
+        assertThat(areaA.metrics().completionRatePercent())
+                .isEqualByComparingTo("50.00");
+        assertThat(areaA.metrics().totalMissionDurationSeconds())
+                .isEqualTo(5_400);
+        assertThat(areaA.metrics().incidentEventCount()).isEqualTo(3);
+        assertThat(areaA.metrics().defectCount()).isEqualTo(2);
+        assertThat(areaA.metrics().observationCount()).isEqualTo(3);
+
+        StatisticsByAreaItem areaB = all.items().get(2);
+        assertThat(areaB.metrics().missionCount()).isEqualTo(2);
+        assertThat(areaB.metrics().completedMissionCount()).isEqualTo(1);
+        assertThat(areaB.metrics().cancelledMissionCount()).isZero();
+        assertThat(areaB.metrics().failedMissionCount()).isEqualTo(1);
+        assertThat(areaB.metrics().completionRatePercent())
+                .isEqualByComparingTo("50.00");
+        assertThat(areaB.metrics().totalMissionDurationSeconds())
+                .isEqualTo(6_600);
+        assertThat(areaB.metrics().incidentEventCount()).isEqualTo(3);
+        assertThat(areaB.metrics().defectCount()).isEqualTo(2);
+        assertThat(areaB.metrics().observationCount()).isEqualTo(3);
+
+        var scoped = statisticsQueryService.findByArea(
+                scopedViewerId,
+                from,
+                to,
+                null,
+                0,
+                20);
+        assertThat(scoped.items().get(1).metrics())
+                .isEqualTo(areaA.metrics());
+        assertThat(scoped.items().get(2).metrics())
+                .satisfies(metrics -> {
+                    assertThat(metrics.missionCount()).isZero();
+                    assertThat(metrics.incidentEventCount()).isZero();
+                    assertThat(metrics.defectCount()).isZero();
+                    assertThat(metrics.observationCount()).isZero();
+                });
+
+        var emptyExistingArea = statisticsQueryService.findByArea(
+                fixtureAdminId,
+                from,
+                to,
+                AREA_ID,
+                0,
+                20);
+        assertThat(emptyExistingArea.items()).singleElement()
+                .satisfies(item -> {
+                    assertThat(item.areaCode()).isEqualTo("A-01");
+                    assertThat(item.metrics().missionCount()).isZero();
+                    assertThat(item.metrics().incidentEventCount()).isZero();
+                    assertThat(item.metrics().defectCount()).isZero();
+                    assertThat(item.metrics().observationCount()).isZero();
+                });
+
+        var secondPage = statisticsQueryService.findByArea(
+                fixtureAdminId,
+                from,
+                to,
+                null,
+                1,
+                1);
+        assertThat(secondPage.totalElements()).isEqualTo(3);
+        assertThat(secondPage.totalPages()).isEqualTo(3);
+        assertThat(secondPage.items())
+                .extracting(StatisticsByAreaItem::areaCode)
+                .containsExactly("A-11");
+    }
+
+    @Test
     void runtimeCatalogReturnsAreaAndRouteGeoJson() {
         PatrolAreaResponse area = patrolCatalogQueryService.findArea(
                 UUID.fromString(
@@ -703,6 +916,15 @@ class PatrolMissionSchemaIntegrationTest {
                         'BRAILLE_BLOCK_INCIDENT_DETECTED'
                 )
                 """, Integer.class)).isEqualTo(6);
+        assertThat(applicationJdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM defect.defect
+                """, Integer.class)).isEqualTo(5);
+        assertThat(applicationJdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM defect.defect
+                WHERE merged_into_defect_id IS NULL
+                """, Integer.class)).isEqualTo(4);
     }
 
     private static int missionCountForArea(String areaCode) {
@@ -750,6 +972,7 @@ class PatrolMissionSchemaIntegrationTest {
                 WHERE a.area_code = ?
                   AND d.first_seen_at >= '2026-07-01T00:00:00Z'
                   AND d.first_seen_at < '2026-07-05T00:00:00Z'
+                  AND d.merged_into_defect_id IS NULL
                 """, Integer.class, areaCode);
     }
 

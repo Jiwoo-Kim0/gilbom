@@ -2,6 +2,7 @@ package com.gilbom.statistics;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 
@@ -41,10 +42,15 @@ public record StatisticsPeriod(
 
     /**
      * SQL 문자열을 만들지 않고 공통 named parameter에 기간을 결합한다.
+     *
+     * <p>PostgreSQL JDBC는 {@link Instant}의 SQL 타입을 자동 추론하지 않으므로,
+     * 같은 시점을 UTC {@code OffsetDateTime}으로 바인딩한다. PostgreSQL의
+     * {@code timestamptz}가 공식 지원하는 Java time 타입을 사용하면서 UTC
+     * 경계도 유지한다.</p>
      */
     MapSqlParameterSource bind(MapSqlParameterSource parameters) {
         return parameters
-                .addValue("from", from)
-                .addValue("to", to);
+                .addValue("from", from.atOffset(ZoneOffset.UTC))
+                .addValue("to", to.atOffset(ZoneOffset.UTC));
     }
 }

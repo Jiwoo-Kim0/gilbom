@@ -2212,6 +2212,7 @@ paths:
         defect.defect의 last_seen_at을 UTC [from,to)로 제한하고 병합 원본을
         제외한 현재 결함을 workflowStatus별로 집계합니다. 데이터가 없어도
         모든 처리 상태를 계약 순서로 반환하며 각 defectCount는 0입니다.
+        이 endpoint는 from과 to 외 query parameter를 허용하지 않습니다.
       x-required-permission: DEFECT_STATUS_VIEW
       security:
         - serverSession: []
@@ -2225,6 +2226,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StatisticsByStatusResponse"
+              example:
+                from: "2026-07-01T00:00:00Z"
+                to: "2026-07-05T00:00:00Z"
+                totalDefectCount: 4
+                items:
+                  - workflowStatus: NEW
+                    defectCount: 2
+                  - workflowStatus: ACCEPTED
+                    defectCount: 1
+                  - workflowStatus: IN_PROGRESS
+                    defectCount: 1
+                  - workflowStatus: RESOLVED
+                    defectCount: 0
+                  - workflowStatus: FALSE_POSITIVE
+                    defectCount: 0
+                  - workflowStatus: REJECTED
+                    defectCount: 0
         "400":
           $ref: "#/components/responses/StatisticsBadRequest"
         "401":
@@ -2243,6 +2261,8 @@ paths:
         defect.defect의 last_seen_at을 UTC [from,to)로 제한하고 병합 원본을
         제외한 현재 결함을 defectType별로 집계합니다. 데이터가 없어도
         모든 결함 유형을 계약 순서로 반환하며 각 defectCount는 0입니다.
+        집계 차원과 컬럼은 고정되어 있으며 from과 to 외 query parameter를
+        허용하지 않습니다.
       x-required-permission: DEFECT_STATUS_VIEW
       security:
         - serverSession: []
@@ -2256,6 +2276,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StatisticsByDefectTypeResponse"
+              example:
+                from: "2026-07-01T00:00:00Z"
+                to: "2026-07-05T00:00:00Z"
+                totalDefectCount: 4
+                items:
+                  - defectType: DAMAGED
+                    defectCount: 1
+                  - defectType: CONTAMINATED
+                    defectCount: 1
+                  - defectType: UPLIFTED
+                    defectCount: 1
+                  - defectType: BLOCKED
+                    defectCount: 1
+                  - defectType: MISSING_SUSPECTED
+                    defectCount: 0
+                  - defectType: INSTALLATION_INVALID
+                    defectCount: 0
+                  - defectType: UNKNOWN_ANOMALY
+                    defectCount: 0
         "400":
           $ref: "#/components/responses/StatisticsBadRequest"
         "401":
@@ -2269,12 +2308,13 @@ paths:
     get:
       tags: [Statistics]
       operationId: getStatisticsByArea
-      summary: 지역별 Mission·Incident·결함 통계
+      summary: 지역별 Mission·Incident·결함·Observation 통계
       description: |
-        Mission started_at, Incident Event occurred_at, Defect last_seen_at을
-        각각 UTC [from,to)로 집계합니다. patrolAreaId를 지정하면 존재 여부를
-        먼저 확인하고, 존재하지만 집계 데이터가 없는 구역도 0 집계 한 건을
-        반환합니다. 미지정 시 areaCode, patrolAreaId 오름차순으로 페이징합니다.
+        Mission started_at, Incident Event occurred_at, Defect last_seen_at,
+        Observation created_at을 각각 UTC [from,to)로 집계합니다.
+        patrolAreaId를 지정하면 존재 여부를 먼저 확인하고, 존재하지만 가시
+        원천 데이터가 없는 구역도 0 집계 한 건을 반환합니다. 미지정 시
+        areaCode, patrolAreaId 오름차순으로 페이징합니다.
       x-required-permissions: [MISSION_VIEW, DEFECT_STATUS_VIEW]
       security:
         - serverSession: []
@@ -2291,6 +2331,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StatisticsByAreaResponse"
+              example:
+                from: "2026-07-01T00:00:00Z"
+                to: "2026-07-05T00:00:00Z"
+                items:
+                  - patrolAreaId: "30000000-0000-4000-8000-000000000001"
+                    areaCode: A-11
+                    areaName: Fixture Area A
+                    metrics:
+                      missionCount: 2
+                      completedMissionCount: 1
+                      cancelledMissionCount: 1
+                      failedMissionCount: 0
+                      completionRatePercent: 50.00
+                      totalMissionDurationSeconds: 5400
+                      incidentEventCount: 3
+                      defectCount: 2
+                      observationCount: 3
+                  - patrolAreaId: "30000000-0000-4000-8000-000000000002"
+                    areaCode: B-22
+                    areaName: Fixture Area B
+                    metrics:
+                      missionCount: 2
+                      completedMissionCount: 1
+                      cancelledMissionCount: 0
+                      failedMissionCount: 1
+                      completionRatePercent: 50.00
+                      totalMissionDurationSeconds: 6600
+                      incidentEventCount: 3
+                      defectCount: 2
+                      observationCount: 3
+                page: 0
+                size: 20
+                totalElements: 2
+                totalPages: 1
         "400":
           $ref: "#/components/responses/StatisticsBadRequest"
         "401":
@@ -3915,6 +3989,7 @@ components:
         - totalMissionDurationSeconds
         - incidentEventCount
         - defectCount
+        - observationCount
       additionalProperties: false
       properties:
         missionCount:
@@ -3951,7 +4026,9 @@ components:
           type: integer
           format: int64
           minimum: 0
-          description: occurred_at이 집계 구간에 속하는 INCIDENT Robot Event 수
+          description: |
+            occurred_at이 집계 구간에 속하는
+            BRAILLE_BLOCK_INCIDENT_DETECTED Robot Event 수
         defectCount:
           type: integer
           format: int64
@@ -3959,6 +4036,11 @@ components:
           description: |
             last_seen_at이 집계 구간에 속하고 merged_into_defect_id가 null인
             현재 결함 수
+        observationCount:
+          type: integer
+          format: int64
+          minimum: 0
+          description: created_at이 집계 구간에 속하는 가시 Defect Observation 수
 
     StatisticsByStatusItem:
       type: object
@@ -5015,7 +5097,7 @@ components:
     StatisticsBadRequest:
       description: |
         from·to 누락 또는 날짜·UUID 형식 오류, page·size·granularity
-        Validation 오류
+        Validation 오류, endpoint 계약에 없는 query parameter
       headers:
         X-Request-Id:
           $ref: "#/components/headers/RequestId"

@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -73,7 +74,7 @@ class StatisticsPeriodTest {
     }
 
     @Test
-    void bindsBothBoundariesAsNamedParameters() {
+    void bindsBothBoundariesAsUtcOffsetDateTimeParameters() {
         StatisticsPeriod period = new StatisticsPeriod(
                 FROM,
                 FROM.plus(Duration.ofDays(1)));
@@ -81,8 +82,10 @@ class StatisticsPeriodTest {
         MapSqlParameterSource parameters =
                 period.bind(new MapSqlParameterSource());
 
-        assertThat(parameters.getValue("from")).isEqualTo(period.from());
-        assertThat(parameters.getValue("to")).isEqualTo(period.to());
+        assertThat(parameters.getValue("from"))
+                .isEqualTo(period.from().atOffset(ZoneOffset.UTC));
+        assertThat(parameters.getValue("to"))
+                .isEqualTo(period.to().atOffset(ZoneOffset.UTC));
     }
 
     private static void assertError(

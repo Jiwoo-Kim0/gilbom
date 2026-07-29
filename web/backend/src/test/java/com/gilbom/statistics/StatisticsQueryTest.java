@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
@@ -59,6 +60,25 @@ class StatisticsQueryTest {
                 () -> StatisticsQuery.byPeriod(
                         PERIOD,
                         "DAY; DROP TABLE robot.mission"));
+    }
+
+    @Test
+    void rejectsParametersOutsideTheEndpointAllowList() {
+        StatisticsQuery.requireOnlyParameters(
+                Set.of("from", "to"),
+                Set.of("from", "to"));
+
+        assertInvalidRequest(() ->
+                StatisticsQuery.requireOnlyParameters(
+                        Set.of(
+                                "from",
+                                "to",
+                                "defectType"),
+                        Set.of("from", "to")));
+        assertInvalidRequest(() ->
+                StatisticsQuery.requireOnlyParameters(
+                        Set.of("from", "to"),
+                        null));
     }
 
     @Test

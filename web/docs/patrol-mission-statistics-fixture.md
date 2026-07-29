@@ -34,7 +34,7 @@
 | Mission Status History | 4 | Mission별 마지막 상태 전이 |
 | Telemetry | 8 | Mission별 위치 궤적 2점 |
 | Robot Image | 1 | 첫 Incident의 가상 JPEG 메타데이터 |
-| Defect | 4 | Area별 2건 |
+| Defect | 원천 5, 현재 4 | Area별 현재 결함 2건, 병합 원본 1건 |
 | Defect Observation | 6 | Incident Event와 일대일 원본 연결 |
 
 ## 3. Mission 원본과 예상값
@@ -59,7 +59,8 @@
 | Mission 결과 Incident 합계 | 6 |
 | 실제 Incident Event 수 | 6 |
 | Telemetry 궤적 점 수 | 8 |
-| Defect 수 | 4 |
+| 현재 Defect 수 | 4 |
+| 병합되어 제외되는 원본 Defect 수 | 1 |
 | Defect Observation 수 | 6 |
 
 ### Area별 예상 집계
@@ -68,6 +69,38 @@
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | A-11 | 2 | 1 | 1 | 0 | 5,400 | 3 | 2 | 3 |
 | B-22 | 2 | 1 | 0 | 1 | 6,600 | 3 | 2 | 3 |
+
+Defect 열은 `merged_into_defect_id IS NULL`인 현재 결함만 센다. A-11에는
+`RESOLVED` 상태의 병합 원본 한 건이 추가로 존재하지만 모든 통계에서 제외한다.
+
+### 결함 처리 상태별 예상 집계
+
+| workflowStatus | 전체 ADMIN | Robot 001 VIEWER |
+|---|---:|---:|
+| `NEW` | 2 | 1 |
+| `ACCEPTED` | 1 | 1 |
+| `IN_PROGRESS` | 1 | 0 |
+| `RESOLVED` | 0 | 0 |
+| `FALSE_POSITIVE` | 0 | 0 |
+| `REJECTED` | 0 | 0 |
+
+전체 현재 결함은 4건이고 Robot 001 배정 범위에서는 2건이다. 원천 DB에는
+`RESOLVED` 병합 원본이 한 건 있지만 상태별 통계의 현재 결함에서는 제외한다.
+
+### 결함 유형별 예상 집계
+
+| defectType | 전체 ADMIN | Robot 001 VIEWER |
+|---|---:|---:|
+| `DAMAGED` | 1 | 1 |
+| `CONTAMINATED` | 1 | 0 |
+| `UPLIFTED` | 1 | 0 |
+| `BLOCKED` | 1 | 1 |
+| `MISSING_SUSPECTED` | 0 | 0 |
+| `INSTALLATION_INVALID` | 0 | 0 |
+| `UNKNOWN_ANOMALY` | 0 | 0 |
+
+`DAMAGED` 병합 원본 한 건은 `merged_into_defect_id IS NULL` 조건으로 제외하며,
+각 유형은 `COUNT(DISTINCT defect_id)`로 집계한다.
 
 ### Route별 예상 Mission
 

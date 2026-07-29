@@ -16,7 +16,7 @@ import com.gilbom.robot.application.RobotScopeService;
  * defect_observation에 UPDATE 권한을 주지 않는다) 대표 결함의 범위 판정에는
  * 자신에게 병합된 결함들의 관측까지 포함한다.
  */
-final class DefectScopeService {
+public final class DefectScopeService {
 
     /**
      * 결함별 관측을 훑는 EXISTS의 앞부분. 로봇 범위 조건절이 뒤에 붙는다.
@@ -47,7 +47,7 @@ final class DefectScopeService {
      * 조회 범위. 결함 테이블을 {@code d}로 alias 하고 {@code userId}를 바인딩한
      * 질의에서 사용한다.
      */
-    static final String VISIBLE_DEFECT_PREDICATE = """
+    public static final String VISIBLE_DEFECT_PREDICATE = """
             (
             """
             + RobotScopeService.SYSTEM_ADMIN_SCOPE

@@ -70,7 +70,8 @@ public final class StatisticsDtos {
             BigDecimal completionRatePercent,
             long totalMissionDurationSeconds,
             long incidentEventCount,
-            long defectCount
+            long defectCount,
+            long observationCount
     ) {
     }
 

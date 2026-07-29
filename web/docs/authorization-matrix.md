@@ -214,7 +214,7 @@ DB trigger도 같은 lock과 판정 함수를 사용해 직접 DML을 방어한�
 |---|---|---|---|:---:|---|
 | GET | `/api/v1/statistics/by-status` | `DEFECT_STATUS_VIEW` | 배정 로봇에서 파생된 현재 결함 집계 |  |  |
 | GET | `/api/v1/statistics/by-defect-type` | `DEFECT_STATUS_VIEW` | 배정 로봇에서 파생된 현재 결함 집계 |  |  |
-| GET | `/api/v1/statistics/by-area` | `MISSION_VIEW` **AND** `DEFECT_STATUS_VIEW` | 배정 로봇의 Mission·Incident·결함 집계 |  |  |
+| GET | `/api/v1/statistics/by-area` | `MISSION_VIEW` **AND** `DEFECT_STATUS_VIEW` | 배정 로봇의 Mission·Incident·결함·Observation 집계 |  |  |
 | GET | `/api/v1/statistics/by-period` | `MISSION_VIEW` **AND** `DEFECT_STATUS_VIEW` | 배정 로봇의 Mission·Incident·결함 집계 |  |  |
 
 `by-area`와 `by-period`의 두 권한은 OR가 아니라 모두 보유해야 하는 AND
