@@ -52,7 +52,7 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform {
-        excludeTags 'password-load'
+        excludeTags 'password-load', 'mqtt-broker-e2e'
     }
     afterSuite { descriptor, result ->
         if (descriptor.parent == null) {
@@ -73,6 +73,26 @@ tasks.named('test') {
                             + "Run scripts/backend-test.sh with Docker, or use "
                             + "-PallowSkippedTests=true only in a build stage "
                             + "that is preceded by the container-backed test gate."
+            )
+        }
+    }
+}
+
+tasks.register('mqttBrokerE2E', Test) {
+    group = 'verification'
+    description = 'Runs the real TLS MQTT Publisher to Broker message-expiry E2E test.'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'mqtt-broker-e2e'
+    }
+    shouldRunAfter tasks.named('test')
+    afterSuite { descriptor, result ->
+        if (descriptor.parent == null) {
+            logger.lifecycle(
+                    "MQTT Broker E2E summary: tests=${result.testCount}, "
+                            + "failures=${result.failedTestCount}, "
+                            + "skipped=${result.skippedTestCount}"
             )
         }
     }
