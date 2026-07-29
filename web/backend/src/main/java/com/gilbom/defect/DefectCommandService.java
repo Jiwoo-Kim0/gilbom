@@ -317,6 +317,37 @@ public class DefectCommandService {
                 request.reason(),
                 AuditResult.SUCCESS));
 
+        // 흡수된 결함은 목록·지도에서 사라지므로 구독자가 화면에서 제거할 수 있게
+        // 각각 알린다. 이벤트가 없으면 다른 관리자 화면이 사라진 결함을 계속 띄운다.
+        for (UUID sourceId : sourceIds) {
+            DefectState source = locked.get(sourceId);
+            eventPublisher.publishEvent(DefectRealtimeEvent.mergedInto(
+                    sourceId,
+                    source.incidentCode(),
+                    source.patrolAreaId(),
+                    source.defectType(),
+                    source.riskLevel(),
+                    source.workflowStatus(),
+                    source.longitude(),
+                    source.latitude(),
+                    targetDefectId,
+                    aggregate.lastSeenAt()));
+        }
+        // 대표 결함은 관측 수·관측 기간이 바뀐다.
+        eventPublisher.publishEvent(DefectRealtimeEvent.updated(
+                targetDefectId,
+                target.incidentCode(),
+                target.patrolAreaId(),
+                target.defectType(),
+                target.riskLevel(),
+                target.workflowStatus(),
+                target.longitude(),
+                target.latitude(),
+                null,
+                null,
+                List.of("observationCount", "firstSeenAt", "lastSeenAt"),
+                aggregate.lastSeenAt()));
+
         return new DefectMergeResponse(
                 targetDefectId,
                 List.copyOf(sourceIds),

@@ -25,6 +25,7 @@ public record DefectRealtimeEvent(
         BigDecimal latestConfidence,
         String beforeStatus,
         String afterStatus,
+        UUID mergedIntoDefectId,
         List<String> changedFields,
         Instant occurredAt
 ) {
@@ -67,6 +68,7 @@ public record DefectRealtimeEvent(
                 latestConfidence,
                 null,
                 null,
+                null,
                 List.of(),
                 occurredAt);
     }
@@ -102,7 +104,46 @@ public record DefectRealtimeEvent(
                 null,
                 beforeStatus,
                 afterStatus,
+                null,
                 changedFields,
+                occurredAt);
+    }
+
+    /**
+     * 병합으로 흡수된 결함. 목록·지도에서는 대표 결함만 노출하므로 구독자는 이
+     * 이벤트를 받으면 해당 결함을 화면에서 제거하고 {@code mergedIntoDefectId}의
+     * 대표 결함을 다시 조회해야 한다.
+     *
+     * <p>계약 24장이 defect.updated의 조건으로 병합을 명시하지는 않지만, 이벤트가
+     * 없으면 다른 관리자 화면이 사라진 결함을 계속 표시한다.
+     */
+    public static DefectRealtimeEvent mergedInto(
+            UUID defectId,
+            String incidentCode,
+            UUID patrolAreaId,
+            String defectType,
+            String riskLevel,
+            String workflowStatus,
+            Double longitude,
+            Double latitude,
+            UUID mergedIntoDefectId,
+            Instant occurredAt
+    ) {
+        return new DefectRealtimeEvent(
+                UPDATED,
+                defectId,
+                incidentCode,
+                patrolAreaId,
+                defectType,
+                riskLevel,
+                workflowStatus,
+                longitude,
+                latitude,
+                null,
+                null,
+                null,
+                mergedIntoDefectId,
+                List.of("mergedIntoDefectId"),
                 occurredAt);
     }
 }
