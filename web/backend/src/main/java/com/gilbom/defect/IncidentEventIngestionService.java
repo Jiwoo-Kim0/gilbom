@@ -6,6 +6,8 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.ApplicationEventPublisherAware;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,18 +16,28 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
+import com.gilbom.defect.realtime.DefectRealtimeEvent;
 import com.gilbom.robot.data.mqtt.v2.inbound.IncidentEventPayload;
 import com.gilbom.robot.event.RobotEventIngestionResult;
 import com.gilbom.robot.event.RobotEventIngestionService;
 
 @Service
-public class IncidentEventIngestionService {
+public class IncidentEventIngestionService
+        implements ApplicationEventPublisherAware {
 
     private static final double MERGE_RADIUS_METERS = 2.0;
 
     private final JdbcTemplate jdbcTemplate;
     private final RobotEventIngestionService eventIngestionService;
     private final ObjectMapper objectMapper;
+
+    /**
+     * 생성자를 바꾸면 이 서비스를 직접 생성하는 robot 쪽 테스트가 깨지므로
+     * {@link ApplicationEventPublisherAware}로 주입받는다. Spring이 빈 초기화
+     * 시점에 주입하고, 직접 생성한 경우에는 no-op으로 남아 발행만 생략된다.
+     */
+    private ApplicationEventPublisher eventPublisher = event -> {
+    };
 
     public IncidentEventIngestionService(
             JdbcTemplate jdbcTemplate,
@@ -35,6 +47,13 @@ public class IncidentEventIngestionService {
         this.jdbcTemplate = jdbcTemplate;
         this.eventIngestionService = eventIngestionService;
         this.objectMapper = objectMapper;
+    }
+
+    @Override
+    public void setApplicationEventPublisher(
+            ApplicationEventPublisher applicationEventPublisher
+    ) {
+        this.eventPublisher = applicationEventPublisher;
     }
 
     @Transactional
@@ -84,7 +103,86 @@ public class IncidentEventIngestionService {
         if (!newDefect) {
             updateDefectAggregate(defectId, payload);
         }
+        publishRealtimeEvent(defectId, newDefect, payload.occurredAt());
         return new IncidentIngestionResult(event, defectId, true);
+    }
+
+    /**
+     * 계약 24장의 SSE 이벤트를 발행한다. 신규 결함이면 defect.created,
+     * 기존 결함에 관측이 합산되면 집계가 바뀌므로 defect.updated다.
+     *
+     * <p>발행 값은 payload가 아니라 저장된 행에서 읽는다. risk_level처럼 서버가
+     * 정하는 값이 있어 payload만으로는 실제 상태를 알 수 없고, 앞으로 위험도 계산이
+     * 추가돼도 이벤트가 어긋나지 않는다.
+     *
+     * <p>{@code DefectRealtimeEventListener}가 AFTER_COMMIT에 수신하므로 이
+     * 트랜잭션이 롤백되면 스트림으로 나가지 않는다.
+     */
+    private void publishRealtimeEvent(
+            UUID defectId,
+            boolean created,
+            Instant occurredAt
+    ) {
+        DefectRealtimeEvent event = jdbcTemplate.query("""
+                        SELECT
+                            incident_code,
+                            patrol_area_id,
+                            defect_type,
+                            risk_level,
+                            workflow_status,
+                            latest_confidence,
+                            ST_X(location) AS longitude,
+                            ST_Y(location) AS latitude
+                        FROM defect.defect
+                        WHERE defect_id = ?
+                        """,
+                resultSet -> {
+                    if (!resultSet.next()) {
+                        return null;
+                    }
+                    String incidentCode = resultSet.getString("incident_code");
+                    UUID patrolAreaId =
+                            resultSet.getObject("patrol_area_id", UUID.class);
+                    String defectType = resultSet.getString("defect_type");
+                    String riskLevel = resultSet.getString("risk_level");
+                    String workflowStatus =
+                            resultSet.getString("workflow_status");
+                    double longitude = resultSet.getDouble("longitude");
+                    double latitude = resultSet.getDouble("latitude");
+                    if (created) {
+                        return DefectRealtimeEvent.created(
+                                defectId,
+                                incidentCode,
+                                patrolAreaId,
+                                defectType,
+                                riskLevel,
+                                workflowStatus,
+                                longitude,
+                                latitude,
+                                resultSet.getBigDecimal("latest_confidence"),
+                                occurredAt);
+                    }
+                    return DefectRealtimeEvent.updated(
+                            defectId,
+                            incidentCode,
+                            patrolAreaId,
+                            defectType,
+                            riskLevel,
+                            workflowStatus,
+                            longitude,
+                            latitude,
+                            null,
+                            null,
+                            List.of(
+                                    "observationCount",
+                                    "lastSeenAt",
+                                    "latestConfidence"),
+                            occurredAt);
+                },
+                defectId);
+        if (event != null) {
+            eventPublisher.publishEvent(event);
+        }
     }
 
     private IncidentContext resolveContext(

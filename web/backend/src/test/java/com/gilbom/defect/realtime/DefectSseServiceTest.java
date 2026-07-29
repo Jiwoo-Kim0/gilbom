@@ -132,6 +132,29 @@ class DefectSseServiceTest {
                 .isEqualTo("defect.created");
     }
 
+    @Test
+    void mergedEventCarriesRepresentativeDefectId() {
+        UUID representativeId =
+                UUID.fromString("2b9a2f4e-1c4d-4a5b-9c8d-000000000049");
+        DefectRealtimeEvent event = DefectRealtimeEvent.mergedInto(
+                DEFECT_ID,
+                "INC-20260729-000001",
+                PATROL_AREA_ID,
+                "DAMAGED",
+                "HIGH",
+                "NEW",
+                127.01,
+                37.51,
+                representativeId,
+                NOW);
+
+        // 병합도 계약상 별도 이벤트명이 없으므로 defect.updated로 나간다.
+        assertThat(event.eventType()).isEqualTo("defect.updated");
+        assertThat(event.mergedIntoDefectId()).isEqualTo(representativeId);
+        assertThat(event.changedFields())
+                .containsExactly("mergedIntoDefectId");
+    }
+
     private DefectSseService newService() {
         return new DefectSseService(
                 accessService,

@@ -23,6 +23,7 @@ public record DefectSseEventResponse(
         BigDecimal latestConfidence,
         String beforeStatus,
         String afterStatus,
+        UUID mergedIntoDefectId,
         List<String> changedFields,
         Instant occurredAt
 ) {
@@ -44,6 +45,7 @@ public record DefectSseEventResponse(
                 event.latestConfidence(),
                 event.beforeStatus(),
                 event.afterStatus(),
+                event.mergedIntoDefectId(),
                 event.changedFields(),
                 event.occurredAt());
     }
