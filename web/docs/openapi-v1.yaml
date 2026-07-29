@@ -1952,10 +1952,14 @@ paths:
       tags: [Missions]
       operationId: createPatrolRoute
       summary: 순찰 경로 버전 등록
-      description: >
+      description: |
         순찰 구역 내부의 4326 LineString 또는 MultiLineString을 등록한다.
         routeVersion은 동일 구역·routeCode 기준으로 서버가 자동 증가시킨다.
         ACTIVE 버전을 등록하면 기존 활성 버전은 INACTIVE로 전환된다.
+        Route 버전의 코드·이름·Geometry는 생성 후 직접 수정하거나 삭제하지 않는다.
+        이름 또는 Geometry를 변경하거나 DRAFT를 운영에 반영할 때는 같은 routeCode로
+        새 버전을 등록한다. Route PATCH·DELETE·수동 상태 변경 API는 제공하지 않으며,
+        ARCHIVED는 기존 데이터 조회 호환을 위한 예약 상태다.
       x-required-permission: MISSION_MANAGE
       security:
         - serverSession: []
@@ -1995,6 +1999,9 @@ paths:
       tags: [Missions]
       operationId: listPatrolRoutes
       summary: 순찰 구역의 버전별 경로 조회
+      description: >
+        DRAFT, ACTIVE, INACTIVE와 기존 ARCHIVED 버전을 숨기지 않고 반환한다.
+        각 버전은 조회 전용이며 변경은 새 버전 POST로 처리한다.
       x-required-permission: MISSION_VIEW
       security:
         - serverSession: []
@@ -2019,6 +2026,9 @@ paths:
       tags: [Missions]
       operationId: getPatrolRoute
       summary: 순찰 경로 버전 단건 조회
+      description: >
+        과거 Mission 참조와 감사 추적을 위해 보존되는 조회 전용 버전이다.
+        이 리소스에는 PATCH, DELETE 또는 수동 상태 변경 API를 제공하지 않는다.
       x-required-permission: MISSION_VIEW
       security:
         - serverSession: []
@@ -3723,12 +3733,16 @@ components:
           type: string
           minLength: 1
           maxLength: 100
+          description: >
+            새 버전에 저장할 이름. 기존 버전의 이름 변경도 동일 routeCode의
+            새 버전 등록으로 처리한다.
           example: 서울 순찰 구역 주 경로
         routeGeometry:
           type: object
           description: >
             선택한 순찰 구역 경계 안에 포함되는 SRID 4326
-            LineString 또는 MultiLineString GeoJSON
+            LineString 또는 MultiLineString GeoJSON. 기존 버전의 Geometry는
+            수정하지 않고 변경 Geometry를 새 버전으로 등록한다.
           required: [type, coordinates]
           additionalProperties: true
           properties:
@@ -3748,6 +3762,10 @@ components:
           type: string
           enum: [DRAFT, ACTIVE]
           default: ACTIVE
+          description: >
+            생성할 버전의 초기 상태. ACTIVE 등록 시 같은 routeCode의 기존 ACTIVE만
+            자동 INACTIVE가 된다. DRAFT 승격과 수동 INACTIVE·ARCHIVED 전이는
+            제공하지 않으며 운영 반영은 새 ACTIVE 버전 등록으로 처리한다.
 
     PatrolRouteResponse:
       type: object
@@ -3783,6 +3801,9 @@ components:
         lifecycleStatus:
           type: string
           enum: [DRAFT, ACTIVE, INACTIVE, ARCHIVED]
+          description: >
+            버전 조회 상태. ACTIVE 등록에 의해 이전 ACTIVE가 INACTIVE로 바뀌는
+            경우를 제외하면 API에서 기존 버전 상태를 직접 변경하지 않는다.
         createdAt:
           type: string
           format: date-time

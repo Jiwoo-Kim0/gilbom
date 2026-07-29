@@ -52,6 +52,13 @@ public class PatrolRouteManagementService {
         this.auditLogService = auditLogService;
     }
 
+    /**
+     * 새 Route 버전을 등록한다.
+     *
+     * <p>기존 버전의 코드·이름·Geometry·버전 번호는 수정하지 않는다.
+     * 새 ACTIVE 버전을 등록할 때만 같은 논리 Route의 기존 ACTIVE 버전을
+     * 자동으로 INACTIVE로 전환한다.</p>
+     */
     @Transactional
     public PatrolRouteResponse create(
             UUID patrolAreaId,

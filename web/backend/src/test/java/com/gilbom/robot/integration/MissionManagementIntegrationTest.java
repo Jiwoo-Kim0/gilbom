@@ -39,6 +39,7 @@ import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaLifecycleS
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaResponse;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaStatusChangeRequest;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaUpdateRequest;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolRouteCreateLifecycleStatus;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolRouteCreateRequest;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolRouteResponse;
 import com.gilbom.robot.mission.MissionManagementService;
@@ -766,6 +767,22 @@ class MissionManagementIntegrationTest {
                 """, String.class, first.patrolRouteId()))
                 .isEqualTo("INACTIVE");
         assertThat(jdbcTemplate.queryForObject("""
+                SELECT route_name
+                FROM robot.patrol_route
+                WHERE patrol_route_id = ?
+                """, String.class, first.patrolRouteId()))
+                .isEqualTo("통합 테스트 경로 v1");
+        assertThat(objectMapper.readTree(
+                jdbcTemplate.queryForObject("""
+                        SELECT ST_AsGeoJSON(route_geometry)
+                        FROM robot.patrol_route
+                        WHERE patrol_route_id = ?
+                        """,
+                        String.class,
+                        first.patrolRouteId()))
+                .path("type").asText())
+                .isEqualTo("LineString");
+        assertThat(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*)
                 FROM robot.patrol_route
                 WHERE patrol_area_id = ?
@@ -788,6 +805,65 @@ class MissionManagementIntegrationTest {
                 second.patrolRouteId(),
                 first.patrolRouteId().toString()))
                 .isEqualTo(1);
+    }
+
+    @Test
+    void keepsDraftRouteVersionWhenPublishingActiveVersion()
+            throws Exception {
+        String routeCode = "ROUTE-DRAFT-"
+                + UUID.randomUUID().toString().substring(0, 8);
+        PatrolRouteResponse draft = patrolRouteManagementService.create(
+                areaId,
+                new PatrolRouteCreateRequest(
+                        routeCode,
+                        "검토 중 경로",
+                        objectMapper.readTree("""
+                                {
+                                  "type": "LineString",
+                                  "coordinates": [
+                                    [127.001, 37.001],
+                                    [127.019, 37.019]
+                                  ]
+                                }
+                                """),
+                        PatrolRouteCreateLifecycleStatus.DRAFT),
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID()));
+
+        PatrolRouteResponse active = patrolRouteManagementService.create(
+                areaId,
+                new PatrolRouteCreateRequest(
+                        routeCode,
+                        "배포 경로",
+                        objectMapper.readTree("""
+                                {
+                                  "type": "LineString",
+                                  "coordinates": [
+                                    [127.002, 37.002],
+                                    [127.018, 37.018]
+                                  ]
+                                }
+                                """),
+                        PatrolRouteCreateLifecycleStatus.ACTIVE),
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID()));
+
+        assertThat(draft.routeVersion()).isEqualTo(1);
+        assertThat(active.routeVersion()).isEqualTo(2);
+        assertThat(active.lifecycleStatus()).isEqualTo("ACTIVE");
+        assertThat(patrolCatalogQueryService.findRoute(
+                areaId,
+                draft.patrolRouteId()))
+                .satisfies(storedDraft -> {
+                    assertThat(storedDraft.routeName())
+                            .isEqualTo("검토 중 경로");
+                    assertThat(storedDraft.lifecycleStatus())
+                            .isEqualTo("DRAFT");
+                    assertThat(storedDraft.routeGeometry()
+                            .path("coordinates").get(0).get(0)
+                            .asDouble())
+                            .isEqualTo(127.001);
+                });
     }
 
     @Test

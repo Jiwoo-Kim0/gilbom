@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -571,6 +572,39 @@ class RobotQueryControllerTest {
                                 """))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")));
+
+        verifyNoInteractions(patrolRouteManagementService);
+    }
+
+    @Test
+    void doesNotExposePatrolRoutePatchOrDeleteEndpoints()
+            throws Exception {
+        String routePath = "/api/v1/patrol-areas/{patrolAreaId}"
+                + "/routes/{patrolRouteId}";
+
+        mockMvc.perform(patch(
+                        routePath,
+                        PATROL_AREA_ID,
+                        PATROL_ROUTE_ID)
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_MANAGE))
+                        .with(csrf().asHeader())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "routeName": "직접 수정 금지"
+                                }
+                                """))
+                .andExpect(status().isMethodNotAllowed());
+
+        mockMvc.perform(delete(
+                        routePath,
+                        PATROL_AREA_ID,
+                        PATROL_ROUTE_ID)
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_MANAGE))
+                        .with(csrf().asHeader()))
+                .andExpect(status().isMethodNotAllowed());
 
         verifyNoInteractions(patrolRouteManagementService);
     }

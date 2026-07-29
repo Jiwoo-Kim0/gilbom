@@ -203,11 +203,14 @@ DB trigger도 같은 lock과 판정 함수를 사용해 직접 DML을 방어한�
 | PATCH | `/api/v1/patrol-areas/{patrolAreaId}/status` | `MISSION_MANAGE` | MVP 권한 단위 | O | 변경 |
 | GET, POST | `/api/v1/patrol-areas/{patrolAreaId}/routes` | GET `MISSION_VIEW`, POST `MISSION_MANAGE` | MVP 권한 단위 | POST O | 생성 |
 | GET | `/api/v1/patrol-areas/{patrolAreaId}/routes/{patrolRouteId}` | `MISSION_VIEW` | MVP 권한 단위 |  |  |
-| PATCH, DELETE | `/api/v1/patrol-routes/{patrolRouteId}` | `MISSION_MANAGE` | MVP 권한 단위 | O | O |
 | GET, POST | `/api/v1/missions` | GET `MISSION_VIEW`, POST `MISSION_MANAGE` | GET 배정 로봇, POST 대상 로봇 `OWNER` | POST O | 생성 |
 | GET, PATCH | `/api/v1/missions/{missionId}` | GET `MISSION_VIEW`, PATCH `MISSION_MANAGE` | GET `VIEWER+`, PATCH `OWNER` | PATCH O | 변경 |
 | GET | `/api/v1/missions/{missionId}/trajectory` | `MISSION_VIEW` | 연결 로봇 `VIEWER+` |  |  |
 | GET | `/api/v1/missions/{missionId}/history` | `MISSION_VIEW` | 연결 로봇 `VIEWER+` |  |  |
+
+Patrol Route 버전은 조회 전용이다. 이름·Geometry·운영 상태 변경은 동일
+`routeCode`의 새 버전 `POST`로 처리하며 기존 버전에 대한 `PATCH`, `DELETE`,
+수동 상태 변경 Endpoint는 제공하지 않는다.
 
 ### 9.1 통계 API
 

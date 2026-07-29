@@ -84,6 +84,16 @@ GET /api/v1/patrol-areas/{patrolAreaId}/routes
 존재하지 않는 Area의 단건·Route 목록은 HTTP 404와
 `PATROL_AREA_NOT_FOUND`를 반환한다.
 
+### Route 버전 변경 정책
+
+- `routeCode`는 같은 논리 경로의 버전 묶음을 식별한다.
+- Route 버전의 이름·Geometry·버전 번호는 생성 후 직접 수정하거나 삭제하지 않는다.
+- 이름 또는 Geometry 변경은 같은 `routeCode`로 새 버전을 `POST`한다.
+- 새 `ACTIVE` 버전은 기존 `ACTIVE`만 자동으로 `INACTIVE` 처리한다.
+- `DRAFT`를 운영에 반영할 때도 기존 행을 승격하지 않고 새 `ACTIVE` 버전을 만든다.
+- 수동 `INACTIVE`·`ARCHIVED`, Route `PATCH`·`DELETE` API는 제공하지 않는다.
+  `ARCHIVED`는 기존 데이터 조회 호환을 위한 예약 상태다.
+
 ## 4. A 통계 개발 입력
 
 - SQL Fixture:
@@ -128,7 +138,7 @@ Query의 `patrolAreaId`, `patrolRouteId`에 전달한다.
 | --- | --- | --- |
 | 실제 MQTT Broker QoS 1 E2E | 차단하지 않음 | Fixture와 직접 저장 통합 Test로 화면·통계 개발 가능 |
 | Mission 생성·수정 REST | 현재 A/C 작업은 차단하지 않음 | B Mission 관리 화면과 운영 입력을 위한 B 후속 작업 |
-| Patrol Route 수동 상태 변경 REST | 현재 조회 작업은 차단하지 않음 | Area 변경·보관 REST는 완료됐으며 Route 수명주기 정책은 B 후속 작업 |
+| Patrol Route 수동 상태 변경 REST | 차단하지 않음 | 불변 버전 정책으로 미제공을 확정했으며 변경은 새 버전 POST로 처리 |
 | 실제 S3 Presigned URL | C 이미지 화면만 차단 | C 소유 Storage Adapter 작업 |
 | Report API·LLM | A 보고서 화면만 차단 | A 소유 작업 |
 | Git 공유 | **차단함** | V22/V23·코드·문서가 commit/push되기 전에는 다른 팀원이 받을 수 없음 |
