@@ -4,8 +4,10 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.databind.JsonNode;
 
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -18,6 +20,12 @@ public final class PatrolCatalogDtos {
     public enum PatrolAreaCreateLifecycleStatus {
         ACTIVE,
         INACTIVE
+    }
+
+    public enum PatrolAreaLifecycleStatus {
+        ACTIVE,
+        INACTIVE,
+        ARCHIVED
     }
 
     public enum PatrolRouteCreateLifecycleStatus {
@@ -39,6 +47,27 @@ public final class PatrolCatalogDtos {
                     ? PatrolAreaCreateLifecycleStatus.ACTIVE
                     : lifecycleStatus;
         }
+    }
+
+    public record PatrolAreaUpdateRequest(
+            @Size(min = 1, max = 100) String areaName,
+            JsonNode boundary
+    ) {
+
+        public PatrolAreaUpdateRequest {
+            areaName = normalize(areaName);
+        }
+
+        @AssertTrue(message = "at least one patrol area field must be provided")
+        @JsonIgnore
+        public boolean isPatchPresent() {
+            return areaName != null || boundary != null;
+        }
+    }
+
+    public record PatrolAreaStatusChangeRequest(
+            @NotNull PatrolAreaLifecycleStatus lifecycleStatus
+    ) {
     }
 
     public record PatrolAreaListResponse(

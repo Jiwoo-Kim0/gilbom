@@ -128,7 +128,7 @@ Query의 `patrolAreaId`, `patrolRouteId`에 전달한다.
 | --- | --- | --- |
 | 실제 MQTT Broker QoS 1 E2E | 차단하지 않음 | Fixture와 직접 저장 통합 Test로 화면·통계 개발 가능 |
 | Mission 생성·수정 REST | 현재 A/C 작업은 차단하지 않음 | B Mission 관리 화면과 운영 입력을 위한 B 후속 작업 |
-| Patrol Area·Route 변경 REST | 현재 조회 작업은 차단하지 않음 | Admin 편집 기능을 위한 B 후속 작업 |
+| Patrol Route 수동 상태 변경 REST | 현재 조회 작업은 차단하지 않음 | Area 변경·보관 REST는 완료됐으며 Route 수명주기 정책은 B 후속 작업 |
 | 실제 S3 Presigned URL | C 이미지 화면만 차단 | C 소유 Storage Adapter 작업 |
 | Report API·LLM | A 보고서 화면만 차단 | A 소유 작업 |
 | Git 공유 | **차단함** | V22/V23·코드·문서가 commit/push되기 전에는 다른 팀원이 받을 수 없음 |

@@ -52,6 +52,8 @@ public enum ErrorCode {
 
     ROBOT_SERIAL_NUMBER_CONFLICT(HttpStatus.CONFLICT, "이미 등록된 로봇 시리얼 번호입니다."),
     PATROL_AREA_CODE_CONFLICT(HttpStatus.CONFLICT, "이미 등록된 순찰 구역 코드입니다."),
+    PATROL_AREA_STATE_CONFLICT(HttpStatus.CONFLICT, "현재 순찰 구역 상태에서는 요청을 수행할 수 없습니다."),
+    PATROL_AREA_IN_USE(HttpStatus.CONFLICT, "진행 중이거나 예정된 임무가 사용하는 순찰 구역입니다."),
     PATROL_ROUTE_VERSION_CONFLICT(HttpStatus.CONFLICT, "순찰 경로 버전 생성이 충돌했습니다."),
     ROBOT_CREDENTIAL_CONFLICT(
             HttpStatus.CONFLICT,
@@ -80,6 +82,10 @@ public enum ErrorCode {
     PATROL_AREA_GEOMETRY_INVALID(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "순찰 구역 경계는 유효한 Polygon 또는 MultiPolygon이어야 합니다."
+    ),
+    PATROL_AREA_ROUTE_OUTSIDE_BOUNDARY(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "변경한 순찰 구역 경계가 활성 또는 초안 경로를 포함하지 않습니다."
     ),
     PATROL_ROUTE_GEOMETRY_INVALID(
             HttpStatus.UNPROCESSABLE_ENTITY,

@@ -1852,6 +1852,84 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Missions]
+      operationId: updatePatrolArea
+      summary: 순찰 구역 이름·경계 변경
+      description: |
+        areaCode는 변경하지 않는다. ARCHIVED 구역과 CREATED·READY·RUNNING·PAUSED
+        Mission이 사용하는 구역은 변경할 수 없다. 경계를 변경할 때는 기존 ACTIVE·DRAFT
+        Route가 모두 새 경계 안에 있어야 한다.
+      x-required-permission: MISSION_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/PatrolAreaId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatrolAreaUpdateRequest"
+      responses:
+        "200":
+          description: 변경된 순찰 구역
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatrolAreaResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/v1/patrol-areas/{patrolAreaId}/status:
+    patch:
+      tags: [Missions]
+      operationId: changePatrolAreaStatus
+      summary: 순찰 구역 상태 변경
+      description: |
+        JSON Body로 목표 상태를 받으며 ACTIVE → INACTIVE → ARCHIVED 단방향 전이만
+        허용한다. 현재 상태와 같은 요청은 변경 없이 현재 값을 반환한다.
+        CREATED·READY·RUNNING·PAUSED Mission이 사용하는 구역은 상태를 변경할 수 없다.
+        이전·이후 상태는 PATROL_AREA_UPDATED 감사 로그의 beforeValue와 afterValue에
+        기록한다.
+      x-required-permission: MISSION_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/PatrolAreaId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatrolAreaStatusChangeRequest"
+      responses:
+        "200":
+          description: 상태가 변경됐거나 이미 목표 상태인 순찰 구역
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatrolAreaResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /api/v1/patrol-areas/{patrolAreaId}/routes:
     post:
@@ -3289,6 +3367,42 @@ components:
           type: string
           format: date-time
 
+    PatrolAreaUpdateRequest:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        areaName:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: 서울 순찰 구역 1 변경
+        boundary:
+          type: object
+          description: >
+            ACTIVE·DRAFT Route를 모두 포함하는 SRID 4326 Polygon 또는
+            MultiPolygon GeoJSON
+          required: [type, coordinates]
+          additionalProperties: true
+          properties:
+            type:
+              type: string
+              enum: [Polygon, MultiPolygon]
+            coordinates:
+              type: array
+              minItems: 1
+              items: {}
+
+    PatrolAreaStatusChangeRequest:
+      type: object
+      required:
+        - lifecycleStatus
+      additionalProperties: false
+      properties:
+        lifecycleStatus:
+          type: string
+          enum: [ACTIVE, INACTIVE, ARCHIVED]
+
     PatrolAreaListResponse:
       type: object
       required: [areas]
@@ -4456,6 +4570,8 @@ components:
         - COMMON_CONFLICT
         - ROBOT_SERIAL_NUMBER_CONFLICT
         - PATROL_AREA_CODE_CONFLICT
+        - PATROL_AREA_STATE_CONFLICT
+        - PATROL_AREA_IN_USE
         - PATROL_ROUTE_VERSION_CONFLICT
         - AUTH_EMAIL_ALREADY_REGISTERED
         - COMMAND_STATE_CONFLICT
@@ -4468,6 +4584,7 @@ components:
         - IMAGE_UNSUPPORTED_MEDIA_TYPE
         - COMMON_BUSINESS_RULE_VIOLATION
         - PATROL_AREA_GEOMETRY_INVALID
+        - PATROL_AREA_ROUTE_OUTSIDE_BOUNDARY
         - PATROL_ROUTE_GEOMETRY_INVALID
         - PATROL_ROUTE_OUTSIDE_AREA
         - REPORT_PERIOD_INVALID

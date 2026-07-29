@@ -199,7 +199,8 @@ DB trigger도 같은 lock과 판정 함수를 사용해 직접 DML을 방어한�
 | Method | Path | 권한 | 객체 범위 | CSRF | 감사 |
 |---|---|---|---|:---:|---|
 | GET, POST | `/api/v1/patrol-areas` | GET `MISSION_VIEW`, POST `MISSION_MANAGE` | MVP 권한 단위 | POST O | 생성 |
-| GET, PATCH, DELETE | `/api/v1/patrol-areas/{patrolAreaId}` | GET `MISSION_VIEW`, 변경 `MISSION_MANAGE` | MVP 권한 단위 | 변경 O | 변경 |
+| GET, PATCH | `/api/v1/patrol-areas/{patrolAreaId}` | GET `MISSION_VIEW`, PATCH `MISSION_MANAGE` | MVP 권한 단위 | PATCH O | 변경 |
+| PATCH | `/api/v1/patrol-areas/{patrolAreaId}/status` | `MISSION_MANAGE` | MVP 권한 단위 | O | 변경 |
 | GET, POST | `/api/v1/patrol-areas/{patrolAreaId}/routes` | GET `MISSION_VIEW`, POST `MISSION_MANAGE` | MVP 권한 단위 | POST O | 생성 |
 | GET | `/api/v1/patrol-areas/{patrolAreaId}/routes/{patrolRouteId}` | `MISSION_VIEW` | MVP 권한 단위 |  |  |
 | PATCH, DELETE | `/api/v1/patrol-routes/{patrolRouteId}` | `MISSION_MANAGE` | MVP 권한 단위 | O | O |

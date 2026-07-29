@@ -1,6 +1,8 @@
 package com.gilbom.robot.mission;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -22,7 +24,10 @@ import com.gilbom.audit.AuditTargetType;
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaCreateRequest;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaLifecycleStatus;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaResponse;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaStatusChangeRequest;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaUpdateRequest;
 
 @Service
 public class PatrolAreaManagementService {
@@ -105,11 +110,222 @@ public class PatrolAreaManagementService {
         return created;
     }
 
+    @Transactional
+    public PatrolAreaResponse update(
+            UUID patrolAreaId,
+            PatrolAreaUpdateRequest request,
+            UUID actorUserId,
+            AuditRequestContext requestContext
+    ) {
+        if (request.boundary() != null) {
+            validateBoundary(request.boundary());
+        }
+
+        PatrolAreaResponse before = lockArea(patrolAreaId);
+        requireEditable(before);
+        requireNotInUse(patrolAreaId);
+        if (request.boundary() != null) {
+            requireRoutesCoveredBy(
+                    patrolAreaId,
+                    request.boundary());
+        }
+
+        List<String> assignments = new ArrayList<>();
+        List<Object> parameters = new ArrayList<>();
+        if (request.areaName() != null) {
+            assignments.add("area_name = ?");
+            parameters.add(request.areaName());
+        }
+        if (request.boundary() != null) {
+            assignments.add(
+                    "boundary = ST_SetSRID(ST_GeomFromGeoJSON(?), 4326)");
+            parameters.add(request.boundary().toString());
+        }
+        assignments.add("updated_by = ?");
+        parameters.add(actorUserId);
+        assignments.add("updated_at = NOW()");
+        parameters.add(patrolAreaId);
+
+        jdbcTemplate.update("""
+                UPDATE robot.patrol_area
+                SET
+                """ + String.join(",\n", assignments) + """
+
+                WHERE patrol_area_id = ?
+                """,
+                parameters.toArray());
+
+        PatrolAreaResponse after = queryService.findArea(patrolAreaId);
+        appendUpdateAudit(
+                patrolAreaId,
+                before,
+                after,
+                actorUserId,
+                requestContext);
+        return after;
+    }
+
+    @Transactional
+    public PatrolAreaResponse changeStatus(
+            UUID patrolAreaId,
+            PatrolAreaStatusChangeRequest request,
+            UUID actorUserId,
+            AuditRequestContext requestContext
+    ) {
+        PatrolAreaResponse before = lockArea(patrolAreaId);
+        PatrolAreaLifecycleStatus current =
+                PatrolAreaLifecycleStatus.valueOf(
+                        before.lifecycleStatus());
+        PatrolAreaLifecycleStatus target =
+                request.lifecycleStatus();
+        if (current == target) {
+            return before;
+        }
+        if (!isAllowedTransition(current, target)) {
+            throw new BusinessException(
+                    ErrorCode.PATROL_AREA_STATE_CONFLICT);
+        }
+        requireNotInUse(patrolAreaId);
+
+        jdbcTemplate.update("""
+                UPDATE robot.patrol_area
+                SET lifecycle_status = ?,
+                    updated_by = ?,
+                    updated_at = NOW()
+                WHERE patrol_area_id = ?
+                """,
+                target.name(),
+                actorUserId,
+                patrolAreaId);
+
+        PatrolAreaResponse after = queryService.findArea(patrolAreaId);
+        appendUpdateAudit(
+                patrolAreaId,
+                before,
+                after,
+                actorUserId,
+                requestContext);
+        return after;
+    }
+
+    private PatrolAreaResponse lockArea(UUID patrolAreaId) {
+        UUID lockedId = jdbcTemplate.query("""
+                SELECT patrol_area_id
+                FROM robot.patrol_area
+                WHERE patrol_area_id = ?
+                FOR UPDATE
+                """,
+                resultSet -> resultSet.next()
+                        ? resultSet.getObject(
+                                "patrol_area_id",
+                                UUID.class)
+                        : null,
+                patrolAreaId);
+        if (lockedId == null) {
+            throw new BusinessException(
+                    ErrorCode.PATROL_AREA_NOT_FOUND);
+        }
+        return queryService.findArea(lockedId);
+    }
+
+    private static void requireEditable(PatrolAreaResponse area) {
+        if (PatrolAreaLifecycleStatus.ARCHIVED.name()
+                .equals(area.lifecycleStatus())) {
+            throw new BusinessException(
+                    ErrorCode.PATROL_AREA_STATE_CONFLICT);
+        }
+    }
+
+    private void requireNotInUse(UUID patrolAreaId) {
+        Boolean inUse = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM robot.mission
+                    WHERE patrol_area_id = ?
+                      AND status IN (
+                          'CREATED',
+                          'READY',
+                          'RUNNING',
+                          'PAUSED'
+                      )
+                )
+                """,
+                Boolean.class,
+                patrolAreaId);
+        if (Boolean.TRUE.equals(inUse)) {
+            throw new BusinessException(
+                    ErrorCode.PATROL_AREA_IN_USE);
+        }
+    }
+
+    private void requireRoutesCoveredBy(
+            UUID patrolAreaId,
+            JsonNode boundary
+    ) {
+        Boolean covered = jdbcTemplate.queryForObject("""
+                WITH candidate AS (
+                    SELECT ST_SetSRID(
+                        ST_GeomFromGeoJSON(?),
+                        4326
+                    ) AS boundary
+                )
+                SELECT NOT EXISTS (
+                    SELECT 1
+                    FROM robot.patrol_route,
+                         candidate
+                    WHERE patrol_area_id = ?
+                      AND lifecycle_status IN ('DRAFT', 'ACTIVE')
+                      AND NOT ST_CoveredBy(
+                          route_geometry,
+                          candidate.boundary
+                      )
+                )
+                """,
+                Boolean.class,
+                boundary.toString(),
+                patrolAreaId);
+        if (!Boolean.TRUE.equals(covered)) {
+            throw new BusinessException(
+                    ErrorCode.PATROL_AREA_ROUTE_OUTSIDE_BOUNDARY);
+        }
+    }
+
+    private static boolean isAllowedTransition(
+            PatrolAreaLifecycleStatus current,
+            PatrolAreaLifecycleStatus target
+    ) {
+        return current == PatrolAreaLifecycleStatus.ACTIVE
+                && target == PatrolAreaLifecycleStatus.INACTIVE
+                || current == PatrolAreaLifecycleStatus.INACTIVE
+                && target == PatrolAreaLifecycleStatus.ARCHIVED;
+    }
+
+    private void appendUpdateAudit(
+            UUID patrolAreaId,
+            PatrolAreaResponse before,
+            PatrolAreaResponse after,
+            UUID actorUserId,
+            AuditRequestContext requestContext
+    ) {
+        auditLogService.appendRequired(new AuditLogRecord(
+                requestContext,
+                actorUserId,
+                AuditActorType.USER,
+                AuditAction.PATROL_AREA_UPDATED.databaseValue(),
+                AuditTargetType.PATROL_AREA,
+                patrolAreaId,
+                snapshot(before),
+                snapshot(after),
+                null,
+                AuditResult.SUCCESS));
+    }
+
     private void validateBoundary(JsonNode boundary) {
         if (!hasSupportedShape(boundary)) {
             throw invalidGeometry();
         }
-
+        /*4326: WGS84 GPS 위경도 좌표계, GeoJSON으로 POLYGON 표현 */
+        /*WITH절로 복합쿼리 ALIAS화 */
         Boolean valid = jdbcTemplate.queryForObject("""
                 WITH candidate AS (
                     SELECT ST_SetSRID(
@@ -130,6 +346,9 @@ public class PatrolAreaManagementService {
                     )
                 FROM candidate
                 """,
+                //빈값?
+                //형식일치?
+                //범위 제한?
                 Boolean.class,
                 boundary.toString());
         if (!Boolean.TRUE.equals(valid)) {

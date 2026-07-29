@@ -13,6 +13,7 @@ import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -34,7 +35,10 @@ import com.gilbom.robot.data.api.response.MissionDtos.MissionResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionStatus;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionUpdateRequest;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaCreateRequest;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaLifecycleStatus;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaResponse;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaStatusChangeRequest;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaUpdateRequest;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolRouteCreateRequest;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolRouteResponse;
 import com.gilbom.robot.mission.MissionManagementService;
@@ -91,6 +95,9 @@ class MissionManagementIntegrationTest {
 
     @Autowired
     private PatrolAreaManagementService patrolAreaManagementService;
+
+    @Autowired
+    private PatrolCatalogQueryService patrolCatalogQueryService;
 
     @Autowired
     private PatrolRouteManagementService patrolRouteManagementService;
@@ -423,6 +430,264 @@ class MissionManagementIntegrationTest {
                         exception -> assertThat(exception.errorCode())
                                 .isEqualTo(
                                         ErrorCode.PATROL_AREA_GEOMETRY_INVALID));
+    }
+
+    @Test
+    void updatesPatrolAreaGeometryAndWritesBeforeAfterAudit()
+            throws Exception {
+        UUID requestId = UUID.randomUUID();
+        PatrolAreaResponse updated = patrolAreaManagementService.update(
+                areaId,
+                new PatrolAreaUpdateRequest(
+                        " 변경된 통합 테스트 구역 ",
+                        objectMapper.readTree("""
+                                {
+                                  "type": "Polygon",
+                                  "coordinates": [
+                                    [
+                                      [126.99, 36.99],
+                                      [127.03, 36.99],
+                                      [127.03, 37.03],
+                                      [126.99, 37.03],
+                                      [126.99, 36.99]
+                                    ]
+                                  ]
+                                }
+                                """)),
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(requestId));
+
+        assertThat(updated.areaName())
+                .isEqualTo("변경된 통합 테스트 구역");
+        assertThat(updated.lifecycleStatus()).isEqualTo("ACTIVE");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT
+                    ST_SRID(boundary) = 4326
+                    AND ST_Covers(
+                        boundary,
+                        ST_GeomFromText(
+                            'LINESTRING('
+                            || '127.001 37.001,'
+                            || '127.019 37.019)',
+                            4326
+                        )
+                    )
+                FROM robot.patrol_area
+                WHERE patrol_area_id = ?
+                """, Boolean.class, areaId)).isTrue();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM audit.audit_log
+                WHERE request_id = ?
+                  AND action_type = 'PATROL_AREA_UPDATED'
+                  AND target_type = 'PATROL_AREA'
+                  AND target_id = ?
+                  AND before_value ->> 'areaName' = 'Mission Area'
+                  AND after_value ->> 'areaName' =
+                      '변경된 통합 테스트 구역'
+                  AND before_value ->> 'lifecycleStatus' = 'ACTIVE'
+                  AND after_value ->> 'lifecycleStatus' = 'ACTIVE'
+                  AND result = 'SUCCESS'
+                """,
+                Integer.class,
+                requestId,
+                areaId)).isOne();
+    }
+
+    @Test
+    void changesPatrolAreaStateOneWayAndRemembersPreviousState() {
+        UUID inactiveRequestId = UUID.randomUUID();
+        PatrolAreaResponse inactive =
+                patrolAreaManagementService.changeStatus(
+                        areaId,
+                        new PatrolAreaStatusChangeRequest(
+                                PatrolAreaLifecycleStatus.INACTIVE),
+                        OWNER_ID,
+                        AuditRequestContext.requestIdOnly(
+                                inactiveRequestId));
+        PatrolAreaResponse archived =
+                patrolAreaManagementService.changeStatus(
+                        areaId,
+                        new PatrolAreaStatusChangeRequest(
+                                PatrolAreaLifecycleStatus.ARCHIVED),
+                        OWNER_ID,
+                        AuditRequestContext.requestIdOnly(
+                                UUID.randomUUID()));
+
+        assertThat(inactive.lifecycleStatus()).isEqualTo("INACTIVE");
+        assertThat(archived.lifecycleStatus()).isEqualTo("ARCHIVED");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM audit.audit_log
+                WHERE request_id = ?
+                  AND action_type = 'PATROL_AREA_UPDATED'
+                  AND before_value ->> 'lifecycleStatus' = 'ACTIVE'
+                  AND after_value ->> 'lifecycleStatus' = 'INACTIVE'
+                """,
+                Integer.class,
+                inactiveRequestId)).isOne();
+
+        assertThatThrownBy(() ->
+                patrolAreaManagementService.changeStatus(
+                        areaId,
+                        new PatrolAreaStatusChangeRequest(
+                                PatrolAreaLifecycleStatus.ACTIVE),
+                        OWNER_ID,
+                        AuditRequestContext.requestIdOnly(
+                                UUID.randomUUID())))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(
+                                        ErrorCode.PATROL_AREA_STATE_CONFLICT));
+    }
+
+    @Test
+    void rejectsPatrolAreaMutationWhileMissionUsesArea() {
+        managementService.create(
+                new MissionCreateRequest(
+                        robotId,
+                        areaId,
+                        routeId,
+                        Instant.now().plusSeconds(3600)),
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID()));
+
+        assertThatThrownBy(() -> patrolAreaManagementService.update(
+                areaId,
+                new PatrolAreaUpdateRequest(
+                        "사용 중 변경 금지",
+                        null),
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID())))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(ErrorCode.PATROL_AREA_IN_USE));
+        assertThatThrownBy(() ->
+                patrolAreaManagementService.changeStatus(
+                        areaId,
+                        new PatrolAreaStatusChangeRequest(
+                                PatrolAreaLifecycleStatus.INACTIVE),
+                        OWNER_ID,
+                        AuditRequestContext.requestIdOnly(
+                                UUID.randomUUID())))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(ErrorCode.PATROL_AREA_IN_USE));
+        assertThat(patrolCatalogQueryService.findArea(areaId).areaName())
+                .isEqualTo("Mission Area");
+        assertThat(patrolCatalogQueryService.findArea(areaId)
+                .lifecycleStatus())
+                .isEqualTo("ACTIVE");
+    }
+
+    @Test
+    void rejectsInvalidOrRouteExcludingPatrolAreaBoundary()
+            throws Exception {
+        PatrolAreaUpdateRequest invalid =
+                new PatrolAreaUpdateRequest(
+                        null,
+                        objectMapper.readTree("""
+                                {
+                                  "type": "Polygon",
+                                  "coordinates": [
+                                    [
+                                      [127.00, 37.00],
+                                      [127.02, 37.02],
+                                      [127.02, 37.00],
+                                      [127.00, 37.02],
+                                      [127.00, 37.00]
+                                    ]
+                                  ]
+                                }
+                                """));
+        assertThatThrownBy(() -> patrolAreaManagementService.update(
+                areaId,
+                invalid,
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID())))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(
+                                        ErrorCode.PATROL_AREA_GEOMETRY_INVALID));
+
+        PatrolAreaUpdateRequest excludesRoute =
+                new PatrolAreaUpdateRequest(
+                        null,
+                        objectMapper.readTree("""
+                                {
+                                  "type": "Polygon",
+                                  "coordinates": [
+                                    [
+                                      [127.00, 37.00],
+                                      [127.01, 37.00],
+                                      [127.01, 37.01],
+                                      [127.00, 37.01],
+                                      [127.00, 37.00]
+                                    ]
+                                  ]
+                                }
+                                """));
+        assertThatThrownBy(() -> patrolAreaManagementService.update(
+                areaId,
+                excludesRoute,
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID())))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(
+                                        ErrorCode
+                                                .PATROL_AREA_ROUTE_OUTSIDE_BOUNDARY));
+    }
+
+    @Test
+    void auditFailureRollsBackPatrolAreaUpdate() {
+        jdbcTemplate.execute("""
+                CREATE FUNCTION audit.reject_patrol_area_update_test()
+                RETURNS TRIGGER
+                LANGUAGE plpgsql
+                AS $$
+                BEGIN
+                    IF NEW.action_type = 'PATROL_AREA_UPDATED'
+                    THEN
+                        RAISE EXCEPTION 'forced patrol area audit failure';
+                    END IF;
+                    RETURN NEW;
+                END;
+                $$
+                """);
+        jdbcTemplate.execute("""
+                CREATE TRIGGER tr_reject_patrol_area_update_test
+                BEFORE INSERT ON audit.audit_log
+                FOR EACH ROW
+                EXECUTE FUNCTION audit.reject_patrol_area_update_test()
+                """);
+        try {
+            assertThatThrownBy(() -> patrolAreaManagementService.update(
+                    areaId,
+                    new PatrolAreaUpdateRequest(
+                            "Rollback 대상 이름",
+                            null),
+                    OWNER_ID,
+                    AuditRequestContext.requestIdOnly(
+                            UUID.randomUUID())))
+                    .isInstanceOf(DataAccessException.class);
+        } finally {
+            jdbcTemplate.execute("""
+                    DROP TRIGGER tr_reject_patrol_area_update_test
+                    ON audit.audit_log
+                    """);
+            jdbcTemplate.execute("""
+                    DROP FUNCTION audit.reject_patrol_area_update_test()
+                    """);
+        }
+
+        assertThat(patrolCatalogQueryService.findArea(areaId).areaName())
+                .isEqualTo("Mission Area");
     }
 
     @Test

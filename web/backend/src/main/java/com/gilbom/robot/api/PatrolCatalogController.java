@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -18,6 +19,8 @@ import com.gilbom.auth.AuthenticatedUserIdResolver;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaCreateRequest;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaListResponse;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaResponse;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaStatusChangeRequest;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaUpdateRequest;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolRouteCreateRequest;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolRouteListResponse;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolRouteResponse;
@@ -79,6 +82,36 @@ public class PatrolCatalogController {
             @PathVariable UUID patrolAreaId
     ) {
         return queryService.findArea(patrolAreaId);
+    }
+
+    @PatchMapping("/{patrolAreaId}")
+    @PreAuthorize("hasAuthority('MISSION_MANAGE')")
+    public PatrolAreaResponse updateArea(
+            @PathVariable UUID patrolAreaId,
+            @Valid @RequestBody PatrolAreaUpdateRequest request,
+            Authentication authentication,
+            HttpServletRequest servletRequest
+    ) {
+        return managementService.update(
+                patrolAreaId,
+                request,
+                userIdResolver.require(authentication),
+                AuditRequestContext.from(servletRequest));
+    }
+
+    @PatchMapping("/{patrolAreaId}/status")
+    @PreAuthorize("hasAuthority('MISSION_MANAGE')")
+    public PatrolAreaResponse changeAreaStatus(
+            @PathVariable UUID patrolAreaId,
+            @Valid @RequestBody PatrolAreaStatusChangeRequest request,
+            Authentication authentication,
+            HttpServletRequest servletRequest
+    ) {
+        return managementService.changeStatus(
+                patrolAreaId,
+                request,
+                userIdResolver.require(authentication),
+                AuditRequestContext.from(servletRequest));
     }
 
     @GetMapping("/{patrolAreaId}/routes")

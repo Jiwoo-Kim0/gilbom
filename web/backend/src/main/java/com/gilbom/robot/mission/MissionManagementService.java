@@ -362,33 +362,33 @@ public class MissionManagementService {
             UUID patrolAreaId,
             UUID patrolRouteId
     ) {
-        Boolean activeArea = jdbcTemplate.queryForObject("""
-                SELECT EXISTS (
-                    SELECT 1
-                    FROM robot.patrol_area
-                    WHERE patrol_area_id = ?
-                      AND lifecycle_status = 'ACTIVE'
-                )
+        String areaStatus = jdbcTemplate.query("""
+                SELECT lifecycle_status
+                FROM robot.patrol_area
+                WHERE patrol_area_id = ?
+                FOR KEY SHARE
                 """,
-                Boolean.class,
+                resultSet -> resultSet.next()
+                        ? resultSet.getString("lifecycle_status")
+                        : null,
                 patrolAreaId);
-        if (!Boolean.TRUE.equals(activeArea)) {
+        if (!"ACTIVE".equals(areaStatus)) {
             throw new BusinessException(ErrorCode.PATROL_AREA_NOT_FOUND);
         }
 
-        Boolean activeRoute = jdbcTemplate.queryForObject("""
-                SELECT EXISTS (
-                    SELECT 1
-                    FROM robot.patrol_route
-                    WHERE patrol_route_id = ?
-                      AND patrol_area_id = ?
-                      AND lifecycle_status = 'ACTIVE'
-                )
+        String routeStatus = jdbcTemplate.query("""
+                SELECT lifecycle_status
+                FROM robot.patrol_route
+                WHERE patrol_route_id = ?
+                  AND patrol_area_id = ?
+                FOR KEY SHARE
                 """,
-                Boolean.class,
+                resultSet -> resultSet.next()
+                        ? resultSet.getString("lifecycle_status")
+                        : null,
                 patrolRouteId,
                 patrolAreaId);
-        if (!Boolean.TRUE.equals(activeRoute)) {
+        if (!"ACTIVE".equals(routeStatus)) {
             throw new BusinessException(ErrorCode.PATROL_ROUTE_NOT_FOUND);
         }
     }

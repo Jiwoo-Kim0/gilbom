@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -282,6 +283,124 @@ class RobotQueryControllerTest {
     }
 
     @Test
+    void updatesPatrolAreaWithMissionManageAndCsrf() throws Exception {
+        when(patrolAreaManagementService.update(
+                eq(PATROL_AREA_ID),
+                any(),
+                eq(USER_ID),
+                any()))
+                .thenReturn(areaResponse(
+                        "변경된 순찰 구역",
+                        "ACTIVE"));
+
+        mockMvc.perform(patch(
+                        "/api/v1/patrol-areas/{patrolAreaId}",
+                        PATROL_AREA_ID)
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_MANAGE))
+                        .with(csrf().asHeader())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "areaName": " 변경된 순찰 구역 "
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath(
+                        "$.patrolAreaId",
+                        is(PATROL_AREA_ID.toString())))
+                .andExpect(jsonPath(
+                        "$.areaName",
+                        is("변경된 순찰 구역")))
+                .andExpect(jsonPath(
+                        "$.lifecycleStatus",
+                        is("ACTIVE")));
+    }
+
+    @Test
+    void changesPatrolAreaStatusWithJsonBody() throws Exception {
+        when(patrolAreaManagementService.changeStatus(
+                eq(PATROL_AREA_ID),
+                any(),
+                eq(USER_ID),
+                any()))
+                .thenReturn(areaResponse(
+                        "서울 순찰 구역 1",
+                        "INACTIVE"));
+
+        mockMvc.perform(patch(
+                        "/api/v1/patrol-areas/{patrolAreaId}/status",
+                        PATROL_AREA_ID)
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_MANAGE))
+                        .with(csrf().asHeader())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "lifecycleStatus": "INACTIVE"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath(
+                        "$.lifecycleStatus",
+                        is("INACTIVE")));
+    }
+
+    @Test
+    void patrolAreaPatchRequiresMissionManageAndCsrf()
+            throws Exception {
+        mockMvc.perform(patch(
+                        "/api/v1/patrol-areas/{patrolAreaId}",
+                        PATROL_AREA_ID)
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_VIEW))
+                        .with(csrf().asHeader())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "areaName": "변경된 순찰 구역"
+                                }
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")));
+
+        mockMvc.perform(patch(
+                        "/api/v1/patrol-areas/{patrolAreaId}/status",
+                        PATROL_AREA_ID)
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_MANAGE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "lifecycleStatus": "INACTIVE"
+                                }
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")));
+
+        verifyNoInteractions(patrolAreaManagementService);
+    }
+
+    @Test
+    void rejectsEmptyPatrolAreaPatchBeforeServiceCall()
+            throws Exception {
+        mockMvc.perform(patch(
+                        "/api/v1/patrol-areas/{patrolAreaId}",
+                        PATROL_AREA_ID)
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_MANAGE))
+                        .with(csrf().asHeader())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath(
+                        "$.code",
+                        is("COMMON_VALIDATION_FAILED")));
+
+        verifyNoInteractions(patrolAreaManagementService);
+    }
+
+    @Test
     void requiresMissionManageForPatrolAreaCreation() throws Exception {
         mockMvc.perform(post("/api/v1/patrol-areas")
                         .with(user(USER_ID.toString())
@@ -504,5 +623,32 @@ class RobotQueryControllerTest {
                 "ACTIVE",
                 Instant.parse("2026-07-29T00:00:00Z"),
                 Instant.parse("2026-07-29T00:00:00Z"));
+    }
+
+    private PatrolAreaResponse areaResponse(
+            String areaName,
+            String lifecycleStatus
+    ) throws Exception {
+        return new PatrolAreaResponse(
+                PATROL_AREA_ID,
+                "AREA-SEOUL-01",
+                areaName,
+                new com.fasterxml.jackson.databind.ObjectMapper()
+                        .readTree("""
+                                {
+                                  "type": "Polygon",
+                                  "coordinates": [
+                                    [
+                                      [127.0, 37.0],
+                                      [127.1, 37.0],
+                                      [127.1, 37.1],
+                                      [127.0, 37.0]
+                                    ]
+                                  ]
+                                }
+                                """),
+                lifecycleStatus,
+                Instant.parse("2026-07-29T00:00:00Z"),
+                Instant.parse("2026-07-29T01:00:00Z"));
     }
 }
