@@ -26,14 +26,18 @@ assert_path_contains() {
     label=$3
 
     if ! awk -v heading="  ${path}:" -v expected="$expected" '
-        $0 == heading {
+        {
+            line = $0
+            sub(/\r$/, "", line)
+        }
+        line == heading {
             in_path = 1
             next
         }
-        in_path && /^  \/api\/v1\// {
+        in_path && line ~ /^  \/api\/v1\// {
             exit
         }
-        in_path && index($0, expected) > 0 {
+        in_path && index(line, expected) > 0 {
             found = 1
         }
         END {

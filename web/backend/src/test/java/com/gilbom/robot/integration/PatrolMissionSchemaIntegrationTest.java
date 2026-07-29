@@ -22,7 +22,9 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.core.namedparam.SqlParameterSource;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -77,6 +79,7 @@ class PatrolMissionSchemaIntegrationTest {
     private static JdbcTemplate ownerJdbcTemplate;
     private static JdbcTemplate applicationJdbcTemplate;
     private static DataSource ownerDataSource;
+    private static DataSource applicationDataSource;
     private static PatrolCatalogQueryService patrolCatalogQueryService;
     private static StatisticsQueryService statisticsQueryService;
 
@@ -107,7 +110,7 @@ class PatrolMissionSchemaIntegrationTest {
                 .load()
                 .migrate();
 
-        DataSource applicationDataSource = dataSource(
+        applicationDataSource = dataSource(
                 APPLICATION_ROLE,
                 APPLICATION_PASSWORD
         );
@@ -792,6 +795,11 @@ class PatrolMissionSchemaIntegrationTest {
         assertThat(empty.items())
                 .hasSize(DefectWorkflowStatus.values().length)
                 .allMatch(item -> item.defectCount() == 0);
+
+        assertThat(statisticsQueryService.findByStatus(
+                fixtureAdminId,
+                from,
+                to)).isEqualTo(all);
     }
 
     @Test
@@ -845,6 +853,11 @@ class PatrolMissionSchemaIntegrationTest {
         assertThat(empty.items())
                 .hasSize(DefectType.values().length)
                 .allMatch(item -> item.defectCount() == 0);
+
+        assertThat(statisticsQueryService.findByDefectType(
+                fixtureAdminId,
+                from,
+                to)).isEqualTo(all);
     }
 
     @Test
@@ -940,6 +953,58 @@ class PatrolMissionSchemaIntegrationTest {
         assertThat(secondPage.items())
                 .extracting(StatisticsByAreaItem::areaCode)
                 .containsExactly("A-11");
+
+        assertThat(statisticsQueryService.findByArea(
+                fixtureAdminId,
+                from,
+                to,
+                null,
+                0,
+                20)).isEqualTo(all);
+    }
+
+    @Test
+    void actualStatisticsRepositoryQueriesHaveReviewableExecutionPlans() {
+        UUID fixtureAdminId = UUID.fromString(
+                "10000000-0000-4000-8000-000000000001");
+        Instant from = Instant.parse("2026-07-01T00:00:00Z");
+        Instant to = Instant.parse("2026-07-05T00:00:00Z");
+        CapturingNamedParameterJdbcTemplate capturingTemplate =
+                new CapturingNamedParameterJdbcTemplate(
+                        applicationDataSource);
+        StatisticsQueryService capturingService =
+                new StatisticsQueryService(
+                        new StatisticsRepository(capturingTemplate));
+
+        capturingService.findByStatus(fixtureAdminId, from, to);
+        assertActualStatisticsExplain(
+                "STATISTICS_BY_STATUS",
+                capturingTemplate.capturedQuery());
+
+        capturingService.findByDefectType(fixtureAdminId, from, to);
+        assertActualStatisticsExplain(
+                "STATISTICS_BY_DEFECT_TYPE",
+                capturingTemplate.capturedQuery());
+
+        capturingService.findByArea(
+                fixtureAdminId,
+                from,
+                to,
+                null,
+                0,
+                20);
+        assertActualStatisticsExplain(
+                "STATISTICS_BY_AREA",
+                capturingTemplate.capturedQuery());
+
+        capturingService.findByPeriod(
+                fixtureAdminId,
+                from,
+                to,
+                "DAY");
+        assertActualStatisticsExplain(
+                "STATISTICS_BY_PERIOD",
+                capturingTemplate.capturedQuery());
     }
 
     @Test
@@ -1282,6 +1347,25 @@ class PatrolMissionSchemaIntegrationTest {
                         String.class));
     }
 
+    private static void assertActualStatisticsExplain(
+            String label,
+            CapturedQuery query
+    ) {
+        assertThat(query).isNotNull();
+        String plan = String.join(
+                System.lineSeparator(),
+                new NamedParameterJdbcTemplate(applicationDataSource)
+                        .queryForList(
+                                "EXPLAIN (ANALYZE, BUFFERS) "
+                                        + query.sql(),
+                                query.parameters(),
+                                String.class));
+        assertThat(plan)
+                .contains("Planning Time")
+                .contains("Execution Time");
+        System.out.println(label + "_ACTUAL_QUERY_EXPLAIN\n" + plan);
+    }
+
     private static String explainWithSeqScanDisabled(String query)
             throws Exception {
         try (Connection connection = ownerDataSource.getConnection();
@@ -1575,5 +1659,35 @@ class PatrolMissionSchemaIntegrationTest {
                 username,
                 password
         );
+    }
+
+    private record CapturedQuery(
+            String sql,
+            SqlParameterSource parameters
+    ) {
+    }
+
+    private static final class CapturingNamedParameterJdbcTemplate
+            extends NamedParameterJdbcTemplate {
+
+        private CapturedQuery capturedQuery;
+
+        private CapturingNamedParameterJdbcTemplate(DataSource dataSource) {
+            super(dataSource);
+        }
+
+        @Override
+        public <T> List<T> query(
+                String sql,
+                SqlParameterSource parameterSource,
+                RowMapper<T> rowMapper
+        ) {
+            capturedQuery = new CapturedQuery(sql, parameterSource);
+            return super.query(sql, parameterSource, rowMapper);
+        }
+
+        private CapturedQuery capturedQuery() {
+            return capturedQuery;
+        }
     }
 }

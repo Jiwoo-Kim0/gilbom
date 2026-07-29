@@ -196,8 +196,16 @@ Mission의 `result_incident_count`는 기기 결과 요약이므로 Incident 통
 - `defect_id`는 권한 범위와 distinct 집계를 위해 key에 포함하고,
   `defect_type`, `workflow_status`, 필요 Area 칼럼은 covering column으로 둔다.
 - 작은 Fixture의 자연 `Seq Scan`은 정상으로 인정한다. 통합 테스트는 자연
-  `EXPLAIN (ANALYZE, BUFFERS)`를 기록하고 `enable_seqscan=off` 환경에서 각
-  인덱스가 대표 Query를 실제로 서비스할 수 있는지 별도로 검증한다.
+  `EXPLAIN (ANALYZE, BUFFERS)`를 기록한다. 이때 Repository가 실제 실행한 네 SQL과
+  바인딩 값을 캡처해 축약한 대표 Query가 아닌 API Query 자체의 계획도 검증한다.
+  `enable_seqscan=off` 환경에서는 각 인덱스가 대표 Query를 실제로 서비스할 수
+  있는지 별도로 확인한다.
 - 강제 계획은 인덱스 호환성의 증거일 뿐 운영 Planner 선택이나 처리량을 보장하지
   않는다. 최종 성능 평가는 실제 Cardinality와 분포를 가진 스테이징 데이터에서
   자연 실행계획과 p95 응답시간을 다시 측정한다.
+
+## 8. 최종 완료 판정
+
+11개 통계 완료 기준의 구현·테스트 근거와 통계 범위/Jetson 후속 범위의 분리 판정은
+[day5-statistics-completion-check.md](day5-statistics-completion-check.md)에
+기록한다.
