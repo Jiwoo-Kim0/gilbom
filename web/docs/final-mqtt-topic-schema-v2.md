@@ -36,6 +36,8 @@ v2에서는 실제 기기가 안정적으로 제공할 수 없는 값과 중복 
 - `position.heading_deg`는 이동 중 GPS RMC Course Over Ground가 유효할 때만 관제용으로 제공한다.
 - Battery Event는 배터리 전이 이력이 필요한 경우에만 사용하는 선택 Topic이다.
 - 짧은 장애물 정지는 State로만 알리고, 재확인 후에도 지속된 정지만 Safety Event로 저장한다.
+- 서버는 Topic별 기준시각과 TTL을 검사해 만료되거나 허용 오차보다 미래인 수신
+  메시지를 DB 처리 전에 거부한다.
 - 위 제거 필드 외에는 v1의 Topic 이름, JSON 멤버 이름과 중첩 구조를 변경하지 않는다.
 - 실제 MQTT Payload에는 설명용 주석을 넣지 않는다. 이 문서의 모든 `json` 블록은 주석 없는 JSON 예시다.
 
@@ -182,6 +184,18 @@ CA 파일은 로봇별 업무 데이터가 아니라 배포 환경 설정으로 
 - Payload의 `mqtt_id`는 Topic의 `{mqtt_id}`와 같아야 한다.
 - Broker ACL은 인증된 MQTT username과 Topic의 `{mqtt_id}`가 같을 때만 발행을 허용한다.
 - 지원하지 않는 `schema_version`은 처리하지 않는다.
+- Telemetry는 `sampled_at`부터 서버 수신까지 60초 미만이어야 한다.
+- State는 `updated_at`부터 서버 수신까지 300초 미만이어야 한다.
+- Event의 `ttl_sec`는 60~300초이며, `occurred_at + ttl_sec`와 서버 수신시각이
+  같거나 서버 수신시각이 더 늦으면 만료로 거부한다.
+- Command Result는 최종 상태면 `completed_at`, `ACCEPTED`면 `received_at`부터
+  서버 수신까지 60초 미만이어야 하고 원 Command의 `expires_at`도 지나지 않아야 한다.
+- 모든 TTL 대상 기준시각은 서버 수신시각보다 최대 5초까지만 미래일 수 있다.
+- TTL 또는 미래 시각 검증에 실패하면 History·Current State·Mission·Defect·
+  Command Result를 저장·변경하지 않고 `MQTT_MESSAGE_EXPIRED` 또는
+  `MQTT_TIMESTAMP_IN_FUTURE`로 거부한다.
+- Presence는 Retain·LWT Payload에 공통 사건시각이 없으므로 TTL 대상에서 제외하고
+  `boot_id`·연결 상태·Replay 규칙으로 검증한다.
 - State는 기존 `updated_at`보다 새로운 경우에만 현재 상태를 갱신한다.
 - Telemetry는 기존 `sampled_at`보다 오래된 표본이 현재값을 덮어쓰지 않게 한다.
 - Event는 `event_id`로 멱등 처리한다.
@@ -604,6 +618,7 @@ Incident·Battery·Safety·Mission Event는 다음 공통 멤버를 사용한다
   "source_component": "ai",
   "occurred_at": "2026-07-26T05:15:34.231Z",
   "sent_at": "2026-07-26T05:15:35.002Z",
+  "ttl_sec": 300,
   "mission_id": "MIS-20260726-001"
 }
 ```
@@ -619,9 +634,12 @@ Incident·Battery·Safety·Mission Event는 다음 공통 멤버를 사용한다
 | `source_component` | Enum String | O | `ai`, `power`, `safety`, `mission` |
 | `occurred_at` | Date-time String | O | 최초 사건 발생 시각, 재전송해도 유지 |
 | `sent_at` | Date-time String | O | 현재 MQTT 전송 시각 |
+| `ttl_sec` | Integer | O | `60~300`, `occurred_at` 기준 유효시간 |
 | `mission_id` | String 또는 Null | O | 관련 미션이 없으면 `null` |
 
-Event를 재전송할 때 `event_id`와 `occurred_at`은 바꾸지 않는다.
+Event를 재전송할 때 `event_id`, `boot_id`, `seq`, `occurred_at`, `ttl_sec`는
+바꾸지 않는다. `sent_at`만 현재 재전송 시각으로 갱신할 수 있으며 재전송으로
+만료시각을 연장하지 않는다.
 
 ---
 
@@ -654,6 +672,7 @@ tbs/v2/robots/{mqtt_id}/events/incident
   "source_component": "ai",
   "occurred_at": "2026-07-26T05:15:34.231Z",
   "sent_at": "2026-07-26T05:15:35.002Z",
+  "ttl_sec": 300,
   "mission_id": "MIS-20260726-001",
   "location": {
     "valid": true,
@@ -780,6 +799,7 @@ tbs/v2/robots/{mqtt_id}/events/battery
   "source_component": "power",
   "occurred_at": "2026-07-26T05:18:10.000Z",
   "sent_at": "2026-07-26T05:18:10.100Z",
+  "ttl_sec": 300,
   "mission_id": "MIS-20260726-001",
   "previous_state": "NORMAL",
   "battery": {
@@ -880,6 +900,7 @@ tbs/v2/robots/{mqtt_id}/events/safety
   "source_component": "safety",
   "occurred_at": "2026-07-26T05:19:00.410Z",
   "sent_at": "2026-07-26T05:19:02.450Z",
+  "ttl_sec": 300,
   "mission_id": "MIS-20260726-001",
   "reason_code": "OBSTACLE",
   "measurement": {
@@ -906,6 +927,7 @@ tbs/v2/robots/{mqtt_id}/events/safety
   "source_component": "safety",
   "occurred_at": "2026-07-26T05:19:08.120Z",
   "sent_at": "2026-07-26T05:19:08.160Z",
+  "ttl_sec": 300,
   "mission_id": "MIS-20260726-001",
   "reason_code": "OBSTACLE",
   "measurement": {
@@ -986,6 +1008,7 @@ tbs/v2/robots/{mqtt_id}/events/mission
   "source_component": "mission",
   "occurred_at": "2026-07-26T06:20:00.000Z",
   "sent_at": "2026-07-26T06:20:00.120Z",
+  "ttl_sec": 300,
   "mission_id": "MIS-20260726-001",
   "result": {
     "duration_sec": 4182,
@@ -1009,6 +1032,7 @@ tbs/v2/robots/{mqtt_id}/events/mission
   "source_component": "mission",
   "occurred_at": "2026-07-26T05:30:00.000Z",
   "sent_at": "2026-07-26T05:30:00.050Z",
+  "ttl_sec": 300,
   "mission_id": "MIS-20260726-001"
 }
 ```
@@ -1288,10 +1312,13 @@ MVP에서 Receipt를 사용하지 않으면 Event QoS 1 PUBACK를 기준으로 �
 2. v2 발행자는 Topic을 `tbs/v2/...`로 바꾸고 `schema_version`을 문자열 `"2.0"`으로 보낸다.
 3. Presence와 State만 Retain한다.
 4. Telemetry는 최신 표본만 발행하며 재연결 후 과거 표본을 보내지 않는다.
-5. Event는 `event_id`를 유지하여 QoS 1 재전송을 멱등 처리한다.
+5. Event는 `event_id`와 최초 `occurred_at`, `ttl_sec`를 유지하여 QoS 1
+   재전송을 멱등 처리하며 만료시각을 연장하지 않는다.
 6. State는 현재값, Telemetry는 측정값, Event는 저장할 사건이라는 역할을 섞지 않는다.
 7. GPS가 무효하면 `valid=false`, `lat=null`, `lon=null`로 보낸다.
 8. GPS가 정지·저속 상태이거나 Course를 제공하지 않으면 `heading_deg=null`로 보낸다.
 9. 미션 진행률·거리·ETA는 기기 MQTT Payload에 넣지 않는다.
 10. 실제 안전 정지는 로봇 내부에서 먼저 수행하고 MQTT는 상태와 확정 사건을 보고한다.
 11. 명령에는 Retain을 사용하지 않고 TTL과 MQTT 5 Message Expiry를 적용한다.
+12. 수신 TTL은 Telemetry 60초, State 300초, Event 60~300초, Command Result
+    60초이며 미래 기준시각은 최대 5초까지만 허용한다.

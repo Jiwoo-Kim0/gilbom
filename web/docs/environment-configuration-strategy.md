@@ -193,6 +193,10 @@ staging/prod에서는 `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`를 애플리�
 | `GILBOM_MQTT_KEYSTORE_SECRET_ID` |  | client private key Secret 참조 |
 | `GILBOM_MQTT_CONNECT_TIMEOUT` |  | 유한 timeout |
 | `GILBOM_MQTT_COMMAND_TTL` |  | operation별 상한 적용 |
+| `MQTT_TELEMETRY_MAX_DELAY` |  | 기본 `60s`, 오래된 Telemetry 수신 차단 |
+| `MQTT_STATE_MAX_DELAY` |  | 기본 `300s`, 단절 후 State 복원 허용 범위 |
+| `MQTT_COMMAND_RESULT_MAX_DELAY` |  | 기본 `60s`, Result 기준시각 허용 지연 |
+| `MQTT_FUTURE_TIMESTAMP_TOLERANCE` |  | 기본 `5s`, 기기 시계 미래 오차 상한 |
 
 비밀번호와 private key는 property dump, health, actuator env, 로그에 노출하지 않는다.
 

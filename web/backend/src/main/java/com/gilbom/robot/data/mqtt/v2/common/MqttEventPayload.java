@@ -17,5 +17,7 @@ public interface MqttEventPayload extends RobotIdentifiedPayload {
 
     Instant sentAt();
 
+    Integer ttlSec();
+
     String missionId();
 }

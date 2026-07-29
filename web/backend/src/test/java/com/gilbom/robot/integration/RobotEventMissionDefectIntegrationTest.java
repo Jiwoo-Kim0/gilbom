@@ -436,6 +436,7 @@ class RobotEventMissionDefectIntegrationTest {
                 EventSource.MISSION,
                 BASE_TIME.plusSeconds(sequence - 1),
                 BASE_TIME.plusSeconds(sequence),
+                300,
                 "MIS-20260728-001",
                 result);
     }
@@ -459,6 +460,7 @@ class RobotEventMissionDefectIntegrationTest {
                 EventSource.AI,
                 BASE_TIME.plusSeconds(sequence - 1),
                 BASE_TIME.plusSeconds(sequence),
+                300,
                 "MIS-20260728-001",
                 new IncidentEventPayload.Location(
                         valid,

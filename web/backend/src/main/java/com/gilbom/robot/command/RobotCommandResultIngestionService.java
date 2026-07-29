@@ -14,6 +14,8 @@ import org.springframework.transaction.annotation.Transactional;
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
 import com.gilbom.robot.data.mqtt.v2.inbound.CommandResultPayload;
+import com.gilbom.robot.mqtt.parser.MqttInboundFreshnessGuard;
+import com.gilbom.robot.mqtt.topic.MqttTopicType;
 import com.gilbom.robot.realtime.RobotRealtimeEvent;
 
 @Service
@@ -21,13 +23,16 @@ public class RobotCommandResultIngestionService {
 
     private final JdbcTemplate jdbcTemplate;
     private final ApplicationEventPublisher eventPublisher;
+    private final MqttInboundFreshnessGuard freshnessGuard;
 
     public RobotCommandResultIngestionService(
             JdbcTemplate jdbcTemplate,
-            ApplicationEventPublisher eventPublisher
+            ApplicationEventPublisher eventPublisher,
+            MqttInboundFreshnessGuard freshnessGuard
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.eventPublisher = eventPublisher;
+        this.freshnessGuard = freshnessGuard;
     }
 
     @Transactional
@@ -39,6 +44,10 @@ public class RobotCommandResultIngestionService {
         CommandTarget target = lockCommand(
                 payload.commandId(),
                 payload.mqttId());
+        freshnessGuard.validateExpiry(
+                MqttTopicType.COMMAND_RESULT,
+                target.expiresAt(),
+                serverReceivedAt);
 
         int inserted = jdbcTemplate.update("""
                 INSERT INTO robot.robot_command_result (
@@ -91,16 +100,11 @@ public class RobotCommandResultIngestionService {
             return new IngestionResult(false, false, target.status());
         }
 
-        boolean commandExpired = !target.status().isTerminal()
-                && !serverReceivedAt.isBefore(target.expiresAt());
-        RobotCommandStatus nextStatus = commandExpired
-                ? RobotCommandStatus.EXPIRED
-                : nextStatus(target.status(), payload.status());
+        RobotCommandStatus nextStatus = nextStatus(
+                target.status(),
+                payload.status());
         boolean changed = nextStatus != target.status();
         if (changed) {
-            String errorCode = commandExpired
-                    ? "COMMAND_TTL_EXPIRED"
-                    : payload.reasonCode();
             int updated = jdbcTemplate.update("""
                     UPDATE robot.robot_command
                     SET command_status = ?,
@@ -128,7 +132,7 @@ public class RobotCommandResultIngestionService {
                     nextStatus.name(),
                     utc(serverReceivedAt),
                     nextStatus.name(),
-                    errorCode,
+                    payload.reasonCode(),
                     utc(serverReceivedAt),
                     payload.commandId(),
                     target.status().name());

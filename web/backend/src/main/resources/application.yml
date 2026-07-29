@@ -156,6 +156,12 @@ mqtt:
   qos: ${MQTT_QOS:1}
   # Full payload logging is for isolated local communication tests only.
   log-payload: ${MQTT_LOG_PAYLOAD:false}
+  inbound-freshness:
+    # Topic별 기준시각부터 서버 수신까지 허용하는 최대 지연이다.
+    telemetry-max-delay: ${MQTT_TELEMETRY_MAX_DELAY:60s}
+    state-max-delay: ${MQTT_STATE_MAX_DELAY:300s}
+    command-result-max-delay: ${MQTT_COMMAND_RESULT_MAX_DELAY:60s}
+    future-tolerance: ${MQTT_FUTURE_TIMESTAMP_TOLERANCE:5s}
   credential-provisioning:
     # The URI returned to a robot may differ from the backend container's broker URI.
     public-broker-uri: ${MQTT_PUBLIC_BROKER_URI:${MQTT_BROKER:ssl://localhost:8883}}

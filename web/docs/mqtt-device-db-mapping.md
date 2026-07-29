@@ -559,6 +559,7 @@ Incident, Battery, Safety, Mission은 다음 공통 필드를 가진다.
 | `source_component` | `source_component` | `ai`, `power`, `safety`, `mission` |
 | `occurred_at` | `occurred_at` | 실제 사건 시각, 재전송 시 유지 |
 | `sent_at` | `sent_at` | 재전송 시 갱신 가능 |
+| `ttl_sec` | `raw_payload` | 60~300초, `occurred_at` 기준 DB 처리 전 만료 검증 |
 | 서버 수신 시각 | `received_at`, `last_received_at` | 서버가 생성 |
 | `mission_id` | 코드 조회 후 `mission_id` | 임무가 없으면 `null` |
 | 전체 JSON | `raw_payload` | 민감정보 제외 |
@@ -748,6 +749,23 @@ topic write tbs/v1/robots/+/ingest/receipt
 - Commands Request는 Retain을 절대 사용하지 않는다.
 - `expires_at`과 MQTT 5 Message Expiry를 함께 적용한다.
 - `command_id` 중복 수신 시 재실행하지 않는다.
+
+### 12.4 수신 메시지 TTL과 미래 시각
+
+| Topic | 기준시각 | 최대 허용 지연 | 미래 허용 오차 | 만료 처리 |
+|---|---|---:|---:|---|
+| Telemetry | `sampled_at` | 60초 | 5초 | History·Current State 처리 전 거부 |
+| State | `updated_at` | 300초 | 5초 | Current State·History 처리 전 거부 |
+| Event | `occurred_at` | Payload `ttl_sec` 60~300초 | 5초 | Event·Mission·Defect 처리 전 거부 |
+| Command Result | 최종 `completed_at`, 그 외 `received_at` | 60초 | 5초 | Result 저장·Command 변경 전 거부 |
+
+Command Result는 위 시간 검증과 별도로 원 Command의 `expires_at`을 넘으면
+`MQTT_MESSAGE_EXPIRED`로 거부한다. 만료 또는 미래 시각 거부는
+`gilbom.mqtt.inbound.rejected` Counter에 `topic`, `reason`의 제한된 Tag만 남기고,
+Payload·식별자·시각 원문은 Metric Tag에 넣지 않는다.
+
+Presence는 Retained ONLINE과 Broker LWT OFFLINE에 공통 기준시각이 없으므로 이
+TTL 표에서 제외한다. 대신 Boot Session, 현재 연결 상태와 Replay 규칙으로 보호한다.
 - 로봇과 백엔드 시간은 NTP로 동기화한다.
 - MQTT Password와 API Key를 Payload, 로그, `raw_payload`, 감사 로그에 넣지 않는다.
 - `integration.mqtt_ingest_log.raw_payload`에는 업무 JSON만 저장하고 인증 헤더·Credential은 저장하지 않는다.

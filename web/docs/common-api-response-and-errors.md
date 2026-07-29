@@ -132,6 +132,8 @@ HTTP 상태와 응답 형식은 다음 원칙을 따른다.
 | `REPORT_NOT_FOUND` | 404 | 보고서 없음 |
 | `IMAGE_NOT_FOUND` | 404 | 이미지 없음 |
 | `COMMAND_STATE_CONFLICT` | 409 | 현재 명령·로봇 상태와 요청 충돌 |
+| `MQTT_MESSAGE_EXPIRED` | 422 | Topic별 기준시각과 TTL을 초과한 수신 메시지 |
+| `MQTT_TIMESTAMP_IN_FUTURE` | 422 | 기준시각이 서버 수신시각보다 허용 오차 이상 미래임 |
 | `REPORT_STATE_CONFLICT` | 409 | 보고서 상태 전이 또는 버전 경합 |
 | `IMAGE_TOO_LARGE` | 413 | 이미지 크기 상한 초과 |
 | `IMAGE_UNSUPPORTED_MEDIA_TYPE` | 415 | Content-Type은 유효하지만 지원하지 않는 이미지 형식 |

@@ -118,6 +118,24 @@ class MqttInboundMessageDispatcherTest {
                 verify(handler, never()).handle(any()));
     }
 
+    @Test
+    void rejectsExpiredMessageWithoutCallingAHandler() {
+        MqttMessageParser parser = mock(MqttMessageParser.class);
+        List<MqttTopicMessageHandler<?>> handlers = inboundHandlers();
+        MqttInboundMessage inboundMessage = inboundMessage();
+        when(parser.parse(inboundMessage)).thenThrow(
+                new BusinessException(ErrorCode.MQTT_MESSAGE_EXPIRED)
+        );
+        MqttInboundMessageDispatcher dispatcher =
+                new MqttInboundMessageDispatcher(parser, handlers);
+
+        assertThatNoException().isThrownBy(() ->
+                dispatcher.dispatch(inboundMessage));
+
+        handlers.forEach(handler ->
+                verify(handler, never()).handle(any()));
+    }
+
     private static List<MqttTopicMessageHandler<?>> inboundHandlers() {
         List<MqttTopicMessageHandler<?>> handlers = new ArrayList<>();
         Arrays.stream(MqttTopicType.values())

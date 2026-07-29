@@ -40,11 +40,13 @@ public class MqttMessageParser {
     private final MqttTopicParser topicParser;
     private final ObjectMapper objectMapper;
     private final Validator validator;
+    private final MqttInboundFreshnessGuard freshnessGuard;
 
     public MqttMessageParser(
             MqttTopicParser topicParser,
             ObjectMapper objectMapper,
-            Validator validator
+            Validator validator,
+            MqttInboundFreshnessGuard freshnessGuard
     ) {
         this.topicParser = topicParser;
         this.objectMapper = objectMapper
@@ -53,6 +55,7 @@ public class MqttMessageParser {
                 .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.validator = validator;
+        this.freshnessGuard = freshnessGuard;
     }
 
     public ParsedMqttMessage parse(MqttInboundMessage inboundMessage) {
@@ -64,6 +67,10 @@ public class MqttMessageParser {
         validateSchemaVersion(payload);
         validatePayload(payload);
         validateMqttId(topic, payload);
+        freshnessGuard.validate(
+                topic.type(),
+                payload,
+                inboundMessage.receivedAt());
 
         return new ParsedMqttMessage(
                 topic,

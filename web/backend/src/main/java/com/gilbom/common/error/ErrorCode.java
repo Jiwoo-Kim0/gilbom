@@ -113,6 +113,14 @@ public enum ErrorCode {
             HttpStatus.UNPROCESSABLE_ENTITY,
             "MQTT QoS가 Topic 계약과 일치하지 않습니다."
     ),
+    MQTT_MESSAGE_EXPIRED(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "MQTT 메시지의 유효시간이 만료되었습니다."
+    ),
+    MQTT_TIMESTAMP_IN_FUTURE(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "MQTT 메시지의 기준시각이 허용된 미래 오차를 초과했습니다."
+    ),
 
     COMMON_RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "요청 한도를 초과했습니다."),
 

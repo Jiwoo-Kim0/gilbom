@@ -7,6 +7,8 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -28,6 +30,7 @@ public record IncidentEventPayload(
         @NotNull EventSource sourceComponent,
         @NotNull Instant occurredAt,
         @NotNull Instant sentAt,
+        @NotNull @Positive @Min(60) @Max(300) Integer ttlSec,
         String missionId,
         @NotNull @Valid Location location,
         @NotNull @Valid Incident incident,

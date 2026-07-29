@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -53,8 +54,12 @@ import com.gilbom.robot.data.mqtt.v2.common.RobotStateReason;
 import com.gilbom.robot.data.mqtt.v2.inbound.CommandResultPayload;
 import com.gilbom.robot.data.mqtt.v2.outbound.CommandRequestPayload;
 import com.gilbom.robot.mqtt.client.MqttV2Publisher;
+import com.gilbom.robot.mqtt.config.MqttInboundFreshnessProperties;
+import com.gilbom.robot.mqtt.parser.MqttInboundFreshnessGuard;
 import com.gilbom.robot.realtime.RobotRealtimeEventListener;
 import com.gilbom.robot.realtime.RobotSseService;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(
@@ -277,7 +282,7 @@ class RobotCommandLifecycleIntegrationTest {
     }
 
     @Test
-    void expiresPendingCommandAndStoresLateResultWithoutRollingBackStatus() {
+    void rejectsLateResultAfterTimeoutWithoutStoringIt() {
         RobotCommandResponse command = create(
                 emergencyStop(),
                 UUID.randomUUID(),
@@ -286,48 +291,50 @@ class RobotCommandLifecycleIntegrationTest {
 
         assertThat(timeoutService.expireCommands(detectedAt))
                 .isGreaterThanOrEqualTo(1);
-        var late = resultService.ingest(
-                result(
-                        UUID.randomUUID(),
-                        command.commandId(),
-                        CommandResultPayload.Status.COMPLETED,
-                        command.issuedAt(),
-                        command.expiresAt().plusSeconds(2)),
-                "{\"status\":\"COMPLETED\"}",
-                command.expiresAt().plusSeconds(3));
-
-        assertThat(late.stored()).isTrue();
-        assertThat(late.commandStatus())
-                .isEqualTo(RobotCommandStatus.EXPIRED);
-        assertThat(late.commandStatusChanged()).isFalse();
+        assertThatThrownBy(() -> resultService.ingest(
+                        result(
+                                UUID.randomUUID(),
+                                command.commandId(),
+                                CommandResultPayload.Status.COMPLETED,
+                                command.issuedAt(),
+                                command.expiresAt().plusSeconds(2)),
+                        "{\"status\":\"COMPLETED\"}",
+                        command.expiresAt().plusSeconds(3)))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(
+                                        ErrorCode.MQTT_MESSAGE_EXPIRED));
         assertThat(commandStatus(command.commandId()))
                 .isEqualTo("EXPIRED");
-        assertThat(resultCount(command.commandId())).isEqualTo(1);
+        assertThat(resultCount(command.commandId())).isZero();
     }
 
     @Test
-    void lateResultCannotCompleteCommandBeforeTimeoutScannerRuns() {
+    void rejectsLateResultBeforeTimeoutScannerWithoutSideEffects() {
         RobotCommandResponse command = create(
                 emergencyStop(),
                 UUID.randomUUID(),
                 UUID.randomUUID());
 
-        var late = resultService.ingest(
-                result(
-                        UUID.randomUUID(),
-                        command.commandId(),
-                        CommandResultPayload.Status.COMPLETED,
-                        command.issuedAt(),
-                        command.expiresAt().plusSeconds(1)),
-                "{\"status\":\"COMPLETED\"}",
-                command.expiresAt().plusSeconds(2));
+        assertThatThrownBy(() -> resultService.ingest(
+                        result(
+                                UUID.randomUUID(),
+                                command.commandId(),
+                                CommandResultPayload.Status.COMPLETED,
+                                command.issuedAt(),
+                                command.expiresAt().plusSeconds(1)),
+                        "{\"status\":\"COMPLETED\"}",
+                        command.expiresAt().plusSeconds(2)))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(
+                                        ErrorCode.MQTT_MESSAGE_EXPIRED));
 
-        assertThat(late.stored()).isTrue();
-        assertThat(late.commandStatusChanged()).isTrue();
-        assertThat(late.commandStatus())
-                .isEqualTo(RobotCommandStatus.EXPIRED);
         assertThat(commandStatus(command.commandId()))
-                .isEqualTo("EXPIRED");
+                .isEqualTo("SENT");
+        assertThat(resultCount(command.commandId())).isZero();
         timeoutService.expireCommands(command.expiresAt().plusSeconds(3));
         assertThat(commandStatus(command.commandId()))
                 .isEqualTo("EXPIRED");
@@ -698,5 +705,12 @@ class RobotCommandLifecycleIntegrationTest {
             RobotRealtimeEventListener.class
     })
     static class TestApplication {
+
+        @Bean
+        MqttInboundFreshnessGuard mqttInboundFreshnessGuard() {
+            return new MqttInboundFreshnessGuard(
+                    new MqttInboundFreshnessProperties(),
+                    new SimpleMeterRegistry());
+        }
     }
 }
