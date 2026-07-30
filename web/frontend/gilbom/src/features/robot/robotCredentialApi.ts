@@ -3,7 +3,7 @@ import { apiJson, jsonBody } from '../../shared/api/apiClient'
 export type IssuedMqttCredential = {
   credentialId: string
   credentialType: string
-  connection: {
+  mqtt: {
     brokerUri: string
     username: string
     password: string

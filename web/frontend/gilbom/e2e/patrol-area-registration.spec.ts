@@ -112,6 +112,10 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
       mapOptions: [] as FakeMapInteractionOptions[],
       setZoomCallCount: 0,
       fitBoundsCallCount: 0,
+      fittedBounds: [] as Array<[
+        southWest: [longitude: number, latitude: number],
+        northEast: [longitude: number, latitude: number],
+      ]>,
     }
 
     class FakeLatLng {
@@ -136,6 +140,13 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
       ) {}
     }
 
+    class FakeLatLngBounds {
+      constructor(
+        readonly southWest: FakeLatLng,
+        readonly northEast: FakeLatLng,
+      ) {}
+    }
+
     class FakeMap {
       readonly element: HTMLElement
       clickIndex = 0
@@ -155,8 +166,12 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
         previewState.setZoomCallCount += 1
       }
 
-      fitBounds() {
+      fitBounds(bounds: FakeLatLngBounds) {
         previewState.fitBoundsCallCount += 1
+        previewState.fittedBounds.push([
+          [bounds.southWest.lng(), bounds.southWest.lat()],
+          [bounds.northEast.lng(), bounds.northEast.lat()],
+        ])
       }
 
       getProjection() {
@@ -202,7 +217,7 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
       value: {
         maps: {
           LatLng: FakeLatLng,
-          LatLngBounds: class FakeLatLngBounds {},
+          LatLngBounds: FakeLatLngBounds,
           Map: FakeMap,
           Polygon: FakeOverlay,
           Polyline: FakeOverlay,
@@ -327,10 +342,12 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
       await fulfillJson(route, {
         credentialId: '83000000-0000-4000-8000-000000000008',
         credentialType: 'PASSWORD',
-        connection: {
+        mqtt: {
           brokerUri: 'mqtts://127.0.0.1:8883',
           username: 'robot-provisioning-e2e',
-          password: 'one-time-password',
+          password: credentialIdempotencyKeys.length >= 3
+            ? 'rotated-password'
+            : 'one-time-password',
           clientId: 'robot-provisioning-e2e',
         },
         expiresAt: null,
@@ -366,8 +383,8 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
           mqttId: 'robot-patrol-area-e2e',
           robotName: '순찰 구역 검증 로봇',
           connectivityStatus: 'ONLINE',
-          latitude: 36.1074,
-          longitude: 128.4164,
+          latitude: 37.5013,
+          longitude: 127.0396,
           headingDeg: 90,
           missionStatus: null,
           observedAt: '2026-07-30T12:00:00Z',
@@ -662,6 +679,21 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
   )
   await page.getByRole('button', { name: '확인 후 닫기' }).click()
 
+  await page.getByRole('button', {
+    name: '활성화 대기 로봇 Credential 회전',
+  }).click()
+  await expect(
+    page.getByRole('dialog', { name: 'Robot Credential 회전' }),
+  ).toBeVisible()
+  await page.getByRole('button', {
+    name: 'Credential 회전',
+    exact: true,
+  }).click()
+  await expect(page.getByText('rotated-password')).toBeVisible()
+  expect(credentialIdempotencyKeys).toHaveLength(3)
+  expect(credentialIdempotencyKeys[2]).not.toBe(credentialIdempotencyKeys[1])
+  await page.getByRole('button', { name: '확인 후 닫기' }).click()
+
   await page.locator('#mission-create-robot').selectOption(ROBOT_ID)
   await expect(
     page.locator(`#mission-create-robot option[value="${BUSY_ROBOT_ID}"]`),
@@ -671,16 +703,34 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
   await expect(selectedRobotMarker).toHaveAttribute('data-mission-status', '')
   await expect(selectedRobotMarker.locator('circle')).toHaveAttribute(
     'cx',
-    '140',
+    '-137540',
   )
   await expect(selectedRobotMarker.locator('circle')).toHaveAttribute(
     'cy',
-    '160',
+    '-139230',
   )
   await expect(areaPreview).toContainText('임무 미수행')
   await expect(areaPreview).toContainText(
-    '위도 36.1074000 · 경도 128.4164000',
+    '위도 37.5013000 · 경도 127.0396000',
   )
+  await expect.poll(() => page.evaluate(() => {
+    const state = (
+      window as typeof window & {
+        __patrolAreaPreviewState: {
+          fittedBounds: Array<[
+            [longitude: number, latitude: number],
+            [longitude: number, latitude: number],
+          ]>
+        }
+      }
+    ).__patrolAreaPreviewState
+    return state.fittedBounds.at(-1)?.map((position) => (
+      position.map((coordinate) => Number(coordinate.toFixed(7)))
+    ))
+  })).toEqual([
+    [128.416, 36.107],
+    [128.417, 36.108],
+  ])
   await expect(page.getByRole('button', { name: '임무 생성' })).toBeEnabled()
   await page.getByRole('button', { name: '임무 생성' }).click()
 

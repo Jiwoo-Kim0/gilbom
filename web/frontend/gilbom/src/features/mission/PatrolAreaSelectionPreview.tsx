@@ -201,18 +201,17 @@ function PatrolAreaNaverPreview({
       maps.Event.addListener(map, 'size_changed', scheduleProjection),
     )
 
-    const robotPoint = robotCoordinate(robot)
-    const visiblePoints = [
-      ...boundaryPoints,
-      ...(robotPoint === null ? [] : [robotPoint]),
-    ]
-    if (visiblePoints.length > 1) {
+    if (boundaryPoints.length > 1) {
       const longitudeDelta = Math.max(
-        ...visiblePoints.map(([longitude]) => Math.abs(longitude - center[0])),
+        ...boundaryPoints.map(
+          ([longitude]) => Math.abs(longitude - center[0]),
+        ),
         0.0005,
       )
       const latitudeDelta = Math.max(
-        ...visiblePoints.map(([, latitude]) => Math.abs(latitude - center[1])),
+        ...boundaryPoints.map(
+          ([, latitude]) => Math.abs(latitude - center[1]),
+        ),
         0.0005,
       )
       map.fitBounds(new maps.LatLngBounds(
@@ -345,16 +344,10 @@ function PatrolAreaFallbackPreview({
   const robotPoint = robotCoordinate(robot)
   const maximumLongitudeDelta = Math.max(
     ...points.map(([longitude]) => Math.abs(longitude - center[0])),
-    ...(robotPoint === null
-      ? []
-      : [Math.abs(robotPoint[0] - center[0])]),
     0.0005,
   )
   const maximumLatitudeDelta = Math.max(
     ...points.map(([, latitude]) => Math.abs(latitude - center[1])),
-    ...(robotPoint === null
-      ? []
-      : [Math.abs(robotPoint[1] - center[1])]),
     0.0005,
   )
   const drawableHalfWidth = FALLBACK_WIDTH / 2 - FALLBACK_PADDING

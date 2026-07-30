@@ -694,26 +694,38 @@ export function MissionManagePage() {
             </div>
           ) : null}
           <form className="mission-create-form" onSubmit={handleCreate}>
-            <label className="admin-form-field" htmlFor="mission-create-robot">
-              Robot
-              <select
-                id="mission-create-robot"
-                value={createRobotId}
-                onChange={(event) => setCreateRobotId(event.target.value)}
-                disabled={catalogLoading || submitting}
-                required
-              >
-                <option value="">
-                  {catalogLoading ? 'Robot 불러오는 중…' : 'Robot 선택'}
-                </option>
-                {activeRobots.map((robot) => (
-                  <option key={robot.robotId} value={robot.robotId}>
-                    {robot.robotName} ({robot.mqttId})
+            <div className="mission-robot-field">
+              <label className="admin-form-field" htmlFor="mission-create-robot">
+                Robot
+                <select
+                  id="mission-create-robot"
+                  value={createRobotId}
+                  onChange={(event) => setCreateRobotId(event.target.value)}
+                  disabled={catalogLoading || submitting}
+                  required
+                >
+                  <option value="">
+                    {catalogLoading ? 'Robot 불러오는 중…' : 'Robot 선택'}
                   </option>
-                ))}
-              </select>
-              <small>ACTIVE 상태이며 현재 임무가 없는 Robot만 표시됩니다.</small>
-            </label>
+                  {activeRobots.map((robot) => (
+                    <option key={robot.robotId} value={robot.robotId}>
+                      {robot.robotName} ({robot.mqttId})
+                    </option>
+                  ))}
+                </select>
+                <small>ACTIVE 상태이며 현재 임무가 없는 Robot만 표시됩니다.</small>
+              </label>
+              {canRegisterRobot && selectedCreateRobot !== null ? (
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => openRobotActivation(selectedCreateRobot)}
+                  disabled={activationSubmitting}
+                >
+                  {selectedCreateRobot.robotName} Credential 회전
+                </button>
+              ) : null}
+            </div>
             {canRegisterRobot && provisioningRobots.length > 0 ? (
               <div className="mission-robot-activation-notice" role="status">
                 <div>
@@ -837,7 +849,9 @@ export function MissionManagePage() {
               <div>
                 <p className="eyebrow">MQTT CREDENTIAL</p>
                 <h3 id="mission-robot-activation-title">
-                  Robot 발급·활성화
+                  {activationRobot.operationalStatus === 'ACTIVE'
+                    ? 'Robot Credential 회전'
+                    : 'Robot 발급·활성화'}
                 </h3>
               </div>
               <button
@@ -857,11 +871,17 @@ export function MissionManagePage() {
                   <strong>
                     {activationRobot.robotName} ({activationRobot.mqttId})
                   </strong>
-                  의 MQTT Credential을 발급합니다. 성공하면 Robot이 ACTIVE로
-                  전환되고 임무 생성 후보로 선택됩니다.
+                  {activationRobot.operationalStatus === 'ACTIVE'
+                    ? '의 기존 MQTT 비밀번호를 폐기하고 새 Credential을 발급합니다.'
+                    : [
+                      '의 MQTT Credential을 발급합니다. 성공하면 Robot이 ACTIVE로 ',
+                      '전환되고 임무 생성 후보로 선택됩니다.',
+                    ].join('')}
                 </p>
                 <p className="mission-robot-activation-warning">
-                  발급 비밀번호는 성공 직후 이 창에서 한 번만 표시됩니다.
+                  {activationRobot.operationalStatus === 'ACTIVE'
+                    ? '기존 비밀번호는 즉시 사용할 수 없게 되며 새 비밀번호는 이 창에서 한 번만 표시됩니다.'
+                    : '발급 비밀번호는 성공 직후 이 창에서 한 번만 표시됩니다.'}
                 </p>
                 {activationError ? (
                   <>
@@ -900,31 +920,35 @@ export function MissionManagePage() {
                       ? '처리 중…'
                       : credentialRegistryConflict
                         ? '잔존 계정 정리 후 다시 발급'
-                        : '발급·활성화'}
+                        : activationRobot.operationalStatus === 'ACTIVE'
+                          ? 'Credential 회전'
+                          : '발급·활성화'}
                   </button>
                 </div>
               </>
             ) : (
               <>
                 <div className="page-alert page-alert-success" role="status">
-                  Robot이 ACTIVE로 전환되어 임무 생성 후보에 선택되었습니다.
+                  {activationRobot.operationalStatus === 'ACTIVE'
+                    ? '새 Credential이 발급되었습니다.'
+                    : 'Robot이 ACTIVE로 전환되어 임무 생성 후보에 선택되었습니다.'}
                 </div>
                 <dl className="mission-robot-credential-result">
                   <div>
                     <dt>Broker</dt>
-                    <dd>{issuedCredential.connection.brokerUri}</dd>
+                    <dd>{issuedCredential.mqtt.brokerUri}</dd>
                   </div>
                   <div>
                     <dt>Username</dt>
-                    <dd>{issuedCredential.connection.username}</dd>
+                    <dd>{issuedCredential.mqtt.username}</dd>
                   </div>
                   <div>
                     <dt>Client ID</dt>
-                    <dd>{issuedCredential.connection.clientId}</dd>
+                    <dd>{issuedCredential.mqtt.clientId}</dd>
                   </div>
                   <div>
                     <dt>1회 비밀번호</dt>
-                    <dd>{issuedCredential.connection.password}</dd>
+                    <dd>{issuedCredential.mqtt.password}</dd>
                   </div>
                 </dl>
                 <p className="mission-robot-activation-warning">

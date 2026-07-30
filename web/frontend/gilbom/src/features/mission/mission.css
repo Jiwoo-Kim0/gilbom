@@ -46,6 +46,16 @@
   padding: 22px 24px 24px;
 }
 
+.mission-robot-field {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.mission-robot-field > .secondary-button {
+  justify-self: start;
+}
+
 .mission-robot-activation-notice {
   grid-column: 1 / -1;
   display: grid;
