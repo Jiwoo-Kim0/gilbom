@@ -28,6 +28,41 @@ export interface RobotListResponse {
   totalPages: number
 }
 
+export interface RobotDetail {
+  robotId: string
+  mqttId: string
+  robotName: string
+  serialNumber: string
+  operationalStatus: string
+  connectivityStatus: RobotConnectivityStatus
+  connectionChangedAt: string | null
+  lastReceivedAt: string | null
+  robotMode: string | null
+  stateReasonCode: string | null
+  missionStatus: string | null
+  batteryPercent: number | null
+  batteryState: string | null
+  charging: boolean | null
+  batteryTemperatureC: number | null
+  estimatedRuntimeSec: number | null
+  cameraHealth: string | null
+  lidarHealth: string | null
+  gpsHealth: string | null
+  motorHealth: string | null
+  storageHealth: string | null
+  latitude: number | null
+  longitude: number | null
+  headingDeg: number | null
+  moving: boolean | null
+  speedMps: number | null
+  jetsonTempC: number | null
+  overallHealthStatus: RobotHealthStatus
+  telemetrySampledAt: string | null
+  telemetryReceivedAt: string | null
+  registeredAt: string
+  updatedAt: string
+}
+
 export interface RobotSummary {
   totalRobots: number
   onlineRobots: number

@@ -1,4 +1,5 @@
-import { Clock, Gauge, MoreVertical, Thermometer } from 'lucide-react'
+import { Clock, Gamepad2, Gauge, MoreVertical, Thermometer } from 'lucide-react'
+import { Link } from 'react-router'
 import type { RobotFleetItem, RobotStatus } from './robotTypes'
 
 interface RobotFleetGridProps {
@@ -136,6 +137,13 @@ export function RobotFleetGrid({
                 <span>임무 <strong>{robot.missionStatus ?? '—'}</strong></span>
                 <span>상태 <strong>{robot.overallHealthStatus}</strong></span>
               </div>
+              <Link
+                className="robot-command-link"
+                to={`/robots/${encodeURIComponent(robot.id)}`}
+              >
+                <Gamepad2 size={15} aria-hidden="true" />
+                상세·제어
+              </Link>
             </article>
           ))}
         </div>

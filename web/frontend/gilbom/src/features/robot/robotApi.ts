@@ -1,5 +1,6 @@
 import { apiJson } from '../../shared/api/apiClient'
 import type {
+  RobotDetail,
   RobotListResponse,
   RobotMapResponse,
   RobotSummary,
@@ -29,4 +30,8 @@ export function getRobotSummary(): Promise<RobotSummary> {
 
 export function getRobotMap(): Promise<RobotMapResponse> {
   return apiJson(`${ROBOT_BASE_PATH}/map`)
+}
+
+export function getRobot(robotId: string): Promise<RobotDetail> {
+  return apiJson(`${ROBOT_BASE_PATH}/${encodeURIComponent(robotId)}`)
 }

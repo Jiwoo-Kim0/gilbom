@@ -31,6 +31,7 @@ import { MyPage } from '../features/platform/MyPage'
 import { NotFoundPage } from '../pages/NotFoundPage'
 import { ReportsPage } from '../features/platform/ReportsPage'
 import { RobotManagePage } from '../features/robot/RobotManagePage'
+import { RobotDetailPage } from '../features/robot/RobotDetailPage'
 import { RoleManagePage } from '../features/platform/RoleManagePage'
 import { MissionManagePage } from '../features/mission/MissionManagePage'
 import { ReportDetailPage } from '../features/report/ReportDetailPage'
@@ -101,6 +102,14 @@ export const router = createBrowserRouter([
         element: (
           <RequirePermission permission={ROBOT_STATUS_VIEW}>
             <RobotManagePage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: 'robots/:robotId',
+        element: (
+          <RequirePermission permission={ROBOT_STATUS_VIEW}>
+            <RobotDetailPage />
           </RequirePermission>
         ),
       },
