@@ -27,6 +27,14 @@ import type {
 import './mission-map.css'
 
 type Coordinate = [longitude: number, latitude: number]
+type ProjectedPoint = { x: number; y: number }
+type ProjectedPolygon = ProjectedPoint[][]
+type ProjectedMissionSnapshot = {
+  missionId: string
+  polygons: ProjectedPolygon[]
+  trajectory: ProjectedPoint[]
+  current: ProjectedPoint | null
+}
 
 const NAVER_MAP_CLIENT_ID = import.meta.env.VITE_NAVER_MAP_CLIENT_ID
 const SNAPSHOT_DEBOUNCE_MILLIS = 400
@@ -151,20 +159,28 @@ function formatObservedAt(value: string | null): string {
   }).format(new Date(value))
 }
 
-function currentMarkerIcon(
-  maps: typeof naver.maps,
-  headingDeg: number | null,
-  online: boolean,
-): naver.maps.MarkerIcon {
-  const heading = headingDeg !== null && Number.isFinite(headingDeg)
-    ? headingDeg
-    : 0
-  const color = online ? '#175c4c' : '#6b7280'
+function projectCoordinate(
+  projection: naver.maps.MapSystemProjection,
+  [longitude, latitude]: Coordinate,
+): ProjectedPoint {
+  const offset = projection.fromCoordToOffset(
+    new naver.maps.LatLng(latitude, longitude),
+  )
   return {
-    content: `<span style="display:grid;width:32px;height:32px;border:3px solid #fff;border-radius:50%;place-items:center;color:#fff;background:${color};box-shadow:0 3px 10px rgba(15,23,42,.35)"><span style="font-size:16px;line-height:1;transform:rotate(${heading}deg)">↑</span></span>`,
-    size: new maps.Size(32, 32),
-    anchor: new maps.Point(16, 16),
+    x: Number(offset.x.toFixed(2)),
+    y: Number(offset.y.toFixed(2)),
   }
+}
+
+function createProjectedPolygonPath(polygon: ProjectedPolygon): string {
+  return polygon
+    .map((ring) => ring
+      .map(({ x, y }, pointIndex) => (
+        `${pointIndex === 0 ? 'M' : 'L'} ${x} ${y}`
+      ))
+      .concat('Z')
+      .join(' '))
+    .join(' ')
 }
 
 function MissionNaverMap({
@@ -176,9 +192,12 @@ function MissionNaverMap({
 }) {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<naver.maps.Map | null>(null)
+  const fittedMissionIdRef = useRef<string | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'fallback'>(
     NAVER_MAP_CLIENT_ID ? 'loading' : 'fallback',
   )
+  const [projectedSnapshot, setProjectedSnapshot] =
+    useState<ProjectedMissionSnapshot | null>(null)
   const polygons = useMemo(
     () => areaPolygons(snapshot.patrolAreaBoundary),
     [snapshot.patrolAreaBoundary],
@@ -187,6 +206,7 @@ function MissionNaverMap({
     () => trajectoryCoordinates(snapshot.trajectory),
     [snapshot.trajectory],
   )
+  const current = snapshot.currentPosition
 
   useEffect(() => {
     if (!NAVER_MAP_CLIENT_ID) {
@@ -217,6 +237,7 @@ function MissionNaverMap({
       cancelled = true
       mapRef.current?.destroy()
       mapRef.current = null
+      fittedMissionIdRef.current = null
     }
   }, [])
 
@@ -226,88 +247,92 @@ function MissionNaverMap({
     }
     const { maps } = window.naver
     const map = mapRef.current
-    const polygonObjects = polygons.map((polygon) => (
-      new maps.Polygon({
-        map,
-        paths: polygon.map((ring) => ring
-          .filter(isCoordinate)
-          .map(([longitude, latitude]) => (
-            new maps.LatLng(latitude, longitude)
-          ))),
-        fillColor: '#2f806c',
-        fillOpacity: 0.1,
-        strokeColor: '#175c4c',
-        strokeOpacity: 0.9,
-        strokeWeight: 3,
-        clickable: false,
-        zIndex: 10,
-      })
-    ))
-    const trajectoryObject = trackCoordinates.length >= 2
-      ? new maps.Polyline({
-        map,
-        path: trackCoordinates.map(([longitude, latitude]) => (
-          new maps.LatLng(latitude, longitude)
-        )),
-        strokeColor: '#e36b2c',
-        strokeOpacity: 0.95,
-        strokeWeight: 5,
-        strokeStyle: 'solid',
-        clickable: false,
-        zIndex: 20,
-      })
-      : null
-    const current = snapshot.currentPosition
-    const currentMarker = current === null
-      ? null
-      : new maps.Marker({
-        map,
-        position: new maps.LatLng(current.latitude, current.longitude),
-        icon: currentMarkerIcon(
-          maps,
-          current.headingDeg,
-          current.connectivityStatus === 'ONLINE',
-        ),
-        title: `현재 위치 · ${formatObservedAt(current.observedAt)}`,
-        zIndex: 30,
-      })
+    const viewportListeners: naver.maps.MapEventListener[] = []
+    let projectionFrame: number | null = null
 
-    const allCoordinates = [
-      ...boundaryCoordinates(snapshot.patrolAreaBoundary),
-      ...trackCoordinates,
-      ...(current === null
-        ? []
-        : [[current.longitude, current.latitude] as Coordinate]),
-    ]
-    if (allCoordinates.length === 1) {
-      const [longitude, latitude] = allCoordinates[0]
-      map.setCenter(new maps.LatLng(latitude, longitude))
-      map.setZoom(17)
-    } else if (allCoordinates.length > 1) {
-      const longitudes = allCoordinates.map(([longitude]) => longitude)
-      const latitudes = allCoordinates.map(([, latitude]) => latitude)
-      map.fitBounds(new maps.LatLngBounds(
-        new maps.LatLng(
-          Math.min(...latitudes),
-          Math.min(...longitudes),
+    const updateProjection = () => {
+      const projection = map.getProjection()
+      setProjectedSnapshot({
+        missionId: snapshot.missionId,
+        polygons: polygons.map((polygon) => (
+          polygon.map((ring) => (
+            ring
+              .filter(isCoordinate)
+              .map((coordinate) => projectCoordinate(projection, coordinate))
+          ))
+        )),
+        trajectory: trackCoordinates.map(
+          (coordinate) => projectCoordinate(projection, coordinate),
         ),
-        new maps.LatLng(
-          Math.max(...latitudes),
-          Math.max(...longitudes),
-        ),
-      ))
+        current: current === null
+          ? null
+          : projectCoordinate(
+            projection,
+            [current.longitude, current.latitude],
+          ),
+      })
     }
+    const scheduleProjection = () => {
+      if (projectionFrame !== null) {
+        return
+      }
+      projectionFrame = window.requestAnimationFrame(() => {
+        projectionFrame = null
+        updateProjection()
+      })
+    }
+
+    viewportListeners.push(
+      maps.Event.addListener(map, 'bounds_changed', scheduleProjection),
+      maps.Event.addListener(map, 'size_changed', scheduleProjection),
+    )
+
+    if (fittedMissionIdRef.current !== snapshot.missionId) {
+      const allCoordinates = [
+        ...boundaryCoordinates(snapshot.patrolAreaBoundary),
+        ...trackCoordinates,
+        ...(current === null
+          ? []
+          : [[current.longitude, current.latitude] as Coordinate]),
+      ]
+      if (allCoordinates.length === 1) {
+        const [longitude, latitude] = allCoordinates[0]
+        map.setCenter(new maps.LatLng(latitude, longitude))
+        map.setZoom(17)
+      } else if (allCoordinates.length > 1) {
+        const longitudes = allCoordinates.map(([longitude]) => longitude)
+        const latitudes = allCoordinates.map(([, latitude]) => latitude)
+        map.fitBounds(new maps.LatLngBounds(
+          new maps.LatLng(
+            Math.min(...latitudes),
+            Math.min(...longitudes),
+          ),
+          new maps.LatLng(
+            Math.max(...latitudes),
+            Math.max(...longitudes),
+          ),
+        ))
+      }
+      fittedMissionIdRef.current = snapshot.missionId
+    }
+    scheduleProjection()
 
     return () => {
-      polygonObjects.forEach((polygon) => polygon.setMap(null))
-      trajectoryObject?.setMap(null)
-      currentMarker?.setMap(null)
+      viewportListeners.forEach((listener) => {
+        maps.Event.removeListener(listener)
+      })
+      if (projectionFrame !== null) {
+        window.cancelAnimationFrame(projectionFrame)
+      }
     }
-  }, [polygons, snapshot, status, trackCoordinates])
+  }, [current, polygons, snapshot, status, trackCoordinates])
 
   if (status === 'fallback') {
     return fallback
   }
+  const visibleProjection = projectedSnapshot?.missionId === snapshot.missionId
+    ? projectedSnapshot
+    : null
   return (
     <div className="mission-map-canvas-wrap">
       <div
@@ -315,6 +340,58 @@ function MissionNaverMap({
         ref={mapElementRef}
         data-testid="mission-naver-map"
       />
+      {status === 'ready' && visibleProjection !== null ? (
+        <svg
+          className="mission-map-projected-overlay"
+          aria-hidden="true"
+          data-testid="mission-map-projected-overlay"
+        >
+          {visibleProjection.polygons.map((polygon, index) => (
+            <path
+              key={`${snapshot.patrolAreaId}-${index}`}
+              className="mission-map-area-shape"
+              d={createProjectedPolygonPath(polygon)}
+              fillRule="evenodd"
+              data-testid="mission-area-shape"
+            />
+          ))}
+          {visibleProjection.trajectory.length >= 2 ? (
+            <polyline
+              className="mission-map-trajectory-line"
+              points={visibleProjection.trajectory
+                .map(({ x, y }) => `${x},${y}`)
+                .join(' ')}
+              fill="none"
+              data-testid="mission-trajectory"
+              data-point-count={visibleProjection.trajectory.length}
+            />
+          ) : null}
+          {current !== null && visibleProjection.current !== null ? (
+            <g
+              className={[
+                'mission-map-current',
+                current.connectivityStatus === 'ONLINE'
+                  ? 'is-online'
+                  : 'is-offline',
+              ].join(' ')}
+              transform={[
+                `translate(${visibleProjection.current.x}`,
+                `${visibleProjection.current.y})`,
+              ].join(' ')}
+              data-testid="mission-current-position"
+              data-latitude={current.latitude}
+              data-longitude={current.longitude}
+              data-heading={current.headingDeg ?? ''}
+            >
+              <circle r="15" />
+              <path
+                d="M 0 -10 L 5 7 L 0 4 L -5 7 Z"
+                transform={`rotate(${current.headingDeg ?? 0})`}
+              />
+            </g>
+          ) : null}
+        </svg>
+      ) : null}
       {status === 'loading' ? (
         <p className="mission-map-loading">네이버 지도를 불러오는 중입니다…</p>
       ) : null}

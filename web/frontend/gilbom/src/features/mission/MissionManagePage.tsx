@@ -936,12 +936,12 @@ export function MissionManagePage() {
           aria-live="polite"
           data-testid="mission-detail"
         >
-          {detailLoading ? (
+          {detailLoading && selectedMission === null ? (
             <div className="admin-loading" role="status">
               <span className="loading-spinner" aria-hidden="true" />
               임무 상세와 상태 이력을 불러오는 중입니다.
             </div>
-          ) : detailError ? (
+          ) : detailError && selectedMission === null ? (
             <div className="page-alert" role="alert">
               {getApiErrorMessage(detailError)}
             </div>
@@ -955,6 +955,12 @@ export function MissionManagePage() {
             </div>
           ) : (
             <>
+              {detailError ? (
+                <div className="page-alert" role="alert">
+                  최신 임무 정보를 불러오지 못해 이전 표시를 유지합니다.{' '}
+                  {getApiErrorMessage(detailError)}
+                </div>
+              ) : null}
               <div className="mission-detail-heading">
                 <div>
                   <MissionStatusBadge status={selectedMission.status} />
