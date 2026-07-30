@@ -7,6 +7,7 @@ import type {
   MissionCreateInput,
   MissionFilters,
   MissionListResponse,
+  MissionMapResponse,
   MissionStatusHistoryResponse,
   PatrolAreaListResponse,
   PatrolRouteListResponse,
@@ -59,6 +60,14 @@ export function getMissionHistory(
 ): Promise<MissionStatusHistoryResponse> {
   return apiJson(
     `${MISSION_BASE_PATH}/${encodeURIComponent(missionId)}/history`,
+  )
+}
+
+export function getMissionMap(
+  missionId: string,
+): Promise<MissionMapResponse> {
+  return apiJson(
+    `${MISSION_BASE_PATH}/${encodeURIComponent(missionId)}/map?limit=5000`,
   )
 }
 

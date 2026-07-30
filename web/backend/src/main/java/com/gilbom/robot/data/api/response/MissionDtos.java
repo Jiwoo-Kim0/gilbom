@@ -140,6 +140,30 @@ public final class MissionDtos {
         }
     }
 
+    public record MissionMapCurrentPosition(
+            double latitude,
+            double longitude,
+            Double headingDeg,
+            Boolean moving,
+            Double speedMps,
+            String connectivityStatus,
+            Instant observedAt
+    ) {
+    }
+
+    public record MissionMapResponse(
+            UUID missionId,
+            UUID patrolAreaId,
+            JsonNode patrolAreaBoundary,
+            List<MissionTrajectoryPoint> trajectory,
+            MissionMapCurrentPosition currentPosition
+    ) {
+
+        public MissionMapResponse {
+            trajectory = List.copyOf(trajectory);
+        }
+    }
+
     public record MissionStatusHistoryItem(
             UUID historyId,
             String transitionSource,

@@ -20,6 +20,8 @@ import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
 import com.gilbom.robot.application.RobotScopeService;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionListResponse;
+import com.gilbom.robot.data.api.response.MissionDtos.MissionMapCurrentPosition;
+import com.gilbom.robot.data.api.response.MissionDtos.MissionMapResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionStatus;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionStatusHistoryItem;
@@ -259,6 +261,73 @@ public class MissionQueryService {
     }
 
     @Transactional(readOnly = true)
+    public MissionMapResponse findMap(
+            UUID userId,
+            UUID missionId,
+            int limit
+    ) {
+        List<MissionMapContext> contexts = jdbcTemplate.query("""
+                SELECT
+                    m.patrol_area_id,
+                    ST_AsGeoJSON(area.boundary)::TEXT
+                        AS patrol_area_boundary,
+                    CASE
+                        WHEN state.position_valid = TRUE
+                         AND state.position IS NOT NULL
+                        THEN ST_Y(state.position)
+                        ELSE NULL
+                    END AS current_latitude,
+                    CASE
+                        WHEN state.position_valid = TRUE
+                         AND state.position IS NOT NULL
+                        THEN ST_X(state.position)
+                        ELSE NULL
+                    END AS current_longitude,
+                    state.heading_deg,
+                    state.moving,
+                    state.speed_mps,
+                    state.connectivity_status,
+                    state.telemetry_sampled_at
+                FROM robot.mission m
+                JOIN robot.robot r
+                  ON r.robot_id = m.robot_id
+                JOIN robot.patrol_area area
+                  ON area.patrol_area_id = m.patrol_area_id
+                LEFT JOIN telemetry.robot_current_state state
+                  ON state.robot_id = m.robot_id
+                WHERE m.mission_id = :missionId
+                  AND
+                """ + RobotScopeService.VISIBLE_ROBOT_PREDICATE,
+                new MapSqlParameterSource()
+                        .addValue("userId", userId)
+                        .addValue("missionId", missionId),
+                (resultSet, rowNumber) -> new MissionMapContext(
+                        resultSet.getObject(
+                                "patrol_area_id",
+                                UUID.class),
+                        json(resultSet.getString(
+                                "patrol_area_boundary")),
+                        currentPosition(resultSet)));
+        if (contexts.isEmpty()) {
+            throw new BusinessException(ErrorCode.MISSION_NOT_FOUND);
+        }
+
+        MissionMapContext context = contexts.getFirst();
+        MissionTrajectoryResponse trajectory = findTrajectory(
+                userId,
+                missionId,
+                null,
+                null,
+                limit);
+        return new MissionMapResponse(
+                missionId,
+                context.patrolAreaId(),
+                context.patrolAreaBoundary(),
+                trajectory.points(),
+                context.currentPosition());
+    }
+
+    @Transactional(readOnly = true)
     public MissionStatusHistoryResponse findHistory(
             UUID userId,
             UUID missionId
@@ -422,7 +491,32 @@ public class MissionQueryService {
         return resultSet.wasNull() ? null : value;
     }
 
+    private static MissionMapCurrentPosition currentPosition(
+            ResultSet resultSet
+    ) throws SQLException {
+        Double latitude = nullableDouble(resultSet, "current_latitude");
+        Double longitude = nullableDouble(resultSet, "current_longitude");
+        if (latitude == null || longitude == null) {
+            return null;
+        }
+        return new MissionMapCurrentPosition(
+                latitude,
+                longitude,
+                nullableDouble(resultSet, "heading_deg"),
+                resultSet.getObject("moving", Boolean.class),
+                nullableDouble(resultSet, "speed_mps"),
+                resultSet.getString("connectivity_status"),
+                instant(resultSet, "telemetry_sampled_at"));
+    }
+
     private static OffsetDateTime utc(Instant instant) {
         return OffsetDateTime.ofInstant(instant, ZoneOffset.UTC);
+    }
+
+    private record MissionMapContext(
+            UUID patrolAreaId,
+            JsonNode patrolAreaBoundary,
+            MissionMapCurrentPosition currentPosition
+    ) {
     }
 }

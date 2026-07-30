@@ -22,6 +22,7 @@ import com.gilbom.audit.AuditRequestContext;
 import com.gilbom.auth.AuthenticatedUserIdResolver;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionCreateRequest;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionListResponse;
+import com.gilbom.robot.data.api.response.MissionDtos.MissionMapResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionStatus;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionStatusHistoryResponse;
@@ -145,6 +146,20 @@ public class MissionController {
                 missionId,
                 from,
                 to,
+                limit);
+    }
+
+    @GetMapping("/{missionId}/map")
+    @PreAuthorize("hasAuthority('MISSION_VIEW')")
+    public MissionMapResponse findMap(
+            @PathVariable UUID missionId,
+            @RequestParam(defaultValue = "5000")
+            @Min(1) @Max(5000) int limit,
+            Authentication authentication
+    ) {
+        return queryService.findMap(
+                userIdResolver.require(authentication),
+                missionId,
                 limit);
     }
 

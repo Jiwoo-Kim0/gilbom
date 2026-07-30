@@ -31,6 +31,7 @@ import com.gilbom.auth.session.AuthenticationSessionConfiguration;
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionCreateRequest;
+import com.gilbom.robot.data.api.response.MissionDtos.MissionMapResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionStatus;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionUpdateRequest;
@@ -386,6 +387,165 @@ class MissionManagementIntegrationTest {
         assertThatThrownBy(() -> queryService.findMission(
                 OTHER_USER_ID,
                 created.missionId()))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(ErrorCode.MISSION_NOT_FOUND));
+    }
+
+    @Test
+    void returnsAreaTrajectoryAndCurrentPositionForMissionMap() {
+        MissionResponse mission = managementService.create(
+                new MissionCreateRequest(
+                        robotId,
+                        areaId,
+                        routeId,
+                        3600,
+                        null),
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID()));
+        UUID bootId = UUID.randomUUID();
+        Instant firstSampledAt = Instant.parse("2026-07-30T01:00:00Z");
+        Instant currentObservedAt = firstSampledAt.plusSeconds(5);
+
+        jdbcTemplate.update("""
+                INSERT INTO telemetry.robot_boot_session (
+                    boot_id,
+                    robot_id,
+                    schema_version,
+                    session_status,
+                    robot_connected_at,
+                    first_received_at,
+                    last_received_at,
+                    last_seen_seq
+                ) VALUES (?, ?, '2.0', 'ONLINE', ?, ?, ?, 2)
+                """,
+                bootId,
+                robotId,
+                java.time.OffsetDateTime.ofInstant(
+                        firstSampledAt,
+                        java.time.ZoneOffset.UTC),
+                java.time.OffsetDateTime.ofInstant(
+                        firstSampledAt,
+                        java.time.ZoneOffset.UTC),
+                java.time.OffsetDateTime.ofInstant(
+                        currentObservedAt,
+                        java.time.ZoneOffset.UTC));
+        for (int sequence = 1; sequence <= 2; sequence++) {
+            Instant sampledAt = firstSampledAt.plusSeconds(sequence - 1);
+            double longitude = 127.005 + sequence * 0.001;
+            double latitude = 37.005 + sequence * 0.001;
+            jdbcTemplate.update("""
+                    INSERT INTO telemetry.robot_telemetry (
+                        message_id,
+                        schema_version,
+                        robot_id,
+                        boot_id,
+                        seq,
+                        sampled_at,
+                        received_at,
+                        position_valid,
+                        position,
+                        heading_deg,
+                        moving,
+                        speed_mps,
+                        battery_valid,
+                        battery_state,
+                        raw_payload,
+                        mission_id
+                    ) VALUES (
+                        ?,
+                        '2.0',
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        TRUE,
+                        ST_SetSRID(ST_MakePoint(?, ?), 4326),
+                        90,
+                        TRUE,
+                        1.2,
+                        FALSE,
+                        'UNKNOWN',
+                        '{}'::JSONB,
+                        ?
+                    )
+                    """,
+                    UUID.randomUUID(),
+                    robotId,
+                    bootId,
+                    sequence,
+                    java.time.OffsetDateTime.ofInstant(
+                            sampledAt,
+                            java.time.ZoneOffset.UTC),
+                    java.time.OffsetDateTime.ofInstant(
+                            sampledAt.plusMillis(100),
+                            java.time.ZoneOffset.UTC),
+                    longitude,
+                    latitude,
+                    mission.missionId());
+        }
+        jdbcTemplate.update("""
+                INSERT INTO telemetry.robot_current_state (
+                    robot_id,
+                    current_boot_id,
+                    connectivity_status,
+                    telemetry_seq,
+                    telemetry_sampled_at,
+                    telemetry_received_at,
+                    position_valid,
+                    position,
+                    heading_deg,
+                    moving,
+                    speed_mps
+                ) VALUES (
+                    ?,
+                    ?,
+                    'ONLINE',
+                    2,
+                    ?,
+                    ?,
+                    TRUE,
+                    ST_SetSRID(ST_MakePoint(127.009, 37.009), 4326),
+                    95,
+                    TRUE,
+                    1.3
+                )
+                """,
+                robotId,
+                bootId,
+                java.time.OffsetDateTime.ofInstant(
+                        currentObservedAt,
+                        java.time.ZoneOffset.UTC),
+                java.time.OffsetDateTime.ofInstant(
+                        currentObservedAt.plusMillis(100),
+                        java.time.ZoneOffset.UTC));
+
+        MissionMapResponse map = queryService.findMap(
+                OWNER_ID,
+                mission.missionId(),
+                5000);
+
+        assertThat(map.patrolAreaId()).isEqualTo(areaId);
+        assertThat(map.patrolAreaBoundary().path("type").asText())
+                .isEqualTo("Polygon");
+        assertThat(map.trajectory()).hasSize(2);
+        assertThat(map.trajectory().get(0).longitude())
+                .isBetween(127.0059999, 127.0060001);
+        assertThat(map.trajectory().get(1).longitude())
+                .isBetween(127.0069999, 127.0070001);
+        assertThat(map.currentPosition()).satisfies(position -> {
+            assertThat(position.latitude()).isEqualTo(37.009);
+            assertThat(position.longitude()).isEqualTo(127.009);
+            assertThat(position.headingDeg()).isEqualTo(95.0);
+            assertThat(position.connectivityStatus()).isEqualTo("ONLINE");
+            assertThat(position.observedAt()).isEqualTo(currentObservedAt);
+        });
+        assertThatThrownBy(() -> queryService.findMap(
+                OTHER_USER_ID,
+                mission.missionId(),
+                5000))
                 .isInstanceOfSatisfying(
                         BusinessException.class,
                         exception -> assertThat(exception.errorCode())

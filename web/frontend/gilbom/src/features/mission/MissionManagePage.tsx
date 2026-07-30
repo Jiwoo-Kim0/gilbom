@@ -32,6 +32,7 @@ import {
   getPatrolAreas,
   getPatrolRoutes,
 } from './missionApi'
+import { MissionMap } from './MissionMap'
 import type {
   Mission,
   MissionFilters,
@@ -908,6 +909,12 @@ export function MissionManagePage() {
                   </div>
                 </div>
               </div>
+
+              <MissionMap
+                missionId={selectedMission.missionId}
+                missionCode={selectedMission.missionCode}
+                patrolAreaName={selectedMission.patrolAreaName}
+              />
 
               <dl className="mission-detail-grid">
                 <div>

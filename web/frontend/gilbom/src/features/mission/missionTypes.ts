@@ -7,6 +7,18 @@ export type MissionStatus =
   | 'CANCELLED'
   | 'FAILED'
 
+export type GeoJsonPolygon = {
+  type: 'Polygon'
+  coordinates: number[][][]
+}
+
+export type GeoJsonMultiPolygon = {
+  type: 'MultiPolygon'
+  coordinates: number[][][][]
+}
+
+export type PatrolAreaBoundary = GeoJsonPolygon | GeoJsonMultiPolygon
+
 export type MissionFilters = {
   robotId: string
   patrolAreaId: string
@@ -86,11 +98,40 @@ export type MissionStatusHistoryResponse = {
   history: MissionStatusHistoryItem[]
 }
 
+export type MissionTrajectoryPoint = {
+  messageId: string
+  sampledAt: string
+  receivedAt: string
+  latitude: number
+  longitude: number
+  headingDeg: number | null
+  moving: boolean
+  speedMps: number | null
+}
+
+export type MissionMapCurrentPosition = {
+  latitude: number
+  longitude: number
+  headingDeg: number | null
+  moving: boolean | null
+  speedMps: number | null
+  connectivityStatus: 'ONLINE' | 'OFFLINE'
+  observedAt: string | null
+}
+
+export type MissionMapResponse = {
+  missionId: string
+  patrolAreaId: string
+  patrolAreaBoundary: PatrolAreaBoundary
+  trajectory: MissionTrajectoryPoint[]
+  currentPosition: MissionMapCurrentPosition | null
+}
+
 export type PatrolArea = {
   patrolAreaId: string
   areaCode: string
   areaName: string
-  boundary: Record<string, unknown>
+  boundary: PatrolAreaBoundary
   lifecycleStatus: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED'
   createdAt: string
   updatedAt: string

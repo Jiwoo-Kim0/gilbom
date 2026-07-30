@@ -5,6 +5,10 @@ declare namespace naver.maps {
     lng(): number
   }
 
+  class LatLngBounds {
+    constructor(southWest: LatLng, northEast: LatLng)
+  }
+
   class Point {
     constructor(x: number, y: number)
   }
@@ -46,7 +50,41 @@ declare namespace naver.maps {
     constructor(element: HTMLElement, options: MapOptions)
     setCenter(latlng: LatLng): void
     setZoom(zoom: number): void
+    fitBounds(bounds: LatLngBounds): void
     destroy(): void
+  }
+
+  interface PolygonOptions {
+    map?: Map
+    paths: LatLng[] | LatLng[][]
+    fillColor?: string
+    fillOpacity?: number
+    strokeColor?: string
+    strokeOpacity?: number
+    strokeWeight?: number
+    clickable?: boolean
+    zIndex?: number
+  }
+
+  class Polygon {
+    constructor(options: PolygonOptions)
+    setMap(map: Map | null): void
+  }
+
+  interface PolylineOptions {
+    map?: Map
+    path: LatLng[]
+    strokeColor?: string
+    strokeOpacity?: number
+    strokeWeight?: number
+    strokeStyle?: string
+    clickable?: boolean
+    zIndex?: number
+  }
+
+  class Polyline {
+    constructor(options: PolylineOptions)
+    setMap(map: Map | null): void
   }
 
   interface MarkerIcon {

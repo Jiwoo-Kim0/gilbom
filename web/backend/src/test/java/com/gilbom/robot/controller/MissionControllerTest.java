@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -42,8 +43,11 @@ import com.gilbom.common.web.RequestIdFilter;
 import com.gilbom.robot.api.MissionController;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionCreateRequest;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionListResponse;
+import com.gilbom.robot.data.api.response.MissionDtos.MissionMapCurrentPosition;
+import com.gilbom.robot.data.api.response.MissionDtos.MissionMapResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionStatus;
+import com.gilbom.robot.data.api.response.MissionDtos.MissionTrajectoryPoint;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionUpdateRequest;
 import com.gilbom.robot.mission.MissionManagementService;
 import com.gilbom.robot.mission.MissionQueryService;
@@ -215,6 +219,62 @@ class MissionControllerTest {
                 .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")));
 
         verifyNoInteractions(queryService);
+    }
+
+    @Test
+    void returnsMissionMapWithViewPermission() throws Exception {
+        Instant observedAt = Instant.parse("2026-07-30T02:00:00Z");
+        when(queryService.findMap(USER_ID, MISSION_ID, 5000))
+                .thenReturn(new MissionMapResponse(
+                        MISSION_ID,
+                        AREA_ID,
+                        new ObjectMapper().readTree("""
+                                {
+                                  "type": "Polygon",
+                                  "coordinates": [[
+                                    [127.0, 37.0],
+                                    [127.1, 37.0],
+                                    [127.1, 37.1],
+                                    [127.0, 37.0]
+                                  ]]
+                                }
+                                """),
+                        List.of(new MissionTrajectoryPoint(
+                                UUID.randomUUID(),
+                                observedAt.minusSeconds(5),
+                                observedAt.minusSeconds(4),
+                                37.01,
+                                127.01,
+                                90.0,
+                                true,
+                                1.2)),
+                        new MissionMapCurrentPosition(
+                                37.02,
+                                127.02,
+                                95.0,
+                                true,
+                                1.3,
+                                "ONLINE",
+                                observedAt)));
+
+        mockMvc.perform(get(
+                        "/api/v1/missions/{missionId}/map",
+                        MISSION_ID)
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_VIEW)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.missionId", is(
+                        MISSION_ID.toString())))
+                .andExpect(jsonPath("$.patrolAreaId", is(
+                        AREA_ID.toString())))
+                .andExpect(jsonPath("$.patrolAreaBoundary.type", is(
+                        "Polygon")))
+                .andExpect(jsonPath("$.trajectory.length()", is(1)))
+                .andExpect(jsonPath("$.currentPosition.latitude", is(
+                        37.02)))
+                .andExpect(jsonPath(
+                        "$.currentPosition.connectivityStatus",
+                        is("ONLINE")));
     }
 
     private MissionResponse response(MissionStatus status) {
