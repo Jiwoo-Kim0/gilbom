@@ -159,7 +159,14 @@ class GlobalExceptionHandlerTest {
     void reportStateConflictsUseTheDedicated409Code() throws Exception {
         mockMvc.perform(get("/test/error").param("code", "REPORT_STATE_CONFLICT"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code", is("REPORT_STATE_CONFLICT")));
+                .andExpect(jsonPath("$.code", is("REPORT_STATE_CONFLICT")))
+                .andExpect(jsonPath(
+                        "$.message",
+                        is("현재 보고서 상태에서는 요청을 수행할 수 없습니다.")))
+                .andExpect(jsonPath("$.details", hasSize(0)))
+                .andExpect(jsonPath("$.currentVersionNo").doesNotExist())
+                .andExpect(jsonPath("$.content").doesNotExist())
+                .andExpect(jsonPath("$.statistics").doesNotExist());
     }
 
     @Test

@@ -13,6 +13,19 @@ AUDIT_ACTION=backend/src/main/java/com/gilbom/audit/AuditAction.java
 ACCESS_DENIED_RESOLVER=backend/src/main/java/com/gilbom/common/web/AccessDeniedErrorCodeResolver.java
 GLOBAL_EXCEPTION_HANDLER=backend/src/main/java/com/gilbom/common/web/GlobalExceptionHandler.java
 SECURITY_CONFIG=backend/src/main/java/com/gilbom/security/config/SecurityConfig.java
+REPORT_MIGRATION=backend/src/main/resources/db/migration/V30__harden_report_domain_invariants.sql
+CANONICAL_FINGERPRINT=backend/src/main/java/com/gilbom/common/idempotency/CanonicalRequestFingerprint.java
+IDEMPOTENCY_STORE=backend/src/main/java/com/gilbom/common/idempotency/IdempotencyRequestStore.java
+IDEMPOTENCY_CLEANUP_JOB=backend/src/main/java/com/gilbom/common/idempotency/IdempotencyRequestCleanupJob.java
+EXPECTED_VERSION_GUARD=backend/src/main/java/com/gilbom/common/concurrency/ExpectedVersionGuard.java
+REPORT_DOMAIN_SERVICE=backend/src/main/java/com/gilbom/report/ReportDomainService.java
+REPORT_STATE_SERVICE=backend/src/main/java/com/gilbom/report/ReportStateTransitionService.java
+REPORT_CONTROLLER=backend/src/main/java/com/gilbom/report/ReportController.java
+REPORT_COMMAND_SERVICE=backend/src/main/java/com/gilbom/report/ReportCommandService.java
+REPORT_QUERY_REPOSITORY=backend/src/main/java/com/gilbom/report/ReportQueryRepository.java
+REPORT_INTEGRATION_TEST=backend/src/test/java/com/gilbom/report/integration/ReportDomainServiceIntegrationTest.java
+REPORT_API_INTEGRATION_TEST=backend/src/test/java/com/gilbom/report/integration/ReportApplicationServiceIntegrationTest.java
+REPORT_CONTROLLER_TEST=backend/src/test/java/com/gilbom/report/ReportControllerTest.java
 FRONTEND_PERMISSIONS=frontend/gilbom/src/features/auth/permissions.ts
 FRONTEND_ROUTER=frontend/gilbom/src/app/router.tsx
 FRONTEND_NAVIGATION=frontend/gilbom/src/features/navigationbar.tsx
@@ -70,11 +83,20 @@ assert_path_contains /api/v1/reports \
     "#/components/schemas/ReportListResponse" \
     "list response"
 assert_path_contains /api/v1/reports \
-    "#/components/schemas/ReportCreateRequest" \
-    "create request"
+    "#/components/schemas/ManualReportCreateRequest" \
+    "current manual/template create request"
 assert_path_contains /api/v1/reports \
-    "LLM_RESPONSE_INVALID" \
-    "LLM invalid response code"
+    "name: createdBy" \
+    "author filter"
+assert_path_contains /api/v1/reports \
+    "name: periodFrom" \
+    "period overlap start filter"
+assert_path_contains /api/v1/reports \
+    "name: periodTo" \
+    "period overlap end filter"
+assert_path_contains /api/v1/reports \
+    "COMMON_CONFLICT" \
+    "in-progress idempotency conflict"
 
 assert_path_contains '/api/v1/reports/{reportId}' \
     "operationId: getReport" \
@@ -117,6 +139,8 @@ for schema in \
     ReportDetailResponse \
     ReportVersionListResponse \
     ReportVersionResponse \
+    ReportEvidenceSnapshot \
+    ApprovedPdfInfoResponse \
     ReportStatisticsSnapshot \
     LlmReportResult
 do
@@ -182,6 +206,99 @@ do
     assert_contains "$AUDIT_ACTION" "${action}(\"${action}\")" \
         "${action} audit action"
 done
+
+for field in \
+    generation_method \
+    evidence_snapshot \
+    approved_pdf_version_no \
+    approved_pdf_storage_key \
+    approved_pdf_sha256 \
+    approved_pdf_created_at \
+    resource_type \
+    resource_id
+do
+    assert_contains "$REPORT_MIGRATION" "$field" \
+        "${field} report persistence field"
+done
+
+assert_contains "$REPORT_MIGRATION" \
+    "ix_idempotency_report_expiry" \
+    "report idempotency expiry index"
+assert_contains "$REPORT_MIGRATION" \
+    "tr_anomaly_report_lifecycle" \
+    "database report lifecycle guard"
+assert_contains "$REPORT_MIGRATION" \
+    "tr_report_version_current_pointer" \
+    "database current-version reverse pointer"
+assert_contains "$CANONICAL_FINGERPRINT" \
+    "fields.sort(Comparator.naturalOrder())" \
+    "canonical request object ordering"
+assert_contains "$IDEMPOTENCY_STORE" \
+    "NOW() + INTERVAL '24 hours'" \
+    "24-hour idempotency retention"
+assert_contains "$IDEMPOTENCY_STORE" \
+    "Propagation.MANDATORY" \
+    "idempotency transaction requirement"
+assert_contains "$IDEMPOTENCY_STORE" \
+    "FOR UPDATE SKIP LOCKED" \
+    "bounded idempotency cleanup locking"
+assert_contains "$IDEMPOTENCY_CLEANUP_JOB" \
+    "CLEANUP_BATCH_SIZE = 1_000" \
+    "idempotency cleanup batch size"
+assert_contains "$EXPECTED_VERSION_GUARD" \
+    "expectedVersionNo != currentVersionNo" \
+    "expected version comparison"
+assert_contains "$REPORT_STATE_SERVICE" \
+    "ReportAction.APPROVE, ReportStatus.APPROVED" \
+    "centralized approve transition"
+assert_contains "$REPORT_DOMAIN_SERVICE" \
+    "auditLogService.appendRequired" \
+    "transactional required report audit"
+assert_contains "$REPORT_CONTROLLER" \
+    "@PreAuthorize(\"hasAuthority('REPORT_VIEW')\")" \
+    "report API view permission"
+assert_contains "$REPORT_CONTROLLER" \
+    "@RequestHeader(\"Idempotency-Key\")" \
+    "report create idempotency header"
+assert_contains "$REPORT_COMMAND_SERVICE" \
+    "domainService.softDelete" \
+    "report soft-delete command boundary"
+assert_contains "$REPORT_QUERY_REPOSITORY" \
+    "report.deleted_at IS NULL" \
+    "soft-deleted report query exclusion"
+assert_contains "$REPORT_QUERY_REPOSITORY" \
+    "report.created_by = :createdBy" \
+    "report author filter"
+assert_contains "$REPORT_QUERY_REPOSITORY" \
+    "report.period_to >= :periodFrom" \
+    "report overlap period filter"
+assert_contains "$REPORT_INTEGRATION_TEST" \
+    "rollsBackHeaderVersionIdempotencyAndAuditAsOneTransaction" \
+    "report transaction atomicity test"
+assert_contains "$REPORT_INTEGRATION_TEST" \
+    "concurrentDuplicateCreatesReturnOneCreationAndOneReplay" \
+    "concurrent idempotent create test"
+assert_contains "$REPORT_INTEGRATION_TEST" \
+    "concurrentUpdatesWithOneExpectedVersionAllowOnlyOneWinner" \
+    "concurrent report update test"
+assert_contains "$REPORT_INTEGRATION_TEST" \
+    "concurrentSubmitAndDecisionTransitionsAllowOnlyFirstCommit" \
+    "concurrent report transition test"
+assert_contains "$REPORT_API_INTEGRATION_TEST" \
+    "listsWithAllFiltersAndStablePagination" \
+    "report list/filter integration test"
+assert_contains "$REPORT_API_INTEGRATION_TEST" \
+    "updateAppendsVersionAndPreservesOldSnapshot" \
+    "report append-only update integration test"
+assert_contains "$REPORT_API_INTEGRATION_TEST" \
+    "rejectedEditReturnsToDraftAndSoftDeleteKeepsHistory" \
+    "report rejected edit and soft-delete integration test"
+assert_contains "$REPORT_API_INTEGRATION_TEST" \
+    "serviceBoundaryUsesCurrentDatabasePermissions" \
+    "report service permission integration test"
+assert_contains "$REPORT_CONTROLLER_TEST" \
+    "requiresReportViewPermissionAtApiBoundary" \
+    "report controller permission test"
 
 for permission in \
     REPORT_VIEW \

@@ -1,4 +1,5 @@
 @import './app/robot/css/robot.css';
+@import './features/report/report.css';
 
 #root {
   min-height: 100vh;
@@ -2123,4 +2124,9 @@ button:disabled {
   .loading-spinner {
     animation-duration: 1400ms;
   }
+}
+
+.safe-report-text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }

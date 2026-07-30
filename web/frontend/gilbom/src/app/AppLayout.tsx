@@ -18,7 +18,9 @@ const pageTitles: Record<string, string> = {
 export function AppLayout() {
   const location = useLocation()
   const { user } = useAuthentication()
-  const pageTitle = pageTitles[location.pathname] ?? '길봄 관리자'
+  const pageTitle = location.pathname.startsWith('/reports')
+    ? '리포트'
+    : (pageTitles[location.pathname] ?? '길봄 관리자')
   const primaryRole = user?.roles.at(0)?.roleName ?? '권한 미지정'
 
   return (
