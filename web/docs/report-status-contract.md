@@ -5,7 +5,7 @@
 - DB 정본:
   [`V2__create_report_and_audit_schema.sql`](../backend/src/main/resources/db/migration/V2__create_report_and_audit_schema.sql),
   [`V30__harden_report_domain_invariants.sql`](../backend/src/main/resources/db/migration/V30__harden_report_domain_invariants.sql),
-  [`V31__add_llm_invocation_quota_ledger.sql`](../backend/src/main/resources/db/migration/V31__add_llm_invocation_quota_ledger.sql)
+  [`V32__add_llm_invocation_quota_ledger.sql`](../backend/src/main/resources/db/migration/V32__add_llm_invocation_quota_ledger.sql)
 - OpenAPI 정본: [`openapi-v1.yaml`](./openapi-v1.yaml)
 
 ## 1. 상태

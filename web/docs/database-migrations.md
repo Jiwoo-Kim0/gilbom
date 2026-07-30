@@ -55,8 +55,8 @@
 | V28 | Incident 수집 무결성 보강 | `INC-YYYYMMDD-NNNNNN` 일자별 Counter와 신규 쓰기 형식 CHECK, GPS·Patrol Area 미확정 Incident 검토 대기열 및 Event·Mission·Image FK를 추가 |
 | V29 | CSRF token 발급 Rate Limit bucket | 쿠키를 유지하지 않는 공개 `/csrf-token` 반복 호출이 익명 Spring Session 생성을 증폭시키지 못하도록 `IP_CSRF_TOKEN_ISSUANCE` HMAC IP bucket을 인증 Rate Limit 허용 타입에 추가 |
 | V30 | 보고서 상태·버전·승인 불변성 보강 | 버전별 생성 방식·근거 snapshot, 승인 PDF 결합 정보, 생성 멱등 결과 추적을 추가하고 순차 버전·현재 버전 포인터·상태 전이를 DB trigger로 강제 |
-| V31 | LLM 호출 quota·credit ledger | 사용자별 UTC 일일 호출 수와 전체 일일 credit을 원자적으로 예약하고 token·안전 실패 코드만 기록해 다중 인스턴스의 rate·budget 우회를 차단 |
-| V32 | 보고서 LLM fallback 사유 | LLM 요청이 template으로 낮아진 원인을 고정 코드로 버전에 보존하되 Prompt·응답·예외 원문 저장을 차단 |
+| V32 | LLM 호출 quota·credit ledger | 사용자별 UTC 일일 호출 수와 전체 일일 credit을 원자적으로 예약하고 token·안전 실패 코드만 기록해 다중 인스턴스의 rate·budget 우회를 차단 |
+| V33 | 보고서 LLM fallback 사유 | LLM 요청이 template으로 낮아진 원인을 고정 코드로 버전에 보존하되 Prompt·응답·예외 원문 저장을 차단 |
 
 ### V26 결함 통계 Query 인덱스
 
@@ -154,10 +154,10 @@ DB가 알 수 없는 요청 문맥 규칙인 `expectedVersionNo` 일치와 최�
 자기 승인은 서비스 계층에서 추가 검사한다. 상세 상태·API 계약은
 [report-status-contract.md](report-status-contract.md)를 함께 적용한다.
 
-### V31 LLM 호출 quota·credit ledger
+### V32 LLM 호출 quota·credit ledger
 
 파일:
-`backend/src/main/resources/db/migration/V31__add_llm_invocation_quota_ledger.sql`
+`backend/src/main/resources/db/migration/V32__add_llm_invocation_quota_ledger.sql`
 
 `request_control.llm_invocation_usage`는 실제 외부 호출 시도마다 한 행을 추가한다.
 호출 전에 최대 입력 8,000 token과 설정된 최대 출력 token의 모델별 credit을
@@ -176,10 +176,10 @@ usage 미제공 응답은 비용을 과소 계산하지 않도록 예약액을 �
 budget 마지막 잔액을 확인해도 한 transaction만 예약에 성공한다. 사용자·날짜와
 날짜·모델 access path를 위한 두 인덱스를 둔다.
 
-### V32 보고서 LLM fallback 사유
+### V33 보고서 LLM fallback 사유
 
 파일:
-`backend/src/main/resources/db/migration/V32__persist_report_generation_fallback.sql`
+`backend/src/main/resources/db/migration/V33__persist_report_generation_fallback.sql`
 
 `report.report_version.generation_fallback_reason`은 LLM 요청이 정책·quota·장애·응답
 검증 때문에 template으로 낮아진 경우에만 저장한다. CHECK 제약은
@@ -202,7 +202,7 @@ docker compose logs backend
 ```
 
 
-Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V32가
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V33이
 순서대로 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증
