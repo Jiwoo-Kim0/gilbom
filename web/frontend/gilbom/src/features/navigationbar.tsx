@@ -13,6 +13,7 @@ import {
   ADMIN_SETTINGS_MANAGE,
   AUDIT_LOG_VIEW,
   MISSION_VIEW,
+  REPORT_VIEW,
   ROBOT_STATUS_VIEW,
   hasPermission,
   type FrontendPermission,
@@ -60,7 +61,7 @@ const navigationItems: readonly NavigationItem[] = [
     to: '/reports',
     label: '리포트',
     icon: BarChart3,
-    requiredPermission: null,
+    requiredPermission: REPORT_VIEW,
   },
   {
     to: '/my',

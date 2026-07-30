@@ -27,4 +27,18 @@ class ErrorCodeTest {
         assertThat(ErrorCode.STATISTICS_PERIOD_INVALID.httpStatus())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
     }
+
+    @Test
+    void reportAndLlmContractCodesKeepTheirDeclaredStatuses() {
+        assertThat(ErrorCode.REPORT_ACCESS_DENIED.httpStatus())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(ErrorCode.REPORT_VALIDATION_FAILED.httpStatus())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(ErrorCode.IDEMPOTENCY_KEY_REUSED.httpStatus())
+                .isEqualTo(HttpStatus.CONFLICT);
+        assertThat(ErrorCode.LLM_UNAVAILABLE.httpStatus())
+                .isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(ErrorCode.LLM_RESPONSE_INVALID.httpStatus())
+                .isEqualTo(HttpStatus.BAD_GATEWAY);
+    }
 }

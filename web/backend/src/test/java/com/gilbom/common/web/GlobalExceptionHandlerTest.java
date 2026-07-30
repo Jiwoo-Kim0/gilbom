@@ -152,7 +152,7 @@ class GlobalExceptionHandlerTest {
     void semanticBusinessRuleViolationsUse422() throws Exception {
         mockMvc.perform(get("/test/business-rule"))
                 .andExpect(status().isUnprocessableEntity())
-                .andExpect(jsonPath("$.code", is("REPORT_PERIOD_INVALID")));
+                .andExpect(jsonPath("$.code", is("REPORT_VALIDATION_FAILED")));
     }
 
     @Test
@@ -234,6 +234,13 @@ class GlobalExceptionHandlerTest {
         mockMvc.perform(get("/test/error").param("code", "AUTH_FORBIDDEN"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")));
+    }
+
+    @Test
+    void reportAuthorizationFailuresUseTheReportSpecific403Code() throws Exception {
+        mockMvc.perform(get("/api/v1/reports/test/access-denied"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is("REPORT_ACCESS_DENIED")));
     }
 
     @Test

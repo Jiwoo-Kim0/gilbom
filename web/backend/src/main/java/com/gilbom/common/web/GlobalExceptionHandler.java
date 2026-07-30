@@ -242,7 +242,10 @@ public class GlobalExceptionHandler {
                     SecurityContextHolder.getContext().getAuthentication()
             );
         }
-        return respond(ErrorCode.AUTH_FORBIDDEN, List.of(), request);
+        return respond(
+                AccessDeniedErrorCodeResolver.resolve(request),
+                List.of(),
+                request);
     }
 
     @ExceptionHandler(Exception.class)

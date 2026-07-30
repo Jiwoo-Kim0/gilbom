@@ -4,6 +4,7 @@ import java.sql.SQLException;
 
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -48,7 +49,7 @@ public class GlobalExceptionTestController {
 
     @GetMapping("/test/business-rule")
     void businessRule() {
-        throw new BusinessException(ErrorCode.REPORT_PERIOD_INVALID);
+        throw new BusinessException(ErrorCode.REPORT_VALIDATION_FAILED);
     }
 
     @GetMapping("/test/dependency")
@@ -95,6 +96,11 @@ public class GlobalExceptionTestController {
     @GetMapping("/test/error")
     void error(@RequestParam ErrorCode code) {
         throw new BusinessException(code);
+    }
+
+    @GetMapping("/api/v1/reports/test/access-denied")
+    void reportAccessDenied() {
+        throw new AccessDeniedException("report permission denied");
     }
 
     public record ValidationRequest(

@@ -40,7 +40,7 @@ HTTP 상태와 응답 형식은 다음 원칙을 따른다.
 
 ```json
 {
-  "items": [],
+  "content": [],
   "page": 0,
   "size": 20,
   "totalElements": 135,
@@ -107,6 +107,7 @@ HTTP 상태와 응답 형식은 다음 원칙을 따른다.
 | `COMMON_RESOURCE_NOT_FOUND` | 404 | 도메인을 특정할 수 없는 리소스 없음 |
 | `COMMON_METHOD_NOT_ALLOWED` | 405 | 지원하지 않는 HTTP 메서드 |
 | `COMMON_CONFLICT` | 409 | 도메인을 특정할 수 없는 중복·상태 충돌 |
+| `IDEMPOTENCY_KEY_REUSED` | 409 | 같은 멱등 key를 다른 요청 fingerprint에 재사용 |
 | `COMMON_PAYLOAD_TOO_LARGE` | 413 | 전역 요청 본문 크기 상한 초과 |
 | `COMMON_UNSUPPORTED_MEDIA_TYPE` | 415 | 일반 API에서 지원하지 않는 Content-Type |
 | `COMMON_BUSINESS_RULE_VIOLATION` | 422 | 도메인을 특정할 수 없는 업무 규칙 위반 |
@@ -134,6 +135,7 @@ HTTP 상태와 응답 형식은 다음 원칙을 따른다.
 | `DEFECT_NOT_FOUND` | 404 | 결함 없음 |
 | `COMMAND_NOT_FOUND` | 404 | 명령 없음 |
 | `REPORT_NOT_FOUND` | 404 | 보고서 없음 |
+| `REPORT_ACCESS_DENIED` | 403 | 인증 사용자의 보고서 기능 권한 부족 |
 | `IMAGE_NOT_FOUND` | 404 | 이미지 없음 |
 | `COMMAND_STATE_CONFLICT` | 409 | 현재 명령·로봇 상태와 요청 충돌 |
 | `MQTT_MESSAGE_EXPIRED` | 422 | Topic별 기준시각과 TTL을 초과한 수신 메시지 |
@@ -141,15 +143,17 @@ HTTP 상태와 응답 형식은 다음 원칙을 따른다.
 | `MQTT_REPLAY_REJECTED` | 422 | 종료·이전 Boot 메시지, 새 Boot의 `seq!=1` 또는 증가하지 않는 `seq` |
 | `MQTT_SEQUENCE_CONFLICT` | 422 | 같은 `(robot_id, boot_id, seq)`를 다른 Topic·메시지가 이미 사용함 |
 | `REPORT_STATE_CONFLICT` | 409 | 보고서 상태 전이 또는 버전 경합 |
+| `REPORT_VALIDATION_FAILED` | 422 | 보고서 기간·본문·통계·사유 업무 규칙 위반 |
 | `IMAGE_TOO_LARGE` | 413 | 이미지 크기 상한 초과 |
 | `IMAGE_UNSUPPORTED_MEDIA_TYPE` | 415 | Content-Type은 유효하지만 지원하지 않는 이미지 형식 |
-| `REPORT_PERIOD_INVALID` | 422 | 보고서 시작·종료 기간 업무 규칙 위반 |
 | `STATISTICS_PERIOD_INVALID` | 422 | 통계 기간이 역전·동일하거나 최대 366일을 초과함 |
 | `DB_UNAVAILABLE` | 503 | 데이터베이스 장애 |
 | `S3_UNAVAILABLE` | 503 | 파일 저장소 장애 |
 | `MQTT_CREDENTIAL_PROVISIONING_UNAVAILABLE` | 503 | Mosquitto Credential 반영·인증 검증 장애 |
 | `MQTT_CREDENTIAL_REGISTRY_DRIFT` | 503 | DB의 활성 hash와 Mosquitto passwd hash 불일치 |
 | `MQTT_UNAVAILABLE` | 503 | MQTT Broker 또는 Adapter 장애 |
+| `LLM_UNAVAILABLE` | 503 | LLM 비활성, timeout, 연결 또는 provider 장애 |
+| `LLM_RESPONSE_INVALID` | 502 | LLM 응답 JSON Schema 또는 원본 정합성 검증 실패 |
 
 `ERROR_400`, `BAD_REQUEST_ERROR`, `INVALID`처럼 HTTP 상태나 모호한 단어만으로 만든 코드는 사용하지 않는다.
 
@@ -202,26 +206,33 @@ Validation 오류 하나는 다음 필드를 사용한다.
 | `HandlerMethodValidationException` | 400 | `COMMON_VALIDATION_FAILED` |
 | `ConstraintViolationException` | 400 | `COMMON_VALIDATION_FAILED` |
 | 인증 실패 | 401 | `AUTH_UNAUTHENTICATED` |
-| 접근 권한 부족 | 403 | `AUTH_FORBIDDEN` |
+| 보고서 기능 권한 부족 | 403 | `REPORT_ACCESS_DENIED` |
+| 그 외 접근 권한 또는 CSRF 검증 실패 | 403 | `AUTH_FORBIDDEN` |
 | 존재하지 않는 도메인 리소스 | 404 | `{DOMAIN}_NOT_FOUND` |
 | 매핑되지 않은 경로·정적 리소스 | 404 | `COMMON_RESOURCE_NOT_FOUND` |
 | `HttpRequestMethodNotSupportedException` | 405 | `COMMON_METHOD_NOT_ALLOWED` |
-| 중복 생성·멱등 키 불일치·상태 충돌 | 409 | `{DOMAIN}_CONFLICT` |
+| 같은 멱등 key의 다른 요청 재사용 | 409 | `IDEMPOTENCY_KEY_REUSED` |
+| 중복 생성·상태 충돌 | 409 | `{DOMAIN}_CONFLICT` |
 | 전역 요청 본문 상한 초과 | 413 | `COMMON_PAYLOAD_TOO_LARGE` |
 | `MaxUploadSizeExceededException` | 413 | `IMAGE_TOO_LARGE` |
 | `HttpMediaTypeNotSupportedException` | 415 | `COMMON_UNSUPPORTED_MEDIA_TYPE` |
 | 이미지 콘텐츠 자체의 형식 검증 실패 | 415 | `IMAGE_UNSUPPORTED_MEDIA_TYPE` |
-| 형식은 맞지만 업무 규칙 위반 | 422 | 구체적인 `{DOMAIN}_{REASON}` 또는 `COMMON_BUSINESS_RULE_VIOLATION` |
+| 보고서 snapshot·상태 입력 업무 규칙 위반 | 422 | `REPORT_VALIDATION_FAILED` |
+| 형식은 맞지만 그 외 업무 규칙 위반 | 422 | 구체적인 `{DOMAIN}_{REASON}` 또는 `COMMON_BUSINESS_RULE_VIOLATION` |
 | Rate Limit 초과 | 429 | `COMMON_RATE_LIMIT_EXCEEDED` |
 | 처리되지 않은 예외 | 500 | `COMMON_INTERNAL_ERROR` |
-| DB·S3·MQTT 장애 | 503 | `DB_UNAVAILABLE`, `S3_UNAVAILABLE`, `MQTT_UNAVAILABLE` |
+| LLM 응답 계약·원본 정합성 실패 | 502 | `LLM_RESPONSE_INVALID` |
+| DB·S3·MQTT·LLM 장애 | 503 | `DB_UNAVAILABLE`, `S3_UNAVAILABLE`, `MQTT_UNAVAILABLE`, `LLM_UNAVAILABLE` |
 
 예:
 
 - 제목 누락 → `400 COMMON_VALIDATION_FAILED`
+- 보고서 필수 통계 누락 → `422 REPORT_VALIDATION_FAILED`
+- 보고서 생성 key를 다른 body에 재사용 → `409 IDEMPOTENCY_KEY_REUSED`
+- LLM 응답의 결함 ID가 Prompt allowlist 밖임 → `502 LLM_RESPONSE_INVALID`
 - 존재하지 않는 로봇 → `404 ROBOT_NOT_FOUND`
 - 실행 중인 임무를 다시 시작 → `409 COMMAND_STATE_CONFLICT`
-- 보고서 시작일이 종료일보다 늦음 → `422 REPORT_PERIOD_INVALID`
+- 보고서 시작일이 종료일보다 늦음 → `422 REPORT_VALIDATION_FAILED`
 - 통계 `from`과 `to`가 같거나 두 Instant의 차이가 366일을 초과함 → `422 STATISTICS_PERIOD_INVALID`
 - 통계 날짜·UUID를 파싱할 수 없음 → `400 COMMON_INVALID_REQUEST`
 - 통계의 `patrolAreaId` UUID가 유효하지만 존재하지 않음 → `404 PATROL_AREA_NOT_FOUND`
@@ -255,7 +266,7 @@ Validation 오류 하나는 다음 필드를 사용한다.
 ```java
 throw new BusinessException(ErrorCode.ROBOT_NOT_FOUND);
 throw new BusinessException(ErrorCode.COMMAND_STATE_CONFLICT);
-throw new BusinessException(ErrorCode.REPORT_PERIOD_INVALID);
+throw new BusinessException(ErrorCode.REPORT_VALIDATION_FAILED);
 throw new BusinessException(ErrorCode.STATISTICS_PERIOD_INVALID);
 ```
 

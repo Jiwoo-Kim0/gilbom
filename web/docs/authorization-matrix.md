@@ -262,7 +262,6 @@ Patrol Route 버전은 조회 전용이다. 이름·Geometry·운영 상태 변�
 
 | Method | Path | 권한 | 객체 범위 | CSRF | 감사 |
 |---|---|---|---|:---:|---|
-| GET | `/api/v1/reports/summary` | `REPORT_VIEW` | MVP 권한 단위 |  |  |
 | GET | `/api/v1/reports` | `REPORT_VIEW` | MVP 권한 단위 |  |  |
 | POST | `/api/v1/reports` | `REPORT_CREATE` | 근거 리소스 재검사 | O | O |
 | GET | `/api/v1/reports/{reportId}` | `REPORT_VIEW` | MVP 권한 단위 |  |  |
@@ -271,9 +270,7 @@ Patrol Route 버전은 조회 전용이다. 이름·Geometry·운영 상태 변�
 | POST | `/api/v1/reports/{reportId}/approve` | `REPORT_APPROVE` | 자기 승인 금지 | O | O |
 | POST | `/api/v1/reports/{reportId}/reject` | `REPORT_APPROVE` | 자기 버전 반려는 허용하되 사유 필수 | O | O |
 | GET | `/api/v1/reports/{reportId}/versions` | `REPORT_VIEW` | MVP 권한 단위 |  |  |
-| GET | `/api/v1/reports/{reportId}/download-url` | `REPORT_VIEW` | MVP 권한 단위 |  | URL 미기록 |
-| GET, POST | `/api/v1/report-schedules` | GET `REPORT_VIEW`, POST `REPORT_APPROVE` | MVP 권한 단위 | POST O | 생성 |
-| PATCH, DELETE | `/api/v1/report-schedules/{scheduleId}` | `REPORT_APPROVE` | MVP 권한 단위 | O | O |
+| GET | `/api/v1/reports/{reportId}/versions/{versionNo}` | `REPORT_VIEW` | MVP 권한 단위 |  |  |
 
 ## 13. 감사·파일·기기 업로드 API
 

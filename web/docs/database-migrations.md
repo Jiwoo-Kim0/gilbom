@@ -53,6 +53,7 @@
 | V26 | 결함 통계 Query 인덱스 | 병합되지 않은 현재 결함의 전체 기간 및 지역·기간 통계를 위해 `last_seen_at`과 `patrol_area_id, last_seen_at` 기반 partial covering index 추가 |
 | V27 | V23 제약 검증 승격 | V23이 `NOT VALID`로 걸어둔 Command·Defect·Observation의 FK 6개와 CHECK 1개를 `VALIDATE`해 기존 행까지 무결성을 보장하고 플래너가 제약을 신뢰하게 함. 근거는 [defect-schema.md](defect-schema.md) 3.0.1 |
 | V28 | Incident 수집 무결성 보강 | `INC-YYYYMMDD-NNNNNN` 일자별 Counter와 신규 쓰기 형식 CHECK, GPS·Patrol Area 미확정 Incident 검토 대기열 및 Event·Mission·Image FK를 추가 |
+| V29 | CSRF token 발급 Rate Limit bucket | 쿠키를 유지하지 않는 공개 `/csrf-token` 반복 호출이 익명 Spring Session 생성을 증폭시키지 못하도록 `IP_CSRF_TOKEN_ISSUANCE` HMAC IP bucket을 인증 Rate Limit 허용 타입에 추가 |
 
 ### V26 결함 통계 Query 인덱스
 
@@ -87,6 +88,22 @@ Sequential Scan을 선택했다. `enable_seqscan=off` 검증에서 전체 기간
 측정한다. V26은 일반 `CREATE INDEX`를 사용하므로 큰 운영 테이블에 적용할 때는
 DDL lock 허용 시간과 배포 창도 확인해야 한다.
 
+### V29 CSRF token 발급 Rate Limit bucket
+
+파일:
+`backend/src/main/resources/db/migration/V29__limit_csrf_token_session_creation.sql`
+
+V29는 `auth.authentication_rate_limit.limit_type`의 기존 CHECK 제약을 교체하여
+`IP_CSRF_TOKEN_ISSUANCE`를 허용한다. 별도 테이블을 만들지 않고 V8·V10에서 구축한
+영속 Rate Limit 저장소를 재사용하므로 다중 애플리케이션 인스턴스가 같은 차단 창을
+공유하며, 클라이언트 IP 원문 대신 HMAC 값과 key version만 저장한다.
+
+애플리케이션은 유효한 기존 세션이 없는 `GET /api/v1/auth/csrf-token` 요청만 이
+bucket에 기록한다. 기존 세션의 새로고침·다중 탭 요청은 새 JDBC session row를 만들지
+않으므로 차감하지 않는다. 세부 한도와 Nginx 선제 제한은
+[인증 Rate Limit·잠금·감사 로그 구현](authentication-rate-limit-lock-audit.md#31-csrf-발급과-세션-저장소-보호)에
+기록한다.
+
 시스템 Role `ADMIN`, `MANAGER`, `OPERATOR`와 18개 세부 permission 및
 role-permission 관계는 결정적인 UUID로 seed한다. 실제
 관리자 계정은 password hash와 MFA 등록 절차가 필요하므로 migration에서 만들지 않는다.
@@ -102,7 +119,7 @@ docker compose logs backend
 ```
 
 
-Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V28이
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V29가
 순서대로 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증

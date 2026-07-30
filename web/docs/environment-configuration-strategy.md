@@ -154,6 +154,8 @@ staging은 prod와 같은 인증·쿠키·IAM·네트워크 정책을 사용하�
 | `INITIAL_ADMIN_USER_CODE` |  | 앞뒤 공백 없는 최대 30자 |
 | `AUTH_RATE_LIMIT_HMAC_KEY_VERSION` |  | HMAC key 회전 버전, 양의 정수 |
 | `AUTH_RATE_LIMIT_HMAC_KEY_BASE64` | O | 최소 32-byte key의 Base64, staging/prod 외부 Secret |
+| `AUTH_CSRF_TOKEN_ISSUANCE_MAX_REQUESTS` |  | 새 익명 세션 생성 방어, 고정 `60` |
+| `AUTH_CSRF_TOKEN_ISSUANCE_WINDOW` |  | 고정 `1m` |
 | `AUTH_EMAIL_AVAILABILITY_MAX_REQUESTS` |  | 기본 1분당 `20` |
 | `AUTH_EMAIL_AVAILABILITY_WINDOW` |  | 기본 `1m` |
 | `AUTH_REGISTRATION_MAX_REQUESTS` |  | 기본 1시간당 `5` |

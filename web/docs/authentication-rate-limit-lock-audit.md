@@ -1,7 +1,7 @@
 # 인증 Rate Limit·잠금·감사 로그 구현
 
 - 구현 상태: 공통 기반 완료
-- 적용 migration: V10
+- 적용 migration: V10, V29
 - 후속 연결: 로그인·초기 비밀번호 변경·MFA·로그아웃 API
 
 ## 1. 방어 계층
@@ -29,6 +29,7 @@ fail-closed 처리한다. 429 응답은 `Cache-Control: no-store`와 정수 초 
 | 정규화 이메일 비밀번호 실패 | 5회 | 15분 창, 15분 제한 |
 | 사용자 MFA 실패 | 5회 | 15분 창, 15분 제한 |
 | 현재 pre-auth challenge | 5회 | challenge 시작부터 5분 |
+| 새 익명 세션의 CSRF 발급 | 60회 | IP별 1분 |
 | 이메일 중복 확인 | 20회 | IP별 1분 |
 | 공개 회원가입 | 5회 | IP별 1시간 |
 
@@ -47,6 +48,7 @@ bucket은 다음처럼 분리한다.
 - `ACCOUNT_MFA_FAILURE`
 - `IP_EMAIL_AVAILABILITY_REQUEST`
 - `IP_PUBLIC_REGISTRATION_REQUEST`
+- `IP_CSRF_TOKEN_ISSUANCE`
 
 실제 계정은 `auth.admin_user.failed_login_count`, `last_failed_login_at`,
 `locked_until`도 함께 갱신한다. 15분 안의 다섯 번째 실패에서
@@ -55,6 +57,34 @@ bucket은 다음처럼 분리한다.
 
 존재하지 않는 이메일도 같은 HMAC bucket을 소비한다. 실제 계정 row가 없다는 이유로
 계정별 제한을 생략하지 않으며 외부 응답은 실제 계정과 같은 인증 실패 계약을 사용한다.
+
+### 3.1 CSRF 발급과 세션 저장소 보호
+
+`GET /api/v1/auth/csrf-token`은 토큰을 읽는 시점에 Spring Session을 만들 수 있다.
+쿠키를 유지하지 않는 클라이언트가 이를 반복하면 인증을 우회하지 않고도
+`session_store.spring_session`과 attribute row 생성을 증폭시킬 수 있다.
+
+다음 두 계층을 적용한다.
+
+1. Nginx는 IP별 `2r/s`, `burst=60`으로 순간 flood를 애플리케이션 전에 `429` 처리한다.
+2. 애플리케이션은 현재 유효한 `HttpSession`이 없는 요청만
+   `IP_CSRF_TOKEN_ISSUANCE` HMAC bucket으로 IP별 정확히 60회/분 허용한다.
+
+이미 세션이 있는 새로고침·다중 탭 요청은 새 JDBC 세션 row를 만들지 않으므로
+애플리케이션 bucket을 소비하지 않는다. Nginx는 서버 세션의 유효성을 판단할 수 없어
+모든 CSRF token 경로에 넉넉한 burst 상한만 적용하고, 영속 정책의 정본은
+애플리케이션과 PostgreSQL에 둔다.
+
+애플리케이션 제한은 다중 인스턴스에서도 같은 HMAC bucket을 공유하고, 거부 시
+공통 JSON `429`, `Retry-After`, `Cache-Control: no-store`를 반환한다. 저장소 장애는
+새 세션 생성을 허용하지 않고 `503 DB_UNAVAILABLE`로 fail-closed 처리한다.
+Nginx가 먼저 거부한 `429`는 애플리케이션 JSON body나 동적 `Retry-After`가 없을 수 있다.
+
+IP 제한은 Nginx와 애플리케이션이 실제 클라이언트 IP를 식별한다는 전제에 의존한다.
+운영 환경에서 Nginx 앞에 LB·WAF·CDN이 있으면 신뢰할 프록시 대역만
+`set_real_ip_from`으로 지정하고 `real_ip_header`를 구성해야 한다. 이를 생략하면 모든
+사용자가 프록시 IP 하나로 집계되거나, 반대로 신뢰하지 않은 전달 헤더를 허용할 경우
+공격자가 IP bucket을 우회할 수 있다.
 
 ## 4. MFA 제한
 
@@ -86,7 +116,7 @@ bucket은 다음처럼 분리한다.
 | `AUTH_RATE_LIMITED` | `DENIED` | 시스템 / 알 수 있을 때만 사용자 UUID |
 | `AUTH_LOGOUT` | `SUCCESS` | 인증 사용자 / 세션 ID는 기록하지 않음 |
 
-IP·중복 확인·회원가입 Rate Limit은 같은 차단 창의 첫 거부 요청에서만
+IP·CSRF 발급·중복 확인·회원가입 Rate Limit은 같은 차단 창의 첫 거부 요청에서만
 `AUTH_RATE_LIMITED`를 기록해 차단 이후의 반복 요청이 감사 저장소를 증폭시키지 못하게
 한다. 계정·MFA 제한은 필수 `AUTH_LOGIN_FAILED`,
 `AUTH_ACCOUNT_TEMPORARILY_LOCKED`, `AUTH_MFA_CHALLENGE_FAILED`로 추적한다.

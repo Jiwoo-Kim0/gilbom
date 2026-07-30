@@ -32,6 +32,7 @@ import com.gilbom.audit.SecurityAuditService;
 import com.gilbom.auth.session.AuthenticationSessionEnforcementFilter;
 import com.gilbom.auth.session.SessionSecurityStateRepository;
 import com.gilbom.common.error.ErrorCode;
+import com.gilbom.common.web.AccessDeniedErrorCodeResolver;
 import com.gilbom.security.web.SecurityErrorResponseWriter;
 
 @Configuration
@@ -90,7 +91,11 @@ public class SecurityConfig {
                                     securityAuditProvider,
                                     request
                             );
-                            errorWriter.write(request, response, ErrorCode.AUTH_FORBIDDEN);
+                            errorWriter.write(
+                                    request,
+                                    response,
+                                    AccessDeniedErrorCodeResolver.resolve(request)
+                            );
                         }))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(HttpMethod.GET,

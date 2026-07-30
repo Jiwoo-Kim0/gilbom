@@ -11,6 +11,7 @@ import {
   ADMIN_SETTINGS_MANAGE,
   AUDIT_LOG_VIEW,
   MISSION_VIEW,
+  REPORT_VIEW,
   ROBOT_STATUS_VIEW,
 } from '../features/auth/permissions'
 import { AdminWorkspaceLayout } from '../features/admin/AdminWorkspaceLayout'
@@ -107,7 +108,14 @@ export const router = createBrowserRouter([
           </RequirePermission>
         ),
       },
-      { path: 'reports', element: <ReportsPage /> },
+      {
+        path: 'reports',
+        element: (
+          <RequirePermission permission={REPORT_VIEW}>
+            <ReportsPage />
+          </RequirePermission>
+        ),
+      },
       {
         path: 'admin',
         element: (
