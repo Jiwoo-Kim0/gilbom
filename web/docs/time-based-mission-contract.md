@@ -22,7 +22,7 @@
 `AUTONOMOUS_DEFAULT` Route를 하나 두고 Frontend가 Area 선택 시 그 ID를 내부
 요청에 자동 포함한다.
 
-- 기존 활성 Area: V31 Migration에서 누락된 Dummy Route를 생성한다.
+- 기존 활성 Area: V32 Migration에서 누락된 Dummy Route를 생성한다.
 - 신규 Area: Area 생성 트랜잭션에서 Dummy Route를 생성한다.
 - Area 경계 변경: Dummy Geometry를 새 경계 내부로 다시 생성한다.
 - Area 비활성화·보관: Dummy Route도 비활성 상태로 동기화한다.
@@ -71,7 +71,7 @@ Route 선택·필터·목록·상세 표시는 제공하지 않는다.
 
 ## 5. 검증 경계
 
-- Backend: 실제 PostGIS Testcontainers로 V1~V31 Migration, Area별 Dummy,
+- Backend: 실제 PostGIS Testcontainers로 V1~V32 Migration, Area별 Dummy,
   Mission 생성·조회·ETA, 시간 진행률, PAUSED 증가와 완료 Event 100%를 검증한다.
 - Frontend: ESLint와 production build를 검증한다.
 - Browser Fixture: 실제 Chromium에서 로그인 상태와 REST 응답을 결정적 Fixture로
