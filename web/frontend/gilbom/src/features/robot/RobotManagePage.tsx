@@ -15,6 +15,7 @@ import {
 import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { RobotFleetGrid } from './RobotFleetGrid'
 import { RobotMap } from './RobotMap'
+import { RobotCredentialManager } from './RobotCredentialManager'
 import { RobotSystemLog } from './RobotSystemLog'
 import {
   getRobotMap,
@@ -349,6 +350,7 @@ export function RobotManagePage() {
         </button>
       </div>
 
+      <RobotCredentialManager onCredentialChanged={loadSnapshot} />
       <RobotSystemLog logs={logs} />
     </section>
   )

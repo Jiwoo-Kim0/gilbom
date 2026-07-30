@@ -11,9 +11,7 @@ import {
   RefreshCw,
   RotateCcw,
   Route,
-  ShieldCheck,
   Timer,
-  X,
 } from 'lucide-react'
 import {
   useCallback,
@@ -24,17 +22,9 @@ import {
   type FormEvent,
 } from 'react'
 import { NavLink } from 'react-router'
-import {
-  ApiError,
-  getApiErrorMessage,
-} from '../../shared/api/apiClient'
+import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { useAuthentication } from '../auth/authenticationContext'
-import { MISSION_MANAGE, ROBOT_REGISTER } from '../auth/permissions'
-import {
-  issueRobotCredential,
-  reconcileRobotCredentialRegistry,
-  type IssuedMqttCredential,
-} from '../robot/robotCredentialApi'
+import { MISSION_MANAGE } from '../auth/permissions'
 import { getRobotMap } from '../robot/robotApi'
 import type { RobotMapItem } from '../robot/robotTypes'
 import { useRobotRealtime } from '../robot/useRobotRealtime'
@@ -179,21 +169,8 @@ export function MissionManagePage() {
   const [catalogError, setCatalogError] = useState<unknown>(null)
   const [formError, setFormError] = useState<unknown>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [activationRobot, setActivationRobot] = useState<RobotOption | null>(
-    null,
-  )
-  const [activationSubmitting, setActivationSubmitting] = useState(false)
-  const [activationError, setActivationError] = useState<unknown>(null)
-  const [issuedCredential, setIssuedCredential] =
-    useState<IssuedMqttCredential | null>(null)
-  const activationIdempotencyKeyRef = useRef<string | null>(null)
   const { user } = useAuthentication()
   const canManage = user?.permissions.includes(MISSION_MANAGE) ?? false
-  const canRegisterRobot =
-    user?.permissions.includes(ROBOT_REGISTER) ?? false
-  const credentialRegistryConflict =
-    activationError instanceof ApiError
-    && activationError.code === 'ROBOT_CREDENTIAL_CONFLICT'
 
   const activeAreas = useMemo(
     () => areas.filter((area) => area.lifecycleStatus === 'ACTIVE'),
@@ -202,13 +179,6 @@ export function MissionManagePage() {
   const activeRobots = useMemo(
     () => robots.filter((robot) => (
       robot.operationalStatus === 'ACTIVE' && robot.missionStatus === null
-    )),
-    [robots],
-  )
-  const provisioningRobots = useMemo(
-    () => robots.filter((robot) => (
-      robot.operationalStatus === 'PROVISIONING'
-      && robot.missionStatus === null
     )),
     [robots],
   )
@@ -288,72 +258,6 @@ export function MissionManagePage() {
       setRobotMapItems([])
     }
   }, [])
-
-  function openRobotActivation(robot: RobotOption) {
-    activationIdempotencyKeyRef.current = crypto.randomUUID()
-    setActivationRobot(robot)
-    setActivationError(null)
-    setIssuedCredential(null)
-  }
-
-  function closeRobotActivation() {
-    if (activationSubmitting) {
-      return
-    }
-    activationIdempotencyKeyRef.current = null
-    setActivationRobot(null)
-    setActivationError(null)
-    setIssuedCredential(null)
-  }
-
-  async function requestRobotCredential(robot: RobotOption) {
-    const idempotencyKey = activationIdempotencyKeyRef.current
-      ?? crypto.randomUUID()
-    activationIdempotencyKeyRef.current = idempotencyKey
-    const credential = await issueRobotCredential(
-      robot.robotId,
-      idempotencyKey,
-    )
-    setIssuedCredential(credential)
-    await loadCatalogs()
-    setCreateRobotId(robot.robotId)
-  }
-
-  async function handleRobotActivation() {
-    if (activationRobot === null) {
-      return
-    }
-
-    setActivationSubmitting(true)
-    setActivationError(null)
-    try {
-      await requestRobotCredential(activationRobot)
-    } catch (nextError) {
-      setActivationError(nextError)
-    } finally {
-      setActivationSubmitting(false)
-    }
-  }
-
-  async function handleRegistryReconcileAndRetry() {
-    if (activationRobot === null) {
-      return
-    }
-
-    setActivationSubmitting(true)
-    setActivationError(null)
-    try {
-      await reconcileRobotCredentialRegistry(
-        activationRobot.robotId,
-        '임무 배정 전 잔존 MQTT Broker 계정 정리',
-      )
-      await requestRobotCredential(activationRobot)
-    } catch (nextError) {
-      setActivationError(nextError)
-    } finally {
-      setActivationSubmitting(false)
-    }
-  }
 
   const loadMissionDetail = useCallback(async (missionId: string) => {
     requestedDetailIdRef.current = missionId
@@ -694,61 +598,29 @@ export function MissionManagePage() {
             </div>
           ) : null}
           <form className="mission-create-form" onSubmit={handleCreate}>
-            <div className="mission-robot-field">
-              <label className="admin-form-field" htmlFor="mission-create-robot">
-                Robot
-                <select
-                  id="mission-create-robot"
-                  value={createRobotId}
-                  onChange={(event) => setCreateRobotId(event.target.value)}
-                  disabled={catalogLoading || submitting}
-                  required
-                >
-                  <option value="">
-                    {catalogLoading ? 'Robot 불러오는 중…' : 'Robot 선택'}
+            <label className="admin-form-field" htmlFor="mission-create-robot">
+              Robot
+              <select
+                id="mission-create-robot"
+                value={createRobotId}
+                onChange={(event) => setCreateRobotId(event.target.value)}
+                disabled={catalogLoading || submitting}
+                required
+              >
+                <option value="">
+                  {catalogLoading ? 'Robot 불러오는 중…' : 'Robot 선택'}
+                </option>
+                {activeRobots.map((robot) => (
+                  <option key={robot.robotId} value={robot.robotId}>
+                    {robot.robotName} ({robot.mqttId})
                   </option>
-                  {activeRobots.map((robot) => (
-                    <option key={robot.robotId} value={robot.robotId}>
-                      {robot.robotName} ({robot.mqttId})
-                    </option>
-                  ))}
-                </select>
-                <small>ACTIVE 상태이며 현재 임무가 없는 Robot만 표시됩니다.</small>
-              </label>
-              {canRegisterRobot && selectedCreateRobot !== null ? (
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={() => openRobotActivation(selectedCreateRobot)}
-                  disabled={activationSubmitting}
-                >
-                  {selectedCreateRobot.robotName} Credential 회전
-                </button>
-              ) : null}
-            </div>
-            {canRegisterRobot && provisioningRobots.length > 0 ? (
-              <div className="mission-robot-activation-notice" role="status">
-                <div>
-                  <ShieldCheck size={18} aria-hidden="true" />
-                  <span>
-                    Credential 발급 후 임무 배정 가능한 Robot
-                  </span>
-                </div>
-                <div className="mission-robot-activation-list">
-                  {provisioningRobots.map((robot) => (
-                    <button
-                      key={robot.robotId}
-                      className="secondary-button"
-                      type="button"
-                      onClick={() => openRobotActivation(robot)}
-                      disabled={activationSubmitting}
-                    >
-                      {robot.robotName} ({robot.mqttId}) 발급·활성화
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
+                ))}
+              </select>
+              <small>
+                ACTIVE 상태이며 현재 임무가 없는 Robot만 표시됩니다.
+                Credential은 Robot 관리에서 발급·회전합니다.
+              </small>
+            </label>
             <label className="admin-form-field" htmlFor="mission-create-area">
               순찰 구역
               <select
@@ -832,142 +704,6 @@ export function MissionManagePage() {
           필요합니다.
         </div>
       )}
-
-      {activationRobot !== null ? (
-        <div
-          className="mission-robot-activation-backdrop"
-          onMouseDown={closeRobotActivation}
-        >
-          <section
-            className="mission-robot-activation-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="mission-robot-activation-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="mission-robot-activation-heading">
-              <div>
-                <p className="eyebrow">MQTT CREDENTIAL</p>
-                <h3 id="mission-robot-activation-title">
-                  {activationRobot.operationalStatus === 'ACTIVE'
-                    ? 'Robot Credential 회전'
-                    : 'Robot 발급·활성화'}
-                </h3>
-              </div>
-              <button
-                className="icon-button"
-                type="button"
-                aria-label="Credential 창 닫기"
-                onClick={closeRobotActivation}
-                disabled={activationSubmitting}
-              >
-                <X size={18} aria-hidden="true" />
-              </button>
-            </div>
-
-            {issuedCredential === null ? (
-              <>
-                <p>
-                  <strong>
-                    {activationRobot.robotName} ({activationRobot.mqttId})
-                  </strong>
-                  {activationRobot.operationalStatus === 'ACTIVE'
-                    ? '의 기존 MQTT 비밀번호를 폐기하고 새 Credential을 발급합니다.'
-                    : [
-                      '의 MQTT Credential을 발급합니다. 성공하면 Robot이 ACTIVE로 ',
-                      '전환되고 임무 생성 후보로 선택됩니다.',
-                    ].join('')}
-                </p>
-                <p className="mission-robot-activation-warning">
-                  {activationRobot.operationalStatus === 'ACTIVE'
-                    ? '기존 비밀번호는 즉시 사용할 수 없게 되며 새 비밀번호는 이 창에서 한 번만 표시됩니다.'
-                    : '발급 비밀번호는 성공 직후 이 창에서 한 번만 표시됩니다.'}
-                </p>
-                {activationError ? (
-                  <>
-                    <div className="page-alert" role="alert">
-                      발급하지 못했습니다. {getApiErrorMessage(activationError)}
-                    </div>
-                    {credentialRegistryConflict ? (
-                      <p className="mission-robot-registry-recovery">
-                        DB에는 활성 Credential이 없지만 Broker에 같은 계정이 남아
-                        있습니다. 기존 정합성 복구 API로 잔존 계정을 제거한 뒤
-                        새 Credential을 발급할 수 있습니다.
-                      </p>
-                    ) : null}
-                  </>
-                ) : null}
-                <div className="mission-robot-activation-actions">
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={closeRobotActivation}
-                    disabled={activationSubmitting}
-                  >
-                    취소
-                  </button>
-                  <button
-                    className="primary-button"
-                    type="button"
-                    onClick={() => void (
-                      credentialRegistryConflict
-                        ? handleRegistryReconcileAndRetry()
-                        : handleRobotActivation()
-                    )}
-                    disabled={activationSubmitting}
-                  >
-                    {activationSubmitting
-                      ? '처리 중…'
-                      : credentialRegistryConflict
-                        ? '잔존 계정 정리 후 다시 발급'
-                        : activationRobot.operationalStatus === 'ACTIVE'
-                          ? 'Credential 회전'
-                          : '발급·활성화'}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="page-alert page-alert-success" role="status">
-                  {activationRobot.operationalStatus === 'ACTIVE'
-                    ? '새 Credential이 발급되었습니다.'
-                    : 'Robot이 ACTIVE로 전환되어 임무 생성 후보에 선택되었습니다.'}
-                </div>
-                <dl className="mission-robot-credential-result">
-                  <div>
-                    <dt>Broker</dt>
-                    <dd>{issuedCredential.mqtt.brokerUri}</dd>
-                  </div>
-                  <div>
-                    <dt>Username</dt>
-                    <dd>{issuedCredential.mqtt.username}</dd>
-                  </div>
-                  <div>
-                    <dt>Client ID</dt>
-                    <dd>{issuedCredential.mqtt.clientId}</dd>
-                  </div>
-                  <div>
-                    <dt>1회 비밀번호</dt>
-                    <dd>{issuedCredential.mqtt.password}</dd>
-                  </div>
-                </dl>
-                <p className="mission-robot-activation-warning">
-                  창을 닫기 전에 승인된 경로로 Robot에 연결 정보를 주입하세요.
-                </p>
-                <div className="mission-robot-activation-actions">
-                  <button
-                    className="primary-button"
-                    type="button"
-                    onClick={closeRobotActivation}
-                  >
-                    확인 후 닫기
-                  </button>
-                </div>
-              </>
-            )}
-          </section>
-        </div>
-      ) : null}
 
       {notice ? (
         <div className="page-notice" role="status">
