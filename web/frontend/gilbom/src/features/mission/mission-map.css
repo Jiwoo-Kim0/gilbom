@@ -91,7 +91,7 @@
 
 .mission-map-legend-area > span {
   border: 1px solid #175c4c;
-  background: rgb(47 128 108 / 20%);
+  background: rgb(47 128 108 / 10%);
 }
 
 .mission-map-legend-trajectory > span {
@@ -148,7 +148,7 @@
 }
 
 .mission-map-area-shape {
-  fill: rgb(47 128 108 / 18%);
+  fill: rgb(47 128 108 / 10%);
   stroke: #175c4c;
   stroke-width: 4;
   vector-effect: non-scaling-stroke;

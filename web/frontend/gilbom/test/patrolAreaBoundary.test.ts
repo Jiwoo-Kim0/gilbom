@@ -2,7 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   calculateBoundaryAverageCenter,
+  createPolygonBoundary,
   getBoundaryOuterPoints,
+  hasBoundarySelfIntersections,
+  orderBoundaryPointsForPolygon,
+  polygonSignedArea,
 } from '../src/features/mission/patrolAreaBoundary.ts'
 import type {
   GeoJsonMultiPolygon,
@@ -67,4 +71,71 @@ test('외곽 경계점이 없으면 평균 중심을 만들지 않는다', () =>
   }
 
   assert.equal(calculateBoundaryAverageCenter(boundary), null)
+})
+
+test('같은 점 집합은 클릭 순열과 무관하게 같은 반시계 Polygon 순서가 된다', () => {
+  const firstPermutation = [
+    [128.417, 36.108],
+    [128.416, 36.107],
+    [128.416, 36.108],
+    [128.417, 36.107],
+  ] as GeoJsonPolygon['coordinates'][number]
+  const secondPermutation = [
+    [128.416, 36.108],
+    [128.417, 36.107],
+    [128.416, 36.107],
+    [128.417, 36.108],
+  ] as GeoJsonPolygon['coordinates'][number]
+  const expected = [
+    [128.416, 36.107],
+    [128.417, 36.107],
+    [128.417, 36.108],
+    [128.416, 36.108],
+  ]
+
+  assert.deepEqual(orderBoundaryPointsForPolygon(firstPermutation), expected)
+  assert.deepEqual(orderBoundaryPointsForPolygon(secondPermutation), expected)
+  assert.ok(polygonSignedArea(expected) > 0)
+  assert.equal(hasBoundarySelfIntersections(expected), false)
+})
+
+test('교차 입력과 내부 점을 모든 점이 포함된 교차 없는 Tour로 재배치한다', () => {
+  const clickedPoints = [
+    [128.417, 36.108],
+    [128.416, 36.107],
+    [128.4165, 36.1075],
+    [128.416, 36.108],
+    [128.417, 36.107],
+  ] as GeoJsonPolygon['coordinates'][number]
+
+  const ordered = orderBoundaryPointsForPolygon(clickedPoints)
+
+  assert.equal(ordered.length, clickedPoints.length)
+  assert.deepEqual(
+    new Set(ordered.map((point) => point.join(':'))),
+    new Set(clickedPoints.map((point) => point.join(':'))),
+  )
+  assert.equal(hasBoundarySelfIntersections(ordered), false)
+  assert.ok(polygonSignedArea(ordered) > 0)
+})
+
+test('GeoJSON 생성은 중복점을 제거하고 자동 정렬한 뒤 Ring을 닫는다', () => {
+  const boundary = createPolygonBoundary([
+    [128.417, 36.108],
+    [128.416, 36.107],
+    [128.417, 36.107],
+    [128.416, 36.108],
+    [128.416, 36.107],
+  ])
+
+  assert.equal(boundary.coordinates[0].length, 5)
+  assert.deepEqual(
+    boundary.coordinates[0][0],
+    boundary.coordinates[0].at(-1),
+  )
+  assert.equal(
+    hasBoundarySelfIntersections(boundary.coordinates[0].slice(0, -1)),
+    false,
+  )
+  assert.ok(polygonSignedArea(boundary.coordinates[0].slice(0, -1)) > 0)
 })

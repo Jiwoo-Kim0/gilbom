@@ -6,10 +6,12 @@ import {
 } from 'lucide-react'
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react'
 import { loadNaverMapsScript } from '../../lib/naverMaps'
+import { orderBoundaryPointsForPolygon } from './patrolAreaBoundary'
 import type { GeoJsonCoordinate } from './missionTypes'
 import './patrol-area-boundary-editor.css'
 
@@ -57,6 +59,10 @@ export function PatrolAreaBoundaryEditor({
   const disabledRef = useRef(disabled)
   const [status, setStatus] = useState<BoundaryEditorStatus>(
     NAVER_MAP_CLIENT_ID ? 'loading' : 'fallback',
+  )
+  const orderedPoints = useMemo(
+    () => orderBoundaryPointsForPolygon(points),
+    [points],
   )
 
   useEffect(() => {
@@ -113,11 +119,9 @@ export function PatrolAreaBoundaryEditor({
             roundCoordinate(event.coord.lng()),
             roundCoordinate(event.coord.lat()),
           ]
-          const previousPoint = currentPoints.at(-1)
-          if (
-            previousPoint?.[0] === nextPoint[0]
-            && previousPoint[1] === nextPoint[1]
-          ) {
+          if (currentPoints.some(([longitude, latitude]) => (
+            longitude === nextPoint[0] && latitude === nextPoint[1]
+          ))) {
             return
           }
           onChangeRef.current([...currentPoints, nextPoint])
@@ -146,7 +150,7 @@ export function PatrolAreaBoundaryEditor({
     }
     const { maps } = window.naver
     const map = mapRef.current
-    const path = points.map(([longitude, latitude]) => (
+    const path = orderedPoints.map(([longitude, latitude]) => (
       new maps.LatLng(latitude, longitude)
     ))
     const polygon = path.length >= 3
@@ -154,7 +158,7 @@ export function PatrolAreaBoundaryEditor({
         map,
         paths: path,
         fillColor: '#2f806c',
-        fillOpacity: 0.2,
+        fillOpacity: 0.1,
         strokeColor: '#175c4c',
         strokeOpacity: 0.95,
         strokeWeight: 3,
@@ -187,10 +191,12 @@ export function PatrolAreaBoundaryEditor({
       polyline?.setMap(null)
       markers.forEach((marker) => marker.setMap(null))
     }
-  }, [points, status])
+  }, [orderedPoints, status])
 
-  function removePoint(index: number) {
-    onChange(points.filter((_, pointIndex) => pointIndex !== index))
+  function removePoint(target: GeoJsonCoordinate) {
+    onChange(points.filter(([longitude, latitude]) => (
+      longitude !== target[0] || latitude !== target[1]
+    )))
   }
 
   function removeLastPoint() {
@@ -212,7 +218,9 @@ export function PatrolAreaBoundaryEditor({
           <MapPin size={18} aria-hidden="true" />
           <div>
             <strong id="patrol-boundary-editor-title">지도에서 구역 경계 지정</strong>
-            <p>경계점을 순서대로 3개 이상 클릭하면 Polygon이 만들어집니다.</p>
+            <p>
+              경계점을 3개 이상 아무 순서로 클릭하면 연결 순서를 자동 최적화합니다.
+            </p>
           </div>
         </div>
         <span>{points.length}/{MAX_BOUNDARY_POINTS}개 점</span>
@@ -253,7 +261,7 @@ export function PatrolAreaBoundaryEditor({
         <span>
           {points.length < 3
             ? `경계점을 ${3 - points.length}개 더 지정해주세요.`
-            : '등록 가능한 Polygon입니다.'}
+            : '교차 없이 자동 정렬된 Polygon입니다.'}
         </span>
         <div>
           <button
@@ -278,8 +286,11 @@ export function PatrolAreaBoundaryEditor({
       </div>
 
       {points.length > 0 ? (
-        <ol className="patrol-boundary-point-list" aria-label="선택된 경계점">
-          {points.map(([longitude, latitude], index) => (
+        <ol
+          className="patrol-boundary-point-list"
+          aria-label="자동 정렬된 경계점"
+        >
+          {orderedPoints.map(([longitude, latitude], index) => (
             <li key={`${longitude}-${latitude}-${index}`}>
               <span>{index + 1}</span>
               <code>
@@ -287,7 +298,7 @@ export function PatrolAreaBoundaryEditor({
               </code>
               <button
                 type="button"
-                onClick={() => removePoint(index)}
+                onClick={() => removePoint([longitude, latitude])}
                 disabled={disabled}
                 aria-label={`경계점 ${index + 1} 삭제`}
               >

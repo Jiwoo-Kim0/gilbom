@@ -21,6 +21,8 @@ import {
 import {
   createPolygonBoundary,
   createSquareBoundary,
+  hasBoundarySelfIntersections,
+  orderBoundaryPointsForPolygon,
   polygonHasArea,
 } from './patrolAreaBoundary'
 import { PatrolAreaBoundaryEditor } from './PatrolAreaBoundaryEditor'
@@ -133,13 +135,20 @@ export function PatrolAreaManagePage() {
           `${longitude}:${latitude}`
         )),
       ).size
-      if (uniquePointCount < 3 || !polygonHasArea(boundaryPoints)) {
+      const orderedPoints = orderBoundaryPointsForPolygon(boundaryPoints)
+      if (uniquePointCount < 3 || !polygonHasArea(orderedPoints)) {
         setFormError(new Error(
           '서로 다른 위치의 경계점으로 면적이 있는 구역을 만들어주세요.',
         ))
         return
       }
-      boundary = createPolygonBoundary(boundaryPoints)
+      if (hasBoundarySelfIntersections(orderedPoints)) {
+        setFormError(new Error(
+          '경계점 연결에서 교차를 제거하지 못했습니다. 점 위치를 조정해주세요.',
+        ))
+        return
+      }
+      boundary = createPolygonBoundary(orderedPoints)
     } else {
       const latitude = Number(centerLatitude)
       const longitude = Number(centerLongitude)

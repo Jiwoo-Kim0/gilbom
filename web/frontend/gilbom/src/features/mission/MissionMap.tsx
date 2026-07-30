@@ -235,7 +235,7 @@ function MissionNaverMap({
             new maps.LatLng(latitude, longitude)
           ))),
         fillColor: '#2f806c',
-        fillOpacity: 0.15,
+        fillOpacity: 0.1,
         strokeColor: '#175c4c',
         strokeOpacity: 0.9,
         strokeWeight: 3,

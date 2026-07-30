@@ -6,10 +6,18 @@ const AREA_ID = '83000000-0000-4000-8000-000000000003'
 const ROUTE_ID = '83000000-0000-4000-8000-000000000004'
 const MISSION_ID = '83000000-0000-4000-8000-000000000005'
 
-const clickedCoordinates = [
+const orderedBoundaryCoordinates = [
   [128.4160, 36.1070],
   [128.4170, 36.1070],
   [128.4170, 36.1080],
+  [128.4160, 36.1080],
+] as const
+
+const clickedCoordinates = [
+  orderedBoundaryCoordinates[2],
+  orderedBoundaryCoordinates[0],
+  orderedBoundaryCoordinates[3],
+  orderedBoundaryCoordinates[1],
 ] as const
 
 const createdArea = {
@@ -19,8 +27,8 @@ const createdArea = {
   boundary: {
     type: 'Polygon',
     coordinates: [[
-      ...clickedCoordinates,
-      clickedCoordinates[0],
+      ...orderedBoundaryCoordinates,
+      orderedBoundaryCoordinates[0],
     ]],
   },
   lifecycleStatus: 'ACTIVE',
@@ -96,6 +104,7 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
       mapOptions: [] as FakeMapInteractionOptions[],
       setZoomCallCount: 0,
       fitBoundsCallCount: 0,
+      polygonFillOpacities: [] as Array<number | undefined>,
     }
 
     class FakeLatLng {
@@ -142,6 +151,13 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
       setMap() {}
     }
 
+    class FakePolygon extends FakeOverlay {
+      constructor(options: { fillOpacity?: number }) {
+        super()
+        previewState.polygonFillOpacities.push(options.fillOpacity)
+      }
+    }
+
     class FakeEventSource {
       onopen: ((event: Event) => void) | null = null
       onerror: ((event: Event) => void) | null = null
@@ -170,7 +186,7 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
           LatLng: FakeLatLng,
           LatLngBounds: class FakeLatLngBounds {},
           Map: FakeMap,
-          Polygon: FakeOverlay,
+          Polygon: FakePolygon,
           Polyline: FakeOverlay,
           Marker: FakeOverlay,
           Size: class FakeSize {},
@@ -280,8 +296,8 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
           routeGeometry: {
             type: 'LineString',
             coordinates: [
-              clickedCoordinates[0],
-              clickedCoordinates[1],
+              orderedBoundaryCoordinates[0],
+              orderedBoundaryCoordinates[1],
             ],
           },
           lifecycleStatus: 'ACTIVE',
@@ -369,8 +385,11 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
   await map.click({ position: { x: 80, y: 80 } })
   await map.click({ position: { x: 180, y: 80 } })
   await map.click({ position: { x: 180, y: 180 } })
-  await expect(editor.getByText('등록 가능한 Polygon입니다.')).toBeVisible()
-  await expect(editor.getByText('3/100개 점')).toBeVisible()
+  await map.click({ position: { x: 80, y: 180 } })
+  await expect(
+    editor.getByText('교차 없이 자동 정렬된 Polygon입니다.'),
+  ).toBeVisible()
+  await expect(editor.getByText('4/100개 점')).toBeVisible()
   await expect.poll(() => page.evaluate(() => {
     const state = (
       window as typeof window & {
@@ -407,8 +426,8 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
     boundary: {
       type: 'Polygon',
       coordinates: [[
-        ...clickedCoordinates,
-        clickedCoordinates[0],
+        ...orderedBoundaryCoordinates,
+        orderedBoundaryCoordinates[0],
       ]],
     },
     lifecycleStatus: 'ACTIVE',
@@ -429,11 +448,21 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
   await expect(areaPreview).toBeVisible()
   await expect(areaPreview).toContainText('시연 순찰 구역 선택 구역')
   await expect(areaPreview).toContainText(
-    '위도 36.1073333 · 경도 128.4166667',
+    '위도 36.1075000 · 경도 128.4165000',
   )
   await expect(
     page.getByTestId('mission-area-preview-naver-map'),
   ).toBeVisible()
+  await expect.poll(() => page.evaluate(() => {
+    const state = (
+      window as typeof window & {
+        __patrolAreaPreviewState: {
+          polygonFillOpacities: Array<number | undefined>
+        }
+      }
+    ).__patrolAreaPreviewState
+    return state.polygonFillOpacities
+  })).toEqual(expect.arrayContaining([0.1]))
   await expect.poll(() => page.evaluate(() => {
     const state = (
       window as typeof window & {
@@ -461,10 +490,12 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
         }
       }
     ).__patrolAreaPreviewState
-    return state.centers.at(-1)
+    return state.centers
+      .at(-1)
+      ?.map((coordinate) => Number(coordinate.toFixed(7)))
   })).toEqual([
-    (128.416 + 128.417 + 128.417) / 3,
-    (36.107 + 36.107 + 36.108) / 3,
+    128.4165,
+    36.1075,
   ])
 
   await page.locator('#mission-create-robot').selectOption(ROBOT_ID)

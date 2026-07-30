@@ -109,7 +109,7 @@ function PatrolAreaNaverPreview({
           ([longitude, latitude]) => new maps.LatLng(latitude, longitude),
         )),
         fillColor: '#2f806c',
-        fillOpacity: 0.2,
+        fillOpacity: 0.1,
         strokeColor: '#175c4c',
         strokeOpacity: 0.95,
         strokeWeight: 3,

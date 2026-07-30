@@ -84,7 +84,7 @@
 }
 
 .patrol-area-preview-shape {
-  fill: rgb(47 128 108 / 20%);
+  fill: rgb(47 128 108 / 10%);
   stroke: #175c4c;
   stroke-width: 4;
   vector-effect: non-scaling-stroke;
