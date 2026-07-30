@@ -1,8 +1,10 @@
 import {
   Filter,
+  Plus,
   RefreshCw,
   RotateCcw,
   Search,
+  X,
 } from 'lucide-react'
 import {
   useCallback,
@@ -13,6 +15,8 @@ import {
   type FormEvent,
 } from 'react'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
+import { useAuthentication } from '../auth/authenticationContext'
+import { ROBOT_REGISTER } from '../auth/permissions'
 import { RobotFleetGrid } from './RobotFleetGrid'
 import { RobotMap } from './RobotMap'
 import { RobotCredentialManager } from './RobotCredentialManager'
@@ -21,6 +25,7 @@ import {
   getRobotMap,
   getRobots,
   getRobotSummary,
+  registerRobot,
 } from './robotApi'
 import type {
   RobotFleetItem,
@@ -131,8 +136,16 @@ export function RobotManagePage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<unknown>(null)
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null)
+  const [registrationOpen, setRegistrationOpen] = useState(false)
+  const [registrationName, setRegistrationName] = useState('')
+  const [registrationSerial, setRegistrationSerial] = useState('')
+  const [registrationError, setRegistrationError] = useState<unknown>(null)
+  const [registrationSubmitting, setRegistrationSubmitting] = useState(false)
+  const [registrationNotice, setRegistrationNotice] = useState<string | null>(null)
   const requestSequenceRef = useRef(0)
   const refreshTimerRef = useRef<number | null>(null)
+  const { user } = useAuthentication()
+  const canRegister = user?.permissions.includes(ROBOT_REGISTER) ?? false
 
   const loadSnapshot = useCallback(async () => {
     const requestSequence = requestSequenceRef.current + 1
@@ -230,6 +243,44 @@ export function RobotManagePage() {
     setSearch('')
   }
 
+  function openRegistration() {
+    setRegistrationName('')
+    setRegistrationSerial('')
+    setRegistrationError(null)
+    setRegistrationOpen(true)
+  }
+
+  function closeRegistration() {
+    if (!registrationSubmitting) {
+      setRegistrationOpen(false)
+    }
+  }
+
+  async function handleRegistration(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const robotName = registrationName.trim()
+    const serialNumber = registrationSerial.trim()
+    if (robotName.length === 0 || serialNumber.length === 0) {
+      setRegistrationError(new Error('로봇 이름과 시리얼 번호를 입력해주세요.'))
+      return
+    }
+
+    setRegistrationSubmitting(true)
+    setRegistrationError(null)
+    try {
+      const registered = await registerRobot({ robotName, serialNumber })
+      setRegistrationOpen(false)
+      setRegistrationNotice(
+        '로봇이 등록되었습니다. MQTT ID: ' + registered.mqttId,
+      )
+      await loadSnapshot()
+    } catch (nextError) {
+      setRegistrationError(nextError)
+    } finally {
+      setRegistrationSubmitting(false)
+    }
+  }
+
   return (
     <section className="page-stack" aria-labelledby="robot-page-title">
       <div className="page-heading">
@@ -239,6 +290,16 @@ export function RobotManagePage() {
           <p>권한 범위 내 로봇의 최신 위치 및 운영 데이터를 추적합니다.</p>
         </div>
         <div className="robot-page-actions">
+          {canRegister ? (
+            <button
+              className="primary-button button-with-icon"
+              type="button"
+              onClick={openRegistration}
+            >
+              <Plus size={16} aria-hidden="true" />
+              로봇 등록
+            </button>
+          ) : null}
           <button
             className="secondary-button"
             type="button"
@@ -250,6 +311,12 @@ export function RobotManagePage() {
           </button>
         </div>
       </div>
+
+      {registrationNotice ? (
+        <div className="page-alert page-alert-success" role="status">
+          {registrationNotice}
+        </div>
+      ) : null}
 
       <div className="robot-realtime-bar" aria-live="polite">
         <span className={`robot-stream-status robot-stream-status-${streamStatus}`}>
@@ -351,7 +418,86 @@ export function RobotManagePage() {
       </div>
 
       <RobotCredentialManager onCredentialChanged={loadSnapshot} />
+
       <RobotSystemLog logs={logs} />
+
+      {registrationOpen ? (
+        <div className="robot-registration-backdrop" onMouseDown={closeRegistration}>
+          <section
+            className="robot-registration-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="robot-registration-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="robot-registration-heading">
+              <div>
+                <p className="eyebrow">ROBOT REGISTRATION</p>
+                <h3 id="robot-registration-title">로봇 등록</h3>
+              </div>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="등록 창 닫기"
+                onClick={closeRegistration}
+                disabled={registrationSubmitting}
+              >
+                <X size={18} aria-hidden="true" />
+              </button>
+            </div>
+            <p className="robot-registration-description">
+              등록 후 MQTT ID가 발급되며, 이미지 업로드 API Key는 별도로 발급합니다.
+            </p>
+            <form className="robot-registration-form" onSubmit={handleRegistration}>
+              <label className="admin-form-field" htmlFor="robot-registration-name">
+                로봇 이름
+                <input
+                  id="robot-registration-name"
+                  value={registrationName}
+                  maxLength={100}
+                  autoFocus
+                  required
+                  onChange={(event) => setRegistrationName(event.target.value)}
+                  placeholder="시연 로봇 1호"
+                />
+              </label>
+              <label className="admin-form-field" htmlFor="robot-registration-serial">
+                시리얼 번호
+                <input
+                  id="robot-registration-serial"
+                  value={registrationSerial}
+                  maxLength={100}
+                  required
+                  onChange={(event) => setRegistrationSerial(event.target.value)}
+                  placeholder="DEMO-ROBOT-001"
+                />
+              </label>
+              {registrationError ? (
+                <div className="page-alert" role="alert">
+                  등록하지 못했습니다. {getApiErrorMessage(registrationError)}
+                </div>
+              ) : null}
+              <div className="robot-registration-actions">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={closeRegistration}
+                  disabled={registrationSubmitting}
+                >
+                  취소
+                </button>
+                <button
+                  className="primary-button"
+                  type="submit"
+                  disabled={registrationSubmitting}
+                >
+                  {registrationSubmitting ? '등록 중…' : '등록하기'}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </section>
   )
 }

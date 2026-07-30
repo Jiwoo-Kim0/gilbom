@@ -1,8 +1,10 @@
-import { apiJson } from '../../shared/api/apiClient'
+import { apiJson, jsonBody } from '../../shared/api/apiClient'
 import type {
   RobotDetail,
   RobotListResponse,
   RobotMapResponse,
+  RobotRegistrationRequest,
+  RobotRegistrationResponse,
   RobotSummary,
 } from './robotTypes'
 
@@ -30,6 +32,19 @@ export function getRobotSummary(): Promise<RobotSummary> {
 
 export function getRobotMap(): Promise<RobotMapResponse> {
   return apiJson(`${ROBOT_BASE_PATH}/map`)
+}
+
+export function registerRobot(
+  input: RobotRegistrationRequest,
+): Promise<RobotRegistrationResponse> {
+  return apiJson(ROBOT_BASE_PATH, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': crypto.randomUUID(),
+    },
+    body: jsonBody(input),
+    csrfRetry: 'replay-safe',
+  })
 }
 
 export function getRobot(robotId: string): Promise<RobotDetail> {

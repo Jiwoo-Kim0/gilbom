@@ -28,6 +28,20 @@ export interface RobotListResponse {
   totalPages: number
 }
 
+export interface RobotRegistrationRequest {
+  robotName: string
+  serialNumber: string
+}
+
+export interface RobotRegistrationResponse {
+  robotId: string
+  mqttId: string
+  robotName: string
+  serialNumber: string
+  operationalStatus: string
+  connectivityStatus: RobotConnectivityStatus
+}
+
 export interface RobotDetail {
   robotId: string
   mqttId: string

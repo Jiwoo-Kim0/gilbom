@@ -8,6 +8,65 @@
   gap: 8px;
 }
 
+.robot-registration-backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  padding: 24px;
+  place-items: center;
+  background: rgb(16 24 40 / 45%);
+}
+
+.robot-registration-dialog {
+  display: grid;
+  width: min(100%, 520px);
+  gap: 18px;
+  padding: 26px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 24px 80px rgb(16 24 40 / 24%);
+}
+
+.robot-registration-heading {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.robot-registration-heading h3 {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-size: 22px;
+}
+
+.robot-registration-description {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.robot-registration-form {
+  display: grid;
+  gap: 16px;
+}
+
+.robot-registration-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.robot-registration-backdrop + .page-alert-success,
+.page-alert-success {
+  margin-top: 0;
+  border-color: #b9dfc5;
+  color: #1f6b38;
+  background: #effaf2;
+}
+
 .robot-realtime-bar {
   display: flex;
   gap: 12px 18px;
