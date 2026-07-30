@@ -17,7 +17,8 @@ class AuditSnapshotTest {
                         "status",
                         "password",
                         "metadata",
-                        "entries"
+                        "entries",
+                        "imageBase64"
                 ),
                 Map.of(
                         "status", "ACTIVE",
@@ -30,14 +31,18 @@ class AuditSnapshotTest {
                         "entries", List.of(Map.of(
                                 "sessionId", "session-value",
                                 "roleId", "ROLE-1"
-                        ))
+                        )),
+                        "imageBase64", "sensitive-image-data"
                 )
         );
 
         assertThat(snapshot.values())
                 .containsEntry("status", "ACTIVE")
                 .doesNotContainKey("email")
-                .containsEntry("password", AuditSnapshot.REDACTED);
+                .containsEntry("password", AuditSnapshot.REDACTED)
+                .containsEntry(
+                        "imageBase64",
+                        AuditSnapshot.REDACTED);
         @SuppressWarnings("unchecked")
         Map<String, Object> metadata =
                 (Map<String, Object>) snapshot.values().get("metadata");
@@ -64,7 +69,9 @@ class AuditSnapshotTest {
                 null,
                 null,
                 null,
-                "rotation: password=plain Bearer jwt-value",
+                "rotation: password=plain Bearer jwt-value "
+                        + "presigned_url=https://sensitive "
+                        + "image_base64=sensitive-image",
                 AuditResult.SUCCESS
         );
 
@@ -72,6 +79,8 @@ class AuditSnapshotTest {
                 .contains("password=[REDACTED]")
                 .contains("Bearer [REDACTED]")
                 .doesNotContain("plain")
-                .doesNotContain("jwt-value");
+                .doesNotContain("jwt-value")
+                .doesNotContain("https://sensitive")
+                .doesNotContain("sensitive-image");
     }
 }

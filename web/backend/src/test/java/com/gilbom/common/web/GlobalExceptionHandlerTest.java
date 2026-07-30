@@ -85,6 +85,23 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void imageBase64RejectedValuesAreNeverReflected()
+            throws Exception {
+        mockMvc.perform(post("/test/image-secret")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"imageBase64":""}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath(
+                        "$.details[0].field",
+                        is("imageBase64")))
+                .andExpect(jsonPath(
+                        "$.details[0].rejectedValue",
+                        nullValue()));
+    }
+
+    @Test
     void malformedJsonHasAStableErrorCodeAndNoInternalDetails() throws Exception {
         mockMvc.perform(post("/test/validation")
                         .contentType(MediaType.APPLICATION_JSON)

@@ -172,6 +172,7 @@ Rate Limit HMAC key는 인스턴스 간 동일하게 주입하고 회전할 때 
 
 | 환경변수 | Secret | 기본·규칙 |
 |---|:---:|---|
+| `GILBOM_REPORT_PDF_STORAGE_ROOT` |  | local Docker는 `/app/data/report-pdf` 영속 volume, IDE/test 기본은 OS 임시 경로 |
 | `AWS_REGION` |  | 배포 region |
 | `GILBOM_S3_ENABLED` |  | local/test/docker 기본 `false` |
 | `GILBOM_S3_BUCKET` |  | 환경별 Private bucket |
@@ -181,6 +182,9 @@ Rate Limit HMAC key는 인스턴스 간 동일하게 주입하고 회전할 때 
 | `GILBOM_S3_DOWNLOAD_URL_TTL` |  | 기본 `5m`, 최대 `10m` |
 
 staging/prod에서는 `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`를 애플리케이션 설정으로 사용하지 않는다. workload role의 단기 credential만 사용한다.
+승인 PDF 저장은 `ApprovedReportPdfStorage` 포트 뒤에 두므로 현재 local volume 구현을
+Private S3 adapter로 바꿔도 상태 전이·DB 결합 규칙은 바뀌지 않는다. DB에는 내부
+storage key와 SHA-256만 저장하며 presigned URL은 저장하지 않는다.
 
 ### 5.5 MQTT
 
@@ -206,19 +210,33 @@ staging/prod에서는 `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`를 애플리�
 
 | 환경변수 | Secret | 기본·규칙 |
 |---|:---:|---|
-| `GILBOM_LLM_ENABLED` |  | 기본 `false` |
-| `GILBOM_LLM_PROVIDER` |  | 승인된 provider 식별자 |
-| `GILBOM_LLM_BASE_URL` |  | 승인된 HTTPS host allowlist |
-| `GILBOM_LLM_MODEL` |  | 승인·고정 모델명 |
+| `GILBOM_LLM_ENABLED` |  | 기본 `false`; 정책 gate 평가 요청 |
+| `GILBOM_LLM_PROVIDER` |  | `GMS`만 허용 |
+| `GILBOM_LLM_BASE_URL` |  | `https://gms.ssafy.io/gmsapi/api.openai.com/v1`만 허용 |
+| `GILBOM_LLM_MODEL` |  | 보고서 생성은 `gpt-5.4-mini`, `gpt-5.4`만 허용 |
 | `GILBOM_LLM_API_KEY` | O | staging/prod Secrets Manager 주입 |
-| `GILBOM_LLM_CONNECT_TIMEOUT` |  | 기본 `3s` |
-| `GILBOM_LLM_READ_TIMEOUT` |  | 기본 `30s` |
-| `GILBOM_LLM_MAX_OUTPUT_TOKENS` |  | 보고서별 상한 |
-| `GILBOM_LLM_DAILY_REQUEST_LIMIT` |  | 환경별 비용 상한 |
-| `GILBOM_LLM_DAILY_BUDGET` |  | 운영 승인 예산 |
-| `GILBOM_LLM_PROMPT_VERSION` |  | 배포된 prompt 버전 |
+| `GILBOM_LLM_CONNECT_TIMEOUT` |  | 기본 `3s`, 최대 `10s` |
+| `GILBOM_LLM_READ_TIMEOUT` |  | 기본 `30s`, 최대 `60s` |
+| `GILBOM_LLM_MAX_OUTPUT_TOKENS` |  | `1..1500`, 보고서별 출력 상한 |
+| `GILBOM_LLM_DAILY_REQUEST_LIMIT` |  | 양수인 환경별 요청 상한 |
+| `GILBOM_LLM_DAILY_BUDGET` |  | 양수인 일별 크레딧 승인 예산 |
+| `GILBOM_LLM_MAX_CONCURRENT_REQUESTS` |  | 기본 `5`, 인스턴스별 `1..20` 동시 외부 호출 상한 |
+| `GILBOM_LLM_PROMPT_VERSION` |  | 현재 `report-v1`만 허용 |
+| `GILBOM_LLM_POLICY_APPROVED` |  | 전체 LLM 운영 정책 승인 여부 |
+| `GILBOM_LLM_TRAINING_EXCLUSION_APPROVED` |  | 입력·출력 학습 제외 확인 여부 |
+| `GILBOM_LLM_DATA_RETENTION_APPROVED` |  | 보존 기간·삭제 정책 승인 여부 |
+| `GILBOM_LLM_OUTBOUND_ALLOWLIST_APPLIED` |  | `gms.ssafy.io:443` egress 적용 확인 여부 |
+| `GILBOM_LLM_IMAGE_INPUT_ENABLED` |  | 기본 `false`; 대표 결함 JPEG 전송 기능 flag |
+| `GILBOM_LLM_IMAGE_DEIDENTIFICATION_APPROVED` |  | 얼굴·차량번호·EXIF 등 이미지 비식별화 검증 승인 |
 
-LLM API Key 원문과 prompt·응답은 로그하지 않는다. `GILBOM_LLM_ENABLED=true`인데 provider, model, Secret, timeout, budget 또는 데이터 보존 승인이 없으면 시작을 거부한다.
+`GILBOM_LLM_ENABLED=true`는 외부 호출을 강제하는 값이 아니다. API Key, provider, 정확한 base URL, 모델, timeout, 출력·동시성 상한, 일별 요청 한도·예산, Prompt 버전, 학습 제외·보존·outbound·전체 정책 승인을 모두 통과해야 `GmsLlmClient`를 만든다. 하나라도 빠지면 서버 기동과 일반 보고서 API는 유지하고 `DisabledLlmClient`와 템플릿 생성만 사용한다. 일별 요청 한도는 사용자별 실제 외부 호출 수에 적용되고, 일별 budget은 환경 전체 호출에 적용된다.
+
+API Key 원문, `Authorization` 헤더, Prompt와 응답 원문은 로그하지 않는다. 사용자 요청은 모델, base URL, System Prompt를 받지 않으며 서버 설정과 `LlmPromptCatalog`만 이 값을 결정한다. 상세 설계와 판정표는 [LLM Client·정책 게이트](./llm-client-policy.md)를 따른다.
+
+이미지 입력은 별도 하위 gate다. 두 이미지 flag가 모두 `true`일 때만
+`DefectImageContentReader`가 선택한 비식별화 완료 JPEG 한 장을 메모리에서 Base64로
+변환한다. 어느 하나라도 `false`이거나 조회 결과가 빈 목록이면 텍스트 LLM 생성은
+유지하고 이미지 전송만 생략한다.
 
 ### 5.7 로그·관리 endpoint
 
@@ -243,10 +261,10 @@ Actuator `env`, `configprops`, heap dump, thread dump는 공개하지 않는다.
 - AWS 정적 Access Key가 staging/prod 설정에 존재하지 않는지
 - S3 활성 시 bucket, region, TTL과 workload role 권한이 유효한지
 - MQTT 활성 시 TLS URI, client ID, credential과 topic 설정이 유효한지
-- LLM 활성 시 승인 provider·model·Secret·timeout·budget이 모두 있는지
+- LLM 활성 요청 시 승인 provider·model·Secret·timeout·budget·데이터 정책·outbound 적용이 모두 있는지
 - Secret 값이 public config나 로그 출력 대상에 포함되지 않았는지
 
-필수 통합 기능이 활성화됐는데 설정이 잘못된 경우 기능을 묵시적으로 우회하지 않고 시작을 실패시킨다. 선택 기능이 명시적으로 비활성화된 경우에는 해당 API를 `503` 또는 기능 미제공 응답으로 닫고 나머지 서비스는 시작할 수 있다.
+필수 통합 기능이 활성화됐는데 설정이 잘못된 경우 기능을 묵시적으로 우회하지 않고 시작을 실패시킨다. LLM은 보고서 조회·수정과 분리된 선택 기능이므로 설정이 잘못되어도 서버를 실패시키지 않고 외부 호출을 닫은 뒤 `TEMPLATE` 방식으로 제한한다. 그 밖의 선택 기능이 명시적으로 비활성화된 경우에는 해당 API를 `503` 또는 기능 미제공 응답으로 닫고 나머지 서비스는 시작할 수 있다.
 
 ## 7. 배포·회전
 

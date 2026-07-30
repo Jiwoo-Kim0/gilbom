@@ -7,7 +7,9 @@ import java.util.Map;
 import java.util.UUID;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.annotation.JsonUnwrapped;
 
 import jakarta.validation.constraints.AssertTrue;
@@ -35,6 +37,37 @@ public final class ReportDtos {
         }
     }
 
+    @JsonTypeInfo(
+            use = JsonTypeInfo.Id.NAME,
+            include = JsonTypeInfo.As.EXISTING_PROPERTY,
+            property = "generationMethod",
+            visible = true)
+    @JsonSubTypes({
+            @JsonSubTypes.Type(
+                    value = ManualReportCreateRequest.class,
+                    name = "MANUAL"),
+            @JsonSubTypes.Type(
+                    value = ManualReportCreateRequest.class,
+                    name = "TEMPLATE"),
+            @JsonSubTypes.Type(
+                    value = LlmReportCreateRequest.class,
+                    name = "LLM")
+    })
+    public sealed interface ReportCreateRequest
+            permits ManualReportCreateRequest,
+                    LlmReportCreateRequest {
+
+        ReportGenerationMethod generationMethod();
+
+        ReportType reportType();
+
+        Instant periodFrom();
+
+        Instant periodTo();
+
+        Map<String, Object> filterCriteria();
+    }
+
     public record ManualReportCreateRequest(
             @NotNull
             ReportGenerationMethod generationMethod,
@@ -55,7 +88,7 @@ public final class ReportDtos {
             @NotNull
             Map<String, Object> statistics,
             Map<String, Object> filterCriteria
-    ) {
+    ) implements ReportCreateRequest {
 
         public ManualReportCreateRequest {
             statistics = immutableObject(statistics);
@@ -84,6 +117,27 @@ public final class ReportDtos {
                             null,
                             generationMethod,
                             null));
+        }
+    }
+
+    public record LlmReportCreateRequest(
+            @NotNull
+            ReportGenerationMethod generationMethod,
+            @NotNull
+            ReportType reportType,
+            @NotNull
+            Instant periodFrom,
+            @NotNull
+            Instant periodTo,
+            Map<String, Object> filterCriteria
+    ) implements ReportCreateRequest {
+
+        public LlmReportCreateRequest {
+            if (generationMethod != ReportGenerationMethod.LLM) {
+                throw validationFailure();
+            }
+            filterCriteria = immutableObjectOrEmpty(
+                    filterCriteria);
         }
     }
 
@@ -233,6 +287,32 @@ public final class ReportDtos {
         }
     }
 
+    public record ReportTransitionRequest(
+            @NotNull
+            @Min(1)
+            Integer expectedVersionNo
+    ) {
+    }
+
+    public record ReportDecisionRequest(
+            @NotNull
+            @Min(1)
+            Integer expectedVersionNo,
+            @Size(max = 500)
+            String reason
+    ) {
+    }
+
+    public record ReportRejectionRequest(
+            @NotNull
+            @Min(1)
+            Integer expectedVersionNo,
+            @NotBlank
+            @Size(max = 500)
+            String reason
+    ) {
+    }
+
     public record ReportListItemResponse(
             UUID reportId,
             String reportCode,
@@ -266,6 +346,7 @@ public final class ReportDtos {
             Instant periodFrom,
             Instant periodTo,
             ReportGenerationMethod generationMethod,
+            ReportGenerationFallbackReason generationFallbackReason,
             String llmModel,
             String promptVersion,
             String changeNote,

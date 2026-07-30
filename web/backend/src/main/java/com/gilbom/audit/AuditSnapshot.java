@@ -39,13 +39,18 @@ public final class AuditSnapshot {
             "otp",
             "recoverycode",
             "privatekey",
-            "presignedurl"
+            "presignedurl",
+            "imagebytes",
+            "imagebase64",
+            "imagedataurl"
     );
     private static final Pattern SENSITIVE_ASSIGNMENT = Pattern.compile(
             "(?i)\\b(password|passwd|passcode|access[_-]?token"
                     + "|refresh[_-]?token|token|secret|api[_-]?key"
                     + "|authorization|session[_-]?id|csrf|totp|otp"
-                    + "|recovery[_-]?code|private[_-]?key)\\b"
+                    + "|recovery[_-]?code|private[_-]?key"
+                    + "|presigned[_-]?url|image[_-]?"
+                    + "(?:bytes|base64|data[_-]?url))\\b"
                     + "(\\s*[:=]\\s*)"
                     + "(\"[^\"]*\"|'[^']*'|[^\\s,;]+)"
     );
@@ -152,7 +157,10 @@ public final class AuditSnapshot {
                 || normalized.endsWith("otp")
                 || normalized.endsWith("recoverycode")
                 || normalized.endsWith("privatekey")
-                || normalized.endsWith("presignedurl");
+                || normalized.endsWith("presignedurl")
+                || normalized.endsWith("imagebytes")
+                || normalized.endsWith("imagebase64")
+                || normalized.endsWith("imagedataurl");
     }
 
     static String redactText(String value) {

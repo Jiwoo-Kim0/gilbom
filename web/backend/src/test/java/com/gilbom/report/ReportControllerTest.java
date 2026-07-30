@@ -3,7 +3,9 @@ package com.gilbom.report;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -75,6 +77,8 @@ class ReportControllerTest {
             new SimpleGrantedAuthority("REPORT_CREATE");
     private static final SimpleGrantedAuthority REPORT_UPDATE =
             new SimpleGrantedAuthority("REPORT_UPDATE");
+    private static final SimpleGrantedAuthority REPORT_APPROVE =
+            new SimpleGrantedAuthority("REPORT_APPROVE");
 
     @Autowired
     private MockMvc mockMvc;
@@ -170,6 +174,77 @@ class ReportControllerTest {
                 .andExpect(jsonPath(
                         "$.currentVersion.versionNo",
                         is(1)));
+    }
+
+    @Test
+    void routesStrictLlmCreateRequestWithoutClientContent()
+            throws Exception {
+        when(commandService.create(
+                eq(USER_ID),
+                eq(IDEMPOTENCY_KEY),
+                any(),
+                any()))
+                .thenReturn(new CreatedApiReport(
+                        detail(),
+                        true));
+
+        mockMvc.perform(post("/api/v1/reports")
+                        .header(
+                                "Idempotency-Key",
+                                IDEMPOTENCY_KEY)
+                        .with(user(USER_ID.toString())
+                                .authorities(REPORT_CREATE))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "generationMethod": "LLM",
+                                  "reportType": "PERIODIC",
+                                  "periodFrom":
+                                    "2026-07-01T00:00:00Z",
+                                  "periodTo":
+                                    "2026-07-08T00:00:00Z",
+                                  "filterCriteria": {
+                                    "defectTypes": ["DAMAGED"]
+                                  }
+                                }
+                                """))
+                .andExpect(status().isCreated());
+
+        verify(commandService).create(
+                eq(USER_ID),
+                eq(IDEMPOTENCY_KEY),
+                argThat(request ->
+                        request instanceof ReportDtos
+                                .LlmReportCreateRequest),
+                any());
+    }
+
+    @Test
+    void rejectsClientSuppliedContentOnLlmCreate()
+            throws Exception {
+        mockMvc.perform(post("/api/v1/reports")
+                        .header(
+                                "Idempotency-Key",
+                                IDEMPOTENCY_KEY)
+                        .with(user(USER_ID.toString())
+                                .authorities(REPORT_CREATE))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "generationMethod": "LLM",
+                                  "reportType": "PERIODIC",
+                                  "periodFrom":
+                                    "2026-07-01T00:00:00Z",
+                                  "periodTo":
+                                    "2026-07-08T00:00:00Z",
+                                  "content": "사용자 주입 본문"
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(commandService);
     }
 
     @Test
@@ -295,6 +370,122 @@ class ReportControllerTest {
     }
 
     @Test
+    void submitsDraftWithExpectedVersionAndUpdatePermission()
+            throws Exception {
+        when(commandService.submit(
+                eq(USER_ID),
+                eq(REPORT_ID),
+                any(),
+                any()))
+                .thenReturn(detail());
+
+        mockMvc.perform(post(
+                        "/api/v1/reports/{reportId}/submit",
+                        REPORT_ID)
+                        .with(user(USER_ID.toString())
+                                .authorities(REPORT_UPDATE))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"expectedVersionNo":1}
+                                """))
+                .andExpect(status().isOk());
+
+        verify(commandService).submit(
+                eq(USER_ID),
+                eq(REPORT_ID),
+                argThat(request ->
+                        request.expectedVersionNo() == 1),
+                any());
+    }
+
+    @Test
+    void approvesAndRejectsOnlyWithApprovePermission()
+            throws Exception {
+        when(commandService.approve(
+                eq(USER_ID),
+                eq(REPORT_ID),
+                any(),
+                any()))
+                .thenReturn(detail());
+        when(commandService.reject(
+                eq(USER_ID),
+                eq(REPORT_ID),
+                any(),
+                any()))
+                .thenReturn(detail());
+
+        mockMvc.perform(post(
+                        "/api/v1/reports/{reportId}/approve",
+                        REPORT_ID)
+                        .with(user(USER_ID.toString())
+                                .authorities(REPORT_APPROVE))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "expectedVersionNo": 1,
+                                  "reason": "검토 완료"
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post(
+                        "/api/v1/reports/{reportId}/reject",
+                        REPORT_ID)
+                        .with(user(USER_ID.toString())
+                                .authorities(REPORT_APPROVE))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "expectedVersionNo": 1,
+                                  "reason": "통계를 보완하세요."
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post(
+                        "/api/v1/reports/{reportId}/approve",
+                        REPORT_ID)
+                        .with(user(USER_ID.toString())
+                                .authorities(REPORT_UPDATE))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"expectedVersionNo":1}
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath(
+                        "$.code",
+                        is("REPORT_ACCESS_DENIED")));
+    }
+
+    @Test
+    void rejectsBlankRejectionReasonAtApiBoundary()
+            throws Exception {
+        mockMvc.perform(post(
+                        "/api/v1/reports/{reportId}/reject",
+                        REPORT_ID)
+                        .with(user(USER_ID.toString())
+                                .authorities(REPORT_APPROVE))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "expectedVersionNo": 1,
+                                  "reason": " "
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath(
+                        "$.code",
+                        is("COMMON_VALIDATION_FAILED")));
+
+        verifyNoInteractions(commandService);
+    }
+
+    @Test
     void readsVersionListAndSpecificVersion()
             throws Exception {
         ReportVersionResponse version =
@@ -388,6 +579,7 @@ class ReportControllerTest {
                         item.periodFrom(),
                         item.periodTo(),
                         ReportGenerationMethod.MANUAL,
+                        null,
                         null,
                         null,
                         null,

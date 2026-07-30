@@ -4,7 +4,8 @@
 - 대상 테이블: `report.anomaly_report`, `report.report_version`
 - DB 정본:
   [`V2__create_report_and_audit_schema.sql`](../backend/src/main/resources/db/migration/V2__create_report_and_audit_schema.sql),
-  [`V30__harden_report_domain_invariants.sql`](../backend/src/main/resources/db/migration/V30__harden_report_domain_invariants.sql)
+  [`V30__harden_report_domain_invariants.sql`](../backend/src/main/resources/db/migration/V30__harden_report_domain_invariants.sql),
+  [`V31__add_llm_invocation_quota_ledger.sql`](../backend/src/main/resources/db/migration/V31__add_llm_invocation_quota_ledger.sql)
 - OpenAPI 정본: [`openapi-v1.yaml`](./openapi-v1.yaml)
 
 ## 1. 상태
@@ -83,10 +84,11 @@ DB trigger와 `CHECK`는 허용 전이 순서, 버전 증가, 승인·삭제 met
 - `IN_REVIEW`에서만 가능하다.
 - `REPORT_APPROVE` 권한과 대상 보고서 접근 범위를 검사한다.
 - 승인자는 최신 `report_version.created_by`와 달라야 한다.
-- 성공 시 `report_status=APPROVED`, `approved_version_no=current_version_no`, `approved_by`, `approved_at`을 같은 트랜잭션에 저장한다.
+- 행 잠금 아래 최신 버전 snapshot으로 PDF를 먼저 렌더링하고 create-only 내부 storage에 저장한 뒤 `report_status=APPROVED`, `approved_version_no=current_version_no`, `approved_by`, `approved_at`과 PDF bundle을 같은 DB 트랜잭션에 저장한다.
 - `APPROVED`가 아닌 상태에서는 `approved_version_no`, `approved_by`, `approved_at`이 모두 `NULL`이어야 한다.
-- 승인 후 생성한 PDF는 `approved_pdf_version_no`, 내부 storage key, SHA-256, 생성 시각을 한 bundle로 저장한다.
+- 승인 PDF는 `approved_pdf_version_no`, 내부 storage key, SHA-256, 생성 시각을 한 bundle로 저장한다. 트랜잭션 rollback 시 새 로컬 artifact를 정리하며 내부 key에는 내용 SHA-256을 포함해 재시도 시 기존 파일을 덮어쓰지 않는다.
 - `approved_pdf_version_no`는 `approved_version_no`와 반드시 같아야 하고, bundle은 한 번 결합한 뒤 덮어쓰지 않는다.
+- PDF에는 제목·요약·기간·본문·통계·근거 snapshot과 승인자·승인 시각을 렌더링한다. 사용자 문자열은 PDF 명령이 아닌 hex text operand로만 기록한다.
 
 ### 3.5 반려
 
@@ -150,7 +152,7 @@ DB trigger와 `CHECK`는 허용 전이 순서, 버전 증가, 승인·삭제 met
 | Method | Path | 동작 | 권한 | 성공 |
 |---|---|---|---|---|
 | `GET` | `/api/v1/reports` | 목록·검색 | `REPORT_VIEW` | `200 ReportListResponse` |
-| `POST` | `/api/v1/reports` | 수동·템플릿 보고서 생성(LLM 생성은 후속 단계) | `REPORT_CREATE` | `201 ReportDetailResponse` |
+| `POST` | `/api/v1/reports` | 수동·템플릿·LLM 보고서 생성 | `REPORT_CREATE` | `201 ReportDetailResponse` |
 | `GET` | `/api/v1/reports/{reportId}` | 최신 버전 상세 | `REPORT_VIEW` | `200 ReportDetailResponse` |
 | `PATCH` | `/api/v1/reports/{reportId}` | 새 버전 생성 | `REPORT_UPDATE` | `200 ReportDetailResponse` |
 | `DELETE` | `/api/v1/reports/{reportId}` | 소프트 삭제 | `REPORT_UPDATE` | `204` |
@@ -228,7 +230,7 @@ DB trigger와 `CHECK`는 허용 전이 순서, 버전 증가, 승인·삭제 met
 | 수정 | `ReportUpdateRequest` | `expectedVersionNo`와 변경할 필드 1개 이상 필수 |
 | 삭제 | query `expectedVersionNo` | `DRAFT`, `REJECTED`만 허용 |
 | submit | `{ "expectedVersionNo": integer }` | `DRAFT`만 허용 |
-| approve | `{ "expectedVersionNo": integer, "reason"?: string }` | 최신 버전 작성자는 승인 불가 |
+| approve | `{ "expectedVersionNo": integer, "reason"?: string }` | 최신 버전 작성자는 승인 불가, 성공 응답에 승인 PDF identity 포함 |
 | reject | `{ "expectedVersionNo": integer, "reason": string }` | 공백이 아닌 1~500자 사유 필수 |
 
 수정 가능한 snapshot 필드는 `title`, `summary`, `periodFrom`, `periodTo`, `content`, `statistics`이며 생략한 값은 직전 버전에서 복사한다. `summary: null`은 요약을 명시적으로 비운다. `changeNote`는 500자 이하의 안전한 변경 사유다.
@@ -268,7 +270,66 @@ provider의 raw text를 직접 저장하지 않는다. LLM adapter가 provider �
 - 기간, 결함 코드·유형·위험도는 DB 원본과 일치한다.
 - 알 수 없는 필드, 허용 개수 초과, HTML·명령 실행을 전제로 한 출력은 거부한다.
 
-한 단계라도 실패하면 보고서와 첫 버전을 저장하지 않고 `502 LLM_RESPONSE_INVALID`를 반환한다. 유효한 결과도 항상 `DRAFT`로만 저장한다.
+한 단계라도 실패하면 provider 결과는 보고서 본문으로 저장하지 않는다. 생성
+파이프라인은 Schema 오류를 재시도하지 않고 `generationMethod=TEMPLATE`로 낮추며
+`LLM_RESPONSE_INVALID`라는 안전한 fallback 사유만 상위 생성 서비스에 전달한다.
+fallback 사유는 `report_version.generation_fallback_reason`에 고정 enum으로 저장하고
+상세·버전 응답의 `generationFallbackReason`으로 반환한다. LLM Prompt·응답 원문과
+provider 예외 메시지는 보고서·멱등 응답·감사 로그 어디에도 저장하지 않는다.
+템플릿 생성까지 불가능한 예외 상황에서만 API 계층이 `502 LLM_RESPONSE_INVALID`를
+반환한다. 유효한 LLM 결과와 템플릿 결과는 모두 항상 `DRAFT`로만 저장한다.
+
+### 7.1 LLM 입력 데이터·이미지 전송 계약
+
+브라우저의 `LlmReportCreateRequest`에는 이미지, URL, 모델과 Prompt 필드가 없다.
+서버가 요청 기간과 객체 접근 범위를 검증한 뒤 통계·결함 근거와 대표 이미지를
+내부적으로 조합한다.
+
+#### 허용 필드
+
+| 분류 | 허용값 | 제한 |
+|---|---|---|
+| 기간·통계 | `period.from`, `period.to`, aggregate, 상태·유형·위험도별 건수 | 요청 기간·필터 결과와 일치, 각 분포 합계는 `defectCount`와 일치 |
+| 결함 근거 | `defectId`, `incidentCode`, 유형, 위험도, workflow 상태, 마지막 관측시각, 일반화 위치명, 비식별 최소 설명 | 최대 20건, 접근 가능한 기간 내 결함만 |
+| 이미지 metadata | `imageIndex`, `defectId`, `incidentCode`, `contentType`, width, height | 텍스트 결함 근거와 결합 |
+| 이미지 내용 | 비식별화가 승인된 대표 관측 JPEG bytes | 현재 최대 1장, 500KB 이하 |
+
+이미지는 `DefectImageContentReader.readTopDefectImages(period, 1)`로 조회한다. 반환형은
+단일 객체가 아니라 `List<ImageContent>`이며 Reader 계약의 기본값은 1, 확장 상한은
+3이다. 선정 기준은 기간 내 대표 결함 상위 N건과 각 대표 결함의 대표 관측 이미지
+한 장이다. 빈 목록이면 같은 요청을 텍스트만으로 생성한다.
+
+#### 전송 금지 필드
+
+- Presigned URL, 일반 외부 URL, bucket 이름, object key, 로컬 파일 경로
+- 비밀번호, Token, API Key, Cookie, 세션·CSRF·TOTP와 AWS·DB·MQTT credential
+- 관리자 이름·이메일, 정밀 좌표, 원본 시스템·감사 로그와 stack trace
+- 비식별화 승인이 없는 이미지, 얼굴·차량번호·사람 식별 단서, EXIF/GPS metadata
+
+LLM adapter는 허용된 bytes를 외부 호출 직전에만 메모리에서 Base64 data URL로
+변환한다. bytes·Base64·data URL은 보고서·버전·멱등 응답·감사 로그·애플리케이션
+로그에 저장하지 않는다. 이미지 전송 flag와 비식별화 승인 중 하나라도 꺼져 있으면
+이미지만 제외하고 텍스트 LLM 생성은 유지한다.
+
+텍스트 입력 JSON은 최대 128KiB, collection당 최대 100개, 결함 근거 최대 20개,
+중첩 깊이 최대 8로 제한한다. Client 호출 직전 key와 문자열을 재귀 검사해
+Authorization·API Key·password·session·cookie·CSRF·TOTP·AWS credential,
+이메일·전화번호, URL·파일 경로·Presigned URL과 Prompt 지시문 패턴을 거부한다.
+사용자 UUID는 사용자별 quota key로만 사용하며 LLM DTO에는 직렬화하지 않는다.
+
+### 7.2 재시도·동시성·Rate·Budget
+
+- Connect 기본 3초, response 기본 30초이며 각각 정책 상한은 10초, 60초다.
+- `429`, `5xx`, network timeout만 backoff+jitter 후 최대 한 번 재시도한다.
+- 그 밖의 `4xx`, JSON·Schema·원본 정합성 오류는 재시도하지 않는다.
+- 인스턴스당 동시 호출은 기본 5, 설정 허용 범위는 1~20이다.
+- 사용자별 UTC 일일 호출 수와 전체 UTC 일일 credit을
+  `request_control.llm_invocation_usage`에 저장한다.
+- 날짜 advisory transaction lock 안에서 사용자 호출 수와 전체 credit을 확인한 뒤
+  호출 예상 최대 비용을 예약하므로 다중 인스턴스의 budget race를 차단한다.
+- 최초 실패와 한 번의 재시도는 각각 일일 요청 수와 credit에 포함한다.
+- ledger에는 Prompt·응답·이미지·URL·credential 원문을 저장하지 않고 model,
+  token, credit, 성공 상태와 고정 실패 코드만 저장한다.
 
 ## 8. 권한과 UI 버튼 매트릭스
 
@@ -319,6 +380,7 @@ provider의 raw text를 직접 저장하지 않는다. LLM adapter가 provider �
   잠금 대기 중 version pointer가 바뀔 수 있으므로 잠금 획득 후 최신 header/version을 다시
   읽고 상태와 `current_version_no`를 검사한 다음 version·header·감사를 기록한다.
 - 동일 버전에 대해 최초 성공한 상태 전이만 반영한다.
+- approve가 승리한 경우 승인 상태·승인 버전·승인 PDF bundle·감사는 같은 DB transaction에서 확정된다. 파일 저장 실패는 `503 S3_UNAVAILABLE`로 승인 전체를 rollback한다.
 - 경합에서 패한 요청은 보고서 본문·통계·현재 version 값을 포함하지 않는
   `409 REPORT_STATE_CONFLICT`를 반환한다. 클라이언트는
   `GET /api/v1/reports/{reportId}`를 다시 호출한 뒤 화면을 갱신한다.
@@ -352,6 +414,9 @@ provider의 raw text를 직접 저장하지 않는다. LLM adapter가 provider �
 - 처리 중 요청의 중복 생성 차단과 실패 후 동일 key 재시도 테스트
 - `Idempotency-Key` 동일 요청 replay와 다른 body 재사용 거부 테스트
 - LLM JSON Schema와 원본 allowlist 검증 테스트
+- 대표 이미지 1장 bytes 전송, 빈 목록 텍스트 폴백과 3장 상한 계약 테스트
+- Presigned URL·저장소 경로·이미지 Base64 비저장·비로그 테스트
+- 비식별화 미승인 시 Reader 미호출·이미지 미전송 테스트
 - 여섯 전용 오류 코드의 HTTP 상태·응답 테스트
 - 상태 변경, 승인자·시각, 감사 로그의 트랜잭션 정합성 테스트
 - 상태별 역할·권한·UI 버튼 매트릭스 테스트

@@ -14,6 +14,8 @@ ACCESS_DENIED_RESOLVER=backend/src/main/java/com/gilbom/common/web/AccessDeniedE
 GLOBAL_EXCEPTION_HANDLER=backend/src/main/java/com/gilbom/common/web/GlobalExceptionHandler.java
 SECURITY_CONFIG=backend/src/main/java/com/gilbom/security/config/SecurityConfig.java
 REPORT_MIGRATION=backend/src/main/resources/db/migration/V30__harden_report_domain_invariants.sql
+LLM_QUOTA_MIGRATION=backend/src/main/resources/db/migration/V31__add_llm_invocation_quota_ledger.sql
+REPORT_FALLBACK_MIGRATION=backend/src/main/resources/db/migration/V32__persist_report_generation_fallback.sql
 CANONICAL_FINGERPRINT=backend/src/main/java/com/gilbom/common/idempotency/CanonicalRequestFingerprint.java
 IDEMPOTENCY_STORE=backend/src/main/java/com/gilbom/common/idempotency/IdempotencyRequestStore.java
 IDEMPOTENCY_CLEANUP_JOB=backend/src/main/java/com/gilbom/common/idempotency/IdempotencyRequestCleanupJob.java
@@ -22,10 +24,24 @@ REPORT_DOMAIN_SERVICE=backend/src/main/java/com/gilbom/report/ReportDomainServic
 REPORT_STATE_SERVICE=backend/src/main/java/com/gilbom/report/ReportStateTransitionService.java
 REPORT_CONTROLLER=backend/src/main/java/com/gilbom/report/ReportController.java
 REPORT_COMMAND_SERVICE=backend/src/main/java/com/gilbom/report/ReportCommandService.java
+REPORT_PDF_SERVICE=backend/src/main/java/com/gilbom/report/pdf/ApprovedReportPdfService.java
+REPORT_PDF_STORAGE=backend/src/main/java/com/gilbom/report/pdf/LocalApprovedReportPdfStorage.java
 REPORT_QUERY_REPOSITORY=backend/src/main/java/com/gilbom/report/ReportQueryRepository.java
 REPORT_INTEGRATION_TEST=backend/src/test/java/com/gilbom/report/integration/ReportDomainServiceIntegrationTest.java
 REPORT_API_INTEGRATION_TEST=backend/src/test/java/com/gilbom/report/integration/ReportApplicationServiceIntegrationTest.java
 REPORT_CONTROLLER_TEST=backend/src/test/java/com/gilbom/report/ReportControllerTest.java
+LLM_IMAGE_CONTENT=backend/src/main/java/com/gilbom/llm/LlmImageContent.java
+GMS_LLM_CLIENT=backend/src/main/java/com/gilbom/llm/GmsLlmClient.java
+REPORT_IMAGE_READER=backend/src/main/java/com/gilbom/report/generation/DefectImageContentReader.java
+REPORT_LLM_REQUEST_FACTORY=backend/src/main/java/com/gilbom/report/generation/ReportLlmRequestFactory.java
+REPORT_LLM_INPUT=backend/src/main/java/com/gilbom/report/generation/ReportLlmInput.java
+REPORT_LLM_INPUT_PREPARER=backend/src/main/java/com/gilbom/report/generation/ReportLlmInputPreparer.java
+LLM_OUTBOUND_GUARD=backend/src/main/java/com/gilbom/llm/LlmOutboundInputGuard.java
+REPORT_LLM_RESULT_VALIDATOR=backend/src/main/java/com/gilbom/report/generation/ReportLlmResultValidator.java
+REPORT_LLM_PIPELINE=backend/src/main/java/com/gilbom/report/generation/ReportLlmGenerationPipeline.java
+REPORT_GENERATION_DATA_SERVICE=backend/src/main/java/com/gilbom/report/generation/ReportGenerationDataService.java
+REPORT_GENERATION_DATA_REPOSITORY=backend/src/main/java/com/gilbom/report/generation/ReportGenerationDataRepository.java
+AUDIT_SNAPSHOT=backend/src/main/java/com/gilbom/audit/AuditSnapshot.java
 FRONTEND_PERMISSIONS=frontend/gilbom/src/features/auth/permissions.ts
 FRONTEND_ROUTER=frontend/gilbom/src/app/router.tsx
 FRONTEND_NAVIGATION=frontend/gilbom/src/features/navigationbar.tsx
@@ -83,8 +99,8 @@ assert_path_contains /api/v1/reports \
     "#/components/schemas/ReportListResponse" \
     "list response"
 assert_path_contains /api/v1/reports \
-    "#/components/schemas/ManualReportCreateRequest" \
-    "current manual/template create request"
+    "#/components/schemas/ReportCreateRequest" \
+    "manual/template/LLM create request"
 assert_path_contains /api/v1/reports \
     "name: createdBy" \
     "author filter"
@@ -187,6 +203,12 @@ assert_contains "$CONTRACT" '| `IN_REVIEW` | 반려 | `REJECTED` |' \
     "reject transition"
 assert_contains "$CONTRACT" '## 8. 권한과 UI 버튼 매트릭스' \
     "UI matrix"
+assert_contains "$CONTRACT" 'List<ImageContent>' \
+    "LLM image list contract"
+assert_contains "$CONTRACT" 'Presigned URL, 일반 외부 URL' \
+    "LLM URL prohibition"
+assert_contains "$CONTRACT" '빈 목록이면 같은 요청을 텍스트만으로 생성한다.' \
+    "text-only image fallback"
 assert_contains "$AUTHORIZATION" \
     '| GET | `/api/v1/reports/{reportId}/versions/{versionNo}` | `REPORT_VIEW` |' \
     "version detail authorization"
@@ -254,15 +276,42 @@ assert_contains "$REPORT_STATE_SERVICE" \
 assert_contains "$REPORT_DOMAIN_SERVICE" \
     "auditLogService.appendRequired" \
     "transactional required report audit"
+assert_contains "$REPORT_DOMAIN_SERVICE" \
+    "createClaimed" \
+    "claim-first generated report orchestration"
 assert_contains "$REPORT_CONTROLLER" \
     "@PreAuthorize(\"hasAuthority('REPORT_VIEW')\")" \
     "report API view permission"
 assert_contains "$REPORT_CONTROLLER" \
     "@RequestHeader(\"Idempotency-Key\")" \
     "report create idempotency header"
+for transition in submit approve reject
+do
+    assert_contains "$REPORT_CONTROLLER" \
+        "@PostMapping(\"/{reportId}/${transition}\")" \
+        "${transition} controller endpoint"
+    assert_contains "$REPORT_COMMAND_SERVICE" \
+        "domainService.${transition}" \
+        "${transition} command boundary"
+done
+assert_contains "$REPORT_CONTROLLER" \
+    "@PreAuthorize(\"hasAuthority('REPORT_APPROVE')\")" \
+    "approve/reject API permission"
 assert_contains "$REPORT_COMMAND_SERVICE" \
     "domainService.softDelete" \
     "report soft-delete command boundary"
+assert_contains "$REPORT_DOMAIN_SERVICE" \
+    "approvedPdfService.create" \
+    "approved PDF generation before approval commit"
+assert_contains "$REPORT_DOMAIN_SERVICE" \
+    "repository.bindApprovedPdf" \
+    "approved PDF version binding"
+assert_contains "$REPORT_PDF_SERVICE" \
+    "registerRollbackCleanup" \
+    "approved PDF rollback cleanup"
+assert_contains "$REPORT_PDF_STORAGE" \
+    "Files.move(temporary, target)" \
+    "approved PDF create-only storage"
 assert_contains "$REPORT_QUERY_REPOSITORY" \
     "report.deleted_at IS NULL" \
     "soft-deleted report query exclusion"
@@ -296,9 +345,75 @@ assert_contains "$REPORT_API_INTEGRATION_TEST" \
 assert_contains "$REPORT_API_INTEGRATION_TEST" \
     "serviceBoundaryUsesCurrentDatabasePermissions" \
     "report service permission integration test"
+assert_contains "$REPORT_API_INTEGRATION_TEST" \
+    "reviewCommandsEnforcePermissionAndBindImmutablePdf" \
+    "report review command and PDF integration test"
+assert_contains "$REPORT_API_INTEGRATION_TEST" \
+    "rejectionRequiresReasonAndDoesNotCreateVersion" \
+    "report rejection no-version integration test"
+assert_contains "$REPORT_API_INTEGRATION_TEST" \
+    "llmFallbackCreatesOneDraftAndReplaySkipsPipeline" \
+    "LLM fallback and replay integration test"
 assert_contains "$REPORT_CONTROLLER_TEST" \
     "requiresReportViewPermissionAtApiBoundary" \
     "report controller permission test"
+assert_contains "$REPORT_CONTROLLER_TEST" \
+    "approvesAndRejectsOnlyWithApprovePermission" \
+    "report decision controller permission test"
+assert_contains "$REPORT_IMAGE_READER" \
+    "MAX_IMAGES = 3" \
+    "image reader expansion cap"
+assert_contains "$REPORT_LLM_REQUEST_FACTORY" \
+    "CURRENT_MAX_IMAGES = 1" \
+    "current one-image behavior"
+assert_contains "$REPORT_LLM_INPUT" \
+    "MAXIMUM_EVIDENCE_ITEMS = 20" \
+    "typed LLM evidence allowlist"
+assert_contains "$REPORT_LLM_INPUT_PREPARER" \
+    "outboundGuard.validate" \
+    "LLM input preflight guard"
+assert_contains "$LLM_OUTBOUND_GUARD" \
+    "MAXIMUM_JSON_BYTES = 128 * 1024" \
+    "LLM input payload cap"
+assert_contains "$REPORT_LLM_RESULT_VALIDATOR" \
+    "validateSchemaShape" \
+    "strict LLM result shape validation"
+assert_contains "$REPORT_LLM_RESULT_VALIDATOR" \
+    "validateStatistics" \
+    "LLM source statistics validation"
+assert_contains "$REPORT_LLM_RESULT_VALIDATOR" \
+    "validateEvidence" \
+    "LLM source evidence validation"
+assert_contains "$REPORT_LLM_PIPELINE" \
+    "retryPolicy.shouldRetry" \
+    "bounded conditional LLM retry"
+assert_contains "$REPORT_LLM_PIPELINE" \
+    "TemplateReportGenerator" \
+    "safe template fallback"
+assert_contains "$REPORT_GENERATION_DATA_SERVICE" \
+    "ReportGenerationCriteria.from" \
+    "server-owned report generation filters"
+assert_contains "$REPORT_GENERATION_DATA_REPOSITORY" \
+    "WITH visible_missions AS" \
+    "single report generation SQL snapshot"
+assert_contains "$LLM_QUOTA_MIGRATION" \
+    "llm_invocation_usage" \
+    "persistent LLM quota ledger"
+assert_contains "$LLM_QUOTA_MIGRATION" \
+    "Prompt·응답·이미지·credential 원문은 저장하지 않는다" \
+    "LLM quota payload prohibition"
+assert_contains "$REPORT_FALLBACK_MIGRATION" \
+    "generation_fallback_reason" \
+    "safe report generation fallback persistence"
+assert_contains "$GMS_LLM_CLIENT" \
+    "Base64.getEncoder().encodeToString" \
+    "in-memory image Base64 conversion"
+assert_contains "$LLM_IMAGE_CONTENT" \
+    "containsExif(bytes)" \
+    "EXIF rejection"
+assert_contains "$AUDIT_SNAPSHOT" \
+    '"imagebase64"' \
+    "image Base64 audit redaction"
 
 for permission in \
     REPORT_VIEW \

@@ -80,6 +80,11 @@ management:
       probes:
         enabled: true
       show-details: never
+    # Secret 이름이 알려져도 관리 endpoint에서 실제 설정값을 반환하지 않는다.
+    configprops:
+      show-values: never
+    env:
+      show-values: never
 
 info:
   app:
@@ -89,6 +94,31 @@ gilbom:
   http:
     # JSON과 chunked body를 포함한 모든 요청 본문의 애플리케이션 전역 상한이다.
     max-request-body-size: ${GILBOM_MAX_REQUEST_BODY_SIZE:1MB}
+  report:
+    pdf:
+      # Docker/운영은 영속 volume 경로를 명시하고 IDE/test만 OS 임시 경로를 기본 사용한다.
+      storage-root: ${GILBOM_REPORT_PDF_STORAGE_ROOT:${java.io.tmpdir}/gilbom-report-pdf}
+  llm:
+    # 정책 gate를 모두 통과하기 전에는 DisabledLlmClient와 TEMPLATE fallback을 사용한다.
+    enabled: ${GILBOM_LLM_ENABLED:false}
+    provider: ${GILBOM_LLM_PROVIDER:}
+    base-url: ${GILBOM_LLM_BASE_URL:https://gms.ssafy.io/gmsapi/api.openai.com/v1}
+    model: ${GILBOM_LLM_MODEL:}
+    api-key: ${GILBOM_LLM_API_KEY:}
+    connect-timeout: ${GILBOM_LLM_CONNECT_TIMEOUT:3s}
+    read-timeout: ${GILBOM_LLM_READ_TIMEOUT:30s}
+    max-output-tokens: ${GILBOM_LLM_MAX_OUTPUT_TOKENS:1500}
+    daily-request-limit: ${GILBOM_LLM_DAILY_REQUEST_LIMIT:0}
+    daily-budget: ${GILBOM_LLM_DAILY_BUDGET:0}
+    max-concurrent-requests: ${GILBOM_LLM_MAX_CONCURRENT_REQUESTS:5}
+    prompt-version: ${GILBOM_LLM_PROMPT_VERSION:}
+    policy-approved: ${GILBOM_LLM_POLICY_APPROVED:false}
+    training-exclusion-approved: ${GILBOM_LLM_TRAINING_EXCLUSION_APPROVED:false}
+    data-retention-approved: ${GILBOM_LLM_DATA_RETENTION_APPROVED:false}
+    outbound-allowlist-applied: ${GILBOM_LLM_OUTBOUND_ALLOWLIST_APPLIED:false}
+    # 비식별화 완료가 별도 확인되기 전에는 이미지가 있어도 텍스트만 전송한다.
+    image-input-enabled: ${GILBOM_LLM_IMAGE_INPUT_ENABLED:false}
+    image-deidentification-approved: ${GILBOM_LLM_IMAGE_DEIDENTIFICATION_APPROVED:false}
   robot:
     presence:
       # State는 30초마다 발행하므로 3회 주기 동안 아무 메시지도 없으면 Offline으로 판정한다.

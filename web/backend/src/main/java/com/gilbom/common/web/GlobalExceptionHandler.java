@@ -75,7 +75,10 @@ public class GlobalExceptionHandler {
             "code",
             "recoverycode",
             "privatekey",
-            "presignedurl");
+            "presignedurl",
+            "imagebytes",
+            "imagebase64",
+            "imagedataurl");
 
     private final ObjectProvider<SecurityAuditService> securityAuditProvider;
 
