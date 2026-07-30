@@ -5,6 +5,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.regex.Pattern;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import com.gilbom.common.error.BusinessException;
@@ -31,12 +33,45 @@ public class LocalFileObjectStorageClient implements ObjectStorageClient {
     private static final Pattern SAFE_OBJECT_KEY =
             Pattern.compile("^[A-Za-z0-9][A-Za-z0-9/_.-]{0,499}$");
 
+    private static final Logger log =
+            LoggerFactory.getLogger(LocalFileObjectStorageClient.class);
+
     private final Path rootDirectory;
 
     public LocalFileObjectStorageClient(StorageProperties properties) {
         this.rootDirectory = Path.of(properties.getLocalRootDirectory())
                 .toAbsolutePath()
                 .normalize();
+        warnIfNotWritable();
+    }
+
+    /**
+     * 저장 경로를 쓸 수 없으면 기동 시점에 알린다.
+     *
+     * <p>컨테이너의 작업 디렉터리는 보통 root 소유이고 애플리케이션은 비특권 사용자로
+     * 돈다. 그 상태에서는 첫 업로드가 503으로 실패하는데, 로봇 쪽 로그만 보면 저장소
+     * 장애와 구분되지 않는다. 실제로 로컬 compose에서 이 상황이 나왔다.
+     *
+     * <p>기동을 중단시키지는 않는다. 이미지 업로드는 관제·결함 조회와 독립적이라,
+     * 경로 설정 하나 때문에 서버 전체가 뜨지 않는 편이 더 나쁘다.
+     */
+    private void warnIfNotWritable() {
+        try {
+            Files.createDirectories(rootDirectory);
+        } catch (IOException exception) {
+            log.warn("Image storage root {} cannot be created: uploads will "
+                            + "fail with 503. Mount a writable volume and set "
+                            + "GILBOM_STORAGE_LOCAL_ROOT_DIRECTORY.",
+                    rootDirectory,
+                    exception);
+            return;
+        }
+        if (!Files.isWritable(rootDirectory)) {
+            log.warn("Image storage root {} is not writable: uploads will "
+                            + "fail with 503. Mount a writable volume and set "
+                            + "GILBOM_STORAGE_LOCAL_ROOT_DIRECTORY.",
+                    rootDirectory);
+        }
     }
 
     @Override
