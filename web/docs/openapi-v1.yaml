@@ -2344,8 +2344,10 @@ paths:
       operationId: createMission
       summary: 순찰 Mission 생성
       description: |
-        대상 Robot의 OWNER만 생성할 수 있습니다. 활성 Area와 그 Area에 속한
-        활성 Route만 허용하며 MQTT용 missionCode는 서버가 생성합니다.
+        대상 Robot의 OWNER만 생성할 수 있습니다. 활성 Area와 계획 시간은
+        필수이며 MQTT용 missionCode는 서버가 생성합니다. patrolRouteId는
+        DB·API FK 호환용 AUTONOMOUS_DEFAULT Route ID로, 사용자 계획이나
+        로봇 주행·지도·진행률 계산에는 사용하지 않습니다.
       x-required-permission: MISSION_MANAGE
       security:
         - serverSession: []
@@ -2411,8 +2413,8 @@ paths:
       operationId: updateMission
       summary: Mission 계획 또는 관리자 상태 변경
       description: |
-        대상 Robot OWNER만 변경할 수 있습니다. Area·Route·예약 시각은
-        CREATED/READY에서만 변경하며 관리자 상태 변경은 READY,
+        대상 Robot OWNER만 변경할 수 있습니다. Area·내부 Route·계획 시간·
+        예약 시각은 CREATED/READY에서만 변경하며 관리자 상태 변경은 READY,
         CANCELLED, FAILED만 허용합니다. 실행 상태는 MQTT Event가 정본입니다.
       x-required-permission: MISSION_MANAGE
       security:
@@ -4057,7 +4059,11 @@ components:
 
     MissionCreateRequest:
       type: object
-      required: [robotId, patrolAreaId, patrolRouteId]
+      required:
+        - robotId
+        - patrolAreaId
+        - patrolRouteId
+        - plannedDurationSec
       additionalProperties: false
       properties:
         robotId:
@@ -4069,6 +4075,13 @@ components:
         patrolRouteId:
           type: string
           format: uuid
+          description: >
+            API·DB FK 호환 전용 AUTONOMOUS_DEFAULT Route ID.
+            화면에서 사용자에게 노출하거나 경로 계획에 사용하지 않습니다.
+        plannedDurationSec:
+          type: integer
+          minimum: 1
+          description: 계획 수행 시간(초). 시간 기반 진행률 계산의 분모입니다.
         scheduledStartAt:
           type: string
           format: date-time
@@ -4085,6 +4098,10 @@ components:
         patrolRouteId:
           type: string
           format: uuid
+          description: API·DB FK 호환 전용 AUTONOMOUS_DEFAULT Route ID
+        plannedDurationSec:
+          type: integer
+          minimum: 1
         scheduledStartAt:
           type: string
           format: date-time
@@ -4111,6 +4128,9 @@ components:
         - patrolRouteCode
         - patrolRouteName
         - patrolRouteVersion
+        - plannedDurationSec
+        - remainingDurationSec
+        - progressStale
         - status
         - progressPercent
         - createdBy
@@ -4142,13 +4162,40 @@ components:
         patrolRouteId:
           type: string
           format: uuid
+          description: API·DB FK 호환 전용 내부 Route ID
         patrolRouteCode:
           type: string
+          description: AUTONOMOUS_DEFAULT. 사용자 화면 비노출 값
         patrolRouteName:
           type: string
+          description: 사용자 화면 비노출 내부 호환 값
         patrolRouteVersion:
           type: integer
           minimum: 1
+          description: 사용자 화면 비노출 내부 호환 값
+        plannedDurationSec:
+          type: integer
+          minimum: 1
+          description: 계획 수행 시간(초)
+        elapsedSec:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: 최신 유효 Telemetry의 mission.elapsed_sec
+        remainingDurationSec:
+          type: integer
+          minimum: 0
+          description: max(plannedDurationSec - elapsedSec, 0)
+        progressObservedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: 진행률 계산에 사용한 최신 Telemetry sampled_at
+        progressStale:
+          type: boolean
+          description: >
+            RUNNING·PAUSED 상태에서 최신 진행 Telemetry가 없거나
+            15초보다 오래되었는지 여부
         status:
           $ref: "#/components/schemas/MissionStatus"
         scheduledStartAt:
@@ -4167,11 +4214,16 @@ components:
           type: number
           minimum: 0
           maximum: 100
+          description: >
+            min(99.99, elapsedSec / plannedDurationSec * 100).
+            100은 MISSION_COMPLETED Event에서만 확정합니다.
         estimatedCompletionAt:
           type: string
           format: date-time
           nullable: true
-          description: RUNNING Mission의 누적 시간과 진행률로 계산한 예상 완료 시각
+          description: >
+            RUNNING·PAUSED Mission에서 최신 progressObservedAt에
+            remainingDurationSec을 더한 예상 완료 시각
         completionReason:
           type: string
           nullable: true

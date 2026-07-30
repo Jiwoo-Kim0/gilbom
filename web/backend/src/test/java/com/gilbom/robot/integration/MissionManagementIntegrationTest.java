@@ -202,7 +202,7 @@ class MissionManagementIntegrationTest {
                 """,
                 routeId,
                 areaId,
-                "ROUTE-" + routeId.toString().substring(0, 8),
+                "AUTONOMOUS_DEFAULT",
                 OWNER_ID,
                 OWNER_ID);
     }
@@ -215,6 +215,7 @@ class MissionManagementIntegrationTest {
                         robotId,
                         areaId,
                         routeId,
+                        3600,
                         Instant.now().plusSeconds(3600)),
                 OWNER_ID,
                 AuditRequestContext.requestIdOnly(createRequestId));
@@ -222,6 +223,7 @@ class MissionManagementIntegrationTest {
         MissionResponse ready = managementService.update(
                 created.missionId(),
                 new MissionUpdateRequest(
+                        null,
                         null,
                         null,
                         null,
@@ -233,6 +235,8 @@ class MissionManagementIntegrationTest {
         assertThat(created.missionCode()).startsWith("MIS-");
         assertThat(created.status()).isEqualTo(MissionStatus.CREATED);
         assertThat(created.patrolRouteId()).isEqualTo(routeId);
+        assertThat(created.plannedDurationSec()).isEqualTo(3600);
+        assertThat(created.remainingDurationSec()).isEqualTo(3600);
         assertThat(ready.status()).isEqualTo(MissionStatus.READY);
         assertThat(queryService.findMissions(
                 OWNER_ID,
@@ -270,12 +274,12 @@ class MissionManagementIntegrationTest {
                 Integer.class,
                 createRequestId)).isOne();
 
-        Instant startedAt = created.createdAt().plusSeconds(1);
+        Instant startedAt = created.createdAt().minusSeconds(900);
         jdbcTemplate.update("""
                 UPDATE robot.mission
                 SET status = 'RUNNING',
                     started_at = ?,
-                    progress_percent = 50,
+                    progress_percent = 25,
                     updated_at = ?
                 WHERE mission_id = ?
                 """,
@@ -283,13 +287,101 @@ class MissionManagementIntegrationTest {
                         startedAt,
                         java.time.ZoneOffset.UTC),
                 java.time.OffsetDateTime.ofInstant(
-                        startedAt.plusSeconds(600),
+                        created.createdAt(),
                         java.time.ZoneOffset.UTC),
                 created.missionId());
         assertThat(queryService.findMission(
                 OWNER_ID,
-                created.missionId()).estimatedCompletionAt())
-                .isEqualTo(startedAt.plusSeconds(1200));
+                created.missionId()))
+                .satisfies(mission -> {
+                    assertThat(mission.estimatedCompletionAt()).isNull();
+                    assertThat(mission.progressStale()).isTrue();
+                });
+
+        UUID bootId = UUID.randomUUID();
+        Instant progressObservedAt = created.createdAt();
+        jdbcTemplate.update("""
+                INSERT INTO telemetry.robot_boot_session (
+                    boot_id,
+                    robot_id,
+                    schema_version,
+                    session_status,
+                    robot_connected_at,
+                    first_received_at,
+                    last_received_at,
+                    last_seen_seq
+                ) VALUES (?, ?, '2.0', 'ONLINE', ?, ?, ?, 1)
+                """,
+                bootId,
+                robotId,
+                java.time.OffsetDateTime.ofInstant(
+                        progressObservedAt,
+                        java.time.ZoneOffset.UTC),
+                java.time.OffsetDateTime.ofInstant(
+                        progressObservedAt,
+                        java.time.ZoneOffset.UTC),
+                java.time.OffsetDateTime.ofInstant(
+                        progressObservedAt,
+                        java.time.ZoneOffset.UTC));
+        jdbcTemplate.update("""
+                INSERT INTO telemetry.robot_telemetry (
+                    message_id,
+                    schema_version,
+                    robot_id,
+                    boot_id,
+                    seq,
+                    sampled_at,
+                    received_at,
+                    position_valid,
+                    moving,
+                    battery_valid,
+                    battery_state,
+                    mission_state,
+                    mission_elapsed_sec,
+                    raw_payload,
+                    mission_id
+                ) VALUES (
+                    ?,
+                    '2.0',
+                    ?,
+                    ?,
+                    1,
+                    ?,
+                    ?,
+                    FALSE,
+                    FALSE,
+                    FALSE,
+                    'UNKNOWN',
+                    'RUNNING',
+                    900,
+                    '{}'::JSONB,
+                    ?
+                )
+                """,
+                UUID.randomUUID(),
+                robotId,
+                bootId,
+                java.time.OffsetDateTime.ofInstant(
+                        progressObservedAt,
+                        java.time.ZoneOffset.UTC),
+                java.time.OffsetDateTime.ofInstant(
+                        progressObservedAt,
+                        java.time.ZoneOffset.UTC),
+                created.missionId());
+        assertThat(queryService.findMission(
+                OWNER_ID,
+                created.missionId()))
+                .satisfies(mission -> {
+                    assertThat(mission.elapsedSec()).isEqualTo(900);
+                    assertThat(mission.remainingDurationSec())
+                            .isEqualTo(2700);
+                    assertThat(mission.progressObservedAt())
+                            .isEqualTo(progressObservedAt);
+                    assertThat(mission.estimatedCompletionAt())
+                            .isEqualTo(
+                                    progressObservedAt.plusSeconds(2700));
+                    assertThat(mission.progressStale()).isFalse();
+                });
 
         assertThatThrownBy(() -> queryService.findMission(
                 OTHER_USER_ID,
@@ -344,6 +436,24 @@ class MissionManagementIntegrationTest {
                 WHERE patrol_area_id = ?
                 """, Boolean.class, created.patrolAreaId()))
                 .isTrue();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM robot.patrol_route
+                WHERE patrol_area_id = ?
+                  AND route_code = 'AUTONOMOUS_DEFAULT'
+                  AND lifecycle_status = 'ACTIVE'
+                  AND ST_CoveredBy(
+                      route_geometry,
+                      (
+                          SELECT boundary
+                          FROM robot.patrol_area
+                          WHERE patrol_area_id = ?
+                      )
+                  )
+                """,
+                Integer.class,
+                created.patrolAreaId(),
+                created.patrolAreaId())).isOne();
         assertThat(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*)
                 FROM audit.audit_log
@@ -550,6 +660,7 @@ class MissionManagementIntegrationTest {
                         robotId,
                         areaId,
                         routeId,
+                        1800,
                         Instant.now().plusSeconds(3600)),
                 OWNER_ID,
                 AuditRequestContext.requestIdOnly(UUID.randomUUID()));
@@ -615,6 +726,12 @@ class MissionManagementIntegrationTest {
                                 .isEqualTo(
                                         ErrorCode.PATROL_AREA_GEOMETRY_INVALID));
 
+        jdbcTemplate.update("""
+                UPDATE robot.patrol_route
+                SET route_code = 'A-01-USER'
+                WHERE patrol_route_id = ?
+                """,
+                routeId);
         PatrolAreaUpdateRequest excludesRoute =
                 new PatrolAreaUpdateRequest(
                         null,
@@ -694,8 +811,7 @@ class MissionManagementIntegrationTest {
     @Test
     void createsActiveRouteVersionsAndUsesLatestVersionForMission()
             throws Exception {
-        String routeCode = "ROUTE-VERSION-"
-                + UUID.randomUUID().toString().substring(0, 8);
+        String routeCode = "AUTONOMOUS_DEFAULT";
         UUID firstRequestId = UUID.randomUUID();
         PatrolRouteResponse first = patrolRouteManagementService.create(
                 areaId,
@@ -740,8 +856,8 @@ class MissionManagementIntegrationTest {
                 OWNER_ID,
                 AuditRequestContext.requestIdOnly(secondRequestId));
 
-        assertThat(first.routeVersion()).isEqualTo(1);
-        assertThat(second.routeVersion()).isEqualTo(2);
+        assertThat(first.routeVersion()).isEqualTo(2);
+        assertThat(second.routeVersion()).isEqualTo(3);
         assertThat(second.lifecycleStatus()).isEqualTo("ACTIVE");
         assertThat(second.routeGeometry().path("type").asText())
                 .isEqualTo("MultiLineString");
@@ -752,6 +868,7 @@ class MissionManagementIntegrationTest {
                                 robotId,
                                 areaId,
                                 second.patrolRouteId(),
+                                3600,
                                 Instant.now().plusSeconds(3600)),
                         OWNER_ID,
                         AuditRequestContext.requestIdOnly(
@@ -956,6 +1073,7 @@ class MissionManagementIntegrationTest {
                         robotId,
                         otherAreaId,
                         routeId,
+                        3600,
                         null),
                 OWNER_ID,
                 AuditRequestContext.requestIdOnly(UUID.randomUUID())))

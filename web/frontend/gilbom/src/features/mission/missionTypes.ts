@@ -10,7 +10,6 @@ export type MissionStatus =
 export type MissionFilters = {
   robotId: string
   patrolAreaId: string
-  patrolRouteId: string
   status: MissionStatus | ''
   startedFrom: string
   startedTo: string
@@ -29,6 +28,11 @@ export type Mission = {
   patrolRouteCode: string
   patrolRouteName: string
   patrolRouteVersion: number
+  plannedDurationSec: number
+  elapsedSec: number | null
+  remainingDurationSec: number
+  progressObservedAt: string | null
+  progressStale: boolean
   status: MissionStatus
   scheduledStartAt: string | null
   startedAt: string | null
@@ -57,7 +61,9 @@ export type MissionListResponse = {
 export type MissionCreateInput = {
   robotId: string
   patrolAreaId: string
+  /** API·DB FK 호환 전용. 화면에서 사용자에게 노출하지 않는다. */
   patrolRouteId: string
+  plannedDurationSec: number
   scheduledStartAt: string | null
 }
 

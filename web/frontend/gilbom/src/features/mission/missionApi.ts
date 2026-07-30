@@ -41,9 +41,6 @@ export function getMissions(
   if (filters.patrolAreaId.length > 0) {
     query.set('patrolAreaId', filters.patrolAreaId)
   }
-  if (filters.patrolRouteId.length > 0) {
-    query.set('patrolRouteId', filters.patrolRouteId)
-  }
   if (filters.status.length > 0) {
     query.set('status', filters.status)
   }

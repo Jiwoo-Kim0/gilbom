@@ -42,6 +42,7 @@ public class MissionManagementService {
             "robotId",
             "patrolAreaId",
             "patrolRouteId",
+            "plannedDurationSec",
             "status",
             "scheduledStartAt",
             "startedAt",
@@ -120,6 +121,7 @@ public class MissionManagementService {
                         robot_id,
                         patrol_area_id,
                         patrol_route_id,
+                        planned_duration_sec,
                         status,
                         scheduled_start_at,
                         created_by,
@@ -127,6 +129,7 @@ public class MissionManagementService {
                         created_at,
                         updated_at
                     ) VALUES (
+                        ?,
                         ?,
                         ?,
                         ?,
@@ -145,6 +148,7 @@ public class MissionManagementService {
                     request.robotId(),
                     request.patrolAreaId(),
                     request.patrolRouteId(),
+                    request.plannedDurationSec(),
                     utc(request.scheduledStartAt()),
                     actorUserId,
                     actorUserId,
@@ -225,6 +229,12 @@ public class MissionManagementService {
                 request.patrolRouteId() != null,
                 "patrol_route_id = ?",
                 targetRouteId);
+        addAssignment(
+                assignments,
+                values,
+                request.plannedDurationSec() != null,
+                "planned_duration_sec = ?",
+                request.plannedDurationSec());
         addAssignment(
                 assignments,
                 values,
@@ -381,6 +391,7 @@ public class MissionManagementService {
                 FROM robot.patrol_route
                 WHERE patrol_route_id = ?
                   AND patrol_area_id = ?
+                  AND route_code = 'AUTONOMOUS_DEFAULT'
                 FOR KEY SHARE
                 """,
                 resultSet -> resultSet.next()
@@ -399,6 +410,7 @@ public class MissionManagementService {
     ) {
         boolean metadataChanged = request.patrolAreaId() != null
                 || request.patrolRouteId() != null
+                || request.plannedDurationSec() != null
                 || request.scheduledStartAt() != null;
         if (metadataChanged
                 && current.status() != MissionStatus.CREATED
@@ -466,6 +478,7 @@ public class MissionManagementService {
         values.put("robotId", mission.robotId());
         values.put("patrolAreaId", mission.patrolAreaId());
         values.put("patrolRouteId", mission.patrolRouteId());
+        values.put("plannedDurationSec", mission.plannedDurationSec());
         values.put("status", mission.status());
         values.put("scheduledStartAt", mission.scheduledStartAt());
         values.put("startedAt", mission.startedAt());

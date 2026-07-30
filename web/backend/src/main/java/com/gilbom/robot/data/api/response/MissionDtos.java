@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
 public final class MissionDtos {
@@ -31,6 +32,7 @@ public final class MissionDtos {
             @NotNull UUID robotId,
             @NotNull UUID patrolAreaId,
             @NotNull UUID patrolRouteId,
+            @NotNull @Positive Integer plannedDurationSec,
             Instant scheduledStartAt
     ) {
     }
@@ -38,6 +40,7 @@ public final class MissionDtos {
     public record MissionUpdateRequest(
             UUID patrolAreaId,
             UUID patrolRouteId,
+            @Positive Integer plannedDurationSec,
             Instant scheduledStartAt,
             MissionStatus status,
             @Size(max = 100) String completionReason
@@ -48,6 +51,7 @@ public final class MissionDtos {
         public boolean isPatchPresent() {
             return patrolAreaId != null
                     || patrolRouteId != null
+                    || plannedDurationSec != null
                     || scheduledStartAt != null
                     || status != null
                     || completionReason != null;
@@ -78,6 +82,11 @@ public final class MissionDtos {
             String patrolRouteCode,
             String patrolRouteName,
             int patrolRouteVersion,
+            int plannedDurationSec,
+            Integer elapsedSec,
+            Integer remainingDurationSec,
+            Instant progressObservedAt,
+            boolean progressStale,
             MissionStatus status,
             Instant scheduledStartAt,
             Instant startedAt,

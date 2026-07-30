@@ -9,8 +9,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class MissionProgressService {
 
-    private static final int MAXIMUM_ROUTE_DISTANCE_METERS = 30;
-
     private final JdbcTemplate jdbcTemplate;
 
     public MissionProgressService(JdbcTemplate jdbcTemplate) {
@@ -18,69 +16,37 @@ public class MissionProgressService {
     }
 
     /**
-     * 가장 최신인 유효 위치만 경로에 투영해 Mission 진행률을 단조 증가시킨다.
-     * 100%는 완료 Event만 확정할 수 있으므로 위치 기반 값은 99.99%로 제한한다.
+     * 가장 최신인 Mission 경과시간으로 진행률을 단조 증가시킨다.
+     * 100%는 완료 Event만 확정할 수 있으므로 Telemetry 값은 99.99%로 제한한다.
      */
     public boolean refresh(
             UUID missionId,
             UUID messageId,
             OffsetDateTime sampledAt,
-            double longitude,
-            double latitude
+            int elapsedSeconds
     ) {
+        if (elapsedSeconds < 0) {
+            throw new IllegalArgumentException(
+                    "elapsedSeconds must not be negative");
+        }
         int updated = jdbcTemplate.update("""
                 WITH progress_candidate AS (
                     SELECT
                         mission.mission_id,
-                        CASE
-                            WHEN GeometryType(
-                                ST_LineMerge(route.route_geometry)
-                            ) = 'LINESTRING'
-                             AND ST_DWithin(
-                                ST_SetSRID(
-                                    ST_MakePoint(
-                                        CAST(? AS DOUBLE PRECISION),
-                                        CAST(? AS DOUBLE PRECISION)
-                                    ),
-                                    4326
-                                )::GEOGRAPHY,
-                                route.route_geometry::GEOGRAPHY,
-                                ?
-                             )
-                            THEN LEAST(
-                                99.99::NUMERIC,
-                                ROUND(
-                                    (
-                                        ST_LineLocatePoint(
-                                            ST_LineMerge(
-                                                route.route_geometry
-                                            ),
-                                            ST_SetSRID(
-                                                ST_MakePoint(
-                                                    CAST(
-                                                        ? AS DOUBLE PRECISION
-                                                    ),
-                                                    CAST(
-                                                        ? AS DOUBLE PRECISION
-                                                    )
-                                                ),
-                                                4326
-                                            )
-                                        ) * 100
-                                    )::NUMERIC,
-                                    2
-                                )
+                        LEAST(
+                            99.99::NUMERIC,
+                            ROUND(
+                                (
+                                    CAST(? AS NUMERIC)
+                                    / mission.planned_duration_sec
+                                    * 100
+                                ),
+                                2
                             )
-                            ELSE NULL
-                        END AS progress_percent
+                        ) AS progress_percent
                     FROM robot.mission mission
-                    JOIN robot.patrol_route route
-                      ON route.patrol_route_id =
-                         mission.patrol_route_id
-                     AND route.patrol_area_id =
-                         mission.patrol_area_id
                     WHERE mission.mission_id = ?
-                      AND mission.status = 'RUNNING'
+                      AND mission.status IN ('RUNNING', 'PAUSED')
                       AND mission.started_at IS NOT NULL
                       AND ? >= mission.started_at
                       AND NOT EXISTS (
@@ -88,8 +54,7 @@ public class MissionProgressService {
                           FROM telemetry.robot_telemetry newer
                           WHERE newer.mission_id =
                                 mission.mission_id
-                            AND newer.position_valid = TRUE
-                            AND newer.position IS NOT NULL
+                            AND newer.mission_elapsed_sec IS NOT NULL
                             AND (
                                 newer.sampled_at > ?
                                 OR (
@@ -114,11 +79,7 @@ public class MissionProgressService {
                   AND candidate.progress_percent >
                       mission.progress_percent
                 """,
-                longitude,
-                latitude,
-                MAXIMUM_ROUTE_DISTANCE_METERS,
-                longitude,
-                latitude,
+                elapsedSeconds,
                 missionId,
                 sampledAt,
                 sampledAt,

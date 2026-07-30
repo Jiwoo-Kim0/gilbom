@@ -23,6 +23,7 @@ import com.gilbom.audit.AuditSnapshot;
 import com.gilbom.audit.AuditTargetType;
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaCreateLifecycleStatus;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaCreateRequest;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaLifecycleStatus;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaResponse;
@@ -94,6 +95,11 @@ public class PatrolAreaManagementService {
                     ErrorCode.PATROL_AREA_CODE_CONFLICT,
                     exception);
         }
+        createAutonomousDefaultRoute(
+                patrolAreaId,
+                actorUserId,
+                request.lifecycleStatus()
+                        == PatrolAreaCreateLifecycleStatus.ACTIVE);
 
         PatrolAreaResponse created = queryService.findArea(patrolAreaId);
         auditLogService.appendRequired(new AuditLogRecord(
@@ -108,6 +114,63 @@ public class PatrolAreaManagementService {
                 null,
                 AuditResult.SUCCESS));
         return created;
+    }
+
+    private void createAutonomousDefaultRoute(
+            UUID patrolAreaId,
+            UUID actorUserId,
+            boolean active
+    ) {
+        int inserted = jdbcTemplate.update("""
+                WITH area_geometry AS (
+                    SELECT
+                        boundary,
+                        ST_PointOnSurface(boundary) AS inside_point
+                    FROM robot.patrol_area
+                    WHERE patrol_area_id = ?
+                )
+                INSERT INTO robot.patrol_route (
+                    patrol_route_id,
+                    patrol_area_id,
+                    route_code,
+                    route_name,
+                    route_version,
+                    route_geometry,
+                    lifecycle_status,
+                    created_by,
+                    updated_by
+                )
+                SELECT
+                    ?,
+                    ?,
+                    'AUTONOMOUS_DEFAULT',
+                    '자율 순찰 내부 경로',
+                    1,
+                    ST_MakeLine(
+                        inside_point,
+                        ST_LineInterpolatePoint(
+                            ST_ShortestLine(
+                                inside_point,
+                                ST_Boundary(boundary)
+                            ),
+                            0.5
+                        )
+                    ),
+                    ?,
+                    ?,
+                    ?
+                FROM area_geometry
+                """,
+                patrolAreaId,
+                UUID.randomUUID(),
+                patrolAreaId,
+                active ? "ACTIVE" : "DRAFT",
+                actorUserId,
+                actorUserId);
+        if (inserted != 1) {
+            throw new IllegalStateException(
+                    "Autonomous default route was not created");
+        }
     }
 
     @Transactional
@@ -154,6 +217,9 @@ public class PatrolAreaManagementService {
                 WHERE patrol_area_id = ?
                 """,
                 parameters.toArray());
+        if (request.boundary() != null) {
+            updateAutonomousDefaultRouteGeometry(patrolAreaId);
+        }
 
         PatrolAreaResponse after = queryService.findArea(patrolAreaId);
         appendUpdateAudit(
@@ -195,6 +261,19 @@ public class PatrolAreaManagementService {
                 WHERE patrol_area_id = ?
                 """,
                 target.name(),
+                actorUserId,
+                patrolAreaId);
+        jdbcTemplate.update("""
+                UPDATE robot.patrol_route
+                SET lifecycle_status = ?,
+                    updated_by = ?,
+                    updated_at = NOW()
+                WHERE patrol_area_id = ?
+                  AND route_code = 'AUTONOMOUS_DEFAULT'
+                """,
+                target == PatrolAreaLifecycleStatus.ACTIVE
+                        ? "ACTIVE"
+                        : "DRAFT",
                 actorUserId,
                 patrolAreaId);
 
@@ -275,6 +354,7 @@ public class PatrolAreaManagementService {
                          candidate
                     WHERE patrol_area_id = ?
                       AND lifecycle_status IN ('DRAFT', 'ACTIVE')
+                      AND route_code <> 'AUTONOMOUS_DEFAULT'
                       AND NOT ST_CoveredBy(
                           route_geometry,
                           candidate.boundary
@@ -288,6 +368,35 @@ public class PatrolAreaManagementService {
             throw new BusinessException(
                     ErrorCode.PATROL_AREA_ROUTE_OUTSIDE_BOUNDARY);
         }
+    }
+
+    private void updateAutonomousDefaultRouteGeometry(UUID patrolAreaId) {
+        jdbcTemplate.update("""
+                WITH area_geometry AS (
+                    SELECT
+                        boundary,
+                        ST_PointOnSurface(boundary) AS inside_point
+                    FROM robot.patrol_area
+                    WHERE patrol_area_id = ?
+                )
+                UPDATE robot.patrol_route route
+                SET route_geometry = ST_MakeLine(
+                        area_geometry.inside_point,
+                        ST_LineInterpolatePoint(
+                            ST_ShortestLine(
+                                area_geometry.inside_point,
+                                ST_Boundary(area_geometry.boundary)
+                            ),
+                            0.5
+                        )
+                    ),
+                    updated_at = NOW()
+                FROM area_geometry
+                WHERE route.patrol_area_id = ?
+                  AND route.route_code = 'AUTONOMOUS_DEFAULT'
+                """,
+                patrolAreaId,
+                patrolAreaId);
     }
 
     private static boolean isAllowedTransition(

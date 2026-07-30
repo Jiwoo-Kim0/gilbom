@@ -194,7 +194,8 @@
             },
             "elapsed_sec": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "description": "Mission 시작 후 벽시계 누적 초. PAUSED 중에도 증가하며 한 Mission 안에서 단조 증가한다."
             },
             "incident_count": {
               "type": "integer",

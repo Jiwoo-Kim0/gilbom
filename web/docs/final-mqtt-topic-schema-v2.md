@@ -45,7 +45,8 @@ v2에서는 실제 기기가 안정적으로 제공할 수 없는 값과 중복 
   Topic 경로와 Payload 식별자에 동일하게 사용한다.
 - MQTT 연결 세션 식별자는 별도의 `mqtt_client_id`를 사용한다.
 - 기기는 미션 완료율과 예상 완료시간을 MQTT로 보내지 않는다.
-- 미션 진행률이 필요하면 서버가 계획 경로와 유효 GPS 궤적을 이용해 별도로 계산한다.
+- 서버는 최신 유효 `mission.elapsed_sec`와 Mission 계획시간의 비율로 진행률을
+  계산하며, Route Geometry와 GPS 유효 여부는 진행률에 사용하지 않는다.
 - `position.heading_deg`는 이동 중 GPS RMC Course Over Ground가 유효할 때만 관제용으로 제공한다.
 - Battery Event는 배터리 전이 이력이 필요한 경우에만 사용하는 선택 Topic이다.
 - 짧은 장애물 정지는 State로만 알리고, 재확인 후에도 지속된 정지만 Safety Event로 저장한다.
@@ -589,7 +590,7 @@ GPS Fix가 없으면 과거 위치를 복사하지 않는다.
 | `system.jetson_temp_c` | Number 또는 Null | O | Jetson Thermal Zone 최고 온도 |
 | `mission` | Object 또는 Null | O | 활성 미션 상태·경과 집계 |
 | `mission.state` | Enum String | 조건부 | 로봇 내부 미션 상태 |
-| `mission.elapsed_sec` | Integer | 조건부 | 미션 시작 후 경과시간 |
+| `mission.elapsed_sec` | Integer | 조건부 | 미션 시작 후 누적 경과시간. `0` 이상이며 PAUSED 중에도 증가 |
 | `mission.incident_count` | Integer | 조건부 | 현재 미션의 확정 Incident Event 수 |
 
 ### 6.4 값 생성 경계
@@ -605,6 +606,13 @@ GPS Fix가 없으면 과거 위치를 복사하지 않는다.
 | `system.jetson_temp_c` | 읽을 수 있는 Thermal Zone 중 최고값 |
 
 `motion.moving`은 실제 바퀴 회전을 측정한 값이 아니라 모터 제어 명령 기준 값이다.
+
+`mission.elapsed_sec`는 현재 Mission의 시작 시점부터 흐른 단조 증가 누적 초이다.
+로봇이 `PAUSED` 상태여도 벽시계 기준으로 계속 증가하며 Mission이 바뀌면 새 Mission
+기준으로 다시 계산한다. 서버는 최신 유효 값으로
+`min(99.99, elapsed_sec / planned_duration_sec * 100)`을 계산하고,
+100%는 `MISSION_COMPLETED` Event를 수신했을 때만 확정한다. 따라서 GPS 유효 여부나
+내부 호환용 Route Geometry는 Mission 진행률에 영향을 주지 않는다.
 
 `position.heading_deg`는 로봇 본체가 바라보는 방향이 아니라 GPS가 계산한 지면 기준 이동 방향이다. 관제 지도 마커 회전에는 사용할 수 있지만, 정지 상태의 자세나 후진 방향을 포함한 자율주행 제어의 유일한 방향값으로 사용하지 않는다. 자율주행 자세 추정은 IMU·전자나침반·엔코더 또는 로컬 위치추정 결과와 결합한다.
 
@@ -1100,7 +1108,9 @@ tbs/v2/robots/{mqtt_id}/events/mission
 
 `normal_detection_count`는 카메라 프레임 수가 아니다. Tracking·Cooldown 등 임베디드팀과 합의한 중복 제거 기준으로 확정한 정상 관측만 센다.
 
-미션 진행률이 필요하면 서버가 관리하는 계획 경로와 `mission_id`가 같은 유효 Telemetry 위치를 사용한다. 이 서버 계산값은 MQTT v2 계약에 포함하지 않는다.
+미션 진행률은 서버가 `mission_id`가 같은 최신 유효 Telemetry의
+`mission.elapsed_sec`와 Mission 계획시간으로 계산한다. 진행률 자체는 MQTT v2
+Payload에 포함하지 않는다.
 
 ---
 

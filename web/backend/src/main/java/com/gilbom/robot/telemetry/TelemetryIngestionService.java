@@ -109,19 +109,16 @@ public class TelemetryIngestionService {
             TelemetryPayload payload,
             OffsetDateTime sampledAt
     ) {
-        TelemetryPayload.Position position = payload.position();
+        TelemetryPayload.Mission mission = payload.mission();
         if (missionId == null
-                || !position.valid()
-                || position.lon() == null
-                || position.lat() == null) {
+                || mission == null) {
             return;
         }
         missionProgressService.refresh(
                 missionId,
                 payload.messageId(),
                 sampledAt,
-                position.lon(),
-                position.lat());
+                mission.elapsedSec());
     }
 
     private UUID findRobotId(String mqttId) {

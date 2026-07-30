@@ -120,6 +120,7 @@ class MissionControllerTest {
                                   "robotId": "%s",
                                   "patrolAreaId": "%s",
                                   "patrolRouteId": "%s",
+                                  "plannedDurationSec": 3600,
                                   "scheduledStartAt":
                                     "2099-01-01T01:00:00Z"
                                 }
@@ -135,6 +136,29 @@ class MissionControllerTest {
                         MISSION_ID.toString())))
                 .andExpect(jsonPath("$.patrolRouteId", is(
                         ROUTE_ID.toString())));
+    }
+
+    @Test
+    void rejectsNonPositivePlannedDuration() throws Exception {
+        mockMvc.perform(post("/api/v1/missions")
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_MANAGE))
+                        .with(csrf().asHeader())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "robotId": "%s",
+                                  "patrolAreaId": "%s",
+                                  "patrolRouteId": "%s",
+                                  "plannedDurationSec": 0
+                                }
+                                """.formatted(
+                                ROBOT_ID,
+                                AREA_ID,
+                                ROUTE_ID)))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(managementService);
     }
 
     @Test
@@ -208,6 +232,11 @@ class MissionControllerTest {
                 "ROUTE-001",
                 "Route 1",
                 1,
+                3600,
+                null,
+                3600,
+                null,
+                false,
                 status,
                 Instant.parse("2099-01-01T01:00:00Z"),
                 null,

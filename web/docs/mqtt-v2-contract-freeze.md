@@ -28,6 +28,9 @@ Draft 07을 사용한다.
 - 10개 Topic의 경로, 방향, QoS, Retain과 MQTT 5 Message Expiry
 - 식별자, 필수·선택 멤버, 타입, enum, UUID·UTC·숫자 범위
 - `valid=false`일 때 위치·배터리 Null 규칙
+- `mission.elapsed_sec`는 Mission 시작 후의 단조 증가 벽시계 누적 초이며
+  `PAUSED` 중에도 증가한다. 서버 진행률은 이 값과 Mission 계획시간으로 계산하고
+  Route Geometry·GPS 유효 여부에는 의존하지 않는다.
 - Event TTL, Topic/Payload `mqtt_id`, Replay·Sequence·중복 처리
 - DB INSERT, Current State 갱신, Command 실행 여부와 오류 코드
 

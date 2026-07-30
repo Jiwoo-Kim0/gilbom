@@ -10,6 +10,7 @@ import {
   RefreshCw,
   RotateCcw,
   Route,
+  Timer,
 } from 'lucide-react'
 import {
   useCallback,
@@ -38,16 +39,15 @@ import type {
   MissionStatus,
   MissionStatusHistoryItem,
   PatrolArea,
-  PatrolRoute,
   RobotOption,
 } from './missionTypes'
+import './mission.css'
 
 const PAGE_SIZE = 20
 
 const emptyFilters: MissionFilters = {
   robotId: '',
   patrolAreaId: '',
-  patrolRouteId: '',
   status: '',
   startedFrom: '',
   startedTo: '',
@@ -141,17 +141,15 @@ export function MissionManagePage() {
   const [history, setHistory] = useState<MissionStatusHistoryItem[]>([])
   const [robots, setRobots] = useState<RobotOption[]>([])
   const [areas, setAreas] = useState<PatrolArea[]>([])
-  const [filterRoutes, setFilterRoutes] = useState<PatrolRoute[]>([])
-  const [createRoutes, setCreateRoutes] = useState<PatrolRoute[]>([])
   const [createRobotId, setCreateRobotId] = useState('')
   const [createAreaId, setCreateAreaId] = useState('')
-  const [createRouteId, setCreateRouteId] = useState('')
+  const [autonomousRouteId, setAutonomousRouteId] = useState('')
+  const [plannedDurationMinutes, setPlannedDurationMinutes] = useState('60')
   const [scheduledStartAt, setScheduledStartAt] = useState('')
   const [createExpanded, setCreateExpanded] = useState(false)
   const [listLoading, setListLoading] = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
   const [catalogLoading, setCatalogLoading] = useState(true)
-  const [filterRoutesLoading, setFilterRoutesLoading] = useState(false)
   const [createRoutesLoading, setCreateRoutesLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [listError, setListError] = useState<unknown>(null)
@@ -276,49 +274,9 @@ export function MissionManagePage() {
   }, [selectedMissionId])
 
   useEffect(() => {
-    const patrolAreaId = draftFilters.patrolAreaId
-    if (patrolAreaId.length === 0) {
-      const timer = window.setTimeout(() => {
-        setFilterRoutes([])
-        setFilterRoutesLoading(false)
-      }, 0)
-      return () => window.clearTimeout(timer)
-    }
-
-    let active = true
-    const loadingTimer = window.setTimeout(() => {
-      if (active) {
-        setFilterRoutesLoading(true)
-      }
-    }, 0)
-    void getPatrolRoutes(patrolAreaId)
-      .then((response) => {
-        if (active) {
-          setFilterRoutes(response.routes)
-        }
-      })
-      .catch((error: unknown) => {
-        if (active) {
-          setFilterRoutes([])
-          setListError(error)
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setFilterRoutesLoading(false)
-        }
-      })
-    return () => {
-      active = false
-      window.clearTimeout(loadingTimer)
-    }
-  }, [draftFilters.patrolAreaId])
-
-  useEffect(() => {
     if (createAreaId.length === 0) {
       const timer = window.setTimeout(() => {
-        setCreateRoutes([])
-        setCreateRouteId('')
+        setAutonomousRouteId('')
         setCreateRoutesLoading(false)
       }, 0)
       return () => window.clearTimeout(timer)
@@ -337,19 +295,21 @@ export function MissionManagePage() {
           return
         }
         const routes = response.routes.filter(
-          (route) => route.lifecycleStatus === 'ACTIVE',
+          (route) => (
+            route.lifecycleStatus === 'ACTIVE'
+            && route.routeCode === 'AUTONOMOUS_DEFAULT'
+          ),
         )
-        setCreateRoutes(routes)
-        setCreateRouteId((current) => (
-          routes.some((route) => route.patrolRouteId === current)
-            ? current
-            : ''
-        ))
+        setAutonomousRouteId(routes.at(0)?.patrolRouteId ?? '')
+        if (routes.length === 0) {
+          setFormError(new Error(
+            '선택한 구역의 내부 자율주행 경로 설정을 찾지 못했습니다.',
+          ))
+        }
       })
       .catch((error: unknown) => {
         if (active) {
-          setCreateRoutes([])
-          setCreateRouteId('')
+          setAutonomousRouteId('')
           setFormError(error)
         }
       })
@@ -396,7 +356,6 @@ export function MissionManagePage() {
     requestedListKeyRef.current = null
     setDraftFilters({ ...emptyFilters })
     setAppliedFilters({ ...emptyFilters })
-    setFilterRoutes([])
     setPage(0)
     setListError(null)
   }
@@ -425,9 +384,16 @@ export function MissionManagePage() {
     if (
       createRobotId.length === 0
       || createAreaId.length === 0
-      || createRouteId.length === 0
+      || autonomousRouteId.length === 0
     ) {
-      setFormError(new Error('Robot, 순찰 구역과 활성 경로를 모두 선택해주세요.'))
+      setFormError(new Error(
+        'Robot과 순찰 구역을 선택하고 내부 경로 설정을 확인해주세요.',
+      ))
+      return
+    }
+    const durationMinutes = Number(plannedDurationMinutes)
+    if (!Number.isInteger(durationMinutes) || durationMinutes <= 0) {
+      setFormError(new Error('계획 시간은 1분 이상의 정수여야 합니다.'))
       return
     }
     if (
@@ -445,7 +411,8 @@ export function MissionManagePage() {
       const created = await createMission({
         robotId: createRobotId,
         patrolAreaId: createAreaId,
-        patrolRouteId: createRouteId,
+        patrolRouteId: autonomousRouteId,
+        plannedDurationSec: durationMinutes * 60,
         scheduledStartAt: scheduledStartAt.length > 0
           ? new Date(scheduledStartAt).toISOString()
           : null,
@@ -453,7 +420,8 @@ export function MissionManagePage() {
       setNotice(`${created.missionCode} 임무를 생성했습니다.`)
       setCreateRobotId('')
       setCreateAreaId('')
-      setCreateRouteId('')
+      setAutonomousRouteId('')
+      setPlannedDurationMinutes('60')
       setScheduledStartAt('')
       setCreateExpanded(false)
       setDraftFilters({ ...emptyFilters })
@@ -530,7 +498,8 @@ export function MissionManagePage() {
             순찰 임무 생성
           </summary>
           <p className="mission-create-description">
-            활성 Robot·구역·경로를 선택합니다. 임무 코드는 서버에서 자동 생성됩니다.
+            활성 Robot과 순찰 구역, 계획 시간을 설정합니다. 경로는 로봇이
+            구역 안에서 자율 결정하며 임무 코드는 서버에서 자동 생성됩니다.
           </p>
           {catalogError ? (
             <div className="page-alert" role="alert">
@@ -569,7 +538,7 @@ export function MissionManagePage() {
                 value={createAreaId}
                 onChange={(event) => {
                   setCreateAreaId(event.target.value)
-                  setCreateRouteId('')
+                  setAutonomousRouteId('')
                 }}
                 disabled={catalogLoading || submitting}
                 required
@@ -584,32 +553,19 @@ export function MissionManagePage() {
                 ))}
               </select>
             </label>
-            <label className="admin-form-field" htmlFor="mission-create-route">
-              계획 경로
-              <select
-                id="mission-create-route"
-                value={createRouteId}
-                onChange={(event) => setCreateRouteId(event.target.value)}
-                disabled={
-                  createAreaId.length === 0
-                  || createRoutesLoading
-                  || submitting
-                }
+            <label className="admin-form-field" htmlFor="mission-create-duration">
+              계획 시간(분)
+              <input
+                id="mission-create-duration"
+                type="number"
+                min="1"
+                step="1"
+                value={plannedDurationMinutes}
+                onChange={(event) => setPlannedDurationMinutes(event.target.value)}
+                disabled={submitting}
                 required
-              >
-                <option value="">
-                  {createRoutesLoading
-                    ? '경로 불러오는 중…'
-                    : (createAreaId.length === 0
-                      ? '구역을 먼저 선택'
-                      : '활성 경로 선택')}
-                </option>
-                {createRoutes.map((route) => (
-                  <option key={route.patrolRouteId} value={route.patrolRouteId}>
-                    {route.routeName} v{route.routeVersion}
-                  </option>
-                ))}
-              </select>
+              />
+              <small>진행률과 예상 완료 시각 계산의 기준입니다.</small>
             </label>
             <label className="admin-form-field" htmlFor="mission-create-schedule">
               예약 시작 시각
@@ -625,7 +581,15 @@ export function MissionManagePage() {
             <button
               className="primary-button mission-create-submit"
               type="submit"
-              disabled={submitting || catalogLoading || createRoutesLoading}
+              disabled={
+                submitting
+                || catalogLoading
+                || createRoutesLoading
+                || (
+                  createAreaId.length > 0
+                  && autonomousRouteId.length === 0
+                )
+              }
             >
               <Plus size={17} aria-hidden="true" />
               {submitting ? '생성 중…' : '임무 생성'}
@@ -672,40 +636,12 @@ export function MissionManagePage() {
             onChange={(event) => setDraftFilters((current) => ({
               ...current,
               patrolAreaId: event.target.value,
-              patrolRouteId: '',
             }))}
           >
             <option value="">전체 구역</option>
             {areas.map((area) => (
               <option key={area.patrolAreaId} value={area.patrolAreaId}>
                 {area.areaName}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="admin-form-field" htmlFor="mission-filter-route">
-          계획 경로
-          <select
-            id="mission-filter-route"
-            value={draftFilters.patrolRouteId}
-            onChange={(event) => setDraftFilters((current) => ({
-              ...current,
-              patrolRouteId: event.target.value,
-            }))}
-            disabled={
-              draftFilters.patrolAreaId.length === 0 || filterRoutesLoading
-            }
-          >
-            <option value="">
-              {filterRoutesLoading
-                ? '경로 불러오는 중…'
-                : (draftFilters.patrolAreaId.length === 0
-                  ? '구역을 먼저 선택'
-                  : '전체 경로')}
-            </option>
-            {filterRoutes.map((route) => (
-              <option key={route.patrolRouteId} value={route.patrolRouteId}>
-                {route.routeName} v{route.routeVersion}
               </option>
             ))}
           </select>
@@ -804,7 +740,7 @@ export function MissionManagePage() {
                   <tr>
                     <th scope="col">임무</th>
                     <th scope="col">Robot</th>
-                    <th scope="col">구역·경로</th>
+                    <th scope="col">순찰 구역</th>
                     <th scope="col">상태</th>
                     <th scope="col">진행률</th>
                     <th scope="col"><span className="sr-only">상세</span></th>
@@ -832,17 +768,21 @@ export function MissionManagePage() {
                       </td>
                       <td>
                         <strong>{mission.patrolAreaName}</strong>
-                        <small>
-                          {mission.patrolRouteName} v{mission.patrolRouteVersion}
-                        </small>
+                        <small>계획 {formatDuration(mission.plannedDurationSec)}</small>
                       </td>
                       <td>
                         <MissionStatusBadge status={mission.status} />
                       </td>
                       <td>
-                        <strong>{mission.progressPercent.toFixed(1)}%</strong>
+                        <strong className="mission-progress-value">
+                          {mission.progressPercent.toFixed(1)}%
+                          {mission.progressStale ? (
+                            <span className="mission-stale-badge">갱신 지연</span>
+                          ) : null}
+                        </strong>
                         <small>
-                          ETA {formatDateTime(mission.estimatedCompletionAt)}
+                          {formatDuration(mission.elapsedSec)} /{' '}
+                          {formatDuration(mission.plannedDurationSec)}
                         </small>
                       </td>
                       <td>
@@ -938,6 +878,35 @@ export function MissionManagePage() {
                     selectedMission.estimatedCompletionAt,
                   )}
                 </small>
+                {selectedMission.progressStale ? (
+                  <p className="mission-stale-notice" role="status">
+                    최근 15초 동안 진행 텔레메트리가 없어 표시값이 지연되고 있습니다.
+                  </p>
+                ) : null}
+                <div className="mission-time-grid">
+                  <div>
+                    <span>계획</span>
+                    <strong>
+                      {formatDuration(selectedMission.plannedDurationSec)}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>경과</span>
+                    <strong>{formatDuration(selectedMission.elapsedSec)}</strong>
+                  </div>
+                  <div>
+                    <span>남은 시간</span>
+                    <strong>
+                      {formatDuration(selectedMission.remainingDurationSec)}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>기준 시각</span>
+                    <strong>
+                      {formatDateTime(selectedMission.progressObservedAt)}
+                    </strong>
+                  </div>
+                </div>
               </div>
 
               <dl className="mission-detail-grid">
@@ -950,13 +919,6 @@ export function MissionManagePage() {
                   <dd>{selectedMission.patrolAreaName}</dd>
                 </div>
                 <div>
-                  <dt>계획 경로</dt>
-                  <dd>
-                    {selectedMission.patrolRouteName}
-                    {' '}v{selectedMission.patrolRouteVersion}
-                  </dd>
-                </div>
-                <div>
                   <dt><CalendarClock size={14} aria-hidden="true" /> 예약 시각</dt>
                   <dd>{formatDateTime(selectedMission.scheduledStartAt)}</dd>
                 </div>
@@ -967,6 +929,10 @@ export function MissionManagePage() {
                 <div>
                   <dt>종료</dt>
                   <dd>{formatDateTime(selectedMission.endedAt)}</dd>
+                </div>
+                <div>
+                  <dt><Timer size={14} aria-hidden="true" /> 예상 완료</dt>
+                  <dd>{formatDateTime(selectedMission.estimatedCompletionAt)}</dd>
                 </div>
               </dl>
 

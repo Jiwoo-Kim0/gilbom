@@ -338,7 +338,7 @@ class RobotEventMissionDefectIntegrationTest {
     }
 
     @Test
-    void updatesRunningMissionProgressFromStoredTelemetryPosition() {
+    void updatesRunningMissionProgressFromElapsedTime() {
         missionIngestionService.ingest(
                 missionEvent(
                         UUID.fromString(
@@ -366,7 +366,67 @@ class RobotEventMissionDefectIntegrationTest {
                 """,
                 Double.class,
                 MISSION_ID);
-        assertThat(progress).isBetween(25.0, 30.0);
+        assertThat(progress).isEqualTo(25.0);
+    }
+
+    @Test
+    void advancesPausedMissionProgressAndCompletesOnlyByEvent() {
+        missionIngestionService.ingest(
+                missionEvent(
+                        UUID.fromString(
+                                "23000000-0000-4000-8000-000000000214"),
+                        1,
+                        MissionEventPayload.EventType.MISSION_STARTED,
+                        null),
+                "{\"event_type\":\"MISSION_STARTED\"}",
+                BASE_TIME.plusSeconds(2));
+        missionIngestionService.ingest(
+                missionEvent(
+                        UUID.fromString(
+                                "23000000-0000-4000-8000-000000000215"),
+                        2,
+                        MissionEventPayload.EventType.MISSION_PAUSED,
+                        null),
+                "{\"event_type\":\"MISSION_PAUSED\"}",
+                BASE_TIME.plusSeconds(3));
+
+        telemetryIngestionService.ingest(new TelemetryIngestionCommand(
+                telemetryPayload(
+                        UUID.fromString(
+                                "23000000-0000-4000-8000-000000000216"),
+                        "MIS-20260728-001",
+                        3),
+                "{}",
+                BASE_TIME.plusSeconds(4)));
+
+        assertThat(missionStatus()).isEqualTo("PAUSED");
+        assertThat(missionProgress()).isEqualTo(37.5);
+
+        missionIngestionService.ingest(
+                missionEvent(
+                        UUID.fromString(
+                                "23000000-0000-4000-8000-000000000217"),
+                        4,
+                        MissionEventPayload.EventType.MISSION_RESUMED,
+                        null),
+                "{\"event_type\":\"MISSION_RESUMED\"}",
+                BASE_TIME.plusSeconds(5));
+        missionIngestionService.ingest(
+                missionEvent(
+                        UUID.fromString(
+                                "23000000-0000-4000-8000-000000000218"),
+                        5,
+                        MissionEventPayload.EventType.MISSION_COMPLETED,
+                        new MissionEventPayload.Result(
+                                5,
+                                0,
+                                0,
+                                "PLANNED_DURATION_REACHED")),
+                "{\"event_type\":\"MISSION_COMPLETED\"}",
+                BASE_TIME.plusSeconds(6));
+
+        assertThat(missionStatus()).isEqualTo("COMPLETED");
+        assertThat(missionProgress()).isEqualTo(100.0);
     }
 
     @Test
@@ -825,6 +885,16 @@ class RobotEventMissionDefectIntegrationTest {
                 MISSION_ID);
     }
 
+    private static Double missionProgress() {
+        return jdbcTemplate.queryForObject("""
+                SELECT progress_percent::DOUBLE PRECISION
+                FROM robot.mission
+                WHERE mission_id = ?
+                """,
+                Double.class,
+                MISSION_ID);
+    }
+
     private static Instant missionStartedAt() {
         return jdbcTemplate.queryForObject("""
                 SELECT started_at
@@ -965,6 +1035,7 @@ class RobotEventMissionDefectIntegrationTest {
                     robot_id,
                     patrol_area_id,
                     patrol_route_id,
+                    planned_duration_sec,
                     status,
                     created_by,
                     updated_by,
@@ -976,6 +1047,7 @@ class RobotEventMissionDefectIntegrationTest {
                     ?,
                     ?,
                     ?,
+                    8,
                     'CREATED',
                     ?,
                     ?,

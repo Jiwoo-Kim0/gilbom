@@ -15,6 +15,7 @@ from referencing import Registry, Resource
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_ROOT = ROOT / "web" / "docs" / "mqtt-v2" / "schemas"
 ASYNCAPI_PATH = ROOT / "web" / "docs" / "asyncapi-mqtt-v2.yaml"
+HUMAN_CONTRACT_PATH = ROOT / "web" / "docs" / "final-mqtt-topic-schema-v2.md"
 FIXTURE_ROOT = ROOT / "test" / "fixtures" / "mqtt" / "v2"
 MANIFEST_PATH = FIXTURE_ROOT / "manifest.json"
 TOPIC_PATTERN = re.compile(r"^tbs/v2/robots/([^/]+)/(.+)$")
@@ -101,6 +102,7 @@ class MqttV2ContractTest(unittest.TestCase):
         cls.manifest = read_json(MANIFEST_PATH)
         with ASYNCAPI_PATH.open(encoding="utf-8") as handle:
             cls.asyncapi = yaml.safe_load(handle)
+        cls.human_contract = HUMAN_CONTRACT_PATH.read_text(encoding="utf-8")
 
     def test_every_json_schema_is_valid_draft_07(self) -> None:
         self.assertGreaterEqual(len(self.schemas), 11)
@@ -327,6 +329,28 @@ class MqttV2ContractTest(unittest.TestCase):
             with self.subTest(path=path.name):
                 for key in forbidden_keys:
                     self.assertNotIn(f'"{key}"', serialized)
+
+    def test_mission_elapsed_time_semantics_match_human_contract(self) -> None:
+        mission_schema = self.schemas["telemetry.schema.json"][
+            "properties"
+        ]["mission"]["anyOf"][0]
+        description = mission_schema["properties"]["elapsed_sec"][
+            "description"
+        ]
+
+        for phrase in ("벽시계", "PAUSED", "단조 증가"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, description)
+                self.assertIn(phrase, self.human_contract)
+
+        self.assertIn(
+            "elapsed_sec / planned_duration_sec",
+            self.human_contract,
+        )
+        self.assertNotIn(
+            "계획 경로와 유효 GPS 궤적을 이용해 별도로 계산",
+            self.human_contract,
+        )
 
     def _semantic_violation_or_scenario(
         self,

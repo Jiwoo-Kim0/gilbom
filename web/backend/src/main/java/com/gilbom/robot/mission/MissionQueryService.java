@@ -44,24 +44,39 @@ public class MissionQueryService {
                 route.route_code AS patrol_route_code,
                 route.route_name AS patrol_route_name,
                 route.route_version AS patrol_route_version,
+                m.planned_duration_sec,
+                latest_progress.mission_elapsed_sec AS elapsed_sec,
+                CASE
+                    WHEN m.status = 'COMPLETED' THEN 0
+                    WHEN latest_progress.mission_elapsed_sec IS NULL
+                        THEN m.planned_duration_sec
+                    ELSE GREATEST(
+                        m.planned_duration_sec
+                            - latest_progress.mission_elapsed_sec,
+                        0
+                    )
+                END AS remaining_duration_sec,
+                latest_progress.sampled_at AS progress_observed_at,
+                CASE
+                    WHEN m.status IN ('RUNNING', 'PAUSED')
+                    THEN latest_progress.sampled_at IS NULL
+                         OR latest_progress.sampled_at
+                            < CURRENT_TIMESTAMP - INTERVAL '15 seconds'
+                    ELSE FALSE
+                END AS progress_stale,
                 m.status,
                 m.scheduled_start_at,
                 m.started_at,
                 m.ended_at,
                 m.progress_percent,
                 CASE
-                    WHEN m.status = 'RUNNING'
-                     AND m.started_at IS NOT NULL
-                     AND m.progress_percent > 0
-                    THEN m.started_at
-                         + (
-                             EXTRACT(
-                                 EPOCH FROM (
-                                     m.updated_at - m.started_at
-                                 )
-                             )
-                             * 100
-                             / m.progress_percent
+                    WHEN m.status IN ('RUNNING', 'PAUSED')
+                     AND latest_progress.mission_elapsed_sec IS NOT NULL
+                    THEN latest_progress.sampled_at
+                         + GREATEST(
+                             m.planned_duration_sec
+                                 - latest_progress.mission_elapsed_sec,
+                             0
                          ) * INTERVAL '1 second'
                     ELSE NULL
                 END AS estimated_completion_at,
@@ -82,6 +97,19 @@ public class MissionQueryService {
             JOIN robot.patrol_route route
               ON route.patrol_route_id = m.patrol_route_id
              AND route.patrol_area_id = m.patrol_area_id
+            LEFT JOIN LATERAL (
+                SELECT
+                    telemetry.mission_elapsed_sec,
+                    telemetry.sampled_at
+                FROM telemetry.robot_telemetry telemetry
+                WHERE telemetry.mission_id = m.mission_id
+                  AND telemetry.mission_elapsed_sec IS NOT NULL
+                ORDER BY
+                    telemetry.mission_elapsed_sec DESC,
+                    telemetry.sampled_at DESC,
+                    telemetry.message_id DESC
+                LIMIT 1
+            ) latest_progress ON TRUE
             """;
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
@@ -325,6 +353,13 @@ public class MissionQueryService {
                 resultSet.getString("patrol_route_code"),
                 resultSet.getString("patrol_route_name"),
                 resultSet.getInt("patrol_route_version"),
+                resultSet.getInt("planned_duration_sec"),
+                resultSet.getObject("elapsed_sec", Integer.class),
+                resultSet.getObject(
+                        "remaining_duration_sec",
+                        Integer.class),
+                instant(resultSet, "progress_observed_at"),
+                resultSet.getBoolean("progress_stale"),
                 MissionStatus.valueOf(resultSet.getString("status")),
                 instant(resultSet, "scheduled_start_at"),
                 instant(resultSet, "started_at"),
