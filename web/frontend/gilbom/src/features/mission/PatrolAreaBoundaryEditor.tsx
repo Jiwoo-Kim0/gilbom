@@ -32,19 +32,29 @@ type PatrolAreaBoundaryEditorProps = {
   onRequestFallback: () => void
 }
 
+type ProjectedBoundaryPoint = {
+  x: number
+  y: number
+}
+
 function roundCoordinate(value: number): number {
   return Number(value.toFixed(7))
 }
 
-function pointMarkerIcon(
-  maps: typeof naver.maps,
-  pointNumber: number,
-): naver.maps.MarkerIcon {
-  return {
-    content: `<span style="display:grid;width:28px;height:28px;border:3px solid #fff;border-radius:50%;place-items:center;color:#fff;background:#175c4c;box-shadow:0 3px 10px rgba(15,23,42,.3);font-size:12px;font-weight:800">${pointNumber}</span>`,
-    size: new maps.Size(28, 28),
-    anchor: new maps.Point(14, 14),
-  }
+function projectBoundaryPoints(
+  map: naver.maps.Map,
+  points: GeoJsonCoordinate[],
+): ProjectedBoundaryPoint[] {
+  const projection = map.getProjection()
+  return points.map(([longitude, latitude]) => {
+    const offset = projection.fromCoordToOffset(
+      new naver.maps.LatLng(latitude, longitude),
+    )
+    return {
+      x: Number(offset.x.toFixed(2)),
+      y: Number(offset.y.toFixed(2)),
+    }
+  })
 }
 
 export function PatrolAreaBoundaryEditor({
@@ -61,10 +71,16 @@ export function PatrolAreaBoundaryEditor({
   const [status, setStatus] = useState<BoundaryEditorStatus>(
     NAVER_MAP_CLIENT_ID ? 'loading' : 'fallback',
   )
+  const [projectedPoints, setProjectedPoints] = useState<
+    ProjectedBoundaryPoint[]
+  >([])
   const orderedPoints = useMemo(
     () => orderBoundaryPointsForPolygon(points),
     [points],
   )
+  const projectedPointList = projectedPoints
+    .map(({ x, y }) => `${x},${y}`)
+    .join(' ')
 
   useEffect(() => {
     pointsRef.current = points
@@ -85,6 +101,8 @@ export function PatrolAreaBoundaryEditor({
 
     let cancelled = false
     let clickListener: naver.maps.MapEventListener | null = null
+    const viewportListeners: naver.maps.MapEventListener[] = []
+    let projectionFrame: number | null = null
 
     loadNaverMapsScript(NAVER_MAP_CLIENT_ID)
       .then(() => {
@@ -109,6 +127,18 @@ export function PatrolAreaBoundaryEditor({
           zoomControl: false,
         })
         mapRef.current = map
+        const scheduleProjection = () => {
+          if (projectionFrame !== null) {
+            return
+          }
+          projectionFrame = window.requestAnimationFrame(() => {
+            projectionFrame = null
+            setProjectedPoints(projectBoundaryPoints(
+              map,
+              orderBoundaryPointsForPolygon(pointsRef.current),
+            ))
+          })
+        }
         clickListener = maps.Event.addListener(map, 'click', (event) => {
           const currentPoints = pointsRef.current
           if (
@@ -129,6 +159,10 @@ export function PatrolAreaBoundaryEditor({
           }
           onChangeRef.current([...currentPoints, nextPoint])
         })
+        viewportListeners.push(
+          maps.Event.addListener(map, 'bounds_changed', scheduleProjection),
+          maps.Event.addListener(map, 'size_changed', scheduleProjection),
+        )
         setStatus('ready')
       })
       .catch(() => {
@@ -142,6 +176,14 @@ export function PatrolAreaBoundaryEditor({
       if (clickListener !== null && window.naver) {
         window.naver.maps.Event.removeListener(clickListener)
       }
+      if (window.naver) {
+        viewportListeners.forEach((listener) => {
+          window.naver?.maps.Event.removeListener(listener)
+        })
+      }
+      if (projectionFrame !== null) {
+        window.cancelAnimationFrame(projectionFrame)
+      }
       mapRef.current?.destroy()
       mapRef.current = null
     }
@@ -149,51 +191,10 @@ export function PatrolAreaBoundaryEditor({
 
   useEffect(() => {
     if (status !== 'ready' || mapRef.current === null || !window.naver) {
+      setProjectedPoints([])
       return
     }
-    const { maps } = window.naver
-    const map = mapRef.current
-    const path = orderedPoints.map(([longitude, latitude]) => (
-      new maps.LatLng(latitude, longitude)
-    ))
-    const polygon = path.length >= 3
-      ? new maps.Polygon({
-        map,
-        paths: path,
-        fillColor: '#2f806c',
-        fillOpacity: 0.1,
-        strokeColor: '#175c4c',
-        strokeOpacity: 0.95,
-        strokeWeight: 3,
-        clickable: false,
-        zIndex: 10,
-      })
-      : null
-    const polyline = path.length >= 2 && path.length < 3
-      ? new maps.Polyline({
-        map,
-        path,
-        strokeColor: '#175c4c',
-        strokeOpacity: 0.95,
-        strokeWeight: 3,
-        strokeStyle: 'solid',
-        clickable: false,
-        zIndex: 10,
-      })
-      : null
-    const markers = path.map((position, index) => new maps.Marker({
-      map,
-      position,
-      icon: pointMarkerIcon(maps, index + 1),
-      title: `순찰 구역 경계점 ${index + 1}`,
-      zIndex: 20,
-    }))
-
-    return () => {
-      polygon?.setMap(null)
-      polyline?.setMap(null)
-      markers.forEach((marker) => marker.setMap(null))
-    }
+    setProjectedPoints(projectBoundaryPoints(mapRef.current, orderedPoints))
   }, [orderedPoints, status])
 
   function removePoint(target: GeoJsonCoordinate) {
@@ -251,6 +252,42 @@ export function PatrolAreaBoundaryEditor({
             aria-label="순찰 구역 경계 편집 지도"
             data-testid="patrol-boundary-naver-map"
           />
+          {status === 'ready' && projectedPoints.length > 0 ? (
+            <svg
+              className="patrol-boundary-projected-overlay"
+              data-testid="patrol-boundary-projected-overlay"
+              aria-hidden="true"
+            >
+              {projectedPoints.length >= 3 ? (
+                <polygon
+                  className="patrol-boundary-projected-polygon"
+                  points={projectedPointList}
+                />
+              ) : projectedPoints.length === 2 ? (
+                <polyline
+                  className="patrol-boundary-projected-line"
+                  points={projectedPointList}
+                />
+              ) : null}
+              {projectedPoints.map(({ x, y }, index) => (
+                <g key={`${x}-${y}-${index}`}>
+                  <circle
+                    className="patrol-boundary-projected-marker"
+                    cx={x}
+                    cy={y}
+                    r="14"
+                  />
+                  <text
+                    className="patrol-boundary-projected-label"
+                    x={x}
+                    y={y}
+                  >
+                    {index + 1}
+                  </text>
+                </g>
+              ))}
+            </svg>
+          ) : null}
           {status === 'loading' ? (
             <div className="patrol-boundary-map-loading" role="status">
               <span className="loading-spinner" aria-hidden="true" />

@@ -125,6 +125,13 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
       }
     }
 
+    class FakePoint {
+      constructor(
+        readonly x: number,
+        readonly y: number,
+      ) {}
+    }
+
     class FakeMap {
       readonly element: HTMLElement
       clickIndex = 0
@@ -146,6 +153,17 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
 
       fitBounds() {
         previewState.fitBoundsCallCount += 1
+      }
+
+      getProjection() {
+        return {
+          fromCoordToOffset(position: FakeLatLng) {
+            return new FakePoint(
+              (position.lng() - 128.415) * 100_000,
+              (36.109 - position.lat()) * 100_000,
+            )
+          },
+        }
       }
       destroy() {}
     }
@@ -171,7 +189,7 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
 
     type ClickHandle = {
       element: HTMLElement
-      handler: () => void
+      handler: (() => void) | null
     }
 
     Object.defineProperty(window, 'EventSource', {
@@ -193,7 +211,7 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
           Polyline: FakeOverlay,
           Marker: FakeOverlay,
           Size: class FakeSize {},
-          Point: class FakePoint {},
+          Point: FakePoint,
           Position: { TOP_RIGHT: 1 },
           Event: {
             addListener(
@@ -202,7 +220,7 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
               listener: (event: { coord: FakeLatLng }) => void,
             ): ClickHandle {
               if (eventName !== 'click') {
-                throw new Error(`지원하지 않는 지도 이벤트: ${eventName}`)
+                return { element: map.element, handler: null }
               }
               const handler = () => {
                 const coordinate = coordinates[
@@ -217,7 +235,9 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
               return { element: map.element, handler }
             },
             removeListener(handle: ClickHandle) {
-              handle.element.removeEventListener('click', handle.handler)
+              if (handle.handler !== null) {
+                handle.element.removeEventListener('click', handle.handler)
+              }
             },
           },
         },
@@ -407,6 +427,18 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
     editor.getByText('교차 없이 자동 정렬된 Polygon입니다.'),
   ).toBeVisible()
   await expect(editor.getByText('4/100개 점')).toBeVisible()
+  const projectedOverlay = editor.getByTestId(
+    'patrol-boundary-projected-overlay',
+  )
+  await expect(projectedOverlay.locator('polygon')).toHaveAttribute(
+    'points',
+    '100,200 200,200 200,100 100,100',
+  )
+  await expect(projectedOverlay.locator('polygon')).toHaveCSS(
+    'fill-opacity',
+    '0.1',
+  )
+  await expect(projectedOverlay.locator('circle')).toHaveCount(4)
   await expect.poll(() => page.evaluate(() => {
     const state = (
       window as typeof window & {
