@@ -32,7 +32,7 @@ REPORT_API_INTEGRATION_TEST=backend/src/test/java/com/gilbom/report/integration/
 REPORT_CONTROLLER_TEST=backend/src/test/java/com/gilbom/report/ReportControllerTest.java
 LLM_IMAGE_CONTENT=backend/src/main/java/com/gilbom/llm/LlmImageContent.java
 GMS_LLM_CLIENT=backend/src/main/java/com/gilbom/llm/GmsLlmClient.java
-REPORT_IMAGE_READER=backend/src/main/java/com/gilbom/report/generation/DefectImageContentReader.java
+DEFECT_REPORT_IMAGE_SERVICE=backend/src/main/java/com/gilbom/defect/DefectReportImageService.java
 REPORT_LLM_REQUEST_FACTORY=backend/src/main/java/com/gilbom/report/generation/ReportLlmRequestFactory.java
 REPORT_LLM_INPUT=backend/src/main/java/com/gilbom/report/generation/ReportLlmInput.java
 REPORT_LLM_INPUT_PREPARER=backend/src/main/java/com/gilbom/report/generation/ReportLlmInputPreparer.java
@@ -203,7 +203,7 @@ assert_contains "$CONTRACT" '| `IN_REVIEW` | 반려 | `REJECTED` |' \
     "reject transition"
 assert_contains "$CONTRACT" '## 8. 권한과 UI 버튼 매트릭스' \
     "UI matrix"
-assert_contains "$CONTRACT" 'List<ImageContent>' \
+assert_contains "$CONTRACT" 'List<DefectReportImage>' \
     "LLM image list contract"
 assert_contains "$CONTRACT" 'Presigned URL, 일반 외부 URL' \
     "LLM URL prohibition"
@@ -360,9 +360,12 @@ assert_contains "$REPORT_CONTROLLER_TEST" \
 assert_contains "$REPORT_CONTROLLER_TEST" \
     "approvesAndRejectsOnlyWithApprovePermission" \
     "report decision controller permission test"
-assert_contains "$REPORT_IMAGE_READER" \
+assert_contains "$DEFECT_REPORT_IMAGE_SERVICE" \
     "MAX_IMAGES = 3" \
-    "image reader expansion cap"
+    "report image service expansion cap"
+assert_contains "$DEFECT_REPORT_IMAGE_SERVICE" \
+    "findReportImages" \
+    "user-scoped report image lookup"
 assert_contains "$REPORT_LLM_REQUEST_FACTORY" \
     "CURRENT_MAX_IMAGES = 1" \
     "current one-image behavior"

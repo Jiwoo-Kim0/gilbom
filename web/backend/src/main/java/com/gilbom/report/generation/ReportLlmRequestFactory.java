@@ -1,20 +1,19 @@
 package com.gilbom.report.generation;
 
-import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import org.springframework.stereotype.Component;
 
+import com.gilbom.defect.DefectReportImageService;
+import com.gilbom.defect.DefectReportImageService.DefectReportImage;
 import com.gilbom.llm.LlmClient;
 import com.gilbom.llm.LlmGenerationRequest;
 import com.gilbom.llm.LlmImageContent;
 import com.gilbom.llm.LlmProperties;
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
-import com.gilbom.report.generation.DefectImageContentReader.ImageContent;
-import com.gilbom.report.generation.DefectImageContentReader.ReportPeriod;
 import com.gilbom.report.generation.ReportLlmInputPreparer.PreparedReportLlmInput;
 
 /**
@@ -25,68 +24,44 @@ public class ReportLlmRequestFactory {
 
     private static final int CURRENT_MAX_IMAGES = 1;
 
-    private final Optional<DefectImageContentReader> imageReader;
+    private final Optional<DefectReportImageService> imageService;
     private final LlmProperties properties;
     private final LlmClient llmClient;
 
     public ReportLlmRequestFactory(
-            Optional<DefectImageContentReader> imageReader,
+            Optional<DefectReportImageService> imageService,
             LlmProperties properties,
             LlmClient llmClient
     ) {
-        this.imageReader = imageReader;
+        this.imageService = imageService;
         this.properties = properties;
         this.llmClient = llmClient;
     }
 
-    public LlmGenerationRequest create(
-            Map<String, Object> input,
-            Instant periodFrom,
-            Instant periodTo
-    ) {
-        if (!llmClient.isAvailable()
-                || !properties.isImageInputAllowed()
-                || imageReader.isEmpty()) {
-            return new LlmGenerationRequest(input);
-        }
-        List<ImageContent> selected =
-                imageReader.get().readTopDefectImages(
-                        new ReportPeriod(periodFrom, periodTo),
-                        CURRENT_MAX_IMAGES);
-        if (selected == null || selected.isEmpty()) {
-            return new LlmGenerationRequest(input);
-        }
-        List<LlmImageContent> images = selected.stream()
-                .limit(CURRENT_MAX_IMAGES)
-                .map(ReportLlmRequestFactory::toLlmImage)
-                .toList();
-        return new LlmGenerationRequest(input, images);
-    }
-
     /**
-     * 실제 외부 호출 경로는 타입 allowlist를 통과한 값과 결함 identity를 함께
-     * 검증한다. Reader가 다른 기간 또는 결함의 이미지를 반환하면 bytes를 보내지
-     * 않고 생성 파이프라인이 안전한 템플릿으로 낮출 수 있도록 실패시킨다.
+     * 타입 allowlist를 통과한 값과 사용자 접근 범위 안의 이미지 identity를 함께
+     * 검증한다. 서비스가 다른 결함의 이미지를 반환하면 bytes를 보내지 않는다.
      */
     public LlmGenerationRequest create(
+            UUID actorUserId,
             PreparedReportLlmInput prepared
     ) {
-        if (prepared == null) {
+        if (actorUserId == null || prepared == null) {
             throw invalid();
         }
         ReportLlmInput.Period period =
                 prepared.source().period();
         if (!llmClient.isAvailable()
                 || !properties.isImageInputAllowed()
-                || imageReader.isEmpty()) {
+                || imageService.isEmpty()) {
             return new LlmGenerationRequest(
                     prepared.promptInput());
         }
-        List<ImageContent> selected =
-                imageReader.get().readTopDefectImages(
-                        new ReportPeriod(
-                                period.from(),
-                                period.to()),
+        List<DefectReportImage> selected =
+                imageService.get().findReportImages(
+                        actorUserId,
+                        period.from(),
+                        period.to(),
                         CURRENT_MAX_IMAGES);
         if (selected == null || selected.isEmpty()) {
             return new LlmGenerationRequest(
@@ -109,7 +84,7 @@ public class ReportLlmRequestFactory {
     }
 
     private static boolean matchesEvidence(
-            ImageContent image,
+            DefectReportImage image,
             PreparedReportLlmInput prepared
     ) {
         if (image == null) {
@@ -119,16 +94,20 @@ public class ReportLlmRequestFactory {
                 prepared.evidenceById().get(image.defectId());
         return evidence != null
                 && evidence.incidentCode().equals(
-                        image.incidentCode());
+                        image.incidentCode())
+                && evidence.defectType().name().equals(
+                        image.defectType())
+                && evidence.riskLevel().name().equals(
+                        image.riskLevel());
     }
 
     private static LlmImageContent toLlmImage(
-            ImageContent image
+            DefectReportImage image
     ) {
         return new LlmImageContent(
                 image.defectId(),
                 image.incidentCode(),
-                image.bytes(),
+                image.content(),
                 image.contentType(),
                 image.width(),
                 image.height());
