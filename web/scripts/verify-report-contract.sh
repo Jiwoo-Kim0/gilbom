@@ -6,7 +6,10 @@ OPENAPI=docs/openapi-v1.yaml
 AUTHORIZATION=docs/authorization-matrix.md
 ERRORS=docs/common-api-response-and-errors.md
 CONTRACT=docs/report-status-contract.md
+COMPLETION_CHECK=docs/day6-report-completion-check.md
 LLM_SCHEMA=docs/report-llm-result.schema.json
+BACKEND_BUILD=backend/build.gradle
+REPORT_ACCEPTANCE_SCRIPT=scripts/report-acceptance-test.sh
 ERROR_CODE=backend/src/main/java/com/gilbom/common/error/ErrorCode.java
 ERROR_CODE_TEST=backend/src/test/java/com/gilbom/common/error/ErrorCodeTest.java
 AUDIT_ACTION=backend/src/main/java/com/gilbom/audit/AuditAction.java
@@ -30,6 +33,10 @@ REPORT_QUERY_REPOSITORY=backend/src/main/java/com/gilbom/report/ReportQueryRepos
 REPORT_INTEGRATION_TEST=backend/src/test/java/com/gilbom/report/integration/ReportDomainServiceIntegrationTest.java
 REPORT_API_INTEGRATION_TEST=backend/src/test/java/com/gilbom/report/integration/ReportApplicationServiceIntegrationTest.java
 REPORT_CONTROLLER_TEST=backend/src/test/java/com/gilbom/report/ReportControllerTest.java
+REPORT_SSE_CONTROLLER=backend/src/main/java/com/gilbom/report/realtime/ReportSseController.java
+REPORT_SSE_SERVICE=backend/src/main/java/com/gilbom/report/realtime/ReportSseService.java
+REPORT_REALTIME_EVENT=backend/src/main/java/com/gilbom/report/realtime/ReportRealtimeEvent.java
+REPORT_REALTIME_LISTENER=backend/src/main/java/com/gilbom/report/realtime/ReportRealtimeEventListener.java
 LLM_IMAGE_CONTENT=backend/src/main/java/com/gilbom/llm/LlmImageContent.java
 GMS_LLM_CLIENT=backend/src/main/java/com/gilbom/llm/GmsLlmClient.java
 DEFECT_REPORT_IMAGE_SERVICE=backend/src/main/java/com/gilbom/defect/DefectReportImageService.java
@@ -45,6 +52,7 @@ AUDIT_SNAPSHOT=backend/src/main/java/com/gilbom/audit/AuditSnapshot.java
 FRONTEND_PERMISSIONS=frontend/gilbom/src/features/auth/permissions.ts
 FRONTEND_ROUTER=frontend/gilbom/src/app/router.tsx
 FRONTEND_NAVIGATION=frontend/gilbom/src/features/navigationbar.tsx
+FRONTEND_REPORT_REALTIME=frontend/gilbom/src/features/report/useReportRealtime.ts
 
 assert_contains() {
     file=$1
@@ -142,6 +150,12 @@ assert_path_contains '/api/v1/reports/{reportId}/approve' \
 assert_path_contains '/api/v1/reports/{reportId}/reject' \
     "operationId: rejectReport" \
     "reject operation"
+assert_path_contains /api/v1/stream/reports \
+    "operationId: streamReportUpdates" \
+    "report SSE operation"
+assert_path_contains /api/v1/stream/reports \
+    "REPORT_VIEW" \
+    "report SSE permission"
 
 for schema in \
     ReportStatus \
@@ -212,6 +226,9 @@ assert_contains "$CONTRACT" '빈 목록이면 같은 요청을 텍스트만으�
 assert_contains "$AUTHORIZATION" \
     '| GET | `/api/v1/reports/{reportId}/versions/{versionNo}` | `REPORT_VIEW` |' \
     "version detail authorization"
+assert_contains "$AUTHORIZATION" \
+    '| GET | `/api/v1/stream/reports` | `REPORT_VIEW` |' \
+    "report SSE authorization"
 
 assert_contains "$ERROR_CODE_TEST" \
     "ErrorCode.LLM_RESPONSE_INVALID.httpStatus()" \
@@ -360,6 +377,24 @@ assert_contains "$REPORT_CONTROLLER_TEST" \
 assert_contains "$REPORT_CONTROLLER_TEST" \
     "approvesAndRejectsOnlyWithApprovePermission" \
     "report decision controller permission test"
+assert_contains "$REPORT_SSE_CONTROLLER" \
+    "hasAuthority('REPORT_VIEW')" \
+    "report SSE subscription permission"
+assert_contains "$REPORT_SSE_SERVICE" \
+    "HEARTBEAT_MILLIS = 15_000L" \
+    "report SSE fifteen-second heartbeat"
+assert_contains "$REPORT_SSE_SERVICE" \
+    "maximumConnectionsPerUser" \
+    "report SSE per-user connection cap"
+assert_contains "$REPORT_SSE_SERVICE" \
+    "accessService.canReceiveEvent" \
+    "report SSE publish-time scope check"
+assert_contains "$REPORT_REALTIME_EVENT" \
+    "currentVersionNo" \
+    "report SSE minimum version pointer"
+assert_contains "$REPORT_REALTIME_LISTENER" \
+    "TransactionPhase.AFTER_COMMIT" \
+    "report SSE after-commit publication"
 assert_contains "$DEFECT_REPORT_IMAGE_SERVICE" \
     "MAX_IMAGES = 3" \
     "report image service expansion cap"
@@ -435,5 +470,35 @@ assert_contains "$FRONTEND_ROUTER" \
 assert_contains "$FRONTEND_NAVIGATION" \
     "requiredPermission: REPORT_VIEW" \
     "report navigation permission"
+assert_contains "$FRONTEND_REPORT_REALTIME" \
+    "source.addEventListener('CONNECTED'" \
+    "report SSE reconnect snapshot trigger"
+assert_contains "$FRONTEND_REPORT_REALTIME" \
+    "source.addEventListener('report.updated'" \
+    "report SSE update snapshot trigger"
+
+for scenario in \
+    S01 S02 S03 S04 S05 \
+    S06 S07 S08 S09 S10 \
+    S11 S12 S13 S14 S15 \
+    S16 S17 S18 S19 S20
+do
+    assert_contains "$COMPLETION_CHECK" \
+        "| ${scenario} |" \
+        "${scenario} completion evidence"
+done
+
+assert_contains "$BACKEND_BUILD" \
+    "tasks.register('reportAcceptanceTest', Test)" \
+    "report acceptance Gradle gate"
+assert_contains "$BACKEND_BUILD" \
+    "result.skippedTestCount > 0" \
+    "report acceptance skip rejection"
+assert_contains "$REPORT_ACCEPTANCE_SCRIPT" \
+    "reportAcceptanceTest" \
+    "container-backed report acceptance execution"
+assert_contains "$REPORT_ACCEPTANCE_SCRIPT" \
+    "npm run build" \
+    "frontend production build gate"
 
 echo "Report API contract synchronization: PASS"

@@ -402,6 +402,24 @@ Authorization·API Key·password·session·cookie·CSRF·TOTP·AWS credential,
 
 감사 로그에는 report ID, 이전·이후 상태, 버전 번호, 결과와 안전한 사유만 저장한다. 보고서 본문 전체와 통계 snapshot을 감사 로그에 복제하지 않는다.
 
+### 10.1 보고서 SSE 전달 계약
+
+- endpoint는 `GET /api/v1/stream/reports`이며 선택 `reportId` query를 받는다.
+- 구독 시 현재 DB의 `REPORT_VIEW` 권한을 검사하고 `reportId`가 있으면 활성 보고서
+  객체 범위까지 검사한다.
+- `report.updated` payload는 `reportId`, `reportStatus`, `currentVersionNo`,
+  `deleted`, `occurredAt`만 포함한다. 제목·본문·통계·작성자·승인자는 포함하지 않는다.
+- 이벤트는 보고서·버전·감사 트랜잭션의 `AFTER_COMMIT`에서만 발행한다.
+- 발행 직전에 사용자별 현재 권한과 보고서 객체 범위를 다시 검사한다. 삭제 이벤트는
+  목록에서 제거할 수 있도록 soft-delete된 객체도 종전 접근 범위 사용자에게만 보낸다.
+- 15초 heartbeat comment마다 세션이 여전히 `AUTHENTICATED`이고 만료되지 않았는지
+  확인한다. 로그아웃·세션 폐기·DB 확인 실패 시 fail-closed로 emitter를 종료한다.
+- 기본 연결 상한은 사용자별 3개, 서버 전체 200개이며 초과 구독은
+  `429 COMMON_RATE_LIMIT_EXCEEDED`로 거부한다.
+- 이벤트 ID replay와 `Last-Event-ID` 복구는 제공하지 않는다. 최초 연결과 재연결의
+  `CONNECTED`, 그리고 `report.updated`를 받은 프론트는 반드시 REST 목록·상세·버전을
+  다시 조회한다. SSE payload만으로 버튼·상태·버전을 확정하지 않는다.
+
 ## 11. 구현 인수 조건
 
 - OpenAPI의 보고서 operation·DTO로 프론트 Mock 응답을 만들 수 있음
@@ -424,3 +442,6 @@ Authorization·API Key·password·session·cookie·CSRF·TOTP·AWS credential,
 - 여섯 전용 오류 코드의 HTTP 상태·응답 테스트
 - 상태 변경, 승인자·시각, 감사 로그의 트랜잭션 정합성 테스트
 - 상태별 역할·권한·UI 버튼 매트릭스 테스트
+- 보고서 SSE 최소 payload·구독 권한·발행 객체 범위·15초 heartbeat 테스트
+- 사용자별·전체 연결 제한과 세션 만료 emitter 종료 테스트
+- SSE 최초 연결·재연결·변경 수신 후 REST snapshot 재조회 테스트

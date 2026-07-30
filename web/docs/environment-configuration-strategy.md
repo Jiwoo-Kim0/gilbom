@@ -173,6 +173,8 @@ Rate Limit HMAC key는 인스턴스 간 동일하게 주입하고 회전할 때 
 | 환경변수 | Secret | 기본·규칙 |
 |---|:---:|---|
 | `GILBOM_REPORT_PDF_STORAGE_ROOT` |  | local Docker는 `/app/data/report-pdf` 영속 volume, IDE/test 기본은 OS 임시 경로 |
+| `GILBOM_REPORT_SSE_MAX_CONNECTIONS_PER_USER` |  | 기본 `3`, 사용자·다중 탭 연결 상한 |
+| `GILBOM_REPORT_SSE_MAX_CONNECTIONS_TOTAL` |  | 기본 `200`, 단일 Backend emitter 상한 |
 | `AWS_REGION` |  | 배포 region |
 | `GILBOM_S3_ENABLED` |  | local/test/docker 기본 `false` |
 | `GILBOM_S3_BUCKET` |  | 환경별 Private bucket |
@@ -185,6 +187,7 @@ staging/prod에서는 `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`를 애플리�
 승인 PDF 저장은 `ApprovedReportPdfStorage` 포트 뒤에 두므로 현재 local volume 구현을
 Private S3 adapter로 바꿔도 상태 전이·DB 결합 규칙은 바뀌지 않는다. DB에는 내부
 storage key와 SHA-256만 저장하며 presigned URL은 저장하지 않는다.
+보고서 SSE heartbeat는 계약상 15초로 고정하며 연결 상한만 환경별로 낮출 수 있다.
 
 ### 5.5 MQTT
 

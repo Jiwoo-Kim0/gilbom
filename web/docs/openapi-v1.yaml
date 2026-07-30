@@ -3071,6 +3071,45 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /api/v1/stream/reports:
+    get:
+      tags: [Reports]
+      operationId: streamReportUpdates
+      summary: 권한·객체 범위 내 보고서 변경 알림
+      description: |
+        CONNECTED와 report.updated 이벤트를 전송하고 15초마다 heartbeat comment를
+        보냅니다. report.updated에는 reportId, reportStatus, currentVersionNo,
+        deleted, occurredAt만 포함합니다.
+        SSE는 변경 알림이며 정본이 아닙니다. 최초 연결과 자동 재연결의 CONNECTED,
+        report.updated 수신 후 클라이언트는 보고서 REST 상세 또는 목록을 다시
+        조회해야 합니다. Last-Event-ID replay는 제공하지 않습니다.
+      x-required-permission: REPORT_VIEW
+      security:
+        - serverSession: []
+      parameters:
+        - name: reportId
+          in: query
+          required: false
+          description: 지정하면 현재 접근 가능한 해당 보고서 이벤트만 구독
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
 components:
   securitySchemes:
     serverSession:
