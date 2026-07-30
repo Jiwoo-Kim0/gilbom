@@ -224,7 +224,6 @@ def create_publish_failed_command(
     client: Any,
     robot_id: str,
     fixture: dict[str, str],
-    temporary_backend: str,
 ) -> str:
     try:
         print(
@@ -251,8 +250,6 @@ def create_publish_failed_command(
         return command_id
     finally:
         support.compose("start", "mosquitto", allow_failure=True)
-        support.command(["docker", "restart", temporary_backend])
-        support.wait_for_health(temporary_backend)
 
 
 def start_scenario_robot(
@@ -284,6 +281,8 @@ def start_scenario_robot(
             "EMERGENCY_STOP=REJECTED:E2E_SAFETY_REJECTED",
             "--command-delay-sec",
             "CANCEL_MISSION=31",
+            "--duplicate-results-for",
+            "PAUSE_MISSION",
         ],
         cwd=support.PROJECT_DIR,
         env=environment,
@@ -696,13 +695,27 @@ def main() -> int:
             client,
             robot_id,
             fixture,
-            temporary_backend,
         )
         wait_for_robot_online(
             db_container,
             database,
             robot_id,
             mock_process,
+        )
+        restart_count = support.command([
+            "docker",
+            "inspect",
+            "--format",
+            "{{.RestartCount}}",
+            temporary_backend,
+        ])
+        support.ensure(
+            restart_count == "0",
+            "backend_restarted_during_broker_recovery",
+        )
+        print(
+            "[command-abnormal-e2e] broker recovery completed through "
+            "MQTT automatic reconnect without restarting Backend"
         )
         observer = ResultObserver(
             mqtt_id,
@@ -790,7 +803,14 @@ def main() -> int:
                 f"DROP DATABASE IF EXISTS {database} WITH (FORCE);",
             )
         if main_backend_was_running:
-            support.compose("start", "backend", allow_failure=True)
+            support.compose(
+                "up",
+                "-d",
+                "--no-deps",
+                "--force-recreate",
+                "backend",
+                allow_failure=True,
+            )
             try:
                 support.wait_for_health(
                     support.compose("ps", "-q", "backend"),

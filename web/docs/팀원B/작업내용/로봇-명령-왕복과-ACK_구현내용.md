@@ -2,8 +2,8 @@
 
 > 담당: 팀원 B — Robot 제어
 > 작업일: 2026-07-28 ~ 2026-07-30
-> 연결 Jira: `S15P11D101-377`, `DAY6-B-02`, `DAY6-B-03`
-> 최종 상태: **Backend·Frontend·정상 Broker E2E DONE / 비정상·보안 E2E TODO**
+> 연결 Jira: `S15P11D101-377`, `S15P11D101-484`, `DAY6-B-02`, `DAY6-B-03`
+> 최종 상태: **Backend·Frontend·정상/비정상 Broker E2E DONE / 보안 E2E TODO**
 
 이 문서는 관리자 요청이 REST·DB·MQTT·Robot Result를 거쳐 다시 관리 화면으로
 돌아오는 **Command 왕복 흐름만** 묶는다. Patrol Area 생성, Mission 시간
@@ -18,7 +18,7 @@
 
 ## 0. 3분 요약
 
-Command Backend와 관리자 제어 화면, 정상 Broker 왕복은 구현·검증됐다.
+Command Backend와 관리자 제어 화면, 정상·비정상 Broker 왕복은 구현·검증됐다.
 
 ```text
 관리자 POST
@@ -39,9 +39,10 @@ REST, 중복 MQTT Result, Robot Scope와 감사 Rollback을 자동 테스트했�
 최근 Command 목록과 상세 Drawer가 있다. ACK와 최종 Result, 실패·거절·Timeout을
 구분하고 `COMMAND_STATUS_CHANGED`와 SSE 재연결 뒤 REST 정본을 다시 조회한다.
 
-정상 E2E는 실제 TLS Mosquitto와 Python Mock Robot을 연결해
-REST→DB→TLS Broker→Mock→Result→DB→SSE→React를 통과했다. 남은 범위는
-Publish 실패·거절·만료·중복·늦은 Result와 권한·Scope·CSRF·감사의 Browser E2E다.
+정상과 비정상 E2E는 실제 TLS Mosquitto와 Python Mock Robot을 연결해
+REST→DB→TLS Broker→Mock→Result→DB→SSE→React를 통과했다. Broker 발행 실패,
+업무 실패, 안전 거절, Timeout, REST/MQTT 중복과 늦은 Result까지 확인했으며
+남은 범위는 권한·Scope·CSRF·감사의 Browser E2E다.
 
 ---
 
@@ -148,6 +149,16 @@ tbs/v2/robots/{mqtt_id}/commands/result
 
 JSON 만료시각과 MQTT 5 Message Expiry는 같은 남은 TTL을 기준으로 계산한다.
 
+Broker 연결이 끊기면 Paho 자동 재연결과 Backend Watchdog가 연결 복구를 시도한다.
+재시도 최대 간격은 기본 5초이며 Spring Duration 형식으로 바꿀 수 있다.
+
+```dotenv
+MQTT_RECONNECT_MAX_DELAY=5s
+```
+
+예를 들어 `3s`, `5000ms`, `1m`처럼 지정한다. 간격은 1초부터 지수적으로
+증가하되 설정값을 넘지 않고, Watchdog도 같은 간격으로 단절 상태를 확인한다.
+
 ### 2.4 SSE
 
 Command 상태가 바뀌면 `COMMAND_STATUS_CHANGED`를 발행한다. Frontend는 Event의
@@ -233,6 +244,21 @@ python scripts/command-roundtrip-e2e.py
 - 최종 Mission `CANCELLED`, Robot mode `READY`, Mission 분리 상태를 검증한다.
 - 완료 뒤 임시 Backend·DB·Vite·Mock을 정리하고 정상 Compose Backend를 복구한다.
 
+비정상 Broker·Browser E2E:
+
+```powershell
+cd web
+python scripts/command-abnormal-e2e.py
+```
+
+- Broker를 실제 중지해 `PUBLISH_FAILED`와 발행 시도·오류 보존을 검증한다.
+- Backend를 재시작하지 않고 MQTT 연결이 자동 복구되는지 검증한다.
+- Mock Override로 `FAILED`, `REJECTED`와 `reasonCode`의 DB·화면 표시를 검증한다.
+- Result를 31초 지연해 `EXPIRED` 화면과 늦은 Result의 DB 무부작용을 확인한다.
+- 같은 REST Idempotency Key가 Command·Publish를 늘리지 않는지 확인한다.
+- 같은 MQTT `command_id`가 동작을 반복하지 않고 기존 `result_id`를 재발행하며
+  Backend가 중복 Result를 저장하지 않는지 확인한다.
+
 ---
 
 ## 5. 작업 중 겪은 함정
@@ -263,10 +289,8 @@ Backend의 중복 발행 방지만으로 충분하지 않다. QoS 1과 재연결
 
 ### 내 몫 — P0
 
-1. Publish 실패·`FAILED`·`REJECTED`·Timeout Browser E2E
-2. 만료 뒤 늦은 Result와 REST/MQTT 중복 Browser E2E
-3. 권한·Robot Scope·CSRF·감사 Browser E2E
-4. 실제 Jetson·EC2 Broker 왕복
+1. 권한·Robot Scope·CSRF·감사 Browser E2E
+2. 실제 Jetson·EC2 Broker 왕복
 
 ### 팀원 A
 

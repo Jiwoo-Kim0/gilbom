@@ -449,6 +449,7 @@ def main() -> int:
                 "up",
                 "-d",
                 "--no-deps",
+                "--force-recreate",
                 "backend",
                 allow_failure=True,
             )

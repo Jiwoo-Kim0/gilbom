@@ -7,6 +7,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 import org.springframework.validation.annotation.Validated;
 
+import java.time.Duration;
 import java.util.Arrays;
 
 
@@ -34,6 +35,7 @@ public class MqttProperties {
     @Max(2)
     private int qos;
     private boolean logPayload;
+    private Duration reconnectMaxDelay = Duration.ofSeconds(5);
 
     /*For mqtt 보안 전략*/
     // @ConfigurationProperties == mqtt.now-mqtt-security-strategy
@@ -117,6 +119,21 @@ public class MqttProperties {
 
     public void setLogPayload(boolean logPayload) {
         this.logPayload = logPayload;
+    }
+
+    public Duration getReconnectMaxDelay() {
+        return reconnectMaxDelay;
+    }
+
+    public void setReconnectMaxDelay(Duration reconnectMaxDelay) {
+        if (reconnectMaxDelay == null
+                || reconnectMaxDelay.compareTo(Duration.ofSeconds(1)) < 0
+                || reconnectMaxDelay.toMillis() > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException(
+                    "mqtt.reconnect-max-delay must be between 1 second "
+                            + "and " + Integer.MAX_VALUE + " milliseconds");
+        }
+        this.reconnectMaxDelay = reconnectMaxDelay;
     }
 
     public Security getSecurity() {

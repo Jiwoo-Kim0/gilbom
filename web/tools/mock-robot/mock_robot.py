@@ -144,6 +144,17 @@ def parse_args() -> argparse.Namespace:
             "Useful for expiry and late-Result E2E scenarios."
         ),
     )
+    parser.add_argument(
+        "--duplicate-results-for",
+        action="append",
+        default=[],
+        choices=COMMAND_TYPES,
+        metavar="TYPE",
+        help=(
+            "Publish the same ACCEPTED and final Result twice for one "
+            "command type to verify server-side deduplication."
+        ),
+    )
     args = parser.parse_args()
     if args.telemetry_interval <= 0:
         parser.error("--telemetry-interval must be greater than zero")
@@ -187,6 +198,7 @@ def parse_args() -> argparse.Namespace:
                 "or negative delay"
             )
         args.command_delays[command_type] = delay_seconds
+    args.duplicate_results_for = set(args.duplicate_results_for)
     return args
 
 
@@ -253,6 +265,7 @@ class MockRobot:
             args.command_outcomes
         )
         self.command_delays: dict[str, float] = args.command_delays
+        self.duplicate_results_for: set[str] = args.duplicate_results_for
 
         self.mode = "READY"
         self.state_reason = "NONE"
@@ -708,6 +721,17 @@ class MockRobot:
             qos=1,
             retain=False,
         )
+        duplicate_results = command_type in self.duplicate_results_for
+        if duplicate_results:
+            self.publish_json(
+                self.command_result_topic,
+                accepted,
+                qos=1,
+                retain=False,
+            )
+            print(
+                f"Duplicate ACCEPTED Result published commandId={command_id}"
+            )
 
         with self.state_lock:
             mission_id_before = self.mission_id
@@ -762,12 +786,22 @@ class MockRobot:
                 qos=1,
                 retain=True,
             )
-        self.publish_final_result(
+        final_result = self.publish_final_result(
             command_id,
             received_at,
             status,
             reason_code,
         )
+        if duplicate_results:
+            self.publish_json(
+                self.command_result_topic,
+                final_result,
+                qos=1,
+                retain=False,
+            )
+            print(
+                f"Duplicate final Result published commandId={command_id}"
+            )
 
     def apply_command(self, command: dict[str, Any]) -> tuple[str, str]:
         command_type = command.get("command_type")
@@ -836,7 +870,7 @@ class MockRobot:
         received_at: datetime,
         status: str,
         reason_code: str,
-    ) -> None:
+    ) -> dict[str, Any]:
         result = self.command_result(
             command_id,
             status,
@@ -854,6 +888,7 @@ class MockRobot:
             f"Command result published commandId={command_id} "
             f"status={status} reason={reason_code}"
         )
+        return result
 
     def handle_ingest_receipt(self, receipt: dict[str, Any]) -> None:
         if receipt.get("schema_version") != SCHEMA_VERSION:

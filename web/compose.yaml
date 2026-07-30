@@ -171,6 +171,7 @@ services:
       MQTT_SUBSCRIBE_TOPIC: ${MQTT_SUBSCRIBE_TOPIC:-tbs/v2/robots/+/presence,tbs/v2/robots/+/state,tbs/v2/robots/+/telemetry,tbs/v2/robots/+/events/#,tbs/v2/robots/+/commands/result}
       MQTT_PUBLISH_TOPIC: ${MQTT_PUBLISH_TOPIC:-tbs/v2/robots/robot-test/commands/request}
       MQTT_QOS: ${MQTT_QOS:-1}
+      MQTT_RECONNECT_MAX_DELAY: ${MQTT_RECONNECT_MAX_DELAY:-5s}
       MQTT_PUBLIC_BROKER_URI: ${MQTT_PUBLIC_BROKER_URI:-ssl://localhost:8883}
       MQTT_CREDENTIAL_PROVISIONING_ENABLED: ${MQTT_CREDENTIAL_PROVISIONING_ENABLED:-true}
       MQTT_CREDENTIAL_PASSWORD_FILE: ${MQTT_CREDENTIAL_PASSWORD_FILE:-/app/config/mqtt/credentials/passwd}

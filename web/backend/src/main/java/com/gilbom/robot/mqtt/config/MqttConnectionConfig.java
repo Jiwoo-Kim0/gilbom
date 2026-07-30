@@ -36,6 +36,8 @@ public class MqttConnectionConfig {
                         .getSocketFactory()//완성된 SSLContext에서 실제 소켓을 생성할 팩토리
         );
         options.setAutomaticReconnect(true);
+        options.setMaxReconnectDelay(Math.toIntExact(
+                properties.getReconnectMaxDelay().toMillis()));
         options.setCleanStart(true);  //연결할 때마다 이전 세션 상태를 버리고 완전히 새로 시작(LIVE)//FALSE로하면 안버리고 누적해서 받기 가능
         options.setConnectionTimeout(10);
         options.setKeepAliveInterval(30);

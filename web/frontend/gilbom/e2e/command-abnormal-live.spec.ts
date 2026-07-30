@@ -139,6 +139,7 @@ async function executeCommand(
         `[data-result-status="${execution.expectedStatus}"]`,
       ),
     ).toBeVisible()
+    await expect(detail.locator('[data-result-status]')).toHaveCount(2)
   }
 
   await detail.getByRole('button', {
@@ -147,7 +148,7 @@ async function executeCommand(
   return command.commandId
 }
 
-test('실패·거절·발행 실패·Timeout과 늦은 Result를 구분한다', async ({
+test('실패·거절·만료·중복·늦은 Result를 구분한다', async ({
   context,
   page,
 }, testInfo) => {
