@@ -211,6 +211,7 @@ Validation 오류 하나는 다음 필드를 사용한다.
 | 존재하지 않는 도메인 리소스 | 404 | `{DOMAIN}_NOT_FOUND` |
 | 매핑되지 않은 경로·정적 리소스 | 404 | `COMMON_RESOURCE_NOT_FOUND` |
 | `HttpRequestMethodNotSupportedException` | 405 | `COMMON_METHOD_NOT_ALLOWED` |
+| 동일 멱등 요청이 아직 처리 중 | 409 | `COMMON_CONFLICT` |
 | 같은 멱등 key의 다른 요청 재사용 | 409 | `IDEMPOTENCY_KEY_REUSED` |
 | 중복 생성·상태 충돌 | 409 | `{DOMAIN}_CONFLICT` |
 | 전역 요청 본문 상한 초과 | 413 | `COMMON_PAYLOAD_TOO_LARGE` |
@@ -228,6 +229,7 @@ Validation 오류 하나는 다음 필드를 사용한다.
 
 - 제목 누락 → `400 COMMON_VALIDATION_FAILED`
 - 보고서 필수 통계 누락 → `422 REPORT_VALIDATION_FAILED`
+- 동일 보고서 생성 요청이 처리 중 → `409 COMMON_CONFLICT`, 같은 key로 재시도
 - 보고서 생성 key를 다른 body에 재사용 → `409 IDEMPOTENCY_KEY_REUSED`
 - LLM 응답의 결함 ID가 Prompt allowlist 밖임 → `502 LLM_RESPONSE_INVALID`
 - 존재하지 않는 로봇 → `404 ROBOT_NOT_FOUND`

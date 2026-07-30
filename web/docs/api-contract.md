@@ -128,11 +128,18 @@ API 계약은 다음 자료의 조합으로 구성한다.
 ### 7.1 `Idempotency-Key`
 
 - `POST /api/v1/robots/{robotId}/commands`와 `POST /api/v1/reports`에 필수다.
-- 범위는 `인증 주체 + HTTP method + 정규화 path + key`다.
+- key의 유일성 범위는 인증 주체 전체다. 최초 사용 시 HTTP method와 정규화 path에
+  결합되며 다른 endpoint에 같은 key를 재사용할 수 없다.
+- 서버는 DTO로 정규화한 body의 JSON object key를 재귀 정렬하고 배열 순서는 보존하여
+  SHA-256을 계산한다.
 - 서버는 key, 요청 body hash, 최종 HTTP 상태와 안전한 응답을 24시간 보존한다.
+- 만료 행은 인덱스를 사용한 bounded batch로 주기적으로 삭제하며 처리 중 잠긴 행은 건너뛴다.
 - 같은 key와 같은 body 재시도는 최초 결과를 반환한다.
+- 같은 요청이 처리 중이면 중복 실행하지 않고 `409 COMMON_CONFLICT`로 동일 key 재시도를 안내한다.
 - 같은 key를 다른 body에 사용하면 `409 IDEMPOTENCY_KEY_REUSED`다.
 - 실패 전 네트워크가 끊겨도 동일 key 재시도로 중복 명령·보고서를 만들지 않는다.
+- 서버 트랜잭션이 실패하면 claim도 rollback하므로 같은 생성 작업은 기존 key로 재시도한다.
+  사용자가 입력을 변경한 새 작업은 새 key를 발급한다.
 
 ### 7.2 자연 멱등 키·버전
 
@@ -140,6 +147,8 @@ API 계약은 다음 자료의 조합으로 구성한다.
 - MQTT 사건은 `event_id` 또는 `message_id`, 명령은 `command_id`를 사용한다.
 - 보고서 수정·삭제·검토·승인·반려는 `expectedVersionNo`로 낙관적 잠금을 수행한다.
 - 상태 전이와 멱등 결과를 같은 DB 트랜잭션에 저장한다.
+- `REPORT_STATE_CONFLICT` 응답에는 최신 본문·통계·버전 값을 포함하지 않는다. 클라이언트는
+  보고서 상세 API를 다시 조회한다.
 
 ## 8. 파일·이미지
 

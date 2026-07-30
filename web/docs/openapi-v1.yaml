@@ -1265,6 +1265,27 @@ paths:
             uniqueItems: true
             items:
               $ref: "#/components/schemas/ReportStatus"
+        - name: createdBy
+          in: query
+          required: false
+          description: 보고서 최초 작성자 UUID
+          schema:
+            type: string
+            format: uuid
+        - name: periodFrom
+          in: query
+          required: false
+          description: 이 시각 이후까지 이어지는 보고서 기간과 겹치는 결과
+          schema:
+            type: string
+            format: date-time
+        - name: periodTo
+          in: query
+          required: false
+          description: 이 시각 이전부터 시작한 보고서 기간과 겹치는 결과
+          schema:
+            type: string
+            format: date-time
         - name: reportType
           in: query
           required: false
@@ -1299,18 +1320,19 @@ paths:
     post:
       tags: [Reports]
       operationId: createReport
-      summary: 수동·템플릿·LLM DRAFT 보고서와 첫 버전 생성
+      summary: 수동·템플릿 DRAFT 보고서와 첫 버전 생성
       description: |
-        MANUAL·TEMPLATE 요청은 완성된 snapshot을 저장하고, LLM 요청은 서버가
-        통계와 허용된 결함 데이터만 provider에 전달해 엄격한 JSON Schema로 검증합니다.
+        이 operation은 LLM 호출 없이 MANUAL·TEMPLATE의 완성된 snapshot을 저장합니다.
+        LLM 생성은 LlmReportCreateRequest와 LlmReportResult 계약을 재사용해 후속 단계에서
+        같은 endpoint에 추가합니다.
         같은 사용자·같은 Idempotency-Key·같은 body는 최초 201 응답을 재사용합니다.
+        동일 요청이 처리 중이면 중복 생성하지 않고 409를 반환하므로 같은 key로 재시도합니다.
       x-required-permission: REPORT_CREATE
       x-error-codes:
         - REPORT_ACCESS_DENIED
         - REPORT_VALIDATION_FAILED
+        - COMMON_CONFLICT
         - IDEMPOTENCY_KEY_REUSED
-        - LLM_UNAVAILABLE
-        - LLM_RESPONSE_INVALID
       security:
         - serverSession: []
       parameters:
@@ -1321,7 +1343,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ReportCreateRequest"
+              $ref: "#/components/schemas/ManualReportCreateRequest"
       responses:
         "201":
           description: 보고서 생성
@@ -1339,10 +1361,6 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
-        "502":
-          $ref: "#/components/responses/BadGateway"
-        "503":
-          $ref: "#/components/responses/ServiceUnavailable"
 
   /api/v1/reports/{reportId}:
     get:
@@ -3103,7 +3121,10 @@ components:
       name: Idempotency-Key
       in: header
       required: true
-      description: 동일 생성 요청의 중복 처리를 막는 클라이언트 생성 UUID
+      description: |
+        동일 생성 요청의 중복 처리를 막는 클라이언트 생성 UUID입니다.
+        동일 작업의 네트워크·서버 실패 재시도에는 같은 값을 사용하고,
+        사용자가 body를 변경한 새 작업에는 새 UUID를 사용합니다.
       schema:
         type: string
         format: uuid
@@ -3130,6 +3151,8 @@ components:
       description: |
         클라이언트가 마지막으로 조회한 currentVersionNo입니다.
         서버 값과 다르면 409 REPORT_STATE_CONFLICT를 반환합니다.
+        충돌 응답에는 보고서 본문이나 최신 version 값을 포함하지 않으므로
+        GET /api/v1/reports/{reportId}를 다시 조회해야 합니다.
       schema:
         type: integer
         minimum: 1
@@ -5612,7 +5635,8 @@ components:
 
     ReportFilterCriteria:
       type: object
-      additionalProperties: false
+      description: 생성 시점 검색 조건 JSON object snapshot
+      additionalProperties: true
       properties:
         patrolAreaId:
           type: string
@@ -5651,6 +5675,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/StatisticsByDefectTypeItem"
+
+    ReportStatisticsObject:
+      type: object
+      description: 수동·템플릿 버전에 그대로 보존되는 통계 JSON object snapshot
+      additionalProperties: true
 
     ReportCreateRequest:
       oneOf:
@@ -5699,7 +5728,7 @@ components:
           minLength: 1
           maxLength: 100000
         statistics:
-          $ref: "#/components/schemas/ReportStatisticsSnapshot"
+          $ref: "#/components/schemas/ReportStatisticsObject"
         filterCriteria:
           $ref: "#/components/schemas/ReportFilterCriteria"
 
@@ -5761,7 +5790,7 @@ components:
           minLength: 1
           maxLength: 100000
         statistics:
-          $ref: "#/components/schemas/ReportStatisticsSnapshot"
+          $ref: "#/components/schemas/ReportStatisticsObject"
         changeNote:
           type: string
           nullable: true
@@ -5815,8 +5844,16 @@ components:
         - periodTo
         - currentVersionNo
         - creatorType
+        - createdBy
+        - createdByDisplayName
+        - updatedBy
+        - updatedByDisplayName
+        - approvedBy
+        - approvedByDisplayName
+        - approvedAt
         - createdAt
         - updatedAt
+      additionalProperties: false
       properties:
         reportId:
           type: string
@@ -5853,9 +5890,22 @@ components:
           type: string
           format: uuid
           nullable: true
+        createdByDisplayName:
+          type: string
+          nullable: true
+        updatedBy:
+          type: string
+          format: uuid
+          nullable: true
+        updatedByDisplayName:
+          type: string
+          nullable: true
         approvedBy:
           type: string
           format: uuid
+          nullable: true
+        approvedByDisplayName:
+          type: string
           nullable: true
         approvedAt:
           type: string
@@ -5900,8 +5950,15 @@ components:
         - title
         - periodFrom
         - periodTo
+        - generationMethod
+        - llmModel
+        - promptVersion
+        - changeNote
         - creatorType
+        - createdBy
+        - createdByDisplayName
         - createdAt
+      additionalProperties: false
       properties:
         reportId:
           type: string
@@ -5920,6 +5977,8 @@ components:
         periodTo:
           type: string
           format: date-time
+        generationMethod:
+          $ref: "#/components/schemas/ReportGenerationMethod"
         llmModel:
           type: string
           maxLength: 100
@@ -5938,6 +5997,9 @@ components:
           type: string
           format: uuid
           nullable: true
+        createdByDisplayName:
+          type: string
+          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -5946,12 +6008,14 @@ components:
       allOf:
         - $ref: "#/components/schemas/ReportVersionSummaryResponse"
         - type: object
-          required: [content, statistics]
+          required: [content, statistics, evidenceSnapshot]
           properties:
             content:
               type: string
             statistics:
-              $ref: "#/components/schemas/ReportStatisticsSnapshot"
+              $ref: "#/components/schemas/ReportStatisticsObject"
+            evidenceSnapshot:
+              $ref: "#/components/schemas/ReportEvidenceSnapshot"
 
     ReportVersionListResponse:
       type: object
@@ -5977,16 +6041,68 @@ components:
           type: integer
           minimum: 0
 
+    ReportEvidenceSnapshot:
+      type: object
+      required: [defectIds, missionIds, patrolAreaIds]
+      additionalProperties: false
+      properties:
+        defectIds:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+        missionIds:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+        patrolAreaIds:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+
+    ApprovedPdfInfoResponse:
+      type: object
+      required: [versionNo, sha256, createdAt]
+      additionalProperties: false
+      properties:
+        versionNo:
+          type: integer
+          minimum: 1
+        sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: 승인 PDF 파일 바이트의 SHA-256 hex
+        createdAt:
+          type: string
+          format: date-time
+
     ReportDetailResponse:
       allOf:
         - $ref: "#/components/schemas/ReportListItemResponse"
         - type: object
-          required: [filterCriteria, currentVersion]
+          required:
+            - filterCriteria
+            - currentVersion
+            - lastRejectionReason
+            - approvedPdf
           properties:
             filterCriteria:
               $ref: "#/components/schemas/ReportFilterCriteria"
             currentVersion:
               $ref: "#/components/schemas/ReportVersionResponse"
+            lastRejectionReason:
+              type: string
+              maxLength: 500
+              nullable: true
+            approvedPdf:
+              allOf:
+                - $ref: "#/components/schemas/ApprovedPdfInfoResponse"
+              nullable: true
 
     LlmReportPeriod:
       type: object
