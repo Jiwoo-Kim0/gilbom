@@ -34,6 +34,7 @@ import { RobotManagePage } from '../features/robot/RobotManagePage'
 import { RobotDetailPage } from '../features/robot/RobotDetailPage'
 import { RoleManagePage } from '../features/platform/RoleManagePage'
 import { MissionManagePage } from '../features/mission/MissionManagePage'
+import { PatrolAreaManagePage } from '../features/mission/PatrolAreaManagePage'
 import { ReportDetailPage } from '../features/report/ReportDetailPage'
 import { ReportEditorPage } from '../features/report/ReportEditorPage'
 
@@ -110,6 +111,14 @@ export const router = createBrowserRouter([
         element: (
           <RequirePermission permission={ROBOT_STATUS_VIEW}>
             <RobotDetailPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: 'patrol-areas',
+        element: (
+          <RequirePermission permission={MISSION_VIEW}>
+            <PatrolAreaManagePage />
           </RequirePermission>
         ),
       },

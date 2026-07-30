@@ -7,9 +7,11 @@ export type MissionStatus =
   | 'CANCELLED'
   | 'FAILED'
 
+export type GeoJsonCoordinate = [longitude: number, latitude: number]
+
 export type GeoJsonPolygon = {
   type: 'Polygon'
-  coordinates: number[][][]
+  coordinates: GeoJsonCoordinate[][]
 }
 
 export type GeoJsonMultiPolygon = {
@@ -135,6 +137,13 @@ export type PatrolArea = {
   lifecycleStatus: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED'
   createdAt: string
   updatedAt: string
+}
+
+export type PatrolAreaCreateInput = {
+  areaCode: string
+  areaName: string
+  boundary: PatrolAreaBoundary
+  lifecycleStatus: 'ACTIVE' | 'INACTIVE'
 }
 
 export type PatrolAreaListResponse = {

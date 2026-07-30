@@ -6,6 +6,7 @@ import {
   ClipboardList,
   Filter,
   History,
+  MapPinned,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -20,6 +21,7 @@ import {
   useState,
   type FormEvent,
 } from 'react'
+import { NavLink } from 'react-router'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { useAuthentication } from '../auth/authenticationContext'
 import { MISSION_MANAGE } from '../auth/permissions'
@@ -494,6 +496,13 @@ export function MissionManagePage() {
             <RefreshCw size={17} aria-hidden="true" />
             새로고침
           </button>
+          <NavLink
+            className="secondary-button button-with-icon"
+            to="/patrol-areas"
+          >
+            <MapPinned size={17} aria-hidden="true" />
+            구역 관리
+          </NavLink>
           {canManage ? (
             <button
               className="primary-button button-with-icon"
@@ -590,6 +599,11 @@ export function MissionManagePage() {
                   </option>
                 ))}
               </select>
+              <small>
+                등록된 ACTIVE 구역만 표시됩니다. 새 구역은{' '}
+                <NavLink to="/patrol-areas">순찰 구역 관리</NavLink>에서
+                등록하세요.
+              </small>
             </label>
             <label className="admin-form-field" htmlFor="mission-create-duration">
               계획 시간(분)

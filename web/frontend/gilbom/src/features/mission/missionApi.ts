@@ -9,6 +9,8 @@ import type {
   MissionListResponse,
   MissionMapResponse,
   MissionStatusHistoryResponse,
+  PatrolArea,
+  PatrolAreaCreateInput,
   PatrolAreaListResponse,
   PatrolRouteListResponse,
   RobotListResponse,
@@ -84,6 +86,15 @@ export function getMissionRobotOptions(): Promise<RobotListResponse> {
 
 export function getPatrolAreas(): Promise<PatrolAreaListResponse> {
   return apiJson('/api/v1/patrol-areas')
+}
+
+export function createPatrolArea(
+  input: PatrolAreaCreateInput,
+): Promise<PatrolArea> {
+  return apiJson('/api/v1/patrol-areas', {
+    method: 'POST',
+    body: jsonBody(input),
+  })
 }
 
 export function getPatrolRoutes(

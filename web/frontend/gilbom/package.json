@@ -14,7 +14,7 @@
     "lint": "eslint .",
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "preview": "vite preview",
-    "test:e2e:mission": "playwright test e2e/mission-time.spec.ts e2e/mission-map.spec.ts",
+    "test:e2e:mission": "playwright test e2e/mission-time.spec.ts e2e/mission-map.spec.ts e2e/patrol-area-registration.spec.ts",
     "test:e2e:mission:live": "playwright test e2e/mission-time-live.spec.ts --config=playwright.live.config.ts"
   },
   "dependencies": {

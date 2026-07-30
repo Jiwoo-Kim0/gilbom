@@ -54,6 +54,24 @@ declare namespace naver.maps {
     destroy(): void
   }
 
+  interface MapPointerEvent {
+    coord: LatLng
+  }
+
+  interface MapEventListener {
+    eventName?: string
+  }
+
+  namespace Event {
+    function addListener(
+      target: Map,
+      eventName: 'click',
+      listener: (event: MapPointerEvent) => void,
+    ): MapEventListener
+
+    function removeListener(listener: MapEventListener): void
+  }
+
   interface PolygonOptions {
     map?: Map
     paths: LatLng[] | LatLng[][]
