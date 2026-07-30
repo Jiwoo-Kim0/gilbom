@@ -7,6 +7,19 @@
 
 ---
 
+> **D1 진행 기록 (7/30)** — 이미지 API 백엔드 구현 완료. 아래 §0 진단 중 일부가 이미 해소됐다.
+>
+> - 완료: `V31` API Key 스키마, `com.gilbom.storage` 패키지(업로드·조회·서명 URL·LLM용 바이트 조회),
+>   `UnavailableDefectImageUrlIssuer` 삭제, `scripts/issue-robot-image-api-key.py`
+> - **위험도 산정은 이미 끝나 있었다.** `V28__harden_incident_ingestion` + `DefectRiskAssessment`
+>   (커밋 `77085f7`)로 구현돼 있으므로 §3의 P1에서 제외한다.
+> - **마이그레이션 번호가 밀렸다.** V28~V30을 다른 작업이 이미 사용해 이 작업은 **V31**을 쓴다.
+>   문서 곳곳의 "V28"은 V31로 읽는다.
+> - **팀원 A가 보고서를 빠르게 진행 중이다.** 커밋 `d7507e5`(계약·오류코드·openapi),
+>   `46d2660`(보고서 기본 API·프론트 UI). §6의 보고서 이관 검토는 사실상 불필요해졌다.
+> - `ErrorCode`에 `IMAGE_NOT_FOUND` / `IMAGE_TOO_LARGE` / `IMAGE_UNSUPPORTED_MEDIA_TYPE` /
+>   `S3_UNAVAILABLE`이 이미 있어 **A 소유 파일을 하나도 고치지 않았다.**
+
 ## 0. 현재 상태 진단 (2026-07-30 실측)
 
 ### 0.1 이미 끝난 것
@@ -302,10 +315,9 @@ LLM 호출은 서버 안에서 일어난다(A 스펙의 `GILBOM_LLM_API_KEY`, ou
   - `defect.created` → 지도 마커 추가 + 토스트, `defect.updated` → 해당 행 갱신
   - 재연결 지수 백오프, 탭 비활성 시 정지
   - 백엔드와 검증 스크립트는 이미 있으므로 프론트만 작업
-- **위험도 산정 (P1)**
-  - `risk_score` 규칙 서비스 + `risk_rule_version` 기록
-  - 유형 가중치 × `damage_ratio` × 신뢰도 × 관측 횟수 → LOW / MEDIUM / HIGH / CRITICAL
-  - 지금은 전부 `MEDIUM`이라 심각도 필터와 요약 카드(`criticalDefects`/`highDefects`)가 무의미하다
+- ~~위험도 산정 (P1)~~ — **이미 완료.** `DefectRiskAssessment`(`DAMAGE_RATIO_V1`)가
+  `damage_ratio`를 LOW/MEDIUM/HIGH/CRITICAL로 매핑하고 `risk_rule_version`까지 기록한다.
+  프론트에서 심각도 필터·요약 카드가 의미를 갖는지만 확인하면 된다
 - **수동 병합 UI**
   - 목록 다중 선택 → 대표 지정 → 병합(사유 필수) → 관측 합산 확인
 - S3 전환이 아직이면 여기서 마무리 (§6.3)
