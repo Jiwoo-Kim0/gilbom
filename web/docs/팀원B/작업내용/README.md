@@ -9,8 +9,10 @@
 | --- | --- | --- | --- |
 | [MQTT-v2-계약과-통신보안_구현내용.md](MQTT-v2-계약과-통신보안_구현내용.md) | 2026-07-27 ~ 07-30 | MQTT v2 정본, AsyncAPI·Schema·Fixture, TLS·ACL, TTL·Replay, Credential 수명주기 | 완료(로컬), 실기 검증 대기 |
 | [로봇-상태수집과-실시간-관제_구현내용.md](로봇-상태수집과-실시간-관제_구현내용.md) | 2026-07-27 ~ 07-30 | Telemetry·Presence·State 저장, ONLINE/OFFLINE, Robot REST·SSE·React 관제 | 완료(로컬), 운영 지도 확인 대기 |
-| [로봇-명령-왕복과-ACK_구현내용.md](로봇-명령-왕복과-ACK_구현내용.md) | 2026-07-28 ~ 07-30 | Command REST·DB·MQTT 발행, ACK·Result·Timeout·멱등성 | Backend 완료, Frontend·전체 E2E 미완 |
-| [순찰구역과-시간기반-Mission_구현내용.md](순찰구역과-시간기반-Mission_구현내용.md) | 2026-07-28 ~ 07-30 | Patrol Area·Route, 시간 기반 Mission, 진행률·ETA, 지도·Browser E2E | 기능 완료, 전체 Mock E2E 미완 |
+| [로봇-Telemetry-기간통계와-시계열_구현내용.md](로봇-Telemetry-기간통계와-시계열_구현내용.md) | 2026-07-30 | Robot별 기간 요약·시계열 API, SSE 재조회, Recharts | 완료(로컬), 운영 성능 측정 대기 |
+| [로봇-등록과-MQTT-Credential-관리_구현내용.md](로봇-등록과-MQTT-Credential-관리_구현내용.md) | 2026-07-29 ~ 07-30 | Robot 등록, 최초 Credential 발급·회전, Registry 복구, Jetson 전달 | 완료(로컬), 실장비 주입 대기 |
+| [로봇-명령-왕복과-ACK_구현내용.md](로봇-명령-왕복과-ACK_구현내용.md) | 2026-07-28 ~ 07-30 | Command REST·DB·MQTT 발행, ACK·Result·Timeout·멱등성 | 완료(로컬), Jetson·EC2 대기 |
+| [순찰구역과-시간기반-Mission_구현내용.md](순찰구역과-시간기반-Mission_구현내용.md) | 2026-07-28 ~ 07-30 | Patrol Area 등록·선택, 시간 기반 Mission, 진행률·ETA, SVG 지도·E2E | 완료(로컬), 운영 지도·Jetson 대기 |
 
 상위 계획과 현재 우선순위는
 [팀원B-remaining-7days.md](../팀원B-remaining-7days.md)를 기준으로 한다.
@@ -33,6 +35,8 @@
 | --- | --- | --- |
 | MQTT 계약·TLS·ACL·Credential | Robot이 Broker에 안전하게 연결하고 허용 Topic을 송수신하는 하나의 연결 흐름 | 업무 Payload를 DB에 저장하는 Telemetry·Command Service |
 | Telemetry·Presence·State·REST·SSE·관제 UI | Robot 상태 수신→DB 정본→SSE 알림→화면 복구가 하나의 상태 관제 흐름 | 관리자 명령 실행과 Mission 생명주기 |
+| Telemetry 기간 통계·시계열 | 저장된 이력→기간 집계→SSE 무효화→요약·그래프가 하나의 분석 조회 흐름 | Current State 관제와 원본 History 수집 |
+| Robot 등록·Credential 운영 UI | Robot identity→PROVISIONING→최초 발급·ACTIVE→Jetson 전달·회전이 하나의 Provisioning 흐름 | Broker TLS·ACL 구현과 Mission 할당 |
 | Command·ACK·Timeout·제어 UI | 관리자 요청→MQTT 발행→Robot Result→상태 화면이 하나의 왕복 흐름 | Patrol Area·Mission 생성과 진행률 |
 | Patrol Area·Mission·진행률·지도 | Area 선택→Mission→Telemetry 진행률·Trajectory→완료가 하나의 임무 흐름 | Broker·Credential 공통 기반 |
 | 전체 Mock E2E | 위 청크가 개별 완료된 뒤 경계를 연결해 검증하는 마지막 통합 흐름 | 구현 자체를 E2E 문서에 섞지 않음 |
