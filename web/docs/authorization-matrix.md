@@ -260,21 +260,22 @@ Patrol Route 버전은 조회 전용이다. 이름·Geometry·운영 상태 변�
 ## 12. 보고서·일정 API
 
 상태 전이 조건은 [`report-status-contract.md`](./report-status-contract.md)를 함께 적용한다.
+현재 보고서에는 로봇·구역 배정과 연결되는 소유 범위 열이 없으므로
+`MVP 권한 단위`는 활성 사용자의 유효 `REPORT_*` 권한 전체 범위를 뜻한다.
+Controller의 세션 권한과 서비스의 현재 DB 유효 권한을 모두 검사한다.
+후속 LLM 생성에서 결함·임무 근거를 선택할 때는 각 근거 리소스 범위를 별도로 재검사한다.
 
 | Method | Path | 권한 | 객체 범위 | CSRF | 감사 |
 |---|---|---|---|:---:|---|
-| GET | `/api/v1/reports/summary` | `REPORT_VIEW` | MVP 권한 단위 |  |  |
 | GET | `/api/v1/reports` | `REPORT_VIEW` | MVP 권한 단위 |  |  |
-| POST | `/api/v1/reports` | `REPORT_CREATE` | 근거 리소스 재검사 | O | O |
+| POST | `/api/v1/reports` | `REPORT_CREATE` | MVP 권한 단위(현재 수동·템플릿) | O | O |
 | GET | `/api/v1/reports/{reportId}` | `REPORT_VIEW` | MVP 권한 단위 |  |  |
 | PATCH, DELETE | `/api/v1/reports/{reportId}` | `REPORT_UPDATE` | MVP 권한 단위 | O | O |
 | POST | `/api/v1/reports/{reportId}/submit` | `REPORT_UPDATE` | MVP 권한 단위 | O | O |
 | POST | `/api/v1/reports/{reportId}/approve` | `REPORT_APPROVE` | 자기 승인 금지 | O | O |
 | POST | `/api/v1/reports/{reportId}/reject` | `REPORT_APPROVE` | 자기 버전 반려는 허용하되 사유 필수 | O | O |
 | GET | `/api/v1/reports/{reportId}/versions` | `REPORT_VIEW` | MVP 권한 단위 |  |  |
-| GET | `/api/v1/reports/{reportId}/download-url` | `REPORT_VIEW` | MVP 권한 단위 |  | URL 미기록 |
-| GET, POST | `/api/v1/report-schedules` | GET `REPORT_VIEW`, POST `REPORT_APPROVE` | MVP 권한 단위 | POST O | 생성 |
-| PATCH, DELETE | `/api/v1/report-schedules/{scheduleId}` | `REPORT_APPROVE` | MVP 권한 단위 | O | O |
+| GET | `/api/v1/reports/{reportId}/versions/{versionNo}` | `REPORT_VIEW` | MVP 권한 단위 |  |  |
 
 ## 13. 감사·파일·기기 업로드 API
 

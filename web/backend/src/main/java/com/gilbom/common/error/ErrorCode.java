@@ -16,6 +16,7 @@ public enum ErrorCode {
 
     AUTH_UNAUTHENTICATED(HttpStatus.UNAUTHORIZED, "인증이 필요합니다."),
     AUTH_FORBIDDEN(HttpStatus.FORBIDDEN, "요청을 수행할 권한이 없습니다."),
+    REPORT_ACCESS_DENIED(HttpStatus.FORBIDDEN, "보고서 요청을 수행할 권한이 없습니다."),
     AUTH_PASSWORD_REUSE_NOT_ALLOWED(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "새 비밀번호는 현재 비밀번호와 달라야 합니다."
@@ -53,6 +54,10 @@ public enum ErrorCode {
     COMMON_METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "지원하지 않는 HTTP 메서드입니다."),
 
     COMMON_CONFLICT(HttpStatus.CONFLICT, "요청이 현재 리소스 상태와 충돌합니다."),
+    IDEMPOTENCY_KEY_REUSED(
+            HttpStatus.CONFLICT,
+            "같은 Idempotency-Key를 다른 요청에 사용할 수 없습니다."
+    ),
 
     ROBOT_SERIAL_NUMBER_CONFLICT(HttpStatus.CONFLICT, "이미 등록된 로봇 시리얼 번호입니다."),
     PATROL_AREA_CODE_CONFLICT(HttpStatus.CONFLICT, "이미 등록된 순찰 구역 코드입니다."),
@@ -103,7 +108,10 @@ public enum ErrorCode {
             HttpStatus.UNPROCESSABLE_ENTITY,
             "순찰 경로는 선택한 순찰 구역 경계 안에 있어야 합니다."
     ),
-    REPORT_PERIOD_INVALID(HttpStatus.UNPROCESSABLE_ENTITY, "보고서 조회 기간이 올바르지 않습니다."),
+    REPORT_VALIDATION_FAILED(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "보고서가 필수 업무 규칙을 충족하지 않습니다."
+    ),
     STATISTICS_PERIOD_INVALID(HttpStatus.UNPROCESSABLE_ENTITY, "통계 조회 기간이 올바르지 않습니다."),
     MQTT_SCHEMA_VERSION_UNSUPPORTED(
             HttpStatus.UNPROCESSABLE_ENTITY,
@@ -141,6 +149,10 @@ public enum ErrorCode {
     COMMON_RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "요청 한도를 초과했습니다."),
 
     COMMON_INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다."),
+    LLM_RESPONSE_INVALID(
+            HttpStatus.BAD_GATEWAY,
+            "LLM 응답을 안전한 보고서로 변환할 수 없습니다."
+    ),
 
     COMMON_SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "서비스를 일시적으로 사용할 수 없습니다."),
     DB_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "데이터베이스를 일시적으로 사용할 수 없습니다."),
@@ -155,7 +167,8 @@ public enum ErrorCode {
             HttpStatus.SERVICE_UNAVAILABLE,
             "DB와 MQTT Broker 인증정보가 일치하지 않습니다."
     ),
-    MQTT_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "MQTT 서비스를 일시적으로 사용할 수 없습니다.");
+    MQTT_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "MQTT 서비스를 일시적으로 사용할 수 없습니다."),
+    LLM_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "LLM 서비스를 일시적으로 사용할 수 없습니다.");
 
     private final HttpStatus httpStatus;
     private final String defaultMessage;

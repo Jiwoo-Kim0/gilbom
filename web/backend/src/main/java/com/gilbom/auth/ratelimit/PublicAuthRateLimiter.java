@@ -33,6 +33,12 @@ public class PublicAuthRateLimiter {
                 subjectHasher.hash("ip:" + clientIpAddress);
 
         return switch (limitType) {
+            case CSRF_TOKEN_ISSUANCE -> repository.consume(
+                    limitType,
+                    subject,
+                    properties.getCsrfTokenIssuanceMaxRequests(),
+                    properties.getCsrfTokenIssuanceWindow()
+            );
             case EMAIL_AVAILABILITY -> repository.consume(
                     limitType,
                     subject,

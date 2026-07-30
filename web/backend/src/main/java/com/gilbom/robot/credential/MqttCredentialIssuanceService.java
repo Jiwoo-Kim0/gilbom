@@ -370,7 +370,7 @@ public class MqttCredentialIssuanceService {
                 || !REQUEST_METHOD.equals(existing.requestMethod())
                 || !requestPath.equals(existing.requestPath())) {
             throw new BusinessException(
-                    ErrorCode.COMMON_CONFLICT,
+                    ErrorCode.IDEMPOTENCY_KEY_REUSED,
                     "동일한 멱등키를 다른 요청에 사용할 수 없습니다.");
         }
         if ("SUCCEEDED".equals(existing.processingStatus())) {

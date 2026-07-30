@@ -1231,11 +1231,108 @@ paths:
           $ref: "#/components/responses/TooManyRequests"
 
   /api/v1/reports:
+    get:
+      tags: [Reports]
+      operationId: listReports
+      summary: 보고서 목록·검색
+      description: |
+        소프트 삭제되지 않은 보고서를 권한 범위에서 검색합니다.
+        search는 trim 후 reportCode와 title에 대소문자 무시 부분 일치로 적용합니다.
+      x-required-permission: REPORT_VIEW
+      x-error-codes:
+        - REPORT_ACCESS_DENIED
+        - REPORT_VALIDATION_FAILED
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+        - name: statuses
+          in: query
+          required: false
+          description: 쉼표로 구분한 보고서 상태
+          style: form
+          explode: false
+          schema:
+            type: array
+            uniqueItems: true
+            items:
+              $ref: "#/components/schemas/ReportStatus"
+        - name: createdBy
+          in: query
+          required: false
+          description: 보고서 최초 작성자 UUID
+          schema:
+            type: string
+            format: uuid
+        - name: periodFrom
+          in: query
+          required: false
+          description: 이 시각 이후까지 이어지는 보고서 기간과 겹치는 결과
+          schema:
+            type: string
+            format: date-time
+        - name: periodTo
+          in: query
+          required: false
+          description: 이 시각 이전부터 시작한 보고서 기간과 겹치는 결과
+          schema:
+            type: string
+            format: date-time
+        - name: reportType
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ReportType"
+        - name: generationMethod
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ReportGenerationMethod"
+        - name: sort
+          in: query
+          required: false
+          description: createdAt, updatedAt, title과 asc, desc만 허용
+          schema:
+            type: string
+            default: createdAt,desc
+            pattern: '^(createdAt|updatedAt|title),(asc|desc)$'
+      responses:
+        "200":
+          description: 보고서 페이지
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
     post:
       tags: [Reports]
       operationId: createReport
-      summary: DRAFT 보고서와 첫 버전 생성
+      summary: 수동·템플릿 DRAFT 보고서와 첫 버전 생성
+      description: |
+        이 operation은 LLM 호출 없이 MANUAL·TEMPLATE의 완성된 snapshot을 저장합니다.
+        LLM 생성은 LlmReportCreateRequest와 LlmReportResult 계약을 재사용해 후속 단계에서
+        같은 endpoint에 추가합니다.
+        같은 사용자·같은 Idempotency-Key·같은 body는 최초 201 응답을 재사용합니다.
+        동일 요청이 처리 중이면 중복 생성하지 않고 409를 반환하므로 같은 key로 재시도합니다.
       x-required-permission: REPORT_CREATE
+      x-error-codes:
+        - REPORT_ACCESS_DENIED
+        - REPORT_VALIDATION_FAILED
+        - COMMON_CONFLICT
+        - IDEMPOTENCY_KEY_REUSED
       security:
         - serverSession: []
       parameters:
@@ -1246,14 +1343,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ReportCreateRequest"
+              $ref: "#/components/schemas/ManualReportCreateRequest"
       responses:
         "201":
           description: 보고서 생성
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReportResponse"
+                $ref: "#/components/schemas/ReportDetailResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1266,11 +1363,41 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
 
   /api/v1/reports/{reportId}:
+    get:
+      tags: [Reports]
+      operationId: getReport
+      summary: 보고서 최신 버전 상세
+      x-required-permission: REPORT_VIEW
+      x-error-codes:
+        - REPORT_ACCESS_DENIED
+        - REPORT_NOT_FOUND
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/ReportId"
+      responses:
+        "200":
+          description: 보고서 header와 최신 version snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportDetailResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
     patch:
       tags: [Reports]
       operationId: updateReport
       summary: DRAFT·REJECTED 보고서 새 버전 생성
       x-required-permission: REPORT_UPDATE
+      x-error-codes:
+        - REPORT_ACCESS_DENIED
+        - REPORT_NOT_FOUND
+        - REPORT_STATE_CONFLICT
+        - REPORT_VALIDATION_FAILED
       security:
         - serverSession: []
       parameters:
@@ -1288,7 +1415,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReportResponse"
+                $ref: "#/components/schemas/ReportDetailResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1299,16 +1426,23 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
     delete:
       tags: [Reports]
       operationId: deleteReport
       summary: DRAFT·REJECTED 보고서 소프트 삭제
       x-required-permission: REPORT_UPDATE
+      x-error-codes:
+        - REPORT_ACCESS_DENIED
+        - REPORT_NOT_FOUND
+        - REPORT_STATE_CONFLICT
       security:
         - serverSession: []
       parameters:
         - $ref: "#/components/parameters/ReportId"
         - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/ExpectedReportVersionNo"
       responses:
         "204":
           description: 보고서 소프트 삭제
@@ -1321,12 +1455,77 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /api/v1/reports/{reportId}/versions:
+    get:
+      tags: [Reports]
+      operationId: listReportVersions
+      summary: 보고서 버전 목록
+      description: 본문과 통계를 제외한 불변 버전 metadata를 versionNo 내림차순으로 반환합니다.
+      x-required-permission: REPORT_VIEW
+      x-error-codes:
+        - REPORT_ACCESS_DENIED
+        - REPORT_NOT_FOUND
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/ReportId"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: 보고서 버전 페이지
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportVersionListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/reports/{reportId}/versions/{versionNo}:
+    get:
+      tags: [Reports]
+      operationId: getReportVersion
+      summary: 보고서 특정 버전 상세
+      x-required-permission: REPORT_VIEW
+      x-error-codes:
+        - REPORT_ACCESS_DENIED
+        - REPORT_NOT_FOUND
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/ReportId"
+        - $ref: "#/components/parameters/ReportVersionNo"
+      responses:
+        "200":
+          description: 불변 보고서 버전 snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportVersionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /api/v1/reports/{reportId}/submit:
     post:
       tags: [Reports]
       operationId: submitReport
       summary: DRAFT에서 IN_REVIEW로 전이
       x-required-permission: REPORT_UPDATE
+      x-error-codes:
+        - REPORT_ACCESS_DENIED
+        - REPORT_NOT_FOUND
+        - REPORT_STATE_CONFLICT
+        - REPORT_VALIDATION_FAILED
       security:
         - serverSession: []
       parameters:
@@ -1344,7 +1543,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReportResponse"
+                $ref: "#/components/schemas/ReportDetailResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1355,6 +1554,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
 
   /api/v1/reports/{reportId}/approve:
     post:
@@ -1362,6 +1563,10 @@ paths:
       operationId: approveReport
       summary: IN_REVIEW에서 APPROVED로 전이
       x-required-permission: REPORT_APPROVE
+      x-error-codes:
+        - REPORT_ACCESS_DENIED
+        - REPORT_NOT_FOUND
+        - REPORT_STATE_CONFLICT
       security:
         - serverSession: []
       parameters:
@@ -1379,7 +1584,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReportResponse"
+                $ref: "#/components/schemas/ReportDetailResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1390,6 +1595,48 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+
+  /api/v1/reports/{reportId}/reject:
+    post:
+      tags: [Reports]
+      operationId: rejectReport
+      summary: IN_REVIEW에서 REJECTED로 전이
+      x-required-permission: REPORT_APPROVE
+      x-error-codes:
+        - REPORT_ACCESS_DENIED
+        - REPORT_NOT_FOUND
+        - REPORT_STATE_CONFLICT
+        - REPORT_VALIDATION_FAILED
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/ReportId"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportRejectionRequest"
+      responses:
+        "200":
+          description: 보고서 반려
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportDetailResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
 
   /api/v1/audit-logs:
     get:
@@ -2812,41 +3059,6 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
-  /api/v1/reports/{reportId}/reject:
-    post:
-      tags: [Reports]
-      operationId: rejectReport
-      summary: IN_REVIEW에서 REJECTED로 전이
-      x-required-permission: REPORT_APPROVE
-      security:
-        - serverSession: []
-      parameters:
-        - $ref: "#/components/parameters/ReportId"
-        - $ref: "#/components/parameters/CsrfToken"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ReportRejectionRequest"
-      responses:
-        "200":
-          description: 보고서 반려
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ReportResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
-
 components:
   securitySchemes:
     serverSession:
@@ -2949,7 +3161,10 @@ components:
       name: Idempotency-Key
       in: header
       required: true
-      description: 동일 생성 요청의 중복 처리를 막는 클라이언트 생성 UUID
+      description: |
+        동일 생성 요청의 중복 처리를 막는 클라이언트 생성 UUID입니다.
+        동일 작업의 네트워크·서버 실패 재시도에는 같은 값을 사용하고,
+        사용자가 body를 변경한 새 작업에는 새 UUID를 사용합니다.
       schema:
         type: string
         format: uuid
@@ -2961,6 +3176,26 @@ components:
       schema:
         type: string
         format: uuid
+    ReportVersionNo:
+      name: versionNo
+      in: path
+      required: true
+      description: 보고서 안에서 1부터 증가하는 불변 버전 번호
+      schema:
+        type: integer
+        minimum: 1
+    ExpectedReportVersionNo:
+      name: expectedVersionNo
+      in: query
+      required: true
+      description: |
+        클라이언트가 마지막으로 조회한 currentVersionNo입니다.
+        서버 값과 다르면 409 REPORT_STATE_CONFLICT를 반환합니다.
+        충돌 응답에는 보고서 본문이나 최신 version 값을 포함하지 않으므로
+        GET /api/v1/reports/{reportId}를 다시 조회해야 합니다.
+      schema:
+        type: integer
+        minimum: 1
     PatrolAreaId:
       name: patrolAreaId
       in: path
@@ -5544,16 +5779,117 @@ components:
         - PERIODIC
         - ISSUE
 
-    ReportCreateRequest:
+    ReportGenerationMethod:
+      type: string
+      enum:
+        - MANUAL
+        - TEMPLATE
+        - LLM
+        - SYSTEM
+
+    ReportCreatorType:
+      type: string
+      enum:
+        - USER
+        - SYSTEM
+
+    ReportRiskLevel:
+      type: string
+      enum:
+        - LOW
+        - MEDIUM
+        - HIGH
+        - CRITICAL
+
+    ReportRecommendationPriority:
+      type: string
+      enum:
+        - IMMEDIATE
+        - HIGH
+        - NORMAL
+        - LOW
+
+    ReportFilterCriteria:
       type: object
-      required: [title, reportType, periodFrom, periodTo, content]
+      description: 생성 시점 검색 조건 JSON object snapshot
+      additionalProperties: true
       properties:
+        patrolAreaId:
+          type: string
+          format: uuid
+          nullable: true
+        robotIds:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+        defectTypes:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/DefectType"
+        workflowStatuses:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/DefectWorkflowStatus"
+
+    ReportStatisticsSnapshot:
+      type: object
+      required: [aggregate, defectsByStatus, defectsByType]
+      additionalProperties: false
+      properties:
+        aggregate:
+          $ref: "#/components/schemas/StatisticsAggregateMetrics"
+        defectsByStatus:
+          type: array
+          items:
+            $ref: "#/components/schemas/StatisticsByStatusItem"
+        defectsByType:
+          type: array
+          items:
+            $ref: "#/components/schemas/StatisticsByDefectTypeItem"
+
+    ReportStatisticsObject:
+      type: object
+      description: 수동·템플릿 버전에 그대로 보존되는 통계 JSON object snapshot
+      additionalProperties: true
+
+    ReportCreateRequest:
+      oneOf:
+        - $ref: "#/components/schemas/ManualReportCreateRequest"
+        - $ref: "#/components/schemas/LlmReportCreateRequest"
+      discriminator:
+        propertyName: generationMethod
+        mapping:
+          MANUAL: "#/components/schemas/ManualReportCreateRequest"
+          TEMPLATE: "#/components/schemas/ManualReportCreateRequest"
+          LLM: "#/components/schemas/LlmReportCreateRequest"
+
+    ManualReportCreateRequest:
+      type: object
+      required:
+        - generationMethod
+        - reportType
+        - title
+        - periodFrom
+        - periodTo
+        - content
+        - statistics
+      additionalProperties: false
+      properties:
+        generationMethod:
+          type: string
+          enum: [MANUAL, TEMPLATE]
         title:
           type: string
           minLength: 1
           maxLength: 200
         summary:
           type: string
+          nullable: true
           maxLength: 255
         reportType:
           $ref: "#/components/schemas/ReportType"
@@ -5566,14 +5902,47 @@ components:
         content:
           type: string
           minLength: 1
-        patrolAreaId:
+          maxLength: 100000
+        statistics:
+          $ref: "#/components/schemas/ReportStatisticsObject"
+        filterCriteria:
+          $ref: "#/components/schemas/ReportFilterCriteria"
+
+    LlmReportCreateRequest:
+      type: object
+      required:
+        - generationMethod
+        - reportType
+        - periodFrom
+        - periodTo
+      additionalProperties: false
+      properties:
+        generationMethod:
           type: string
-          format: uuid
-          nullable: true
+          enum: [LLM]
+        reportType:
+          $ref: "#/components/schemas/ReportType"
+        periodFrom:
+          type: string
+          format: date-time
+        periodTo:
+          type: string
+          format: date-time
+        filterCriteria:
+          $ref: "#/components/schemas/ReportFilterCriteria"
 
     ReportUpdateRequest:
       type: object
-      required: [expectedVersionNo, content]
+      required: [expectedVersionNo]
+      minProperties: 2
+      additionalProperties: false
+      anyOf:
+        - required: [title]
+        - required: [summary]
+        - required: [periodFrom]
+        - required: [periodTo]
+        - required: [content]
+        - required: [statistics]
       properties:
         expectedVersionNo:
           type: integer
@@ -5584,12 +5953,23 @@ components:
           maxLength: 200
         summary:
           type: string
+          nullable: true
           maxLength: 255
+        periodFrom:
+          type: string
+          format: date-time
+        periodTo:
+          type: string
+          format: date-time
         content:
           type: string
           minLength: 1
+          maxLength: 100000
+        statistics:
+          $ref: "#/components/schemas/ReportStatisticsObject"
         changeNote:
           type: string
+          nullable: true
           maxLength: 500
 
     ReportTransitionRequest:
@@ -5611,6 +5991,7 @@ components:
           minimum: 1
         reason:
           type: string
+          minLength: 1
           maxLength: 500
 
     ReportRejectionRequest:
@@ -5626,7 +6007,7 @@ components:
           minLength: 1
           maxLength: 500
 
-    ReportResponse:
+    ReportListItemResponse:
       type: object
       required:
         - reportId
@@ -5634,9 +6015,21 @@ components:
         - title
         - reportType
         - reportStatus
+        - generationMethod
+        - periodFrom
+        - periodTo
         - currentVersionNo
+        - creatorType
+        - createdBy
+        - createdByDisplayName
+        - updatedBy
+        - updatedByDisplayName
+        - approvedBy
+        - approvedByDisplayName
+        - approvedAt
         - createdAt
         - updatedAt
+      additionalProperties: false
       properties:
         reportId:
           type: string
@@ -5652,12 +6045,43 @@ components:
           $ref: "#/components/schemas/ReportType"
         reportStatus:
           $ref: "#/components/schemas/ReportStatus"
+        generationMethod:
+          $ref: "#/components/schemas/ReportGenerationMethod"
+        periodFrom:
+          type: string
+          format: date-time
+        periodTo:
+          type: string
+          format: date-time
         currentVersionNo:
           type: integer
           minimum: 1
+        approvedVersionNo:
+          type: integer
+          minimum: 1
+          nullable: true
+        creatorType:
+          $ref: "#/components/schemas/ReportCreatorType"
+        createdBy:
+          type: string
+          format: uuid
+          nullable: true
+        createdByDisplayName:
+          type: string
+          nullable: true
+        updatedBy:
+          type: string
+          format: uuid
+          nullable: true
+        updatedByDisplayName:
+          type: string
+          nullable: true
         approvedBy:
           type: string
           format: uuid
+          nullable: true
+        approvedByDisplayName:
+          type: string
           nullable: true
         approvedAt:
           type: string
@@ -5669,6 +6093,307 @@ components:
         updatedAt:
           type: string
           format: date-time
+
+    ReportListResponse:
+      type: object
+      required: [content, page, size, totalElements, totalPages]
+      additionalProperties: false
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportListItemResponse"
+        page:
+          type: integer
+          minimum: 0
+        size:
+          type: integer
+          minimum: 1
+          maximum: 100
+        totalElements:
+          type: integer
+          format: int64
+          minimum: 0
+        totalPages:
+          type: integer
+          minimum: 0
+
+    ReportVersionSummaryResponse:
+      type: object
+      required:
+        - reportId
+        - versionNo
+        - title
+        - periodFrom
+        - periodTo
+        - generationMethod
+        - llmModel
+        - promptVersion
+        - changeNote
+        - creatorType
+        - createdBy
+        - createdByDisplayName
+        - createdAt
+      additionalProperties: false
+      properties:
+        reportId:
+          type: string
+          format: uuid
+        versionNo:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+        summary:
+          type: string
+          nullable: true
+        periodFrom:
+          type: string
+          format: date-time
+        periodTo:
+          type: string
+          format: date-time
+        generationMethod:
+          $ref: "#/components/schemas/ReportGenerationMethod"
+        llmModel:
+          type: string
+          maxLength: 100
+          nullable: true
+        promptVersion:
+          type: string
+          maxLength: 50
+          nullable: true
+        changeNote:
+          type: string
+          maxLength: 500
+          nullable: true
+        creatorType:
+          $ref: "#/components/schemas/ReportCreatorType"
+        createdBy:
+          type: string
+          format: uuid
+          nullable: true
+        createdByDisplayName:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    ReportVersionResponse:
+      allOf:
+        - $ref: "#/components/schemas/ReportVersionSummaryResponse"
+        - type: object
+          required: [content, statistics, evidenceSnapshot]
+          properties:
+            content:
+              type: string
+            statistics:
+              $ref: "#/components/schemas/ReportStatisticsObject"
+            evidenceSnapshot:
+              $ref: "#/components/schemas/ReportEvidenceSnapshot"
+
+    ReportVersionListResponse:
+      type: object
+      required: [content, page, size, totalElements, totalPages]
+      additionalProperties: false
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportVersionSummaryResponse"
+        page:
+          type: integer
+          minimum: 0
+        size:
+          type: integer
+          minimum: 1
+          maximum: 100
+        totalElements:
+          type: integer
+          format: int64
+          minimum: 0
+        totalPages:
+          type: integer
+          minimum: 0
+
+    ReportEvidenceSnapshot:
+      type: object
+      required: [defectIds, missionIds, patrolAreaIds]
+      additionalProperties: false
+      properties:
+        defectIds:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+        missionIds:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+        patrolAreaIds:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+
+    ApprovedPdfInfoResponse:
+      type: object
+      required: [versionNo, sha256, createdAt]
+      additionalProperties: false
+      properties:
+        versionNo:
+          type: integer
+          minimum: 1
+        sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: 승인 PDF 파일 바이트의 SHA-256 hex
+        createdAt:
+          type: string
+          format: date-time
+
+    ReportDetailResponse:
+      allOf:
+        - $ref: "#/components/schemas/ReportListItemResponse"
+        - type: object
+          required:
+            - filterCriteria
+            - currentVersion
+            - lastRejectionReason
+            - approvedPdf
+          properties:
+            filterCriteria:
+              $ref: "#/components/schemas/ReportFilterCriteria"
+            currentVersion:
+              $ref: "#/components/schemas/ReportVersionResponse"
+            lastRejectionReason:
+              type: string
+              maxLength: 500
+              nullable: true
+            approvedPdf:
+              allOf:
+                - $ref: "#/components/schemas/ApprovedPdfInfoResponse"
+              nullable: true
+
+    LlmReportPeriod:
+      type: object
+      required: [from, to]
+      additionalProperties: false
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+
+    LlmReportKeyDefect:
+      type: object
+      required:
+        - defectId
+        - incidentCode
+        - defectType
+        - riskLevel
+        - lastSeenAt
+        - rationale
+      additionalProperties: false
+      properties:
+        defectId:
+          type: string
+          format: uuid
+        incidentCode:
+          type: string
+          minLength: 1
+          maxLength: 40
+        defectType:
+          $ref: "#/components/schemas/DefectType"
+        riskLevel:
+          $ref: "#/components/schemas/ReportRiskLevel"
+        locationLabel:
+          type: string
+          maxLength: 200
+          nullable: true
+        lastSeenAt:
+          type: string
+          format: date-time
+        rationale:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    LlmReportActionRecommendation:
+      type: object
+      required: [priority, recommendation, rationale, relatedDefectIds]
+      additionalProperties: false
+      properties:
+        priority:
+          $ref: "#/components/schemas/ReportRecommendationPriority"
+        recommendation:
+          type: string
+          minLength: 1
+          maxLength: 500
+        rationale:
+          type: string
+          minLength: 1
+          maxLength: 500
+        relatedDefectIds:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+
+    LlmReportResult:
+      type: object
+      required:
+        - title
+        - summary
+        - statistics
+        - keyDefects
+        - actionRecommendations
+        - period
+        - promptVersion
+        - modelIdentifier
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        summary:
+          type: string
+          minLength: 1
+          maxLength: 255
+        statistics:
+          $ref: "#/components/schemas/ReportStatisticsSnapshot"
+        keyDefects:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/LlmReportKeyDefect"
+        actionRecommendations:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/LlmReportActionRecommendation"
+        period:
+          $ref: "#/components/schemas/LlmReportPeriod"
+        promptVersion:
+          type: string
+          minLength: 1
+          maxLength: 50
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$'
+        modelIdentifier:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$'
 
     ErrorCode:
       type: string
@@ -5694,10 +6419,12 @@ components:
         - DEFECT_NOT_FOUND
         - COMMAND_NOT_FOUND
         - REPORT_NOT_FOUND
+        - REPORT_ACCESS_DENIED
         - IMAGE_NOT_FOUND
         - ROBOT_CREDENTIAL_NOT_FOUND
         - COMMON_METHOD_NOT_ALLOWED
         - COMMON_CONFLICT
+        - IDEMPOTENCY_KEY_REUSED
         - ROBOT_SERIAL_NUMBER_CONFLICT
         - PATROL_AREA_CODE_CONFLICT
         - PATROL_AREA_STATE_CONFLICT
@@ -5715,6 +6442,7 @@ components:
         - MQTT_REPLAY_REJECTED
         - MQTT_SEQUENCE_CONFLICT
         - REPORT_STATE_CONFLICT
+        - REPORT_VALIDATION_FAILED
         - COMMON_PAYLOAD_TOO_LARGE
         - IMAGE_TOO_LARGE
         - COMMON_UNSUPPORTED_MEDIA_TYPE
@@ -5724,7 +6452,6 @@ components:
         - PATROL_AREA_ROUTE_OUTSIDE_BOUNDARY
         - PATROL_ROUTE_GEOMETRY_INVALID
         - PATROL_ROUTE_OUTSIDE_AREA
-        - REPORT_PERIOD_INVALID
         - STATISTICS_PERIOD_INVALID
         - COMMON_RATE_LIMIT_EXCEEDED
         - COMMON_INTERNAL_ERROR
@@ -5736,6 +6463,8 @@ components:
         - MQTT_CREDENTIAL_PROVISIONING_UNAVAILABLE
         - MQTT_CREDENTIAL_REGISTRY_DRIFT
         - MQTT_UNAVAILABLE
+        - LLM_UNAVAILABLE
+        - LLM_RESPONSE_INVALID
 
     ValidationErrorDetail:
       type: object
@@ -6045,8 +6774,26 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
 
+    BadGateway:
+      description: 외부 LLM 응답이 계약을 충족하지 않음
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            timestamp: "2026-07-30T01:00:00Z"
+            status: 502
+            code: LLM_RESPONSE_INVALID
+            message: LLM 응답을 안전한 보고서로 변환할 수 없습니다.
+            path: /api/v1/reports
+            requestId: 18c88a89-7d89-4c17-97fa-a6e2253614d9
+            details: []
+
     ServiceUnavailable:
-      description: DB·S3·MQTT 등 주요 구성요소 장애
+      description: DB·S3·MQTT·LLM 등 주요 구성요소 장애
       headers:
         X-Request-Id:
           $ref: "#/components/headers/RequestId"

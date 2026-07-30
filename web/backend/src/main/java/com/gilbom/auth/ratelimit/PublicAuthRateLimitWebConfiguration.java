@@ -10,6 +10,19 @@ import com.gilbom.security.web.SecurityErrorResponseWriter;
 public class PublicAuthRateLimitWebConfiguration {
 
     @Bean
+    public CsrfTokenIssuanceRateLimitFilter csrfTokenIssuanceRateLimitFilter(
+            PublicAuthRateLimiter rateLimiter,
+            AuthenticationAuditService auditService,
+            SecurityErrorResponseWriter errorWriter
+    ) {
+        return new CsrfTokenIssuanceRateLimitFilter(
+                rateLimiter,
+                auditService,
+                errorWriter
+        );
+    }
+
+    @Bean
     public PublicAuthRateLimitFilter publicAuthRateLimitFilter(
             PublicAuthRateLimiter rateLimiter,
             AuthenticationAuditService auditService,

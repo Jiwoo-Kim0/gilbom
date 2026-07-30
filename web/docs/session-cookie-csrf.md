@@ -19,6 +19,12 @@
 `GET /api/v1/auth/csrf-token`이 먼저 익명 Spring Session을 만든다. 비밀번호 검증
 성공 시 같은 세션의 companion row를 다음 challenge 중 하나로 만든다.
 
+쿠키에 대응하는 기존 세션이 없는 CSRF 조회만 IP별 60회/분의 영속 Rate Limit
+bucket을 소비한다. 기존 세션에서 새로고침하거나 여러 탭이 토큰을 다시 읽는 요청은
+새 session row를 만들지 않으므로 이 bucket에서 제외한다. Nginx는 별도로 `2r/s`,
+`burst=60`의 짧은 token bucket을 적용해 순간 flood가 애플리케이션과 DB에 도달하기
+전에 `429`로 차단한다.
+
 ```text
 PASSWORD_CHANGE_REQUIRED
 MFA_ENROLLMENT_REQUIRED

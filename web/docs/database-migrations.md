@@ -53,6 +53,8 @@
 | V26 | 결함 통계 Query 인덱스 | 병합되지 않은 현재 결함의 전체 기간 및 지역·기간 통계를 위해 `last_seen_at`과 `patrol_area_id, last_seen_at` 기반 partial covering index 추가 |
 | V27 | V23 제약 검증 승격 | V23이 `NOT VALID`로 걸어둔 Command·Defect·Observation의 FK 6개와 CHECK 1개를 `VALIDATE`해 기존 행까지 무결성을 보장하고 플래너가 제약을 신뢰하게 함. 근거는 [defect-schema.md](defect-schema.md) 3.0.1 |
 | V28 | Incident 수집 무결성 보강 | `INC-YYYYMMDD-NNNNNN` 일자별 Counter와 신규 쓰기 형식 CHECK, GPS·Patrol Area 미확정 Incident 검토 대기열 및 Event·Mission·Image FK를 추가 |
+| V29 | CSRF token 발급 Rate Limit bucket | 쿠키를 유지하지 않는 공개 `/csrf-token` 반복 호출이 익명 Spring Session 생성을 증폭시키지 못하도록 `IP_CSRF_TOKEN_ISSUANCE` HMAC IP bucket을 인증 Rate Limit 허용 타입에 추가 |
+| V30 | 보고서 상태·버전·승인 불변성 보강 | 버전별 생성 방식·근거 snapshot, 승인 PDF 결합 정보, 생성 멱등 결과 추적을 추가하고 순차 버전·현재 버전 포인터·상태 전이를 DB trigger로 강제 |
 
 ### V26 결함 통계 Query 인덱스
 
@@ -87,6 +89,69 @@ Sequential Scan을 선택했다. `enable_seqscan=off` 검증에서 전체 기간
 측정한다. V26은 일반 `CREATE INDEX`를 사용하므로 큰 운영 테이블에 적용할 때는
 DDL lock 허용 시간과 배포 창도 확인해야 한다.
 
+### V29 CSRF token 발급 Rate Limit bucket
+
+파일:
+`backend/src/main/resources/db/migration/V29__limit_csrf_token_session_creation.sql`
+
+V29는 `auth.authentication_rate_limit.limit_type`의 기존 CHECK 제약을 교체하여
+`IP_CSRF_TOKEN_ISSUANCE`를 허용한다. 별도 테이블을 만들지 않고 V8·V10에서 구축한
+영속 Rate Limit 저장소를 재사용하므로 다중 애플리케이션 인스턴스가 같은 차단 창을
+공유하며, 클라이언트 IP 원문 대신 HMAC 값과 key version만 저장한다.
+
+애플리케이션은 유효한 기존 세션이 없는 `GET /api/v1/auth/csrf-token` 요청만 이
+bucket에 기록한다. 기존 세션의 새로고침·다중 탭 요청은 새 JDBC session row를 만들지
+않으므로 차감하지 않는다. 세부 한도와 Nginx 선제 제한은
+[인증 Rate Limit·잠금·감사 로그 구현](authentication-rate-limit-lock-audit.md#31-csrf-발급과-세션-저장소-보호)에
+기록한다.
+
+### V30 보고서 도메인 불변성 보강
+
+파일:
+`backend/src/main/resources/db/migration/V30__harden_report_domain_invariants.sql`
+
+V30은 기존 V2의 변경 가능한 보고서 header와 append-only version 구조를 유지하면서,
+보고서 생성·수정·승인 API가 필요로 하는 재현성과 DB 방어선을 보강한다.
+
+#### 저장 필드
+
+| 대상 | 추가 필드 | 저장 규칙 |
+|---|---|---|
+| `report.report_version` | `generation_method` | `MANUAL`, `TEMPLATE`, `LLM`, `SYSTEM`만 허용. 기존 version은 header의 값을 backfill한 뒤 `NOT NULL`로 전환 |
+| `report.report_version` | `evidence_snapshot` | `defectIds`, `missionIds`, `patrolAreaIds` 배열을 가진 JSON object. 원본 리소스가 정리된 뒤에도 버전별 근거 ID를 재현 |
+| `report.anomaly_report` | `approved_pdf_version_no`, `approved_pdf_storage_key`, `approved_pdf_sha256`, `approved_pdf_created_at` | 네 필드는 모두 `NULL`이거나 승인된 정확한 version에 함께 결합. SHA-256은 32 bytes이고 생성 시각은 승인 시각 이후여야 함 |
+| `request_control.idempotency_request` | `resource_type`, `resource_id` | 둘 다 `NULL`이거나 함께 존재. 보고서 생성 성공 시 `REPORT`와 생성된 report UUID를 저장 |
+
+승인 PDF version은 `(report_id, version_no)` 복합 외래 키로 실제
+`report.report_version`을 참조한다. 내부 object storage key는 DB에 저장하지만 외부
+API에는 노출하지 않고, PDF version·SHA-256·생성 시각만 동일성 확인에 사용한다.
+
+보고서 생성 멱등 행은 다음 partial index로 24시간 만료 정리 대상을 찾는다.
+
+```sql
+CREATE INDEX ix_idempotency_report_expiry
+    ON request_control.idempotency_request (expires_at)
+    WHERE request_method = 'POST'
+      AND request_path = '/api/v1/reports';
+```
+
+#### DB trigger 불변성
+
+| Trigger | 강제 규칙 |
+|---|---|
+| `tr_report_version_sequence` | 첫 version은 1이고, 이후 version은 잠근 header의 `current_version_no + 1`만 허용 |
+| `tr_report_version_current_pointer` | 새 version을 INSERT한 transaction이 commit되기 전에 header의 `current_version_no`가 그 version을 가리켜야 함 |
+| `tr_anomaly_report_lifecycle` | 계약에 없는 상태 전이, version 증가 없는 본문 metadata 변경, `IN_REVIEW` 수정, 승인본 변경·삭제, 삭제본 재변경, 승인 PDF 교체를 거부 |
+
+현재 version 역방향 검사는 header와 version을 같은 transaction에서 생성·변경할 수
+있도록 `DEFERRABLE INITIALLY DEFERRED` constraint trigger로 commit 시점에 수행한다.
+`REJECTED → DRAFT`는 새 version이 함께 생성된 경우만 허용하고, version pointer는
+한 번에 정확히 1만 증가할 수 있다.
+
+DB가 알 수 없는 요청 문맥 규칙인 `expectedVersionNo` 일치와 최신 version 작성자의
+자기 승인은 서비스 계층에서 추가 검사한다. 상세 상태·API 계약은
+[report-status-contract.md](report-status-contract.md)를 함께 적용한다.
+
 시스템 Role `ADMIN`, `MANAGER`, `OPERATOR`와 18개 세부 permission 및
 role-permission 관계는 결정적인 UUID로 seed한다. 실제
 관리자 계정은 password hash와 MFA 등록 절차가 필요하므로 migration에서 만들지 않는다.
@@ -102,7 +167,7 @@ docker compose logs backend
 ```
 
 
-Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V28이
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V30이
 순서대로 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증

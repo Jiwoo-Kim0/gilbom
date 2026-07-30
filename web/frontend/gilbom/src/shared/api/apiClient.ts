@@ -1,10 +1,20 @@
 import {
   clearCsrfToken,
   requireCsrfToken,
-} from './csrfTokenStore'
+} from './csrfTokenStore.ts'
 
 const CSRF_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 const JSON_CONTENT_TYPE = 'application/json'
+
+export type ApiErrorCategory =
+  | 'NETWORK'
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
+  | 'NOT_FOUND'
+  | 'CONFLICT'
+  | 'VALIDATION'
+  | 'UNAVAILABLE'
+  | 'UNEXPECTED'
 
 export type ValidationErrorDetail = {
   field: string
@@ -23,6 +33,12 @@ type ErrorResponse = {
 
 export type ApiRequestInit = RequestInit & {
   notifyUnauthorized?: boolean
+  /**
+   * CSRF 실패와 권한 부족이 모두 403/AUTH_FORBIDDEN이므로 기본값은 재시도하지
+   * 않는다. 멱등 키나 낙관적 잠금으로 중복 실행이 방지되고 body를 다시 보낼 수
+   * 있는 요청만 명시적으로 opt-in한다.
+   */
+  csrfRetry?: 'never' | 'replay-safe'
 }
 
 type UnauthorizedListener = () => void
@@ -32,6 +48,7 @@ const unauthorizedListeners = new Set<UnauthorizedListener>()
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
+  readonly category: ApiErrorCategory
   readonly requestId: string | null
   readonly details: ValidationErrorDetail[]
   readonly retryAfterSeconds: number | null
@@ -58,10 +75,38 @@ export class ApiError extends Error {
     this.name = 'ApiError'
     this.status = status
     this.code = code
+    this.category = categorizeApiError(status)
     this.requestId = requestId
     this.details = details
     this.retryAfterSeconds = retryAfterSeconds
     this.csrfRejected = csrfRejected
+  }
+}
+
+function categorizeApiError(status: number): ApiErrorCategory {
+  switch (status) {
+    case 0:
+      return 'NETWORK'
+    case 401:
+      return 'UNAUTHORIZED'
+    case 403:
+      return 'FORBIDDEN'
+    case 404:
+      return 'NOT_FOUND'
+    case 409:
+      return 'CONFLICT'
+    case 400:
+    case 413:
+    case 415:
+    case 422:
+      return 'VALIDATION'
+    case 429:
+    case 502:
+    case 503:
+    case 504:
+      return 'UNAVAILABLE'
+    default:
+      return 'UNEXPECTED'
   }
 }
 
@@ -150,6 +195,7 @@ export async function apiFetch(
 ): Promise<Response> {
   const {
     notifyUnauthorized: shouldNotifyUnauthorized = true,
+    csrfRetry = 'never',
     ...requestInit
   } = init
   const requestMethod = (
@@ -172,21 +218,52 @@ export async function apiFetch(
     }
   }
 
-  let response: Response
-  try {
-    response = await fetch(input, {
-      ...requestInit,
-      method: requestMethod,
-      headers,
-      credentials: 'include',
-      cache: requestInit.cache ?? 'no-store',
-    })
-  } catch {
-    throw new ApiError({
-      status: 0,
-      code: 'COMMON_NETWORK_ERROR',
-      message: '서버에 연결할 수 없습니다. 네트워크 상태를 확인해주세요.',
-    })
+  const send = async (): Promise<Response> => {
+    try {
+      return await fetch(input, {
+        ...requestInit,
+        method: requestMethod,
+        headers,
+        credentials: 'include',
+        cache: requestInit.cache ?? 'no-store',
+      })
+    } catch {
+      throw new ApiError({
+        status: 0,
+        code: 'COMMON_NETWORK_ERROR',
+        message: '서버에 연결할 수 없습니다. 네트워크 상태를 확인해주세요.',
+      })
+    }
+  }
+
+  let response = await send()
+
+  const hasReplayableBody = (
+    requestInit.body === undefined
+    || requestInit.body === null
+    || typeof requestInit.body === 'string'
+  )
+  const canRetryCsrf = (
+    response.status === 403
+    && requiresCsrf
+    && csrfRetry === 'replay-safe'
+    && hasReplayableBody
+    && !(input instanceof Request)
+  )
+
+  if (canRetryCsrf) {
+    clearCsrfToken()
+    try {
+      headers.set('X-CSRF-TOKEN', await requireCsrfToken())
+    } catch {
+      clearCsrfToken()
+      throw new ApiError({
+        status: 0,
+        code: 'AUTH_CSRF_TOKEN_UNAVAILABLE',
+        message: '요청 보안 정보를 갱신하지 못했습니다. 잠시 후 다시 시도해주세요.',
+      })
+    }
+    response = await send()
   }
 
   if (response.status === 401) {
@@ -196,8 +273,8 @@ export async function apiFetch(
     }
   }
 
-  // 권한 거부와 CSRF 거부에 같은 공개 코드가 쓰이므로 변경 요청의 403에서는
-  // 메모리 토큰만 폐기한다. 중복 변경 위험 때문에 자동 재시도는 하지 않는다.
+  // 재시도 뒤에도 403이면 실제 권한 부족일 수 있으므로 토큰을 폐기하고 최종
+  // ApiError로 변환한다. 기본 모드의 변경 요청도 기존처럼 자동 재시도하지 않는다.
   const csrfRejected = response.status === 403 && requiresCsrf
   if (csrfRejected) {
     clearCsrfToken()

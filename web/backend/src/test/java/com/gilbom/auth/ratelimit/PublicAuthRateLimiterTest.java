@@ -23,10 +23,16 @@ class PublicAuthRateLimiterTest {
             new PublicAuthRateLimiter(properties, subjectHasher, repository);
 
     @Test
-    void appliesSeparateAvailabilityAndRegistrationPolicies() {
+    void appliesSeparateCsrfAvailabilityAndRegistrationPolicies() {
         HashedRateLimitSubject subject =
                 new HashedRateLimitSubject(new byte[32], 1);
         when(subjectHasher.hash("ip:203.0.113.10")).thenReturn(subject);
+        when(repository.consume(
+                PublicAuthRateLimitType.CSRF_TOKEN_ISSUANCE,
+                subject,
+                60,
+                Duration.ofMinutes(1)
+        )).thenReturn(new RateLimitDecision(true, 0));
         when(repository.consume(
                 PublicAuthRateLimitType.EMAIL_AVAILABILITY,
                 subject,
@@ -41,6 +47,10 @@ class PublicAuthRateLimiterTest {
         )).thenReturn(new RateLimitDecision(false, 120));
 
         assertThat(rateLimiter.consume(
+                PublicAuthRateLimitType.CSRF_TOKEN_ISSUANCE,
+                "203.0.113.10"
+        ).allowed()).isTrue();
+        assertThat(rateLimiter.consume(
                 PublicAuthRateLimitType.EMAIL_AVAILABILITY,
                 "203.0.113.10"
         ).allowed()).isTrue();
@@ -49,6 +59,6 @@ class PublicAuthRateLimiterTest {
                 "203.0.113.10"
         ).retryAfterSeconds()).isEqualTo(120);
 
-        verify(subjectHasher, Mockito.times(2)).hash("ip:203.0.113.10");
+        verify(subjectHasher, Mockito.times(3)).hash("ip:203.0.113.10");
     }
 }

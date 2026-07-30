@@ -11,6 +11,9 @@ import {
   ADMIN_SETTINGS_MANAGE,
   AUDIT_LOG_VIEW,
   MISSION_VIEW,
+  REPORT_CREATE,
+  REPORT_UPDATE,
+  REPORT_VIEW,
   ROBOT_STATUS_VIEW,
 } from '../features/auth/permissions'
 import { AdminWorkspaceLayout } from '../features/admin/AdminWorkspaceLayout'
@@ -30,6 +33,8 @@ import { ReportsPage } from '../features/platform/ReportsPage'
 import { RobotManagePage } from '../features/robot/RobotManagePage'
 import { RoleManagePage } from '../features/platform/RoleManagePage'
 import { MissionManagePage } from '../features/mission/MissionManagePage'
+import { ReportDetailPage } from '../features/report/ReportDetailPage'
+import { ReportEditorPage } from '../features/report/ReportEditorPage'
 
 export const router = createBrowserRouter([
   {
@@ -107,7 +112,42 @@ export const router = createBrowserRouter([
           </RequirePermission>
         ),
       },
-      { path: 'reports', element: <ReportsPage /> },
+      {
+        path: 'reports',
+        element: (
+          <RequirePermission permission={REPORT_VIEW}>
+            <ReportsPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: 'reports/new',
+        element: (
+          <RequirePermission permission={REPORT_VIEW}>
+            <RequirePermission permission={REPORT_CREATE}>
+              <ReportEditorPage mode="create" />
+            </RequirePermission>
+          </RequirePermission>
+        ),
+      },
+      {
+        path: 'reports/:reportId',
+        element: (
+          <RequirePermission permission={REPORT_VIEW}>
+            <ReportDetailPage />
+          </RequirePermission>
+        ),
+      },
+      {
+        path: 'reports/:reportId/edit',
+        element: (
+          <RequirePermission permission={REPORT_VIEW}>
+            <RequirePermission permission={REPORT_UPDATE}>
+              <ReportEditorPage mode="edit" />
+            </RequirePermission>
+          </RequirePermission>
+        ),
+      },
       {
         path: 'admin',
         element: (
