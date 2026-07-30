@@ -3,7 +3,7 @@
 > 담당: 팀원 B — Robot 제어
 > 작업일: 2026-07-28 ~ 2026-07-30
 > 연결 Jira: `S15P11D101-377`, `S15P11D101-484`, `DAY6-B-02`, `DAY6-B-03`
-> 최종 상태: **Backend·Frontend·정상/비정상 Broker E2E DONE / 보안 E2E TODO**
+> 최종 상태: **Backend·Frontend·정상/비정상/보안 Broker E2E DONE**
 
 이 문서는 관리자 요청이 REST·DB·MQTT·Robot Result를 거쳐 다시 관리 화면으로
 돌아오는 **Command 왕복 흐름만** 묶는다. Patrol Area 생성, Mission 시간
@@ -18,7 +18,8 @@
 
 ## 0. 3분 요약
 
-Command Backend와 관리자 제어 화면, 정상·비정상 Broker 왕복은 구현·검증됐다.
+Command Backend와 관리자 제어 화면, 정상·비정상·보안 Broker 왕복은
+구현·검증됐다.
 
 ```text
 관리자 POST
@@ -42,7 +43,8 @@ REST, 중복 MQTT Result, Robot Scope와 감사 Rollback을 자동 테스트했�
 정상과 비정상 E2E는 실제 TLS Mosquitto와 Python Mock Robot을 연결해
 REST→DB→TLS Broker→Mock→Result→DB→SSE→React를 통과했다. Broker 발행 실패,
 업무 실패, 안전 거절, Timeout, REST/MQTT 중복과 늦은 Result까지 확인했으며
-남은 범위는 권한·Scope·CSRF·감사의 Browser E2E다.
+권한·Robot Scope·CSRF·감사도 실제 로그인 세션과 Chromium에서 검증했다.
+로컬 자동 검증 이후 남은 범위는 실제 Jetson·EC2 Broker 왕복이다.
 
 ---
 
@@ -259,6 +261,24 @@ python scripts/command-abnormal-e2e.py
 - 같은 MQTT `command_id`가 동작을 반복하지 않고 기존 `result_id`를 재발행하며
   Backend가 중복 Result를 저장하지 않는지 확인한다.
 
+보안 Broker·Browser E2E:
+
+```powershell
+cd web
+python scripts/command-security-e2e.py
+```
+
+- 익명 Command 조회가 `401 AUTH_UNAUTHENTICATED`인지 확인한다.
+- `ROBOT_COMMAND_EXECUTE`가 제거된 사용자는 화면이 조회 전용이고 직접 발행도
+  `403 AUTH_FORBIDDEN`인지 확인한다.
+- 전역 실행 권한이 있어도 대상 Robot 배정이 `VIEWER`면 직접 발행이
+  `404 ROBOT_NOT_FOUND`인지 확인해 객체 존재 여부를 숨긴다.
+- `OPERATOR` 배정 사용자의 CSRF 누락·불일치 발행이 각각 거절되는지 확인한다.
+- 정상 화면 발행과 같은 Idempotency Key 재요청 뒤 Command, Publish,
+  `ROBOT_COMMAND_ISSUED` 감사가 각각 한 건만 남는지 DB와 대조한다.
+- `AUTH_CSRF_FAILED`, `AUTH_ACCESS_DENIED` 거절 감사도 행위 사용자와 요청
+  경로가 일치하는지 확인한다.
+
 ---
 
 ## 5. 작업 중 겪은 함정
@@ -289,8 +309,7 @@ Backend의 중복 발행 방지만으로 충분하지 않다. QoS 1과 재연결
 
 ### 내 몫 — P0
 
-1. 권한·Robot Scope·CSRF·감사 Browser E2E
-2. 실제 Jetson·EC2 Broker 왕복
+1. 실제 Jetson·EC2 Broker 왕복
 
 ### 팀원 A
 
