@@ -1225,6 +1225,7 @@ def test_resend_keeps_event_id_and_occurred_at(wired):
         original = stored[event_id]
         assert payload["occurred_at"] == original["occurred_at"]
         assert payload["seq"] == original["seq"]
+        assert payload["ttl_sec"] == 300
         # 재전송에서 갱신되는 것은 sent_at 하나뿐이다 (§7).
         assert {k: v for k, v in payload.items() if k != "sent_at"} == {
             k: v for k, v in original.items() if k != "sent_at"

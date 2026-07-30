@@ -80,7 +80,7 @@ tasks.named('test') {
 
 tasks.register('mqttBrokerE2E', Test) {
     group = 'verification'
-    description = 'Runs the real TLS MQTT Publisher to Broker message-expiry E2E test.'
+    description = 'Runs real TLS MQTT outbound expiry and inbound Event-to-DB E2E tests.'
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
     useJUnitPlatform {

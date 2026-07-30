@@ -295,7 +295,7 @@ def test_start_registers_lwt_before_connecting(client, paho, config):
     assert (qos, retain) == (1, True)
     assert json.loads(payload) == {
         "schema_version": "2.0",
-        "robot_id": ROBOT_ID,
+        "mqtt_id": ROBOT_ID,
         "boot_id": client.messages.boot_id,
         "status": "OFFLINE",
         "reason": "UNGRACEFUL_DISCONNECT",
@@ -349,7 +349,7 @@ def test_shutdown_publishes_graceful_then_disconnects(client, paho):
     assert (qos, retain) == (1, True)
     assert json.loads(payload) == {
         "schema_version": "2.0",
-        "robot_id": ROBOT_ID,
+        "mqtt_id": ROBOT_ID,
         "boot_id": client.messages.boot_id,
         "status": "OFFLINE",
         "reason": "GRACEFUL_SHUTDOWN",

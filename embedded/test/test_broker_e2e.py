@@ -121,7 +121,7 @@ def test_connect_publishes_retained_online_presence(broker, client):
     record, body = hits[0]
     assert (record.qos, record.retain) == (1, True)
     assert body["schema_version"] == "2.0"
-    assert body["robot_id"] == ROBOT_ID
+    assert body["mqtt_id"] == ROBOT_ID
     assert body["boot_id"] == client.messages.boot_id
     assert body["connected_at"]
 
@@ -197,7 +197,7 @@ def test_ungraceful_kill_triggers_lwt(broker, tmp_path):
         record, body = hits[0]
         assert record.is_will is True
         assert (record.qos, record.retain) == (1, True)
-        assert body["robot_id"] == ROBOT_ID
+        assert body["mqtt_id"] == ROBOT_ID
         assert body["schema_version"] == "2.0"
     finally:
         child.kill()

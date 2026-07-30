@@ -678,7 +678,7 @@ def test_payload_matches_the_contract_shape(client, sampler):
     assert list(payload) == [
         "schema_version",
         "message_id",
-        "robot_id",
+        "mqtt_id",
         "boot_id",
         "seq",
         "sampled_at",
@@ -690,7 +690,7 @@ def test_payload_matches_the_contract_shape(client, sampler):
         "mission",
     ]
     assert payload["schema_version"] == "2.0"
-    assert payload["robot_id"] == ROBOT_ID
+    assert payload["mqtt_id"] == ROBOT_ID
 
 
 def test_message_id_is_new_for_every_sample(client, sampler, clock):

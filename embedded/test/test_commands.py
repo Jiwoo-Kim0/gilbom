@@ -246,14 +246,14 @@ def test_the_result_payload_matches_the_contract_shape(client, runner):
         "schema_version",
         "result_id",
         "command_id",
-        "robot_id",
+        "mqtt_id",
         "status",
         "received_at",
         "completed_at",
         "reason_code",
         "state",
     ]
-    assert payload["robot_id"] == ROBOT_ID
+    assert payload["mqtt_id"] == ROBOT_ID
     # state 는 처리 후 값이다.
     assert payload["state"] == {"mode": "SAFE_STOP", "reason_code": "REMOTE_ESTOP"}
 

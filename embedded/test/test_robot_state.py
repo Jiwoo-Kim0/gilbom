@@ -665,7 +665,7 @@ def test_payload_matches_the_contract_shape(client, publisher, state):
     payload = client.states()[-1]
     assert list(payload) == [
         "schema_version",
-        "robot_id",
+        "mqtt_id",
         "boot_id",
         "seq",
         "updated_at",
@@ -676,7 +676,7 @@ def test_payload_matches_the_contract_shape(client, publisher, state):
         "health",
     ]
     assert payload["schema_version"] == "2.0"
-    assert payload["robot_id"] == ROBOT_ID
+    assert payload["mqtt_id"] == ROBOT_ID
     # 미션 보관함은 아직 비어 있다 — 채우는 것은 R-5.
     assert payload["mission"] is None
     assert payload["battery"] == {"valid": False, "percent": None, "state": "UNKNOWN"}

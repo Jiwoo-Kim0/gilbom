@@ -362,7 +362,7 @@ mosquitto_pub \
   -u robot-test -P '테스트 비밀번호' \
   -t 'tbs/v2/robots/robot-test/telemetry' \
   -q 0 \
-  -m '{"schema_version":"2.0","message_id":"fb9c4472-226d-4473-b684-f0d8282292bd","robot_id":"robot-test","boot_id":"572b2e59-d31f-445f-a43d-7df80ba64203","seq":1,"sampled_at":"2026-07-26T05:15:35.000Z","mission_id":null,"position":{"valid":true,"lat":37.5013,"lon":127.0396,"heading_deg":null},"motion":{"moving":false,"speed_mps":null},"battery":{"valid":true,"percent":87.0,"state":"NORMAL","source":"MEASURED"},"system":{"jetson_temp_c":41.5},"mission":null}' \
+  -m '{"schema_version":"2.0","message_id":"fb9c4472-226d-4473-b684-f0d8282292bd","mqtt_id":"robot-test","boot_id":"572b2e59-d31f-445f-a43d-7df80ba64203","seq":1,"sampled_at":"2026-07-26T05:15:35.000Z","mission_id":null,"position":{"valid":true,"lat":37.5013,"lon":127.0396,"heading_deg":null},"motion":{"moving":false,"speed_mps":null},"battery":{"valid":true,"percent":87.0,"state":"NORMAL","source":"MEASURED"},"system":{"jetson_temp_c":41.5},"mission":null}' \
   -d
 ```
 

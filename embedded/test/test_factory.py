@@ -21,7 +21,12 @@ from comms import (
     topic,
     utc_now,
 )
-from comms.contract import NAMESPACE
+from comms.contract import (
+    EVENT_TTL_DEFAULT_SEC,
+    EVENT_TTL_MAX_SEC,
+    EVENT_TTL_MIN_SEC,
+    NAMESPACE,
+)
 
 ROBOT_ID = "RBT-001"
 ISO_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
@@ -104,7 +109,7 @@ def test_presence_online(factory):
     payload = factory.presence_online()
     assert payload == {
         "schema_version": "2.0",
-        "robot_id": ROBOT_ID,
+        "mqtt_id": ROBOT_ID,
         "boot_id": factory.boot_id,
         "status": "ONLINE",
         "connected_at": payload["connected_at"],
@@ -149,7 +154,7 @@ def test_state_full(factory):
     )
     assert list(payload) == [
         "schema_version",
-        "robot_id",
+        "mqtt_id",
         "boot_id",
         "seq",
         "updated_at",
@@ -285,7 +290,7 @@ def test_telemetry_full(factory):
     assert list(payload) == [
         "schema_version",
         "message_id",
-        "robot_id",
+        "mqtt_id",
         "boot_id",
         "seq",
         "sampled_at",
@@ -439,6 +444,7 @@ def test_incident_event(factory):
     assert is_uuid4(payload["event_id"])
     assert payload["occurred_at"] == "2026-07-26T05:15:34.231Z"
     assert ISO_PATTERN.match(payload["sent_at"])
+    assert payload["ttl_sec"] == EVENT_TTL_DEFAULT_SEC
     assert payload["location"] == {
         "valid": True,
         "lat": 37.4979,
@@ -651,14 +657,43 @@ def test_mission_paused_omits_result(factory):
         "schema_version",
         "event_id",
         "event_type",
-        "robot_id",
+        "mqtt_id",
         "boot_id",
         "seq",
         "source_component",
         "occurred_at",
         "sent_at",
+        "ttl_sec",
         "mission_id",
     ]
+
+
+@pytest.mark.parametrize(
+    "ttl_sec",
+    [EVENT_TTL_MIN_SEC, EVENT_TTL_MAX_SEC],
+)
+def test_event_ttl_accepts_contract_boundaries(ttl_sec):
+    factory = MessageFactory(ROBOT_ID, event_ttl_sec=ttl_sec)
+    payload = factory.mission_event(
+        event_type="MISSION_PAUSED",
+        occurred_at="2026-07-26T05:30:00.000Z",
+        mission_id="MIS-20260726-001",
+    )
+    assert payload["ttl_sec"] == ttl_sec
+
+
+@pytest.mark.parametrize(
+    "ttl_sec",
+    [
+        EVENT_TTL_MIN_SEC - 1,
+        EVENT_TTL_MAX_SEC + 1,
+        60.0,
+        True,
+    ],
+)
+def test_event_ttl_rejects_values_outside_contract(ttl_sec):
+    with pytest.raises(ValueError, match="event_ttl_sec"):
+        MessageFactory(ROBOT_ID, event_ttl_sec=ttl_sec)
 
 
 def test_mission_started_must_not_carry_result(factory):
@@ -701,7 +736,7 @@ def test_command_result_completed(factory):
         "schema_version",
         "result_id",
         "command_id",
-        "robot_id",
+        "mqtt_id",
         "status",
         "received_at",
         "completed_at",

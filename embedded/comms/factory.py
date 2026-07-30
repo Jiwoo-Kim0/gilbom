@@ -13,6 +13,9 @@ from .contract import (
     BLOCK_TYPES,
     COMMAND_STATUSES,
     DEFECT_TYPES,
+    EVENT_TTL_DEFAULT_SEC,
+    EVENT_TTL_MAX_SEC,
+    EVENT_TTL_MIN_SEC,
     INCIDENT_EVENT_TYPE,
     MISSION_EVENT_TYPES,
     MISSION_STATES,
@@ -37,11 +40,26 @@ class MessageFactory:
               presence 와 commands/result 는 seq 를 쓰지 않는다.
     """
 
-    def __init__(self, robot_id: str, boot_id: str = None) -> None:
+    def __init__(
+        self,
+        robot_id: str,
+        boot_id: str = None,
+        event_ttl_sec: int = EVENT_TTL_DEFAULT_SEC,
+    ) -> None:
         if not robot_id:
             raise ValueError("robot_id is required")
+        if (
+            isinstance(event_ttl_sec, bool)
+            or not isinstance(event_ttl_sec, int)
+            or not EVENT_TTL_MIN_SEC <= event_ttl_sec <= EVENT_TTL_MAX_SEC
+        ):
+            raise ValueError(
+                "event_ttl_sec must be an integer between "
+                f"{EVENT_TTL_MIN_SEC} and {EVENT_TTL_MAX_SEC}"
+            )
         self.robot_id = robot_id
         self.boot_id = boot_id or new_uuid()
+        self.event_ttl_sec = event_ttl_sec
         self.topics = Topics(robot_id)
         self._seq = 0
         self._seq_lock = threading.Lock()
@@ -60,7 +78,7 @@ class MessageFactory:
     def _head(self) -> dict:
         return {
             "schema_version": SCHEMA_VERSION,
-            "robot_id": self.robot_id,
+            "mqtt_id": self.robot_id,
             "boot_id": self.boot_id,
         }
 
@@ -103,7 +121,7 @@ class MessageFactory:
         health_members = health(**health_block)
         return {
             "schema_version": SCHEMA_VERSION,
-            "robot_id": self.robot_id,
+            "mqtt_id": self.robot_id,
             "boot_id": self.boot_id,
             "seq": self.next_seq(),
             "updated_at": updated_at or utc_now(),
@@ -163,7 +181,7 @@ class MessageFactory:
         return {
             "schema_version": SCHEMA_VERSION,
             "message_id": new_uuid(),
-            "robot_id": self.robot_id,
+            "mqtt_id": self.robot_id,
             "boot_id": self.boot_id,
             "seq": self.next_seq(),
             "sampled_at": sampled_at or utc_now(),
@@ -215,7 +233,7 @@ class MessageFactory:
             "schema_version": SCHEMA_VERSION,
             "event_id": new_uuid(),
             "event_type": event_type,
-            "robot_id": self.robot_id,
+            "mqtt_id": self.robot_id,
             "boot_id": self.boot_id,
             "seq": self.next_seq(),
             "source_component": _enum(
@@ -223,6 +241,7 @@ class MessageFactory:
             ),
             "occurred_at": occurred_at,
             "sent_at": sent_at or utc_now(),
+            "ttl_sec": self.event_ttl_sec,
             "mission_id": mission_id,
         }
 
@@ -428,7 +447,7 @@ class MessageFactory:
             "schema_version": SCHEMA_VERSION,
             "result_id": new_uuid(),
             "command_id": command_id,
-            "robot_id": self.robot_id,
+            "mqtt_id": self.robot_id,
             "status": status,
             "received_at": received_at,
             "completed_at": completed_at,

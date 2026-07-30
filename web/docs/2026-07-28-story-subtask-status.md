@@ -64,7 +64,7 @@ Day 9까지 흩어진 팀원 B 백로그다.
 | `S15P11D101-377` Robot 명령·ACK 생명주기와 REST API | REST에서 명령을 생성·조회하고 DB 저장 후 MQTT로 발행한다. `command_id` 멱등성, 만료시간, Retain 금지, ACK/Result 저장, `CREATED→SENT→ACCEPTED→COMPLETED` 및 실패·거절·만료 전이를 관리한다. | **DONE (Backend)** | V21 Command·Result Table, 생성·목록·단건·결과 REST, MQTT 5 Message Expiry, `PUBLISH_FAILED`, ACK 영속화, 지연 결과 보호, Timeout Scheduler, `COMMAND_STATUS_CHANGED` SSE, Permission·SQL Scope를 구현했다. 정상·실패·거절·만료·중복·범위 밖·감사 실패 Rollback 통합 테스트와 전체 323 tests가 실패 없이 통과했다. | 실제 Mock Robot이 명령을 수신하고 Result를 되돌리는 Broker E2E는 `B-STORY-06` 통합 범위로 추적한다. |
 | `S15P11D101-378` Presence·State·Boot Session 저장 | Presence로 연결·단절과 Last Will을 기록하고 State로 mode·health를 저장한다. `boot_id`별 Session과 `seq` 진행을 추적해 재부팅과 Replay를 구분하고 변경을 SSE로 알린다. | **DONE** | V18 Boot Session·append-only Status History, Presence·State Service/Handler, 90초 Timeout과 commit 이후 SSE를 구현했다. `S15P11D101-432`에서 State·Telemetry·Event 공용 `seq`, 새 Boot `seq=1`, 종료·이전 Boot Replay 차단을 보강했다. | 실제 Jetson 단절·재연결 실기와 다중 Backend SSE Fan-out은 Day 7~10 후속 통합 범위다. |
 | `S15P11D101-379` 순찰 임무와 경로 관리 | 순찰 구역·경로 CRUD, Mission 생성·Robot 배정, 상태 전이·이력, 진행률, 실제 궤적, 충전 후 재개를 관리하고 명령 수명주기와 연결한다. | **IN PROGRESS** | V22~V25 정본·FK·Robot별 활성 Mission 제약, Area 등록·조회·이름/경계 변경·보관 REST, Route 불변 버전·자동 비활성화 정책, Mission 생성·목록·상세·변경·궤적·이력 REST, Telemetry 경로 진행률·예상 완료 시각, START·PAUSE·RESUME·CANCEL Command FK, OpenAPI와 통합 테스트를 구현했다. | 복귀·충전 상태 계약과 실제 Broker E2E가 남았다. |
-| `S15P11D101-432` `boot_id`·`seq` Replay 정책 고정 | State·Telemetry·Event 4종의 Boot별 공용 순번, 정확한 재전송 멱등성, 교차 Topic 충돌과 종료·이전 Boot 차단을 하나의 정책으로 적용한다. | **DONE (Backend)** | 공통 Replay Service가 Current State 행 잠금 아래 세 History Table을 함께 검사한다. 새 Boot `seq=1`, 증가 순번·누락 허용, `REPLACED_BY_NEW_BOOT`, 복구 가능한 Presence 재연결, 제한 Metric과 오류 코드가 구현됐고 집중 4 Suite·30 Test와 전체 98 Suite·514 Test가 실패 없이 통과했다. | 실제 Robot·Mock Publisher가 UUIDv4 Boot와 공용 순번을 계약대로 생성하는지는 Broker E2E에서 확인한다. |
+| `S15P11D101-432` `boot_id`·`seq` Replay 정책 고정 | State·Telemetry·Event 4종의 Boot별 공용 순번, 정확한 재전송 멱등성, 교차 Topic 충돌과 종료·이전 Boot 차단을 하나의 정책으로 적용한다. | **DONE (Backend·Mock)** | 공통 Replay Service가 Current State 행 잠금 아래 세 History Table을 함께 검사한다. 새 Boot `seq=1`, 증가 순번·누락 허용, `REPLACED_BY_NEW_BOOT`, 복구 가능한 Presence 재연결, 제한 Metric과 오류 코드가 구현됐다. 실제 로컬 TLS Broker에서 정상 Event의 정확한 재전송 멱등성과 같은 `(boot_id,seq)`의 다른 Event 충돌 거부를 검증했다. | 실제 Jetson Publisher와 EC2 Broker 재검증은 Day 7 통합 범위다. |
 | `S15P11D101-434` 기기 Credential 회전·폐기 API | 기존 발급 API가 새 Credential 버전을 회전하고, Secret 없는 이력 조회와 ACTIVE Credential 즉시 폐기를 제공한다. | **DONE (Backend)** | Robot 잠금 기반 버전 직렬화, 기존 버전 `REVOKED(ROTATED)`, Broker hash 일치 검증, DB 실패 시 이전 hash 복구, 필수 감사, 반복 폐기 멱등성, 권한·CSRF를 구현했다. `TODAY-B-00-6`에서 Registry Drift 조회·복구와 실제 TLS Cutover까지 검증했다. | EC2 운영 Broker와 실제 Jetson의 Cutover는 배포·장비 연동 단계에서 최종 확인한다. |
 
 ## 3. Story별 완료 조건
@@ -175,6 +175,8 @@ Day 9까지 흩어진 팀원 B 백로그다.
   - [x] Telemetry·State·Presence·Command·Result Payload 초안
   - [x] Event `ttl_sec` 60~300초와 `occurred_at` 기준 만료 처리 확정
   - [x] Backend의 `boot_id`, 공용 `seq`, 재시도 ID Replay 정책 고정 (`S15P11D101-432`)
+  - [x] Embedded Event Wire Payload의 `mqtt_id`·`ttl_sec`와 재전송 불변 필드 자동 검증
+  - [x] 로컬 TLS Broker에서 Event 만료·미래시각·정확한 재전송·순번 충돌 DB E2E
   - [ ] `(WAITING)` Embedded 구현이 UUIDv4 Boot·공용 `seq`·재시도 ID 정책을 따르는지 확인
   - [ ] `(WAITING)` Embedded의 NTP 오차와 발행 주기 확인
   - [ ] `(WAITING)` MQTT Client ID와 동시 접속 정책 확인
@@ -189,6 +191,7 @@ Day 9까지 흩어진 팀원 B 백로그다.
   - [ ] State 수신·DB 반영 재검증
   - [x] Telemetry 수신·DB 반영 재검증
   - [x] 중복 이벤트의 이력 중복 저장 방지 검증
+  - [x] Event 만료·미래시각·정확한 재전송·순번 충돌의 TLS Broker→DB 검증
   - [x] 오래된 Telemetry의 현재 상태 덮어쓰기 방지 DB 검증
   - [ ] 미등록 `mqtt_id`와 ACL 위반 거절 검증
   - [ ] Command 발행 → Mock 수신 → Result 수신 검증

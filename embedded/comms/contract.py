@@ -2,6 +2,9 @@
 
 NAMESPACE = "tbs/v2"
 SCHEMA_VERSION = "2.0"
+EVENT_TTL_MIN_SEC = 60
+EVENT_TTL_MAX_SEC = 300
+EVENT_TTL_DEFAULT_SEC = 300
 
 
 # --------------------------------------------------------------------------
