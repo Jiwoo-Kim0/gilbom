@@ -23,6 +23,7 @@ import {
 import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { useAuthentication } from '../auth/authenticationContext'
 import { MISSION_MANAGE } from '../auth/permissions'
+import { useRobotRealtime } from '../robot/useRobotRealtime'
 import {
   createMission,
   getMission,
@@ -96,7 +97,10 @@ function formatDuration(seconds: number | null): string {
 function MissionStatusBadge({ status }: { status: MissionStatus }) {
   const presentation = statusPresentation[status]
   return (
-    <span className={`mission-status mission-status-${presentation.tone}`}>
+    <span
+      className={`mission-status mission-status-${presentation.tone}`}
+      data-status={status}
+    >
       {presentation.label}
     </span>
   )
@@ -133,6 +137,7 @@ export function MissionManagePage() {
   const requestedListKeyRef = useRef<string | null>(null)
   const requestedDetailIdRef = useRef<string | null>(null)
   const catalogRequestedRef = useRef(false)
+  const realtimeRefreshTimerRef = useRef<number | null>(null)
   const [draftFilters, setDraftFilters] = useState<MissionFilters>(emptyFilters)
   const [appliedFilters, setAppliedFilters] = useState<MissionFilters>(emptyFilters)
   const [missions, setMissions] = useState<MissionListResponse | null>(null)
@@ -219,6 +224,53 @@ export function MissionManagePage() {
     setCatalogLoading(false)
   }, [])
 
+  const loadMissionDetail = useCallback(async (missionId: string) => {
+    requestedDetailIdRef.current = missionId
+    setDetailLoading(true)
+    setDetailError(null)
+    try {
+      const [mission, statusHistory] = await Promise.all([
+        getMission(missionId),
+        getMissionHistory(missionId),
+      ])
+      if (requestedDetailIdRef.current !== missionId) {
+        return
+      }
+      setSelectedMission(mission)
+      setHistory(statusHistory.history)
+    } catch (error) {
+      if (requestedDetailIdRef.current === missionId) {
+        setDetailError(error)
+      }
+    } finally {
+      if (requestedDetailIdRef.current === missionId) {
+        setDetailLoading(false)
+      }
+    }
+  }, [])
+
+  const refreshFromRealtime = useCallback(() => {
+    if (realtimeRefreshTimerRef.current !== null) {
+      window.clearTimeout(realtimeRefreshTimerRef.current)
+    }
+    realtimeRefreshTimerRef.current = window.setTimeout(() => {
+      requestedListKeyRef.current = null
+      void loadMissions(page, appliedFilters)
+      if (selectedMissionId !== null) {
+        requestedDetailIdRef.current = null
+        void loadMissionDetail(selectedMissionId)
+      }
+    }, 250)
+  }, [
+    appliedFilters,
+    loadMissionDetail,
+    loadMissions,
+    page,
+    selectedMissionId,
+  ])
+
+  useRobotRealtime(refreshFromRealtime)
+
   useEffect(() => {
     const queryKey = JSON.stringify([page, appliedFilters])
     if (requestedListKeyRef.current === queryKey) {
@@ -250,29 +302,14 @@ export function MissionManagePage() {
       return
     }
 
-    const missionId = selectedMissionId
-    requestedDetailIdRef.current = missionId
-    setDetailLoading(true)
-    setDetailError(null)
-    void Promise.all([
-      getMission(missionId),
-      getMissionHistory(missionId),
-    ]).then(([mission, statusHistory]) => {
-      if (requestedDetailIdRef.current !== missionId) {
-        return
-      }
-      setSelectedMission(mission)
-      setHistory(statusHistory.history)
-    }).catch((error: unknown) => {
-      if (requestedDetailIdRef.current === missionId) {
-        setDetailError(error)
-      }
-    }).finally(() => {
-      if (requestedDetailIdRef.current === missionId) {
-        setDetailLoading(false)
-      }
-    })
-  }, [selectedMissionId])
+    void loadMissionDetail(selectedMissionId)
+  }, [loadMissionDetail, selectedMissionId])
+
+  useEffect(() => () => {
+    if (realtimeRefreshTimerRef.current !== null) {
+      window.clearTimeout(realtimeRefreshTimerRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     if (createAreaId.length === 0) {
@@ -370,10 +407,10 @@ export function MissionManagePage() {
 
   function refresh() {
     requestedListKeyRef.current = null
-    requestedDetailIdRef.current = null
     void loadMissions(page, appliedFilters)
     if (selectedMissionId !== null) {
-      setSelectedMissionId((current) => current)
+      requestedDetailIdRef.current = null
+      void loadMissionDetail(selectedMissionId)
     }
   }
 
@@ -830,7 +867,11 @@ export function MissionManagePage() {
           </div>
         </div>
 
-        <aside className="content-card mission-detail-card" aria-live="polite">
+        <aside
+          className="content-card mission-detail-card"
+          aria-live="polite"
+          data-testid="mission-detail"
+        >
           {detailLoading ? (
             <div className="admin-loading" role="status">
               <span className="loading-spinner" aria-hidden="true" />
@@ -861,7 +902,10 @@ export function MissionManagePage() {
                 </span>
               </div>
 
-              <div className="mission-progress-card">
+              <div
+                className="mission-progress-card"
+                data-testid="mission-detail-progress"
+              >
                 <div>
                   <span>
                     <CircleGauge size={16} aria-hidden="true" />
@@ -967,7 +1011,11 @@ export function MissionManagePage() {
                 </div>
               </div>
 
-              <section className="mission-history" aria-labelledby="history-title">
+              <section
+                className="mission-history"
+                aria-labelledby="history-title"
+                data-testid="mission-detail-history"
+              >
                 <div className="mission-section-heading">
                   <div>
                     <History size={17} aria-hidden="true" />
