@@ -3,6 +3,7 @@ import { expect, test, type Route } from '@playwright/test'
 const USER_ID = '83000000-0000-4000-8000-000000000001'
 const ROBOT_ID = '83000000-0000-4000-8000-000000000002'
 const BUSY_ROBOT_ID = '83000000-0000-4000-8000-000000000006'
+const PROVISIONING_ROBOT_ID = '83000000-0000-4000-8000-000000000007'
 const AREA_ID = '83000000-0000-4000-8000-000000000003'
 const ROUTE_ID = '83000000-0000-4000-8000-000000000004'
 const MISSION_ID = '83000000-0000-4000-8000-000000000005'
@@ -86,6 +87,7 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
   let areaCreated = false
   let missionCreated = false
   let routeRequested = false
+  let credentialIssued = false
   let createPayload: Record<string, unknown> | null = null
   let missionCreatePayload: Record<string, unknown> | null = null
 
@@ -254,7 +256,7 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
         userId: USER_ID,
         displayName: '순찰 구역 E2E 관리자',
         roles: [{ roleCode: 'OPERATOR', roleName: '운영자' }],
-        permissions: ['MISSION_VIEW', 'MISSION_MANAGE'],
+        permissions: ['MISSION_VIEW', 'MISSION_MANAGE', 'ROBOT_REGISTER'],
       })
       return
     }
@@ -286,12 +288,44 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
           connectivityStatus: 'ONLINE',
           missionStatus: 'RUNNING',
           overallHealthStatus: 'NORMAL',
+        }, {
+          robotId: PROVISIONING_ROBOT_ID,
+          mqttId: 'robot-provisioning-e2e',
+          robotName: '활성화 대기 로봇',
+          serialNumber: 'PROVISIONING-E2E-001',
+          operationalStatus: credentialIssued ? 'ACTIVE' : 'PROVISIONING',
+          connectivityStatus: 'OFFLINE',
+          missionStatus: null,
+          overallHealthStatus: 'UNKNOWN',
         }],
         page: 0,
         size: 100,
-        totalElements: 2,
+        totalElements: 3,
         totalPages: 1,
       })
+      return
+    }
+    if (
+      pathname
+        === `/api/v1/robots/${PROVISIONING_ROBOT_ID}/credentials`
+      && request.method() === 'POST'
+    ) {
+      expect(request.headers()['x-csrf-token']).toBe('patrol-area-e2e-csrf')
+      expect(request.headers()['idempotency-key']).toMatch(
+        /^[0-9a-f-]{36}$/u,
+      )
+      credentialIssued = true
+      await fulfillJson(route, {
+        credentialId: '83000000-0000-4000-8000-000000000008',
+        credentialType: 'PASSWORD',
+        connection: {
+          brokerUri: 'mqtts://127.0.0.1:8883',
+          username: 'robot-provisioning-e2e',
+          password: 'one-time-password',
+          clientId: 'robot-provisioning-e2e',
+        },
+        expiresAt: null,
+      }, 201)
       return
     }
     if (pathname === '/api/v1/robots/map') {
@@ -574,6 +608,19 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
     128.4165,
     36.1075,
   ])
+
+  await page.getByRole('button', {
+    name: '활성화 대기 로봇 (robot-provisioning-e2e) 발급·활성화',
+  }).click()
+  await expect(
+    page.getByRole('dialog', { name: 'Robot 발급·활성화' }),
+  ).toBeVisible()
+  await page.getByRole('button', { name: '발급·활성화', exact: true }).click()
+  await expect(page.getByText('one-time-password')).toBeVisible()
+  await expect(page.locator('#mission-create-robot')).toHaveValue(
+    PROVISIONING_ROBOT_ID,
+  )
+  await page.getByRole('button', { name: '확인 후 닫기' }).click()
 
   await page.locator('#mission-create-robot').selectOption(ROBOT_ID)
   await expect(
