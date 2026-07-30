@@ -45,6 +45,10 @@ import {
 import { getReportActionPolicy } from './reportPolicy'
 import { ReportStatusBadge } from './ReportStatusBadge'
 import { SafeReportText } from './SafeReportText'
+import {
+  useReportRealtime,
+  type ReportRealtimeEvent,
+} from './useReportRealtime'
 import type {
   ReportDetail,
   ReportVersion,
@@ -133,6 +137,23 @@ export function ReportDetailPage() {
       }
     }
   }, [reportId])
+
+  const refreshFromRealtime = useCallback((
+    event: ReportRealtimeEvent | null,
+  ) => {
+    if (event?.deleted === true) {
+      navigate('/reports', {
+        replace: true,
+        state: {
+          notice: '보고서가 삭제되어 목록으로 이동했습니다.',
+        },
+      })
+      return
+    }
+    void load(true)
+  }, [load, navigate])
+
+  useReportRealtime(refreshFromRealtime, reportId)
 
   useEffect(() => {
     const timer = window.setTimeout(() => {

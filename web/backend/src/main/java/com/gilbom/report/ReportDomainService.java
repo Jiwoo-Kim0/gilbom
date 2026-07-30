@@ -10,6 +10,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,6 +27,7 @@ import com.gilbom.common.error.ErrorCode;
 import com.gilbom.report.ReportCreationIdempotencyRepository.Claim;
 import com.gilbom.report.pdf.ApprovedReportPdfArtifact;
 import com.gilbom.report.pdf.ApprovedReportPdfService;
+import com.gilbom.report.realtime.ReportRealtimeEvent;
 
 @Service
 public class ReportDomainService {
@@ -50,6 +52,7 @@ public class ReportDomainService {
     private final ExpectedVersionGuard expectedVersionGuard;
     private final AuditLogService auditLogService;
     private final ApprovedReportPdfService approvedPdfService;
+    private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
 
     public ReportDomainService(
@@ -59,6 +62,7 @@ public class ReportDomainService {
             ExpectedVersionGuard expectedVersionGuard,
             AuditLogService auditLogService,
             ApprovedReportPdfService approvedPdfService,
+            ApplicationEventPublisher eventPublisher,
             Clock clock
     ) {
         this.repository = repository;
@@ -67,6 +71,7 @@ public class ReportDomainService {
         this.expectedVersionGuard = expectedVersionGuard;
         this.auditLogService = auditLogService;
         this.approvedPdfService = approvedPdfService;
+        this.eventPublisher = eventPublisher;
         this.clock = clock;
     }
 
@@ -154,6 +159,7 @@ public class ReportDomainService {
                 created,
                 null);
         idempotencyRepository.complete(claim, created);
+        publishUpdated(created);
         return new CreatedReport(created, true);
     }
 
@@ -196,6 +202,7 @@ public class ReportDomainService {
                 before,
                 updated,
                 content.changeNote());
+        publishUpdated(updated);
         return updated;
     }
 
@@ -226,6 +233,7 @@ public class ReportDomainService {
                 before,
                 submitted,
                 null);
+        publishUpdated(submitted);
         return submitted;
     }
 
@@ -274,6 +282,7 @@ public class ReportDomainService {
                 before,
                 approved,
                 optionalReason(reason));
+        publishUpdated(approved);
         return approved;
     }
 
@@ -306,6 +315,7 @@ public class ReportDomainService {
                 before,
                 rejected,
                 rejectionReason);
+        publishUpdated(rejected);
         return rejected;
     }
 
@@ -332,6 +342,7 @@ public class ReportDomainService {
                 before,
                 deleted,
                 null);
+        publishUpdated(deleted);
     }
 
     @Transactional(readOnly = true)
@@ -361,6 +372,11 @@ public class ReportDomainService {
         return repository.findActiveById(reportId)
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.REPORT_NOT_FOUND));
+    }
+
+    private void publishUpdated(ReportRecord report) {
+        eventPublisher.publishEvent(
+                ReportRealtimeEvent.from(report));
     }
 
     private void requireExpectedVersion(

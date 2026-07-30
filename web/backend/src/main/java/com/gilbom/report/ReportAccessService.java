@@ -35,12 +35,7 @@ public class ReportAccessService {
 
     @Transactional(readOnly = true)
     public void require(UUID userId, String permission) {
-        boolean allowed = userId != null
-                && userRepository.findActiveUser(userId)
-                        .map(user -> user.permissions()
-                                .contains(permission))
-                        .orElse(false);
-        if (!allowed) {
+        if (!hasPermission(userId, permission)) {
             throw new BusinessException(
                     ErrorCode.REPORT_ACCESS_DENIED);
         }
@@ -66,5 +61,28 @@ public class ReportAccessService {
             throw new BusinessException(
                     ErrorCode.REPORT_NOT_FOUND);
         }
+    }
+
+    /**
+     * SSE 이벤트를 보내기 직전의 현재 권한·객체 범위 검사다.
+     *
+     * <p>삭제 이벤트도 구독자 화면에서 제거해야 하므로 soft-delete된 보고서까지
+     * 존재 여부를 확인한다. 현재 MVP 범위는 REPORT_VIEW 권한 전체지만 향후 조직·
+     * 구역 범위가 추가되면 이 진입점에서 함께 제한한다.</p>
+     */
+    @Transactional(readOnly = true)
+    public boolean canReceiveEvent(UUID userId, UUID reportId) {
+        return reportId != null
+                && hasPermission(userId, VIEW)
+                && reportRepository.findById(reportId).isPresent();
+    }
+
+    private boolean hasPermission(UUID userId, String permission) {
+        return userId != null
+                && permission != null
+                && userRepository.findActiveUser(userId)
+                        .map(user -> user.permissions()
+                                .contains(permission))
+                        .orElse(false);
     }
 }
