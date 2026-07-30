@@ -74,7 +74,9 @@ public class ReportLlmGenerationPipeline {
 
         LlmGenerationRequest llmRequest;
         try {
-            llmRequest = requestFactory.create(prepared);
+            llmRequest = requestFactory.create(
+                    request.actorUserId(),
+                    prepared);
         } catch (RuntimeException exception) {
             return fallback(
                     request,

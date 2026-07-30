@@ -101,6 +101,8 @@ services:
       GILBOM_MAX_REQUEST_HEADER_SIZE: ${GILBOM_MAX_REQUEST_HEADER_SIZE:-16KB}
       GILBOM_MAX_UPLOAD_FILE_SIZE: ${GILBOM_MAX_UPLOAD_FILE_SIZE:-500KB}
       GILBOM_REPORT_PDF_STORAGE_ROOT: ${GILBOM_REPORT_PDF_STORAGE_ROOT:-/app/data/report-pdf}
+      GILBOM_STORAGE_LOCAL_ROOT_DIRECTORY: ${GILBOM_STORAGE_LOCAL_ROOT_DIRECTORY:-/app/data/robot-images}
+      GILBOM_STORAGE_URL_SIGNING_KEY_BASE64: ${GILBOM_STORAGE_URL_SIGNING_KEY_BASE64:-}
       # 기본은 Nginx same-origin 전용이다. true일 때만 정확한 Origin 목록을 전달한다.
       GILBOM_CORS_ENABLED: ${GILBOM_CORS_ENABLED:-false}
       GILBOM_CORS_ALLOWED_ORIGINS: ${GILBOM_CORS_ALLOWED_ORIGINS:-}
@@ -176,6 +178,7 @@ services:
       - ./infra/mosquitto/local/runtime/certs:/app/config/mqtt/certs:ro
       - ./infra/mosquitto/local/runtime/credentials:/app/config/mqtt/credentials
       - report_pdf_data:/app/data/report-pdf
+      - robot_images:/app/data/robot-images
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
     depends_on:
@@ -273,6 +276,8 @@ volumes:
   postgres_data:
   # 승인 PDF는 승인 버전·SHA-256과 결합되므로 backend 재배포 뒤에도 유지한다.
   report_pdf_data:
+  # S3 전환 전 로컬 결함 이미지를 backend 컨테이너 재생성 뒤에도 유지한다.
+  robot_images:
 
 networks:
   backend:

@@ -1,95 +1,113 @@
 package com.gilbom.report.generation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.gilbom.defect.DefectReportImageService;
+import com.gilbom.defect.DefectReportImageService.DefectReportImage;
 import com.gilbom.llm.FakeLlmClient;
 import com.gilbom.llm.LlmGenerationRequest;
 import com.gilbom.llm.LlmProperties;
-import com.gilbom.report.generation.DefectImageContentReader.ImageContent;
-import com.gilbom.report.generation.DefectImageContentReader.ReportPeriod;
+import com.gilbom.report.generation.ReportLlmInputPreparer.PreparedReportLlmInput;
 
 class ReportLlmRequestFactoryTest {
 
-    private static final Instant FROM =
-            Instant.parse("2026-07-01T00:00:00Z");
-    private static final Instant TO =
-            Instant.parse("2026-07-31T23:59:59Z");
+    private static final UUID USER_ID =
+            UUID.fromString("7d273071-3ebf-4a0e-96e0-c6d9a623f799");
+    private static final Instant FROM = ReportLlmTestFixtures.FROM;
+    private static final Instant TO = ReportLlmTestFixtures.TO;
 
     @Test
     void readsOneTopImageWhenImagePolicyIsApproved() {
-        FakeReader reader = new FakeReader(List.of(
-                image("INC-001", 1),
-                image("INC-002", 2)));
+        DefectReportImageService imageService =
+                mock(DefectReportImageService.class);
+        when(imageService.findReportImages(
+                USER_ID,
+                FROM,
+                TO,
+                1))
+                .thenReturn(List.of(image(
+                        ReportLlmTestFixtures.DEFECT_ID,
+                        "INC-20260715-000001",
+                        1)));
         ReportLlmRequestFactory factory =
                 new ReportLlmRequestFactory(
-                        Optional.of(reader),
+                        Optional.of(imageService),
                         imageApprovedProperties(),
                         new FakeLlmClient());
 
         LlmGenerationRequest request = factory.create(
-                Map.of("statistics", Map.of("defectCount", 2)),
-                FROM,
-                TO);
+                USER_ID,
+                prepared());
 
-        assertThat(reader.maxImages()).containsExactly(1);
-        assertThat(reader.periods())
-                .containsExactly(new ReportPeriod(FROM, TO));
+        verify(imageService).findReportImages(
+                USER_ID,
+                FROM,
+                TO,
+                1);
         assertThat(request.images()).hasSize(1);
         assertThat(request.images().getFirst().incidentCode())
-                .isEqualTo("INC-001");
+                .isEqualTo("INC-20260715-000001");
     }
 
     @Test
-    void emptyReaderResultKeepsTextOnlyGeneration() {
-        FakeReader reader = new FakeReader(List.of());
+    void emptyImageResultKeepsTextOnlyGeneration() {
+        DefectReportImageService imageService =
+                mock(DefectReportImageService.class);
+        when(imageService.findReportImages(
+                USER_ID,
+                FROM,
+                TO,
+                1))
+                .thenReturn(List.of());
         ReportLlmRequestFactory factory =
                 new ReportLlmRequestFactory(
-                        Optional.of(reader),
+                        Optional.of(imageService),
                         imageApprovedProperties(),
                         new FakeLlmClient());
 
         LlmGenerationRequest request = factory.create(
-                Map.of("period", "2026-07"),
-                FROM,
-                TO);
+                USER_ID,
+                prepared());
 
         assertThat(request.images()).isEmpty();
         assertThat(request.input())
-                .containsEntry("period", "2026-07");
+                .containsKey("period");
     }
 
     @Test
     void unapprovedImagePolicyDoesNotReadOrSendImages() {
-        FakeReader reader = new FakeReader(
-                List.of(image("INC-001", 1)));
+        DefectReportImageService imageService =
+                mock(DefectReportImageService.class);
         LlmProperties properties = imageApprovedProperties();
         properties.setImageDeidentificationApproved(false);
         ReportLlmRequestFactory factory =
                 new ReportLlmRequestFactory(
-                        Optional.of(reader),
+                        Optional.of(imageService),
                         properties,
                         new FakeLlmClient());
 
         LlmGenerationRequest request = factory.create(
-                Map.of("period", "2026-07"),
-                FROM,
-                TO);
+                USER_ID,
+                prepared());
 
-        assertThat(reader.periods()).isEmpty();
+        verifyNoInteractions(imageService);
         assertThat(request.images()).isEmpty();
     }
 
     @Test
-    void missingReaderBeanKeepsTextOnlyGeneration() {
+    void missingImageServiceBeanKeepsTextOnlyGeneration() {
         ReportLlmRequestFactory factory =
                 new ReportLlmRequestFactory(
                         Optional.empty(),
@@ -97,28 +115,52 @@ class ReportLlmRequestFactoryTest {
                         new FakeLlmClient());
 
         assertThat(factory.create(
-                Map.of("period", "2026-07"),
-                FROM,
-                TO).images()).isEmpty();
+                USER_ID,
+                prepared()).images()).isEmpty();
     }
 
     @Test
     void unavailableLlmDoesNotReadImages() {
-        FakeReader reader = new FakeReader(
-                List.of(image("INC-001", 1)));
+        DefectReportImageService imageService =
+                mock(DefectReportImageService.class);
         ReportLlmRequestFactory factory =
                 new ReportLlmRequestFactory(
-                        Optional.of(reader),
+                        Optional.of(imageService),
                         imageApprovedProperties(),
                         new FakeLlmClient().available(false));
 
         LlmGenerationRequest request = factory.create(
-                Map.of("period", "2026-07"),
-                FROM,
-                TO);
+                USER_ID,
+                prepared());
 
-        assertThat(reader.periods()).isEmpty();
+        verifyNoInteractions(imageService);
         assertThat(request.images()).isEmpty();
+    }
+
+    @Test
+    void mismatchedImageClassificationIsNotSent() {
+        DefectReportImageService imageService =
+                mock(DefectReportImageService.class);
+        when(imageService.findReportImages(
+                USER_ID,
+                FROM,
+                TO,
+                1))
+                .thenReturn(List.of(image(
+                        ReportLlmTestFixtures.DEFECT_ID,
+                        "INC-20260715-000001",
+                        1,
+                        "DAMAGED",
+                        "CRITICAL")));
+        ReportLlmRequestFactory factory =
+                new ReportLlmRequestFactory(
+                        Optional.of(imageService),
+                        imageApprovedProperties(),
+                        new FakeLlmClient());
+
+        assertThat(factory.create(
+                USER_ID,
+                prepared()).images()).isEmpty();
     }
 
     private static LlmProperties imageApprovedProperties() {
@@ -128,13 +170,37 @@ class ReportLlmRequestFactoryTest {
         return properties;
     }
 
-    private static ImageContent image(
+    private static PreparedReportLlmInput prepared() {
+        return new ReportLlmInputPreparer(
+                new ObjectMapper().findAndRegisterModules())
+                .prepare(ReportLlmTestFixtures.input());
+    }
+
+    private static DefectReportImage image(
+            UUID defectId,
             String incidentCode,
             int marker
     ) {
-        return new ImageContent(
-                UUID.randomUUID(),
+        return image(
+                defectId,
                 incidentCode,
+                marker,
+                "DAMAGED",
+                "HIGH");
+    }
+
+    private static DefectReportImage image(
+            UUID defectId,
+            String incidentCode,
+            int marker,
+            String defectType,
+            String riskLevel
+    ) {
+        return new DefectReportImage(
+                defectId,
+                incidentCode,
+                defectType,
+                riskLevel,
                 new byte[] {
                         (byte) 0xff,
                         (byte) 0xd8,
@@ -145,37 +211,5 @@ class ReportLlmRequestFactoryTest {
                 "image/jpeg",
                 640,
                 480);
-    }
-
-    private static final class FakeReader
-            implements DefectImageContentReader {
-
-        private final List<ImageContent> result;
-        private final List<ReportPeriod> periods =
-                new ArrayList<>();
-        private final List<Integer> maxImages =
-                new ArrayList<>();
-
-        private FakeReader(List<ImageContent> result) {
-            this.result = result;
-        }
-
-        @Override
-        public List<ImageContent> readTopDefectImages(
-                ReportPeriod period,
-                int maximum
-        ) {
-            periods.add(period);
-            maxImages.add(maximum);
-            return result;
-        }
-
-        private List<ReportPeriod> periods() {
-            return List.copyOf(periods);
-        }
-
-        private List<Integer> maxImages() {
-            return List.copyOf(maxImages);
-        }
     }
 }

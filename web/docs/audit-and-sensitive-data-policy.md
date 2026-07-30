@@ -195,15 +195,27 @@ token·credit, 성공 여부와 고정 실패 코드만 기록한다. Prompt·�
 결함 원본 이미지는 `S2 Restricted`이며 기존 Private 이미지 저장소에서만 영구
 보존한다. 외부 LLM 전송은 다음 조건을 모두 충족한 대표 JPEG 한 장에만 허용한다.
 
-- 얼굴·차량번호·사람 식별 단서와 EXIF/GPS metadata 제거 완료
-- 정책 오너가 비식별화 검증 결과를 승인
+- 임베디드 비식별화 오너가 얼굴·차량번호·사람 식별 단서와 EXIF/GPS metadata
+  제거 완료 근거를 제공
+- 정책 오너가 위 근거와 샘플 검증 결과를 승인
 - 기간·결함 객체 접근 범위를 서버가 재검사
 - GMS 학습 제외·보존·outbound 정책 gate 통과
 
-승인 전에는 이미지를 보내지 않고 텍스트만으로 보고서를 생성한다. 승인 후에도
-`DefectImageContentReader`의 bytes를 요청 직전에만 Base64로 변환하고, Presigned URL을
-LLM에 전달하지 않는다. 요청 완료 뒤 bytes·Base64 참조를 유지하거나 업무 DB, 감사,
-APM, trace와 오류 객체에 복제하지 않는다.
+백엔드의 JPEG magic·content type·500KB·양수 해상도·EXIF marker 검사는 형식
+검증이며 얼굴이나 차량번호 부재를 증명하지 않는다. 따라서 임베디드 확인과 정책
+오너 승인 전에는 `GILBOM_LLM_IMAGE_DEIDENTIFICATION_APPROVED=false`를 유지하고,
+이미지를 보내지 않은 채 텍스트만으로 보고서를 생성한다.
+
+승인 후에는 `DefectReportImageService.findReportImages(actorUserId, from, to, 1)`로
+사용자 접근 범위 안의 `List<DefectReportImage>`만 조회한다. Request Factory는
+`defectId`, `incidentCode`, `defectType`, `riskLevel`이 같은 요청의 텍스트 근거와
+일치하는지 다시 검사한다. 빈 목록이나 읽기 실패는 텍스트 전용 LLM 생성으로
+계속하고, 형식 검증 실패는 외부 전송 없이 안전한 템플릿 fallback으로 전환한다.
+
+허용된 `content(byte[])`는 요청 직전에만 메모리에서 Base64 data URL로 변환한다.
+Presigned URL, bucket·object key와 로컬 경로는 LLM에 전달하지 않는다. 요청 완료 뒤
+bytes·Base64 참조를 유지하거나 업무 DB, 감사, APM, trace와 오류 객체에 복제하지
+않는다.
 
 ## 7. 조회·보존
 

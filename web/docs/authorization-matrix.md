@@ -265,7 +265,10 @@ Patrol Route 버전은 조회 전용이다. 이름·Geometry·운영 상태 변�
 Controller의 세션 권한과 서비스의 현재 DB 유효 권한을 모두 검사한다.
 후속 LLM 생성에서 결함·임무 근거를 선택할 때는 각 근거 리소스 범위를 별도로
 재검사한다. 대표 이미지는 `REPORT_CREATE`만으로 조회하지 않고 `DEFECT_STATUS_VIEW`와
-대상 결함의 객체 접근 범위를 통과한 뒤에만 `DefectImageContentReader`에 전달한다.
+대상 결함의 객체 접근 범위는
+`DefectReportImageService.findReportImages(actorUserId, from, to, maxImages)`가
+직접 적용하며, 보고서 Request Factory가 텍스트 근거와 이미지 identity를 다시
+대조한 뒤에만 외부 LLM에 전달한다.
 이미지 bytes, Base64와 data URL은 권한·감사 snapshot에 포함하지 않는다.
 
 | Method | Path | 권한 | 객체 범위 | CSRF | 감사 |

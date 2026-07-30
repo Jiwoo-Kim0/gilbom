@@ -27,8 +27,8 @@ WORKDIR /app
 
 COPY --from=mqtt-tools /usr/bin/mosquitto_passwd /usr/local/bin/mosquitto_passwd
 COPY --from=builder --chown=spring:mqttcred /workspace/build/libs/*.jar app.jar
-RUN mkdir -p /app/data/report-pdf \
-    && chown spring:mqttcred /app/data/report-pdf
+RUN mkdir -p /app/data/report-pdf /app/data/robot-images \
+    && chown spring:mqttcred /app/data/report-pdf /app/data/robot-images
 
 USER spring
 

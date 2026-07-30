@@ -73,8 +73,8 @@ Base URL 검사는 HTTPS scheme, 정확한 host·443 port·path를 모두 비교
 - `DisabledLlmClient`: 외부 요청을 만들지 않고 직접 호출 시 `LLM_UNAVAILABLE`을 반환한다.
 - `TemplateReportGenerator`: 외부 통신 없이 같은 입력으로 항상 같은 `TEMPLATE` 보고서 본문을 만든다.
 - `ReportGenerationModeResolver`: LLM이 비활성화된 경우에만 `LLM` 요청을 `TEMPLATE`로 낮추고 `MANUAL`, `TEMPLATE` 요청은 보존한다.
-- `DefectImageContentReader`: 기간 내 대표 결함 상위 N건의 대표 관측 이미지 bytes를 `List<ImageContent>`로 제공한다. 기본·현재 호출값은 1, Reader 계약 상한은 3이다.
-- `ReportLlmRequestFactory`: 이미지 하위 gate를 확인한 뒤 Reader를 호출하고, 결과가 없으면 텍스트 전용 요청을 만든다.
+- `DefectReportImageService`: 사용자 ID와 기간으로 객체 접근 범위를 적용해 대표 결함 상위 N건의 관측 이미지 bytes를 `List<DefectReportImage>`로 제공한다. 기본·현재 호출값은 1, 서비스 계약 상한은 3이다.
+- `ReportLlmRequestFactory`: 이미지 하위 gate를 확인한 뒤 서비스를 호출하고, 결함 근거 정합성을 재검사하며 결과가 없으면 텍스트 전용 요청을 만든다.
 - `ReportLlmInput`: 기간, 집계, 상태·유형·위험도 분포, 최소 결함 근거만 표현하는
   타입 기반 allowlist다. 사용자 ID는 orchestration에만 쓰고 이 DTO에는 포함하지 않는다.
 - `LlmOutboundInputGuard`: Client 호출 직전 key·문자열·크기·깊이를 다시 검사해
@@ -94,8 +94,9 @@ Base URL 검사는 HTTPS scheme, 정확한 host·443 port·path를 모두 비교
 1. `ReportLlmInput` 생성자에서 기간, 음수 통계, 분포 합계, 중복 결함을 검사한다.
 2. `ReportLlmInputPreparer`가 DTO를 고정 JSON slot으로 바꾸고 outbound 금지 패턴과
    128KiB 상한을 검사한다.
-3. 이미지 gate가 승인된 경우에만 Reader 결과의 `defectId`, `incidentCode`가 텍스트
-   allowlist와 일치하는지 확인한다.
+3. 이미지 gate가 승인된 경우에만 `actorUserId`로 이미지 서비스를 호출하고 반환된
+   `defectId`, `incidentCode`, `defectType`, `riskLevel`이 텍스트 allowlist와
+   일치하는지 확인한다.
 4. 인스턴스 semaphore를 얻은 뒤 PostgreSQL ledger에서 사용자별 일일 요청 수와 전체
    일일 credit을 한 UTC 날짜 advisory lock 아래 원자적으로 예약한다.
 5. GMS를 호출한다. `429`, `5xx`, network timeout만 100ms 기반 backoff와 jitter 후
@@ -111,9 +112,9 @@ Base URL 검사는 HTTPS scheme, 정확한 host·443 port·path를 모두 비교
 ## 6. 이미지 바이트 입력 계약
 
 이미지는 사용자 생성 API body에서 받지 않는다. 서버가 보고서 기간을 기준으로
-`readTopDefectImages(period, 1)`을 호출하며, 반환형은 한 장이어도
-`List<ImageContent>`다. 선정 기준은 기간 내 대표 결함 상위 N건과 각 결함의 대표 관측
-이미지 한 장이다.
+`findReportImages(actorUserId, from, to, 1)`을 호출하며, 반환형은 한 장이어도
+`List<DefectReportImage>`다. 선정 기준은 기간 내 대표 결함 상위 N건과 각 결함의
+대표 관측 이미지 한 장이다.
 
 허용되는 이미지 입력은 다음 조건을 모두 만족해야 한다.
 
@@ -121,12 +122,13 @@ Base URL 검사는 HTTPS scheme, 정확한 host·443 port·path를 모두 비교
 - `GILBOM_LLM_IMAGE_DEIDENTIFICATION_APPROVED=true`
 - `image/jpeg`, JPEG magic, 1~512,000 bytes, 양수 width·height
 - 얼굴·차량번호·사람 식별 단서와 EXIF/GPS metadata 제거가 검증됨
-- `defectId`, `incidentCode`가 같은 요청의 텍스트 allowlist에 존재함
+- `defectId`, `incidentCode`, `defectType`, `riskLevel`이 같은 요청의 텍스트
+  allowlist와 일치함
 
 GMS Chat Completions adapter는 호출 직전에만 bytes를 Base64 data URL로 바꾼다.
 Presigned URL, bucket, object key, 로컬 파일 경로를 만들거나 전달하지 않는다.
 Base64와 원본 bytes는 보고서, 버전, 멱등 저장소, 감사·애플리케이션 로그에 저장하지
-않는다. Reader가 없거나 빈 목록을 반환하거나 이미지 gate가 닫혀 있으면 외부 요청은
+않는다. 서비스가 없거나 빈 목록을 반환하거나 이미지 gate가 닫혀 있으면 외부 요청은
 기존 문자열 content를 사용해 텍스트만으로 생성한다.
 
 ## 7. 비밀정보·로그 규칙
@@ -162,7 +164,7 @@ race를 막는다. 애플리케이션 한도와 별개로 GMS·인프라 hard ca
 - Provider 오류가 API Key나 응답 원문을 예외에 남기지 않는다.
 - 미승인 URL·model·Prompt·timeout·Budget을 각각 차단한다.
 - LLM 비활성 시 템플릿 생성이 가능하고 기존 보고서 회귀 테스트가 모두 통과한다.
-- 이미지 비식별화 미승인·Reader 부재·빈 목록은 이미지 전송 없이 텍스트 생성으로 이어진다.
+- 이미지 비식별화 미승인·서비스 부재·빈 목록은 이미지 전송 없이 텍스트 생성으로 이어진다.
 - 승인된 JPEG는 한 장만 Base64 data URL로 전달되고 Presigned URL·저장소 경로는 요청에 없다.
 - credential·개인정보·URL·임의 필드와 128KiB 초과 입력은 외부 Client 호출 전에
   거부된다.

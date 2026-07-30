@@ -291,13 +291,16 @@ provider 예외 메시지는 보고서·멱등 응답·감사 로그 어디에�
 |---|---|---|
 | 기간·통계 | `period.from`, `period.to`, aggregate, 상태·유형·위험도별 건수 | 요청 기간·필터 결과와 일치, 각 분포 합계는 `defectCount`와 일치 |
 | 결함 근거 | `defectId`, `incidentCode`, 유형, 위험도, workflow 상태, 마지막 관측시각, 일반화 위치명, 비식별 최소 설명 | 최대 20건, 접근 가능한 기간 내 결함만 |
-| 이미지 metadata | `imageIndex`, `defectId`, `incidentCode`, `contentType`, width, height | 텍스트 결함 근거와 결합 |
+| 이미지 metadata | `imageIndex`, `defectId`, `incidentCode`, `defectType`, `riskLevel`, `contentType`, width, height | 텍스트 결함 근거와 결합 |
 | 이미지 내용 | 비식별화가 승인된 대표 관측 JPEG bytes | 현재 최대 1장, 500KB 이하 |
 
-이미지는 `DefectImageContentReader.readTopDefectImages(period, 1)`로 조회한다. 반환형은
-단일 객체가 아니라 `List<ImageContent>`이며 Reader 계약의 기본값은 1, 확장 상한은
-3이다. 선정 기준은 기간 내 대표 결함 상위 N건과 각 대표 결함의 대표 관측 이미지
-한 장이다. 빈 목록이면 같은 요청을 텍스트만으로 생성한다.
+이미지는 `DefectReportImageService.findReportImages(actorUserId, period.from,
+period.to, 1)`로 조회한다. 반환형은 단일 객체가 아니라
+`List<DefectReportImage>`이며 서비스 기본값은 1, 확장 상한은 3이다. 서비스는
+`actorUserId`로 기간·객체 접근 범위를 적용하고 기간 내 대표 결함 상위 N건에서
+각 대표 결함의 대표 관측 이미지 한 장을 고른다. Request Factory는 반환된
+`defectId`, `incidentCode`, `defectType`, `riskLevel`을 같은 요청의 텍스트 근거와
+다시 대조한다. 빈 목록이면 같은 요청을 텍스트만으로 생성한다.
 
 #### 전송 금지 필드
 
@@ -315,7 +318,8 @@ LLM adapter는 허용된 bytes를 외부 호출 직전에만 메모리에서 Bas
 중첩 깊이 최대 8로 제한한다. Client 호출 직전 key와 문자열을 재귀 검사해
 Authorization·API Key·password·session·cookie·CSRF·TOTP·AWS credential,
 이메일·전화번호, URL·파일 경로·Presigned URL과 Prompt 지시문 패턴을 거부한다.
-사용자 UUID는 사용자별 quota key로만 사용하며 LLM DTO에는 직렬화하지 않는다.
+사용자 UUID는 사용자별 quota와 서버 내부 객체 범위 조회에만 사용하며 LLM DTO에는
+직렬화하지 않는다.
 
 ### 7.2 재시도·동시성·Rate·Budget
 
@@ -416,7 +420,7 @@ Authorization·API Key·password·session·cookie·CSRF·TOTP·AWS credential,
 - LLM JSON Schema와 원본 allowlist 검증 테스트
 - 대표 이미지 1장 bytes 전송, 빈 목록 텍스트 폴백과 3장 상한 계약 테스트
 - Presigned URL·저장소 경로·이미지 Base64 비저장·비로그 테스트
-- 비식별화 미승인 시 Reader 미호출·이미지 미전송 테스트
+- 비식별화 미승인 시 이미지 서비스 미호출·이미지 미전송 테스트
 - 여섯 전용 오류 코드의 HTTP 상태·응답 테스트
 - 상태 변경, 승인자·시각, 감사 로그의 트랜잭션 정합성 테스트
 - 상태별 역할·권한·UI 버튼 매트릭스 테스트

@@ -234,9 +234,9 @@ storage key와 SHA-256만 저장하며 presigned URL은 저장하지 않는다.
 API Key 원문, `Authorization` 헤더, Prompt와 응답 원문은 로그하지 않는다. 사용자 요청은 모델, base URL, System Prompt를 받지 않으며 서버 설정과 `LlmPromptCatalog`만 이 값을 결정한다. 상세 설계와 판정표는 [LLM Client·정책 게이트](./llm-client-policy.md)를 따른다.
 
 이미지 입력은 별도 하위 gate다. 두 이미지 flag가 모두 `true`일 때만
-`DefectImageContentReader`가 선택한 비식별화 완료 JPEG 한 장을 메모리에서 Base64로
-변환한다. 어느 하나라도 `false`이거나 조회 결과가 빈 목록이면 텍스트 LLM 생성은
-유지하고 이미지 전송만 생략한다.
+`DefectReportImageService`가 사용자 접근 범위 안에서 선택한 비식별화 완료 JPEG
+한 장을 메모리에서 Base64로 변환한다. 어느 하나라도 `false`이거나 조회 결과가
+빈 목록이면 텍스트 LLM 생성은 유지하고 이미지 전송만 생략한다.
 
 ### 5.7 로그·관리 endpoint
 
