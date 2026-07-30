@@ -1,4 +1,5 @@
 import {
+  Bot,
   Crosshair,
   MapPinned,
 } from 'lucide-react'
@@ -10,6 +11,7 @@ import {
   type ReactNode,
 } from 'react'
 import { loadNaverMapsScript } from '../../lib/naverMaps'
+import type { RobotMapItem } from '../robot/robotTypes'
 import {
   calculateBoundaryAverageCenter,
   getBoundaryOuterPoints,
@@ -19,6 +21,7 @@ import type {
   GeoJsonCoordinate,
   PatrolArea,
   PatrolAreaBoundary,
+  RobotOption,
 } from './missionTypes'
 import './patrol-area-selection-preview.css'
 
@@ -31,19 +34,80 @@ const DEFAULT_CENTER = {
   longitude: 128.3446,
 }
 
+type ProjectedPoint = {
+  x: number
+  y: number
+}
+
+type ProjectedPolygon = ProjectedPoint[][]
+
+function robotCoordinate(
+  robot: RobotMapItem | null,
+): GeoJsonCoordinate | null {
+  if (robot === null) {
+    return null
+  }
+
+  const { longitude, latitude } = robot
+  if (
+    longitude === null
+    || latitude === null
+    || !Number.isFinite(longitude)
+    || !Number.isFinite(latitude)
+  ) {
+    return null
+  }
+  return [longitude, latitude]
+}
+
+function projectCoordinate(
+  projection: naver.maps.MapSystemProjection,
+  [longitude, latitude]: GeoJsonCoordinate,
+): ProjectedPoint {
+  const offset = projection.fromCoordToOffset(
+    new naver.maps.LatLng(latitude, longitude),
+  )
+  return {
+    x: Number(offset.x.toFixed(2)),
+    y: Number(offset.y.toFixed(2)),
+  }
+}
+
+function createProjectedPolygonPath(polygon: ProjectedPolygon): string {
+  return polygon
+    .map((ring) => ring
+      .map(({ x, y }, pointIndex) => (
+        `${pointIndex === 0 ? 'M' : 'L'} ${x} ${y}`
+      ))
+      .concat('Z')
+      .join(' '))
+    .join(' ')
+}
+
 function PatrolAreaNaverPreview({
   boundary,
   center,
+  robot,
   fallback,
 }: {
   boundary: PatrolAreaBoundary
   center: GeoJsonCoordinate
+  robot: RobotMapItem | null
   fallback: ReactNode
 }) {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<naver.maps.Map | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'fallback'>(
     NAVER_MAP_CLIENT_ID ? 'loading' : 'fallback',
+  )
+  const [projectedPolygons, setProjectedPolygons] = useState<
+    ProjectedPolygon[]
+  >([])
+  const [projectedCenter, setProjectedCenter] = useState<ProjectedPoint | null>(
+    null,
+  )
+  const [projectedRobot, setProjectedRobot] = useState<ProjectedPoint | null>(
+    null,
   )
   const polygons = useMemo(
     () => getBoundaryPolygons(boundary),
@@ -97,45 +161,68 @@ function PatrolAreaNaverPreview({
 
   useEffect(() => {
     if (status !== 'ready' || mapRef.current === null || !window.naver) {
+      setProjectedPolygons([])
+      setProjectedCenter(null)
+      setProjectedRobot(null)
       return
     }
 
     const { maps } = window.naver
     const map = mapRef.current
-    const polygonObjects = polygons.map((polygon) => (
-      new maps.Polygon({
-        map,
-        paths: polygon.map((ring) => ring.map(
-          ([longitude, latitude]) => new maps.LatLng(latitude, longitude),
-        )),
-        fillColor: '#2f806c',
-        fillOpacity: 0.1,
-        strokeColor: '#175c4c',
-        strokeOpacity: 0.95,
-        strokeWeight: 3,
-        clickable: false,
-        zIndex: 10,
-      })
-    ))
     const centerPosition = new maps.LatLng(center[1], center[0])
-    const centerMarker = new maps.Marker({
-      map,
-      position: centerPosition,
-      title: '순찰 구역 경계점 평균 중심',
-      zIndex: 20,
-    })
+    const viewportListeners: naver.maps.MapEventListener[] = []
+    let projectionFrame: number | null = null
 
-    if (boundaryPoints.length > 1) {
-      const longitudes = boundaryPoints.map(([longitude]) => longitude)
-      const latitudes = boundaryPoints.map(([, latitude]) => latitude)
+    const updateProjection = () => {
+      const projection = map.getProjection()
+      setProjectedPolygons(polygons.map((polygon) => (
+        polygon.map((ring) => ring.map((coordinate) => (
+          projectCoordinate(projection, coordinate)
+        )))
+      )))
+      setProjectedCenter(projectCoordinate(projection, center))
+      const robotPoint = robotCoordinate(robot)
+      setProjectedRobot(robotPoint === null
+        ? null
+        : projectCoordinate(projection, robotPoint))
+    }
+    const scheduleProjection = () => {
+      if (projectionFrame !== null) {
+        return
+      }
+      projectionFrame = window.requestAnimationFrame(() => {
+        projectionFrame = null
+        updateProjection()
+      })
+    }
+
+    viewportListeners.push(
+      maps.Event.addListener(map, 'bounds_changed', scheduleProjection),
+      maps.Event.addListener(map, 'size_changed', scheduleProjection),
+    )
+
+    const robotPoint = robotCoordinate(robot)
+    const visiblePoints = [
+      ...boundaryPoints,
+      ...(robotPoint === null ? [] : [robotPoint]),
+    ]
+    if (visiblePoints.length > 1) {
+      const longitudeDelta = Math.max(
+        ...visiblePoints.map(([longitude]) => Math.abs(longitude - center[0])),
+        0.0005,
+      )
+      const latitudeDelta = Math.max(
+        ...visiblePoints.map(([, latitude]) => Math.abs(latitude - center[1])),
+        0.0005,
+      )
       map.fitBounds(new maps.LatLngBounds(
         new maps.LatLng(
-          Math.min(...latitudes),
-          Math.min(...longitudes),
+          center[1] - latitudeDelta,
+          center[0] - longitudeDelta,
         ),
         new maps.LatLng(
-          Math.max(...latitudes),
-          Math.max(...longitudes),
+          center[1] + latitudeDelta,
+          center[0] + longitudeDelta,
         ),
       ))
     } else {
@@ -143,12 +230,17 @@ function PatrolAreaNaverPreview({
     }
     // fitBounds로 계산한 Zoom은 유지하고 사용자가 요청한 점 평균을 중앙에 둔다.
     map.setCenter(centerPosition)
+    scheduleProjection()
 
     return () => {
-      polygonObjects.forEach((polygon) => polygon.setMap(null))
-      centerMarker.setMap(null)
+      viewportListeners.forEach((listener) => {
+        maps.Event.removeListener(listener)
+      })
+      if (projectionFrame !== null) {
+        window.cancelAnimationFrame(projectionFrame)
+      }
     }
-  }, [boundaryPoints, center, polygons, status])
+  }, [boundaryPoints, center, polygons, robot, status])
 
   if (status === 'fallback') {
     return fallback
@@ -162,6 +254,73 @@ function PatrolAreaNaverPreview({
         aria-label="선택한 순찰 구역 Polygon 지도"
         data-testid="mission-area-preview-naver-map"
       />
+      {status === 'ready'
+        && projectedPolygons.length > 0
+        && projectedCenter !== null ? (
+          <svg
+            className="patrol-area-preview-projected-overlay"
+            data-testid="mission-area-preview-projected-overlay"
+            aria-hidden="true"
+          >
+            {projectedPolygons.map((polygon, polygonIndex) => (
+              <path
+                key={polygonIndex}
+                className="patrol-area-preview-projected-shape"
+                d={createProjectedPolygonPath(polygon)}
+                fillRule="evenodd"
+              />
+            ))}
+            <circle
+              className="patrol-area-preview-projected-center-circle"
+              cx={projectedCenter.x}
+              cy={projectedCenter.y}
+              r="10"
+            />
+            <path
+              className="patrol-area-preview-projected-center-cross"
+              d={[
+                `M ${projectedCenter.x - 16} ${projectedCenter.y}`,
+                `H ${projectedCenter.x + 16}`,
+                `M ${projectedCenter.x} ${projectedCenter.y - 16}`,
+                `V ${projectedCenter.y + 16}`,
+              ].join(' ')}
+            />
+            {projectedRobot !== null && robot !== null ? (
+              <g
+                data-testid="mission-area-preview-robot"
+                data-robot-id={robot.robotId}
+                data-mission-status={robot.missionStatus ?? ''}
+              >
+                <circle
+                  className={[
+                    'patrol-area-preview-projected-robot',
+                    robot.connectivityStatus === 'ONLINE'
+                      ? 'is-online'
+                      : 'is-offline',
+                  ].join(' ')}
+                  cx={projectedRobot.x}
+                  cy={projectedRobot.y}
+                  r="15"
+                />
+                <path
+                  className="patrol-area-preview-projected-robot-heading"
+                  d={[
+                    `M ${projectedRobot.x} ${projectedRobot.y - 10}`,
+                    `L ${projectedRobot.x + 5} ${projectedRobot.y + 7}`,
+                    `L ${projectedRobot.x} ${projectedRobot.y + 4}`,
+                    `L ${projectedRobot.x - 5} ${projectedRobot.y + 7}`,
+                    'Z',
+                  ].join(' ')}
+                  transform={[
+                    `rotate(${robot.headingDeg ?? 0}`,
+                    `${projectedRobot.x}`,
+                    `${projectedRobot.y})`,
+                  ].join(' ')}
+                />
+              </g>
+            ) : null}
+          </svg>
+        ) : null}
       {status === 'loading' ? (
         <div className="patrol-area-preview-loading" role="status">
           <span className="loading-spinner" aria-hidden="true" />
@@ -175,18 +334,27 @@ function PatrolAreaNaverPreview({
 function PatrolAreaFallbackPreview({
   area,
   center,
+  robot,
 }: {
   area: PatrolArea
   center: GeoJsonCoordinate
+  robot: RobotMapItem | null
 }) {
   const polygons = getBoundaryPolygons(area.boundary)
   const points = getBoundaryOuterPoints(area.boundary)
+  const robotPoint = robotCoordinate(robot)
   const maximumLongitudeDelta = Math.max(
     ...points.map(([longitude]) => Math.abs(longitude - center[0])),
+    ...(robotPoint === null
+      ? []
+      : [Math.abs(robotPoint[0] - center[0])]),
     0.0005,
   )
   const maximumLatitudeDelta = Math.max(
     ...points.map(([, latitude]) => Math.abs(latitude - center[1])),
+    ...(robotPoint === null
+      ? []
+      : [Math.abs(robotPoint[1] - center[1])]),
     0.0005,
   )
   const drawableHalfWidth = FALLBACK_WIDTH / 2 - FALLBACK_PADDING
@@ -200,6 +368,7 @@ function PatrolAreaFallbackPreview({
         - (latitude - center[1]) / maximumLatitudeDelta * drawableHalfHeight,
     }
   }
+  const projectedRobot = robotPoint === null ? null : project(robotPoint)
 
   return (
     <div className="patrol-area-preview-map-wrap">
@@ -242,6 +411,26 @@ function PatrolAreaFallbackPreview({
           <circle r="10" />
           <path d="M -16 0 H 16 M 0 -16 V 16" />
         </g>
+        {projectedRobot !== null && robot !== null ? (
+          <g
+            className={[
+              'patrol-area-preview-robot',
+              robot.connectivityStatus === 'ONLINE'
+                ? 'is-online'
+                : 'is-offline',
+            ].join(' ')}
+            transform={`translate(${projectedRobot.x} ${projectedRobot.y})`}
+            data-testid="mission-area-preview-robot"
+            data-robot-id={robot.robotId}
+            data-mission-status={robot.missionStatus ?? ''}
+          >
+            <circle r="15" />
+            <path
+              d="M 0 -10 L 5 7 L 0 4 L -5 7 Z"
+              transform={`rotate(${robot.headingDeg ?? 0})`}
+            />
+          </g>
+        ) : null}
       </svg>
       <span className="patrol-area-preview-fallback-label">
         Naver Maps를 불러오지 못해 좌표 Layer로 표시 중
@@ -252,8 +441,12 @@ function PatrolAreaFallbackPreview({
 
 export function PatrolAreaSelectionPreview({
   area,
+  selectedRobot,
+  robotPosition,
 }: {
   area: PatrolArea
+  selectedRobot: RobotOption | null
+  robotPosition: RobotMapItem | null
 }) {
   const center = useMemo(
     () => calculateBoundaryAverageCenter(area.boundary),
@@ -296,8 +489,13 @@ export function PatrolAreaSelectionPreview({
       <PatrolAreaNaverPreview
         boundary={area.boundary}
         center={center}
+        robot={robotPosition}
         fallback={(
-          <PatrolAreaFallbackPreview area={area} center={center} />
+          <PatrolAreaFallbackPreview
+            area={area}
+            center={center}
+            robot={robotPosition}
+          />
         )}
       />
 
@@ -308,6 +506,28 @@ export function PatrolAreaSelectionPreview({
           위도 {center[1].toFixed(7)} · 경도 {center[0].toFixed(7)}
         </code>
       </div>
+      {selectedRobot !== null ? (
+        <div className="patrol-area-preview-robot-summary">
+          <Bot size={15} aria-hidden="true" />
+          <span>선택 로봇</span>
+          <strong>
+            {selectedRobot.robotName} ({selectedRobot.mqttId})
+          </strong>
+          <code>
+            {robotPosition === null
+              || robotPosition.latitude === null
+              || robotPosition.longitude === null
+              ? '현재 GPS 위치 미수신'
+              : [
+                `위도 ${robotPosition.latitude.toFixed(7)}`,
+                `경도 ${robotPosition.longitude.toFixed(7)}`,
+                robotPosition.missionStatus === null
+                  ? '임무 미수행'
+                  : `임무 ${robotPosition.missionStatus}`,
+              ].join(' · ')}
+          </code>
+        </div>
+      ) : null}
     </section>
   )
 }

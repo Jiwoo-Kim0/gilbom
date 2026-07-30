@@ -25,6 +25,8 @@ import { NavLink } from 'react-router'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { useAuthentication } from '../auth/authenticationContext'
 import { MISSION_MANAGE } from '../auth/permissions'
+import { getRobotMap } from '../robot/robotApi'
+import type { RobotMapItem } from '../robot/robotTypes'
 import { useRobotRealtime } from '../robot/useRobotRealtime'
 import {
   createMission,
@@ -149,6 +151,7 @@ export function MissionManagePage() {
   const [selectedMission, setSelectedMission] = useState<Mission | null>(null)
   const [history, setHistory] = useState<MissionStatusHistoryItem[]>([])
   const [robots, setRobots] = useState<RobotOption[]>([])
+  const [robotMapItems, setRobotMapItems] = useState<RobotMapItem[]>([])
   const [areas, setAreas] = useState<PatrolArea[]>([])
   const [createRobotId, setCreateRobotId] = useState('')
   const [createAreaId, setCreateAreaId] = useState('')
@@ -174,12 +177,22 @@ export function MissionManagePage() {
     [areas],
   )
   const activeRobots = useMemo(
-    () => robots.filter((robot) => robot.operationalStatus === 'ACTIVE'),
+    () => robots.filter((robot) => (
+      robot.operationalStatus === 'ACTIVE' && robot.missionStatus === null
+    )),
     [robots],
   )
   const selectedCreateArea = useMemo(
     () => activeAreas.find((area) => area.patrolAreaId === createAreaId) ?? null,
     [activeAreas, createAreaId],
+  )
+  const selectedCreateRobot = useMemo(
+    () => activeRobots.find((robot) => robot.robotId === createRobotId) ?? null,
+    [activeRobots, createRobotId],
+  )
+  const selectedCreateRobotPosition = useMemo(
+    () => robotMapItems.find((robot) => robot.robotId === createRobotId) ?? null,
+    [createRobotId, robotMapItems],
   )
   const pageRunningCount = missions?.content.filter(
     (mission) => mission.status === 'RUNNING',
@@ -212,9 +225,10 @@ export function MissionManagePage() {
   const loadCatalogs = useCallback(async () => {
     setCatalogLoading(true)
     setCatalogError(null)
-    const [robotResult, areaResult] = await Promise.allSettled([
+    const [robotResult, areaResult, robotMapResult] = await Promise.allSettled([
       getMissionRobotOptions(),
       getPatrolAreas(),
+      getRobotMap(),
     ])
 
     if (robotResult.status === 'fulfilled') {
@@ -223,12 +237,26 @@ export function MissionManagePage() {
     if (areaResult.status === 'fulfilled') {
       setAreas(areaResult.value.areas)
     }
+    if (robotMapResult.status === 'fulfilled') {
+      setRobotMapItems(robotMapResult.value.robots)
+    } else {
+      setRobotMapItems([])
+    }
     if (robotResult.status === 'rejected') {
       setCatalogError(robotResult.reason)
     } else if (areaResult.status === 'rejected') {
       setCatalogError(areaResult.reason)
     }
     setCatalogLoading(false)
+  }, [])
+
+  const loadRobotPositions = useCallback(async () => {
+    try {
+      const result = await getRobotMap()
+      setRobotMapItems(result.robots)
+    } catch {
+      setRobotMapItems([])
+    }
   }, [])
 
   const loadMissionDetail = useCallback(async (missionId: string) => {
@@ -267,11 +295,17 @@ export function MissionManagePage() {
         requestedDetailIdRef.current = null
         void loadMissionDetail(selectedMissionId)
       }
+      if (createExpanded && createRobotId.length > 0) {
+        void loadRobotPositions()
+      }
     }, 250)
   }, [
     appliedFilters,
+    createExpanded,
+    createRobotId,
     loadMissionDetail,
     loadMissions,
+    loadRobotPositions,
     page,
     selectedMissionId,
   ])
@@ -611,7 +645,11 @@ export function MissionManagePage() {
               </small>
             </label>
             {selectedCreateArea ? (
-              <PatrolAreaSelectionPreview area={selectedCreateArea} />
+              <PatrolAreaSelectionPreview
+                area={selectedCreateArea}
+                selectedRobot={selectedCreateRobot}
+                robotPosition={selectedCreateRobotPosition}
+              />
             ) : null}
             <label className="admin-form-field" htmlFor="mission-create-duration">
               계획 시간(분)

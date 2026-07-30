@@ -173,6 +173,7 @@ export type RobotOption = {
   serialNumber: string
   operationalStatus: string
   connectivityStatus: string
+  missionStatus: string | null
   overallHealthStatus: string
 }
 

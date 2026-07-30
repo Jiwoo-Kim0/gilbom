@@ -2,6 +2,7 @@ import { expect, test, type Route } from '@playwright/test'
 
 const USER_ID = '83000000-0000-4000-8000-000000000001'
 const ROBOT_ID = '83000000-0000-4000-8000-000000000002'
+const BUSY_ROBOT_ID = '83000000-0000-4000-8000-000000000006'
 const AREA_ID = '83000000-0000-4000-8000-000000000003'
 const ROUTE_ID = '83000000-0000-4000-8000-000000000004'
 const MISSION_ID = '83000000-0000-4000-8000-000000000005'
@@ -107,7 +108,6 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
       mapOptions: [] as FakeMapInteractionOptions[],
       setZoomCallCount: 0,
       fitBoundsCallCount: 0,
-      polygonFillOpacities: [] as Array<number | undefined>,
     }
 
     class FakeLatLng {
@@ -172,13 +172,6 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
       setMap() {}
     }
 
-    class FakePolygon extends FakeOverlay {
-      constructor(options: { fillOpacity?: number }) {
-        super()
-        previewState.polygonFillOpacities.push(options.fillOpacity)
-      }
-    }
-
     class FakeEventSource {
       onopen: ((event: Event) => void) | null = null
       onerror: ((event: Event) => void) | null = null
@@ -207,7 +200,7 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
           LatLng: FakeLatLng,
           LatLngBounds: class FakeLatLngBounds {},
           Map: FakeMap,
-          Polygon: FakePolygon,
+          Polygon: FakeOverlay,
           Polyline: FakeOverlay,
           Marker: FakeOverlay,
           Size: class FakeSize {},
@@ -282,12 +275,38 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
           serialNumber: 'PATROL-AREA-E2E-001',
           operationalStatus: 'ACTIVE',
           connectivityStatus: 'ONLINE',
+          missionStatus: null,
+          overallHealthStatus: 'NORMAL',
+        }, {
+          robotId: BUSY_ROBOT_ID,
+          mqttId: 'robot-busy-e2e',
+          robotName: '임무 수행 중 로봇',
+          serialNumber: 'BUSY-E2E-001',
+          operationalStatus: 'ACTIVE',
+          connectivityStatus: 'ONLINE',
+          missionStatus: 'RUNNING',
           overallHealthStatus: 'NORMAL',
         }],
         page: 0,
         size: 100,
-        totalElements: 1,
+        totalElements: 2,
         totalPages: 1,
+      })
+      return
+    }
+    if (pathname === '/api/v1/robots/map') {
+      await fulfillJson(route, {
+        robots: [{
+          robotId: ROBOT_ID,
+          mqttId: 'robot-patrol-area-e2e',
+          robotName: '순찰 구역 검증 로봇',
+          connectivityStatus: 'ONLINE',
+          latitude: 36.1074,
+          longitude: 128.4164,
+          headingDeg: 90,
+          missionStatus: null,
+          observedAt: '2026-07-30T12:00:00Z',
+        }],
       })
       return
     }
@@ -502,16 +521,25 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
   await expect(
     page.getByTestId('mission-area-preview-naver-map'),
   ).toBeVisible()
-  await expect.poll(() => page.evaluate(() => {
-    const state = (
-      window as typeof window & {
-        __patrolAreaPreviewState: {
-          polygonFillOpacities: Array<number | undefined>
-        }
-      }
-    ).__patrolAreaPreviewState
-    return state.polygonFillOpacities
-  })).toEqual(expect.arrayContaining([0.1]))
+  const projectedAreaPreview = page.getByTestId(
+    'mission-area-preview-projected-overlay',
+  )
+  await expect(projectedAreaPreview.locator('path').first()).toHaveAttribute(
+    'd',
+    'M 100 200 L 200 200 L 200 100 L 100 100 L 100 200 Z',
+  )
+  await expect(projectedAreaPreview.locator('path').first()).toHaveCSS(
+    'fill-opacity',
+    '0.1',
+  )
+  await expect(projectedAreaPreview.locator('circle')).toHaveAttribute(
+    'cx',
+    '150',
+  )
+  await expect(projectedAreaPreview.locator('circle')).toHaveAttribute(
+    'cy',
+    '150',
+  )
   await expect.poll(() => page.evaluate(() => {
     const state = (
       window as typeof window & {
@@ -548,6 +576,24 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
   ])
 
   await page.locator('#mission-create-robot').selectOption(ROBOT_ID)
+  await expect(
+    page.locator(`#mission-create-robot option[value="${BUSY_ROBOT_ID}"]`),
+  ).toHaveCount(0)
+  const selectedRobotMarker = page.getByTestId('mission-area-preview-robot')
+  await expect(selectedRobotMarker).toHaveAttribute('data-robot-id', ROBOT_ID)
+  await expect(selectedRobotMarker).toHaveAttribute('data-mission-status', '')
+  await expect(selectedRobotMarker.locator('circle')).toHaveAttribute(
+    'cx',
+    '140',
+  )
+  await expect(selectedRobotMarker.locator('circle')).toHaveAttribute(
+    'cy',
+    '160',
+  )
+  await expect(areaPreview).toContainText('임무 미수행')
+  await expect(areaPreview).toContainText(
+    '위도 36.1074000 · 경도 128.4164000',
+  )
   await expect(page.getByRole('button', { name: '임무 생성' })).toBeEnabled()
   await page.getByRole('button', { name: '임무 생성' }).click()
 

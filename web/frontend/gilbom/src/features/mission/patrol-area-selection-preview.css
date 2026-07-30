@@ -10,7 +10,8 @@
 
 .patrol-area-preview-heading,
 .patrol-area-preview-heading > div,
-.patrol-area-preview-center-summary {
+.patrol-area-preview-center-summary,
+.patrol-area-preview-robot-summary {
   display: flex;
   gap: 8px;
   align-items: center;
@@ -66,6 +67,58 @@
   height: 270px;
 }
 
+.patrol-area-preview-projected-overlay {
+  position: absolute;
+  z-index: 10;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.patrol-area-preview-projected-shape {
+  fill: #2f806c;
+  fill-opacity: 0.1;
+  stroke: #175c4c;
+  stroke-opacity: 0.95;
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.patrol-area-preview-projected-center-circle {
+  fill: #fff;
+  stroke: #e36b2c;
+  stroke-width: 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.patrol-area-preview-projected-center-cross {
+  fill: none;
+  stroke: #e36b2c;
+  stroke-linecap: round;
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.patrol-area-preview-projected-robot {
+  stroke: #fff;
+  stroke-width: 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.patrol-area-preview-projected-robot.is-online {
+  fill: #175c4c;
+}
+
+.patrol-area-preview-projected-robot.is-offline {
+  fill: #6b7280;
+}
+
+.patrol-area-preview-projected-robot-heading {
+  fill: #fff;
+}
+
 .patrol-area-preview-loading {
   position: absolute;
   inset: 0;
@@ -105,6 +158,24 @@
   vector-effect: non-scaling-stroke;
 }
 
+.patrol-area-preview-robot circle {
+  stroke: #fff;
+  stroke-width: 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.patrol-area-preview-robot.is-online circle {
+  fill: #175c4c;
+}
+
+.patrol-area-preview-robot.is-offline circle {
+  fill: #6b7280;
+}
+
+.patrol-area-preview-robot path {
+  fill: #fff;
+}
+
 .patrol-area-preview-fallback-label {
   position: absolute;
   right: 10px;
@@ -123,15 +194,27 @@
   font-size: 11px;
 }
 
+.patrol-area-preview-robot-summary {
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .patrol-area-preview-center-summary svg {
   color: #e36b2c;
 }
 
-.patrol-area-preview-center-summary span {
+.patrol-area-preview-robot-summary svg {
+  color: #175c4c;
+}
+
+.patrol-area-preview-center-summary span,
+.patrol-area-preview-robot-summary span {
   font-weight: 800;
 }
 
-.patrol-area-preview-center-summary code {
+.patrol-area-preview-center-summary code,
+.patrol-area-preview-robot-summary code {
   color: var(--brand-strong);
   font-size: 11px;
 }
@@ -147,6 +230,10 @@
   }
 
   .patrol-area-preview-center-summary code {
+    flex-basis: 100%;
+  }
+
+  .patrol-area-preview-robot-summary code {
     flex-basis: 100%;
   }
 }
