@@ -55,6 +55,7 @@
 | V28 | Incident 수집 무결성 보강 | `INC-YYYYMMDD-NNNNNN` 일자별 Counter와 신규 쓰기 형식 CHECK, GPS·Patrol Area 미확정 Incident 검토 대기열 및 Event·Mission·Image FK를 추가 |
 | V29 | CSRF token 발급 Rate Limit bucket | 쿠키를 유지하지 않는 공개 `/csrf-token` 반복 호출이 익명 Spring Session 생성을 증폭시키지 못하도록 `IP_CSRF_TOKEN_ISSUANCE` HMAC IP bucket을 인증 Rate Limit 허용 타입에 추가 |
 | V30 | 보고서 상태·버전·승인 불변성 보강 | 버전별 생성 방식·근거 snapshot, 승인 PDF 결합 정보, 생성 멱등 결과 추적을 추가하고 순차 버전·현재 버전 포인터·상태 전이를 DB trigger로 강제 |
+| V31 | 시간 기반 Mission 계약 | `planned_duration_sec` 양수 제약과 기존 Mission 3,600초 Backfill을 추가하고, 기존 ACTIVE Patrol Area에 내부 `AUTONOMOUS_DEFAULT` Route를 보강 |
 
 ### V26 결함 통계 Query 인덱스
 
@@ -167,7 +168,7 @@ docker compose logs backend
 ```
 
 
-Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V30이
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V31이
 순서대로 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증
