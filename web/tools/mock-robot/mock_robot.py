@@ -76,6 +76,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--ca-certificate", type=Path, default=DEFAULT_CA_CERTIFICATE)
     parser.add_argument("--telemetry-interval", type=float, default=5.0)
+    parser.add_argument(
+        "--mission-auto-complete-sec",
+        type=int,
+        default=0,
+        help=(
+            "Publish MISSION_COMPLETED after this many wall-clock seconds "
+            "while a mission is RUNNING; zero disables automatic completion."
+        ),
+    )
     parser.add_argument("--latitude", type=float, default=37.5013)
     parser.add_argument("--longitude", type=float, default=127.0396)
     parser.add_argument("--battery-percent", type=float, default=87.0)
@@ -117,6 +126,8 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.telemetry_interval <= 0:
         parser.error("--telemetry-interval must be greater than zero")
+    if args.mission_auto_complete_sec < 0:
+        parser.error("--mission-auto-complete-sec must be zero or greater")
     if not 0.0 <= args.battery_percent <= 100.0:
         parser.error("--battery-percent must be between 0 and 100")
     if args.jetson_temp_step_c < 0.0:
@@ -195,6 +206,7 @@ class MockRobot:
         self.presence_topic = topic(self.mqtt_id, "presence")
         self.state_topic = topic(self.mqtt_id, "state")
         self.telemetry_topic = topic(self.mqtt_id, "telemetry")
+        self.mission_event_topic = topic(self.mqtt_id, "events/mission")
         self.command_request_topic = topic(self.mqtt_id, "commands/request")
         self.command_result_topic = topic(self.mqtt_id, "commands/result")
         self.ingest_receipt_topic = topic(self.mqtt_id, "ingest/receipt")
@@ -411,6 +423,62 @@ class MockRobot:
             result["completed_at"] = format_instant()
         return result
 
+    def mission_event(
+        self,
+        event_type: str,
+        mission_id: str,
+        *,
+        duration_sec: int | None = None,
+        completion_reason: str | None = None,
+    ) -> dict[str, Any]:
+        occurred_at = utc_now()
+        event: dict[str, Any] = {
+            "schema_version": SCHEMA_VERSION,
+            "event_id": str(uuid.uuid4()),
+            "event_type": event_type,
+            "mqtt_id": self.mqtt_id,
+            "boot_id": self.boot_id,
+            "seq": self.next_sequence(),
+            "source_component": "mission",
+            "occurred_at": format_instant(occurred_at),
+            "sent_at": format_instant(),
+            "ttl_sec": 300,
+            "mission_id": mission_id,
+        }
+        if completion_reason is not None:
+            event["result"] = {
+                "duration_sec": max(0, duration_sec or 0),
+                "incident_count": 0,
+                "normal_detection_count": 0,
+                "completion_reason": completion_reason,
+            }
+        return event
+
+    def publish_mission_event(
+        self,
+        event_type: str,
+        mission_id: str,
+        *,
+        duration_sec: int | None = None,
+        completion_reason: str | None = None,
+    ) -> None:
+        event = self.mission_event(
+            event_type,
+            mission_id,
+            duration_sec=duration_sec,
+            completion_reason=completion_reason,
+        )
+        self.publish_json(
+            self.mission_event_topic,
+            event,
+            qos=1,
+            retain=False,
+        )
+        print(
+            f"Mission event published missionId={mission_id} "
+            f"eventType={event_type}"
+        )
+
     def on_connect(
         self,
         client: mqtt.Client,
@@ -572,8 +640,46 @@ class MockRobot:
             retain=False,
         )
 
+        with self.state_lock:
+            mission_id_before = self.mission_id
+            mission_started_at_before = self.mission_started_at
+
         status, reason_code = self.apply_command(command)
         if status == "COMPLETED":
+            command_type = command.get("command_type")
+            with self.state_lock:
+                mission_id_after = self.mission_id
+            mission_id = (
+                mission_id_before
+                if command_type == "CANCEL_MISSION"
+                else mission_id_after
+            )
+            event_type = {
+                "START_MISSION": "MISSION_STARTED",
+                "PAUSE_MISSION": "MISSION_PAUSED",
+                "RESUME_MISSION": "MISSION_RESUMED",
+                "CANCEL_MISSION": "MISSION_CANCELLED",
+            }.get(command_type)
+            if event_type is not None and mission_id is not None:
+                terminal = event_type == "MISSION_CANCELLED"
+                duration_sec = None
+                if terminal and mission_started_at_before is not None:
+                    duration_sec = max(
+                        0,
+                        int(
+                            (
+                                utc_now() - mission_started_at_before
+                            ).total_seconds()
+                        ),
+                    )
+                self.publish_mission_event(
+                    event_type,
+                    mission_id,
+                    duration_sec=duration_sec,
+                    completion_reason=(
+                        "MOCK_COMMAND_CANCELLED" if terminal else None
+                    ),
+                )
             self.publish_json(
                 self.state_topic,
                 self.state_payload(),
@@ -686,15 +792,58 @@ class MockRobot:
     def telemetry_loop(self) -> None:
         while not self.stop_event.is_set():
             if self.connected_event.is_set():
+                telemetry = self.telemetry_payload()
                 result = self.publish_json(
                     self.telemetry_topic,
-                    self.telemetry_payload(),
+                    telemetry,
                     qos=0,
                     retain=False,
                 )
                 if result.rc == mqtt.MQTT_ERR_SUCCESS:
                     self.advance_telemetry_values()
+                    self.maybe_auto_complete_mission(telemetry)
             self.stop_event.wait(self.args.telemetry_interval)
+
+    def maybe_auto_complete_mission(
+        self,
+        telemetry: dict[str, Any],
+    ) -> bool:
+        threshold = self.args.mission_auto_complete_sec
+        mission = telemetry.get("mission")
+        mission_id = telemetry.get("mission_id")
+        if (
+            threshold <= 0
+            or not isinstance(mission, dict)
+            or not isinstance(mission_id, str)
+            or mission.get("state") != "RUNNING"
+            or not isinstance(mission.get("elapsed_sec"), int)
+            or mission["elapsed_sec"] < threshold
+        ):
+            return False
+
+        with self.state_lock:
+            if (
+                self.mission_id != mission_id
+                or self.mission_state != "RUNNING"
+            ):
+                return False
+            self.mission_state = "COMPLETED"
+            self.mode = "READY"
+            self.state_reason = "NONE"
+
+        self.publish_mission_event(
+            "MISSION_COMPLETED",
+            mission_id,
+            duration_sec=mission["elapsed_sec"],
+            completion_reason="MOCK_PLANNED_DURATION_REACHED",
+        )
+        self.publish_json(
+            self.state_topic,
+            self.state_payload(),
+            qos=1,
+            retain=True,
+        )
+        return True
 
     def run(self) -> int:
         try:

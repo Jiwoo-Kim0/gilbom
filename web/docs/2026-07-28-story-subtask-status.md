@@ -63,7 +63,7 @@ Day 9까지 흩어진 팀원 B 백로그다.
 | `S15P11D101-376` Robot 관제 조회 REST API | 목록·요약·지도·단건을 제공한다. 목록·집계는 SQL `JOIN/EXISTS`에서 객체 범위를 제한하며 범위 밖 단건은 존재하지 않는 대상과 동일한 `404`를 반환한다. | **DONE** | `/api/v1/robots`, `/summary`, `/map`, `/{robotId}`, `ROBOT_STATUS_VIEW`, SQL Scope, Controller·Scope 통합 테스트, OpenAPI가 있다. | 프론트 연결은 사용자가 현재 제외했으므로 이 Backend Story 완료 판정에 포함하지 않는다. |
 | `S15P11D101-377` Robot 명령·ACK 생명주기와 REST API | REST에서 명령을 생성·조회하고 DB 저장 후 MQTT로 발행한다. `command_id` 멱등성, 만료시간, Retain 금지, ACK/Result 저장, `CREATED→SENT→ACCEPTED→COMPLETED` 및 실패·거절·만료 전이를 관리한다. | **DONE (Backend)** | V21 Command·Result Table, 생성·목록·단건·결과 REST, MQTT 5 Message Expiry, `PUBLISH_FAILED`, ACK 영속화, 지연 결과 보호, Timeout Scheduler, `COMMAND_STATUS_CHANGED` SSE, Permission·SQL Scope를 구현했다. 정상·실패·거절·만료·중복·범위 밖·감사 실패 Rollback 통합 테스트와 전체 323 tests가 실패 없이 통과했다. | 실제 Mock Robot이 명령을 수신하고 Result를 되돌리는 Broker E2E는 `B-STORY-06` 통합 범위로 추적한다. |
 | `S15P11D101-378` Presence·State·Boot Session 저장 | Presence로 연결·단절과 Last Will을 기록하고 State로 mode·health를 저장한다. `boot_id`별 Session과 `seq` 진행을 추적해 재부팅과 Replay를 구분하고 변경을 SSE로 알린다. | **DONE** | V18 Boot Session·append-only Status History, Presence·State Service/Handler, 90초 Timeout과 commit 이후 SSE를 구현했다. `S15P11D101-432`에서 State·Telemetry·Event 공용 `seq`, 새 Boot `seq=1`, 종료·이전 Boot Replay 차단을 보강했다. | 실제 Jetson 단절·재연결 실기와 다중 Backend SSE Fan-out은 Day 7~10 후속 통합 범위다. |
-| `S15P11D101-379` 순찰 임무와 경로 관리 | 순찰 구역·경로 CRUD, Mission 생성·Robot 배정, 상태 전이·이력, 시간 기반 진행률과 실제 궤적을 관리하고 명령 수명주기와 연결한다. | **IN PROGRESS** | V22~V25·V31 정본·FK·Robot별 활성 Mission 제약, Area 등록·변경·보관 REST, 내부 Dummy Route, 시간 기반 Mission·진행률·ETA, Area·Trajectory·현재 위치 지도, START·PAUSE·RESUME·CANCEL Command FK와 OpenAPI·통합·Browser 테스트를 구현했다. | 실제 로그인 Backend Browser 단일 체인과 Mission 전체 Mock E2E가 남았다. 충전소 복귀·충전 후 재개는 구현 범위에서 제외했다. |
+| `S15P11D101-379` 순찰 임무와 경로 관리 | 순찰 구역·경로 CRUD, Mission 생성·Robot 배정, 상태 전이·이력, 시간 기반 진행률과 실제 궤적을 관리하고 명령 수명주기와 연결한다. | **DONE** | V22~V25·V32 정본·FK·Robot별 활성 Mission 제약, Area 등록·변경·보관 REST, 내부 Dummy Route, 시간 기반 Mission·진행률·ETA, Area·Trajectory·현재 위치 지도, START·PAUSE·RESUME·CANCEL Command FK와 OpenAPI·통합·Browser 테스트를 구현했다. 실제 로그인·MFA Browser 체인과 TLS MQTT·Mock Robot·DB·REST/SSE·React Mission 전체 E2E도 통과했다. | 충전소 복귀·충전 후 재개는 구현 범위에서 제외했으며 실제 Jetson·EC2 재검증은 Day 7~10 통합 범위다. |
 | `S15P11D101-432` `boot_id`·`seq` Replay 정책 고정 | State·Telemetry·Event 4종의 Boot별 공용 순번, 정확한 재전송 멱등성, 교차 Topic 충돌과 종료·이전 Boot 차단을 하나의 정책으로 적용한다. | **DONE (Backend·Mock)** | 공통 Replay Service가 Current State 행 잠금 아래 세 History Table을 함께 검사한다. 새 Boot `seq=1`, 증가 순번·누락 허용, `REPLACED_BY_NEW_BOOT`, 복구 가능한 Presence 재연결, 제한 Metric과 오류 코드가 구현됐다. 실제 로컬 TLS Broker에서 정상 Event의 정확한 재전송 멱등성과 같은 `(boot_id,seq)`의 다른 Event 충돌 거부를 검증했다. | 실제 Jetson Publisher와 EC2 Broker 재검증은 Day 7 통합 범위다. |
 | `S15P11D101-434` 기기 Credential 회전·폐기 API | 기존 발급 API가 새 Credential 버전을 회전하고, Secret 없는 이력 조회와 ACTIVE Credential 즉시 폐기를 제공한다. | **DONE (Backend)** | Robot 잠금 기반 버전 직렬화, 기존 버전 `REVOKED(ROTATED)`, Broker hash 일치 검증, DB 실패 시 이전 hash 복구, 필수 감사, 반복 폐기 멱등성, 권한·CSRF를 구현했다. `TODAY-B-00-6`에서 Registry Drift 조회·복구와 실제 TLS Cutover까지 검증했다. | EC2 운영 Broker와 실제 Jetson의 Cutover는 배포·장비 연동 단계에서 최종 확인한다. |
 
@@ -244,7 +244,7 @@ Day 9까지 흩어진 팀원 B 백로그다.
   - [x] Telemetry에 Mission UUID를 연결한 실제 순찰 궤적 저장
   - [x] 시작·일시정지·재개·종료 명령 연동 — START·PAUSE·RESUME·CANCEL FK 연결 완료
   - [x] Area·실제 Trajectory·현재 위치 지도와 영역 이탈 경고
-  - [ ] 실제 로그인 Backend Browser 단일 체인과 Mission 전체 Mock E2E
+  - [x] 실제 로그인 Backend Browser 단일 체인과 Mission 전체 Mock E2E
   - 충전소 복귀·충전·충전 후 재개는 구현 범위 제외
 
 - [ ] **B-STORY-11. 실제 Jetson 통합** — `TODO / WAITING`
@@ -306,14 +306,14 @@ Day 9까지 흩어진 팀원 B 백로그다.
 | Day 1 | `375` Telemetry 안정화 | DONE | 300개 자동 테스트와 TLS Mosquitto Mock E2E 완료 |
 | Day 2 | `378` Presence·State·Boot | DONE | 308개 자동 테스트와 TLS Mosquitto Mock E2E 완료 |
 | Day 4 | `377` Command·ACK·Timeout | DONE (Backend) | 실제 Robot·Mock Broker 왕복 E2E는 Day 10 통합에서 재검증 |
-| Day 6 | `379` Mission·Patrol | IN PROGRESS | Mission REST·시간 진행률·지도·명령 FK 완료. 실제 로그인 Backend Browser 단일 체인과 Mission 전체 Mock E2E가 남았고 충전 기능은 범위에서 제외함 |
+| Day 6 | `379` Mission·Patrol | DONE | Mission REST·시간 진행률·지도·명령 FK와 실제 로그인 Browser 체인, TLS MQTT·Mock Robot 기반 Mission 전체 E2E 완료. 충전 기능은 범위에서 제외함 |
 | Day 7 | `368` 정리, 계약·Fixture | TODO | 별도 API를 `376`에 병합 |
 | Day 9 | 팀원 B P0 기능 동결 | 미착수 범위 있음 | P1·P2 제거, 신규 기능 금지 |
 | Day 10 | 실기·통합 시험 | 예정 | Jetson 불가 시 동일 계약의 Mock과 증거 영상 사용 |
 | Day 11 | 안정화 | 예정 | 치명·높은 우선순위 Bug만 수정 |
 | Day 12 | 최종 검증·시연 | 예정 | P0 실패가 있으면 해당 흐름만 집중 수정·재시험 |
 
-현재 6건 완료 상태이므로, Day 5~7에 남은 Jira 2건을 정리하고 Day 8~9에
+현재 7건 완료 상태이므로, Day 7에 남은 Jira 1건을 정리하고 Day 8~9에
 프론트를 연결하면 Day 10~12의 검증 시간을 보존할 수 있다. 이 일정은 P0를 고정하고
 `368` 중복 API, 복잡한 Dashboard, 다중 Instance SSE와 고급 Mission UX를 후속으로
 이동할 수 있다는 조건에서 달성 가능하다.
