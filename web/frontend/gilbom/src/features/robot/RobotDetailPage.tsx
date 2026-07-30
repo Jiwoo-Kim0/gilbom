@@ -19,7 +19,11 @@ import { useAuthentication } from '../auth/authenticationContext'
 import { ROBOT_COMMAND_VIEW } from '../auth/permissions'
 import { CommandControlPage } from '../command/CommandControlPage'
 import { getRobot } from './robotApi'
-import type { RobotDetail } from './robotTypes'
+import type {
+  RobotDetail,
+  RobotRealtimeEvent,
+} from './robotTypes'
+import { useRobotRealtime } from './useRobotRealtime'
 
 function formatMetric(value: number | null, suffix: string): string {
   return value === null ? '—' : `${value.toFixed(1)}${suffix}`
@@ -51,6 +55,7 @@ export function RobotDetailPage() {
   const { robotId } = useParams<{ robotId: string }>()
   const { user } = useAuthentication()
   const [robot, setRobot] = useState<RobotDetail | null>(null)
+  const [commandRealtimeRevision, setCommandRealtimeRevision] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<unknown>(null)
   const canViewCommands = user?.permissions.includes(ROBOT_COMMAND_VIEW) ?? false
@@ -73,6 +78,31 @@ export function RobotDetailPage() {
       setLoading(false)
     }
   }, [robotId])
+
+  const refreshRobotSnapshot = useCallback(async (
+    event?: RobotRealtimeEvent,
+  ) => {
+    if (robotId === undefined) {
+      return
+    }
+    if (event !== undefined && event.robotId !== robotId) {
+      return
+    }
+    if (
+      event === undefined
+      || event.eventType === 'COMMAND_STATUS_CHANGED'
+    ) {
+      setCommandRealtimeRevision((current) => current + 1)
+    }
+    try {
+      setRobot(await getRobot(robotId))
+      setError(null)
+    } catch (nextError) {
+      setError(nextError)
+    }
+  }, [robotId])
+
+  const { status: streamStatus } = useRobotRealtime(refreshRobotSnapshot)
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -173,7 +203,11 @@ export function RobotDetailPage() {
           </article>
 
           {canViewCommands ? (
-            <CommandControlPage robot={robot} />
+            <CommandControlPage
+              robot={robot}
+              streamStatus={streamStatus}
+              realtimeRevision={commandRealtimeRevision}
+            />
           ) : null}
         </>
       )}

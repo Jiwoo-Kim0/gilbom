@@ -1,9 +1,9 @@
-# Robot Command 발행·ACK·Timeout Backend 구현 내용
+# Robot Command 발행·ACK·Timeout 구현 내용
 
 > 담당: 팀원 B — Robot 제어
 > 작업일: 2026-07-28 ~ 2026-07-30
 > 연결 Jira: `S15P11D101-377`, `DAY6-B-02`, `DAY6-B-03`
-> 최종 상태: **Backend DONE / Frontend·전체 E2E IN PROGRESS**
+> 최종 상태: **Backend·Frontend·정상 Broker E2E DONE / 비정상·보안 E2E TODO**
 
 이 문서는 관리자 요청이 REST·DB·MQTT·Robot Result를 거쳐 다시 관리 화면으로
 돌아오는 **Command 왕복 흐름만** 묶는다. Patrol Area 생성, Mission 시간
@@ -18,7 +18,7 @@
 
 ## 0. 3분 요약
 
-Command Backend는 구현됐다.
+Command Backend와 관리자 제어 화면, 정상 Broker 왕복은 구현·검증됐다.
 
 ```text
 관리자 POST
@@ -35,10 +35,13 @@ Command Backend는 구현됐다.
 정상뿐 아니라 Publish 실패, 업무 실패, 안전 거절, 만료, 늦은 Result, 중복
 REST, 중복 MQTT Result, Robot Scope와 감사 Rollback을 자동 테스트했다.
 
-하지만 사용자가 실제로 누를 Command 화면은 아직 없다.
-`frontend/src/features/command/` 폴더가 없으며 버튼·확인 Modal·ACK·Timeout
-표시도 없다. Mock Robot의 Command Handler는 존재하지만
-REST→TLS Broker→Mock→DB→SSE→React 전체 증거도 아직 없다.
+`frontend/src/features/command/`에는 상태 기반 여섯 제어 버튼, 확인 Modal,
+최근 Command 목록과 상세 Drawer가 있다. ACK와 최종 Result, 실패·거절·Timeout을
+구분하고 `COMMAND_STATUS_CHANGED`와 SSE 재연결 뒤 REST 정본을 다시 조회한다.
+
+정상 E2E는 실제 TLS Mosquitto와 Python Mock Robot을 연결해
+REST→DB→TLS Broker→Mock→Result→DB→SSE→React를 통과했다. 남은 범위는
+Publish 실패·거절·만료·중복·늦은 Result와 권한·Scope·CSRF·감사의 Browser E2E다.
 
 ---
 
@@ -46,7 +49,7 @@ REST→TLS Broker→Mock→DB→SSE→React 전체 증거도 아직 없다.
 
 ### 1.1 제공 Command
 
-| Command | Backend | Frontend 계획 | 파라미터 핵심 |
+| Command | Backend | Frontend | 파라미터 핵심 |
 | --- | :---: | :---: | --- |
 | `START_MISSION` | O | O | `mission_id`, `zone_id` |
 | `PAUSE_MISSION` | O | O | `reason` |
@@ -216,7 +219,19 @@ cd web/backend
 - 30초 Command는 재연결 뒤 1건 전달
 - QoS 1, Retain `false`, Session Present 확인
 
-전체 Browser E2E는 아직 미실행이다.
+정상 Broker·Browser E2E:
+
+```powershell
+cd web
+python scripts/command-roundtrip-e2e.py
+```
+
+- 현재 Backend 소스로 이미지를 빌드하고 임시 PostgreSQL DB·Backend를 기동한다.
+- 실제 TLS Mosquitto에 Mock Robot을 연결하고 Chromium에서 여섯 명령을 실행한다.
+- 각 명령의 고유 `commandId`, `COMPLETED`, `ACCEPTED`·`COMPLETED` Result를
+  화면·REST·DB에서 대조한다.
+- 최종 Mission `CANCELLED`, Robot mode `READY`, Mission 분리 상태를 검증한다.
+- 완료 뒤 임시 Backend·DB·Vite·Mock을 정리하고 정상 Compose Backend를 복구한다.
 
 ---
 
@@ -248,14 +263,10 @@ Backend의 중복 발행 방지만으로 충분하지 않다. QoS 1과 재연결
 
 ### 내 몫 — P0
 
-1. `features/command/` Type·API Client
-2. Permission·메뉴·Route
-3. 상태 기반 버튼
-4. 중요 명령 확인 Modal
-5. Command·Result·Timeout 화면
-6. SSE 뒤 REST 정본 갱신
-7. 정상·실패·거절·만료·중복 Browser E2E
-8. 실제 TLS Broker 전체 왕복
+1. Publish 실패·`FAILED`·`REJECTED`·Timeout Browser E2E
+2. 만료 뒤 늦은 Result와 REST/MQTT 중복 Browser E2E
+3. 권한·Robot Scope·CSRF·감사 Browser E2E
+4. 실제 Jetson·EC2 Broker 왕복
 
 ### 팀원 A
 
@@ -276,4 +287,5 @@ Backend의 중복 발행 방지만으로 충분하지 않다. QoS 1과 재연결
 
 - `DailyLog/2026-07-30_Day6_상세_구현.md` 6~8절
 - `TROUBLESHOOTING/3_MqttTtlAndMessageExpiry.md`
+- `TROUBLESHOOTING/14_CommandNormalRoundtrip.md`
 - [팀원 B Story 현황](../../2026-07-28-story-subtask-status.md)

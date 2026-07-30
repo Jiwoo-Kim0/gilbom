@@ -25,13 +25,17 @@ import {
 } from '../auth/permissions'
 import { getMissions } from '../mission/missionApi'
 import type { Mission } from '../mission/missionTypes'
-import type { RobotDetail } from '../robot/robotTypes'
+import type {
+  RobotDetail,
+  RobotStreamStatus,
+} from '../robot/robotTypes'
 import {
   CommandCreateAttempt,
   createRobotCommand,
   listRobotCommands,
 } from './commandApi'
 import { CommandConfirmModal } from './CommandConfirmModal'
+import { CommandHistoryPanel } from './CommandHistoryPanel'
 import {
   COMMAND_DEFINITIONS,
   IN_FLIGHT_COMMAND_STATUSES,
@@ -117,9 +121,20 @@ function upsertCreatedCommand(
   }
 }
 
-export function CommandControlPage({ robot }: { robot: RobotDetail }) {
+type CommandControlPageProps = {
+  robot: RobotDetail
+  streamStatus: RobotStreamStatus
+  realtimeRevision: number
+}
+
+export function CommandControlPage({
+  robot,
+  streamStatus,
+  realtimeRevision,
+}: CommandControlPageProps) {
   const { user } = useAuthentication()
   const [commands, setCommands] = useState<CommandListResponse | null>(null)
+  const [commandSnapshotRevision, setCommandSnapshotRevision] = useState(0)
   const [currentMission, setCurrentMission] = useState<Mission | null>(null)
   const [loading, setLoading] = useState(false)
   const [missionLoading, setMissionLoading] = useState(false)
@@ -145,6 +160,7 @@ export function CommandControlPage({ robot }: { robot: RobotDetail }) {
     setError(null)
     try {
       setCommands(await listRobotCommands(robot.robotId, 0, PAGE_SIZE))
+      setCommandSnapshotRevision((current) => current + 1)
     } catch (nextError) {
       setCommands(null)
       setError(nextError)
@@ -193,7 +209,7 @@ export function CommandControlPage({ robot }: { robot: RobotDetail }) {
       void loadControlData()
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [loadControlData])
+  }, [loadControlData, realtimeRevision])
 
   const pendingCommandTypes = useMemo(() => (
     commands?.content
@@ -202,6 +218,11 @@ export function CommandControlPage({ robot }: { robot: RobotDetail }) {
       ))
       .map((command) => command.commandType) ?? []
   ), [commands])
+  const effectiveMissionStatus = (
+    robot.missionStatus
+    ?? currentMission?.status
+    ?? null
+  )
 
   const selectedDefinition = selectedCommand === null
     ? null
@@ -216,7 +237,7 @@ export function CommandControlPage({ robot }: { robot: RobotDetail }) {
         connectivityStatus: robot.connectivityStatus,
         operationalStatus: robot.operationalStatus,
         robotMode: robot.robotMode,
-        missionStatus: robot.missionStatus,
+        missionStatus: effectiveMissionStatus,
         hasMissionTarget: currentMission !== null,
         pendingCommandTypes,
       },
@@ -324,7 +345,7 @@ export function CommandControlPage({ robot }: { robot: RobotDetail }) {
           </div>
           <div className="command-current-context">
             <span>Robot <strong>{robot.robotMode ?? '—'}</strong></span>
-            <span>Mission <strong>{robot.missionStatus ?? '—'}</strong></span>
+            <span>Mission <strong>{effectiveMissionStatus ?? '—'}</strong></span>
             {currentMission !== null ? (
               <span>Code <strong>{currentMission.missionCode}</strong></span>
             ) : null}
@@ -345,7 +366,7 @@ export function CommandControlPage({ robot }: { robot: RobotDetail }) {
                   connectivityStatus: robot.connectivityStatus,
                   operationalStatus: robot.operationalStatus,
                   robotMode: robot.robotMode,
-                  missionStatus: robot.missionStatus,
+                  missionStatus: effectiveMissionStatus,
                   hasMissionTarget: currentMission !== null,
                   pendingCommandTypes,
                 },
@@ -402,6 +423,10 @@ export function CommandControlPage({ robot }: { robot: RobotDetail }) {
               <dt>접근 수준</dt>
               <dd>{canExecute ? '조회·발행' : '조회'}</dd>
             </div>
+            <div>
+              <dt>실시간 연결</dt>
+              <dd>{streamStatus}</dd>
+            </div>
           </dl>
         )}
         <p className="command-foundation-note">
@@ -409,6 +434,13 @@ export function CommandControlPage({ robot }: { robot: RobotDetail }) {
           권한·Robot 범위·최종 업무 상태를 다시 검증합니다.
         </p>
       </article>
+
+      <CommandHistoryPanel
+        commands={commands}
+        loading={loading}
+        streamStatus={streamStatus}
+        refreshRevision={commandSnapshotRevision}
+      />
 
       {selectedDefinition !== null ? (
         <CommandConfirmModal

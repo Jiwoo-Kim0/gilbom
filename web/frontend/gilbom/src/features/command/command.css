@@ -67,7 +67,7 @@
 
 .command-foundation-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin: 0;
 }
@@ -98,6 +98,490 @@
   border-top: 1px solid var(--line);
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.command-history-card {
+  display: grid;
+  gap: 18px;
+}
+
+.command-history-heading {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.command-history-heading h3 {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-size: 19px;
+}
+
+.command-history-heading p:not(.eyebrow) {
+  margin: 7px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.command-stream-status {
+  display: inline-flex;
+  min-height: 30px;
+  gap: 6px;
+  padding: 0 10px;
+  border-radius: 999px;
+  align-items: center;
+  color: var(--command-warning);
+  background: color-mix(in srgb, var(--command-warning) 9%, var(--surface));
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.command-stream-connected {
+  color: var(--command-success);
+  background: color-mix(in srgb, var(--command-success) 9%, var(--surface));
+}
+
+.command-history-empty {
+  margin: 0;
+  padding: 20px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.command-history-meta {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.command-history-list {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.command-history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(150px, 0.8fr) auto auto;
+  min-height: 72px;
+  gap: 14px;
+  padding: 12px 15px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  align-items: center;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.command-history-row:last-child {
+  border-bottom: 0;
+}
+
+.command-history-row:hover {
+  background: var(--surface-muted);
+}
+
+.command-history-row:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
+}
+
+.command-history-row-main {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.command-history-row-main strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.command-history-row-main code {
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.command-history-row-time {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.command-status-badge {
+  display: inline-flex;
+  min-height: 28px;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  border-radius: 999px;
+  align-items: center;
+  color: var(--text-muted);
+  background: var(--surface);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.command-status-progress {
+  color: var(--brand-strong);
+  background: var(--brand-soft);
+}
+
+.command-status-ack {
+  color: var(--command-warning);
+  background: color-mix(in srgb, var(--command-warning) 9%, var(--surface));
+}
+
+.command-status-success {
+  color: var(--command-success);
+  background: color-mix(in srgb, var(--command-success) 9%, var(--surface));
+}
+
+.command-status-failure,
+.command-status-rejected {
+  color: var(--command-danger);
+  background: color-mix(in srgb, var(--command-danger) 8%, var(--surface));
+}
+
+.command-status-expired {
+  color: var(--command-warning);
+  background: color-mix(in srgb, var(--command-warning) 10%, var(--surface));
+}
+
+.command-detail-backdrop {
+  position: fixed;
+  z-index: 1100;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(15 23 42 / 52%);
+  backdrop-filter: blur(2px);
+}
+
+.command-detail-drawer {
+  display: grid;
+  width: min(100%, 620px);
+  height: 100%;
+  overflow-y: auto;
+  align-content: start;
+  gap: 18px;
+  padding: 24px;
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: -18px 0 52px rgb(15 23 42 / 22%);
+}
+
+.command-detail-heading {
+  display: flex;
+  min-width: 0;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.command-detail-heading > div {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.command-detail-heading h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 22px;
+}
+
+.command-detail-heading code {
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.command-detail-state {
+  display: flex;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  align-items: flex-start;
+  color: var(--brand-strong);
+  background: var(--brand-soft);
+}
+
+.command-detail-state > span {
+  display: grid;
+  gap: 4px;
+}
+
+.command-detail-state strong {
+  color: currentColor;
+  font-size: 14px;
+}
+
+.command-detail-state small {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.command-detail-ack,
+.command-detail-expired {
+  color: var(--command-warning);
+  background: color-mix(in srgb, var(--command-warning) 9%, var(--surface));
+}
+
+.command-detail-success {
+  color: var(--command-success);
+  background: color-mix(in srgb, var(--command-success) 8%, var(--surface));
+}
+
+.command-detail-failure,
+.command-detail-rejected {
+  color: var(--command-danger);
+  background: color-mix(in srgb, var(--command-danger) 7%, var(--surface));
+}
+
+.command-detail-guidance {
+  display: flex;
+  gap: 9px;
+  padding: 13px 14px;
+  border: 1px solid color-mix(in srgb, var(--command-warning) 28%, var(--line));
+  border-radius: 12px;
+  align-items: flex-start;
+  color: var(--text);
+  background: color-mix(in srgb, var(--command-warning) 7%, var(--surface));
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.command-detail-guidance svg {
+  flex: 0 0 auto;
+  color: var(--command-warning);
+}
+
+.command-detail-timeline {
+  margin: 0;
+  padding: 0 2px;
+}
+
+.command-detail-timeline > div {
+  position: relative;
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  min-height: 42px;
+  gap: 12px;
+  padding: 0 0 12px 26px;
+  align-items: start;
+}
+
+.command-detail-timeline > div::before {
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  content: '';
+}
+
+.command-detail-timeline > div::after {
+  position: absolute;
+  top: 14px;
+  bottom: 0;
+  left: 8px;
+  width: 2px;
+  background: var(--line);
+  content: '';
+}
+
+.command-detail-timeline > div:last-child::after {
+  display: none;
+}
+
+.command-detail-timeline > div.is-complete::before {
+  border-color: var(--command-success);
+  background: var(--command-success);
+}
+
+.command-detail-timeline dt {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.command-detail-timeline dd {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.command-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--line);
+}
+
+.command-detail-grid > div {
+  display: grid;
+  gap: 5px;
+  padding: 12px 14px;
+  background: var(--surface-muted);
+}
+
+.command-detail-grid dt {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.command-detail-grid dd {
+  overflow-wrap: anywhere;
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.command-result-section {
+  display: grid;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.command-result-heading {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.command-result-heading h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.command-result-heading span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.command-result-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.command-result-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-muted);
+}
+
+.command-result-summary {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.command-result-summary strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.command-result-summary small {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.command-result-list dl {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.command-result-list dl > div {
+  display: grid;
+  gap: 3px;
+  padding: 8px 9px;
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.command-result-list dt {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.command-result-list dd {
+  overflow-wrap: anywhere;
+  margin: 0;
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.command-result-step {
+  display: inline-flex;
+  min-height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  align-items: center;
+  color: var(--brand-strong);
+  background: var(--brand-soft);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.command-result-success {
+  color: var(--command-success);
+  background: color-mix(in srgb, var(--command-success) 9%, var(--surface));
+}
+
+.command-result-ack,
+.command-result-expired {
+  color: var(--command-warning);
+  background: color-mix(in srgb, var(--command-warning) 9%, var(--surface));
+}
+
+.command-result-failure {
+  color: var(--command-danger);
+  background: color-mix(in srgb, var(--command-danger) 8%, var(--surface));
 }
 
 .command-controls-card {
@@ -508,6 +992,45 @@
 
   .command-foundation-summary {
     grid-template-columns: 1fr;
+  }
+
+  .command-history-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .command-history-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 12px;
+  }
+
+  .command-history-row-time {
+    grid-column: 1;
+  }
+
+  .command-history-row .command-status-badge {
+    grid-row: 1;
+    grid-column: 2;
+  }
+
+  .command-detail-drawer {
+    width: 100%;
+    padding: 18px;
+  }
+
+  .command-detail-timeline > div {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .command-detail-grid,
+  .command-result-list dl {
+    grid-template-columns: 1fr;
+  }
+
+  .command-result-summary {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .command-controls-heading {

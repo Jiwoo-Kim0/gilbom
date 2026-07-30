@@ -44,7 +44,9 @@ function parseRobotEvent(event: MessageEvent<string>): RobotRealtimeEvent | null
   }
 }
 
-export function useRobotRealtime(onSnapshotRequired: () => void): {
+export function useRobotRealtime(
+  onSnapshotRequired: (event?: RobotRealtimeEvent) => void,
+): {
   status: RobotStreamStatus
   lastHeartbeatAt: string | null
   logs: RobotLogEntry[]
@@ -146,7 +148,7 @@ export function useRobotRealtime(onSnapshotRequired: () => void): {
         eventMessage[event.eventType],
         'info',
       )
-      onSnapshotRequiredRef.current()
+      onSnapshotRequiredRef.current(event)
     }
 
     for (const eventType of ROBOT_EVENT_TYPES) {
