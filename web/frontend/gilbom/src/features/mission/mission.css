@@ -107,6 +107,15 @@
   font-weight: 700;
 }
 
+.mission-robot-registry-recovery {
+  padding: 12px;
+  border: 1px solid #e4cc78;
+  border-radius: 12px;
+  color: #6e5613;
+  background: #fff9df;
+  font-size: 13px;
+}
+
 .mission-robot-activation-actions {
   justify-content: flex-end;
   margin-top: 20px;

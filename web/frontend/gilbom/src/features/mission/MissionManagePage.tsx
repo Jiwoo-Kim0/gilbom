@@ -24,11 +24,15 @@ import {
   type FormEvent,
 } from 'react'
 import { NavLink } from 'react-router'
-import { getApiErrorMessage } from '../../shared/api/apiClient'
+import {
+  ApiError,
+  getApiErrorMessage,
+} from '../../shared/api/apiClient'
 import { useAuthentication } from '../auth/authenticationContext'
 import { MISSION_MANAGE, ROBOT_REGISTER } from '../auth/permissions'
 import {
   issueRobotCredential,
+  reconcileRobotCredentialRegistry,
   type IssuedMqttCredential,
 } from '../robot/robotCredentialApi'
 import { getRobotMap } from '../robot/robotApi'
@@ -187,6 +191,9 @@ export function MissionManagePage() {
   const canManage = user?.permissions.includes(MISSION_MANAGE) ?? false
   const canRegisterRobot =
     user?.permissions.includes(ROBOT_REGISTER) ?? false
+  const credentialRegistryConflict =
+    activationError instanceof ApiError
+    && activationError.code === 'ROBOT_CREDENTIAL_CONFLICT'
 
   const activeAreas = useMemo(
     () => areas.filter((area) => area.lifecycleStatus === 'ACTIVE'),
@@ -299,24 +306,48 @@ export function MissionManagePage() {
     setIssuedCredential(null)
   }
 
+  async function requestRobotCredential(robot: RobotOption) {
+    const idempotencyKey = activationIdempotencyKeyRef.current
+      ?? crypto.randomUUID()
+    activationIdempotencyKeyRef.current = idempotencyKey
+    const credential = await issueRobotCredential(
+      robot.robotId,
+      idempotencyKey,
+    )
+    setIssuedCredential(credential)
+    await loadCatalogs()
+    setCreateRobotId(robot.robotId)
+  }
+
   async function handleRobotActivation() {
     if (activationRobot === null) {
       return
     }
 
-    const idempotencyKey = activationIdempotencyKeyRef.current
-      ?? crypto.randomUUID()
-    activationIdempotencyKeyRef.current = idempotencyKey
     setActivationSubmitting(true)
     setActivationError(null)
     try {
-      const credential = await issueRobotCredential(
+      await requestRobotCredential(activationRobot)
+    } catch (nextError) {
+      setActivationError(nextError)
+    } finally {
+      setActivationSubmitting(false)
+    }
+  }
+
+  async function handleRegistryReconcileAndRetry() {
+    if (activationRobot === null) {
+      return
+    }
+
+    setActivationSubmitting(true)
+    setActivationError(null)
+    try {
+      await reconcileRobotCredentialRegistry(
         activationRobot.robotId,
-        idempotencyKey,
+        '임무 배정 전 잔존 MQTT Broker 계정 정리',
       )
-      setIssuedCredential(credential)
-      await loadCatalogs()
-      setCreateRobotId(activationRobot.robotId)
+      await requestRobotCredential(activationRobot)
     } catch (nextError) {
       setActivationError(nextError)
     } finally {
@@ -833,9 +864,18 @@ export function MissionManagePage() {
                   발급 비밀번호는 성공 직후 이 창에서 한 번만 표시됩니다.
                 </p>
                 {activationError ? (
-                  <div className="page-alert" role="alert">
-                    발급하지 못했습니다. {getApiErrorMessage(activationError)}
-                  </div>
+                  <>
+                    <div className="page-alert" role="alert">
+                      발급하지 못했습니다. {getApiErrorMessage(activationError)}
+                    </div>
+                    {credentialRegistryConflict ? (
+                      <p className="mission-robot-registry-recovery">
+                        DB에는 활성 Credential이 없지만 Broker에 같은 계정이 남아
+                        있습니다. 기존 정합성 복구 API로 잔존 계정을 제거한 뒤
+                        새 Credential을 발급할 수 있습니다.
+                      </p>
+                    ) : null}
+                  </>
                 ) : null}
                 <div className="mission-robot-activation-actions">
                   <button
@@ -849,10 +889,18 @@ export function MissionManagePage() {
                   <button
                     className="primary-button"
                     type="button"
-                    onClick={() => void handleRobotActivation()}
+                    onClick={() => void (
+                      credentialRegistryConflict
+                        ? handleRegistryReconcileAndRetry()
+                        : handleRobotActivation()
+                    )}
                     disabled={activationSubmitting}
                   >
-                    {activationSubmitting ? '발급 중…' : '발급·활성화'}
+                    {activationSubmitting
+                      ? '처리 중…'
+                      : credentialRegistryConflict
+                        ? '잔존 계정 정리 후 다시 발급'
+                        : '발급·활성화'}
                   </button>
                 </div>
               </>

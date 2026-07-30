@@ -88,6 +88,8 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
   let missionCreated = false
   let routeRequested = false
   let credentialIssued = false
+  let registryReconciled = false
+  const credentialIdempotencyKeys: string[] = []
   let createPayload: Record<string, unknown> | null = null
   let missionCreatePayload: Record<string, unknown> | null = null
 
@@ -311,9 +313,16 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
       && request.method() === 'POST'
     ) {
       expect(request.headers()['x-csrf-token']).toBe('patrol-area-e2e-csrf')
-      expect(request.headers()['idempotency-key']).toMatch(
-        /^[0-9a-f-]{36}$/u,
-      )
+      const idempotencyKey = request.headers()['idempotency-key']
+      expect(idempotencyKey).toMatch(/^[0-9a-f-]{36}$/u)
+      credentialIdempotencyKeys.push(idempotencyKey)
+      if (!registryReconciled) {
+        await fulfillJson(route, {
+          code: 'ROBOT_CREDENTIAL_CONFLICT',
+          message: 'MQTT Broker에 이미 같은 로봇 계정이 있습니다.',
+        }, 409)
+        return
+      }
       credentialIssued = true
       await fulfillJson(route, {
         credentialId: '83000000-0000-4000-8000-000000000008',
@@ -326,6 +335,28 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
         },
         expiresAt: null,
       }, 201)
+      return
+    }
+    if (
+      pathname
+        === `/api/v1/robots/${PROVISIONING_ROBOT_ID}`
+          + '/credentials/registry-reconcile'
+      && request.method() === 'POST'
+    ) {
+      expect(request.headers()['x-csrf-token']).toBe('patrol-area-e2e-csrf')
+      expect(request.postDataJSON()).toEqual({
+        reason: '임무 배정 전 잔존 MQTT Broker 계정 정리',
+      })
+      registryReconciled = true
+      await fulfillJson(route, {
+        robotId: PROVISIONING_ROBOT_ID,
+        mqttId: 'robot-provisioning-e2e',
+        registryStatus: 'IN_SYNC',
+        driftDetected: false,
+        activeCredentialId: null,
+        activeCredentialVersion: null,
+        checkedAt: '2026-07-30T12:00:00Z',
+      })
       return
     }
     if (pathname === '/api/v1/robots/map') {
@@ -616,7 +647,16 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
     page.getByRole('dialog', { name: 'Robot 발급·활성화' }),
   ).toBeVisible()
   await page.getByRole('button', { name: '발급·활성화', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText(
+    'MQTT Broker에 이미 같은 로봇 계정이 있습니다.',
+  )
+  await page.getByRole('button', {
+    name: '잔존 계정 정리 후 다시 발급',
+  }).click()
   await expect(page.getByText('one-time-password')).toBeVisible()
+  expect(registryReconciled).toBe(true)
+  expect(credentialIdempotencyKeys).toHaveLength(2)
+  expect(credentialIdempotencyKeys[1]).toBe(credentialIdempotencyKeys[0])
   await expect(page.locator('#mission-create-robot')).toHaveValue(
     PROVISIONING_ROBOT_ID,
   )
