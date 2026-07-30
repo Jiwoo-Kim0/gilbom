@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gilbom.example/contracts/mqtt/v2/schemas/ingest-receipt.schema.json",
+  "title": "길봄 MQTT v2 Ingest Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "ingest_status",
+    "incident_id",
+    "received_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/definitions/schemaVersion"
+    },
+    "event_id": {
+      "$ref": "common.schema.json#/definitions/uuidV4"
+    },
+    "ingest_status": {
+      "type": "string",
+      "enum": [
+        "STORED",
+        "MERGED",
+        "DUPLICATE",
+        "REJECTED"
+      ]
+    },
+    "incident_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^INC-[0-9]{8}-[0-9]{6}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "received_at": {
+      "$ref": "common.schema.json#/definitions/utcDateTime"
+    }
+  }
+}

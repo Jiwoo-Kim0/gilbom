@@ -1,0 +1,236 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gilbom.example/contracts/mqtt/v2/schemas/telemetry.schema.json",
+  "title": "길봄 MQTT v2 Telemetry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "message_id",
+    "mqtt_id",
+    "boot_id",
+    "seq",
+    "sampled_at",
+    "mission_id",
+    "position",
+    "motion",
+    "battery",
+    "system",
+    "mission"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/definitions/schemaVersion"
+    },
+    "message_id": {
+      "$ref": "common.schema.json#/definitions/uuidV4"
+    },
+    "mqtt_id": {
+      "$ref": "common.schema.json#/definitions/mqttId"
+    },
+    "boot_id": {
+      "$ref": "common.schema.json#/definitions/uuidV4"
+    },
+    "seq": {
+      "$ref": "common.schema.json#/definitions/seq"
+    },
+    "sampled_at": {
+      "$ref": "common.schema.json#/definitions/utcDateTime"
+    },
+    "mission_id": {
+      "$ref": "common.schema.json#/definitions/missionId"
+    },
+    "position": {
+      "$ref": "common.schema.json#/definitions/position"
+    },
+    "motion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "moving",
+        "speed_mps"
+      ],
+      "properties": {
+        "moving": {
+          "type": "boolean"
+        },
+        "speed_mps": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "battery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "valid",
+        "percent",
+        "state",
+        "source"
+      ],
+      "properties": {
+        "valid": {
+          "type": "boolean"
+        },
+        "percent": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "state": {
+          "$ref": "common.schema.json#/definitions/batteryState"
+        },
+        "source": {
+          "enum": [
+            "MEASURED",
+            "ESTIMATED",
+            null
+          ]
+        },
+        "voltage_v": {
+          "type": "number"
+        },
+        "current_a": {
+          "type": "number"
+        },
+        "charging": {
+          "type": "boolean"
+        },
+        "battery_temperature_c": {
+          "type": "number"
+        },
+        "estimated_runtime_sec": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "valid": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "percent": {
+                "type": "number"
+              },
+              "state": {
+                "not": {
+                  "const": "UNKNOWN"
+                }
+              },
+              "source": {
+                "enum": [
+                  "MEASURED",
+                  "ESTIMATED"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "valid": {
+                "const": false
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "percent": {
+                "type": "null"
+              },
+              "state": {
+                "const": "UNKNOWN"
+              },
+              "source": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "system": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jetson_temp_c"
+      ],
+      "properties": {
+        "jetson_temp_c": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "mission": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "elapsed_sec",
+            "incident_count"
+          ],
+          "properties": {
+            "state": {
+              "$ref": "common.schema.json#/definitions/missionState"
+            },
+            "elapsed_sec": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "incident_count": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "mission_id": {
+            "type": "null"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "mission": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "mission": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  ]
+}

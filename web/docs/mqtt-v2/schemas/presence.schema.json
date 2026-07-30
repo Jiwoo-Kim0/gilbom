@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gilbom.example/contracts/mqtt/v2/schemas/presence.schema.json",
+  "title": "길봄 MQTT v2 Presence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "mqtt_id",
+    "boot_id",
+    "status"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/definitions/schemaVersion"
+    },
+    "mqtt_id": {
+      "$ref": "common.schema.json#/definitions/mqttId"
+    },
+    "boot_id": {
+      "$ref": "common.schema.json#/definitions/uuidV4"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "ONLINE",
+        "OFFLINE"
+      ]
+    },
+    "connected_at": {
+      "$ref": "common.schema.json#/definitions/utcDateTime"
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "GRACEFUL_SHUTDOWN",
+        "CRITICAL_BATTERY_SHUTDOWN",
+        "SYSTEM_FAULT_SHUTDOWN",
+        "UNGRACEFUL_DISCONNECT"
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "status": {
+          "const": "ONLINE"
+        }
+      },
+      "required": [
+        "connected_at"
+      ],
+      "not": {
+        "required": [
+          "reason"
+        ]
+      }
+    },
+    {
+      "properties": {
+        "status": {
+          "const": "OFFLINE"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "not": {
+        "required": [
+          "connected_at"
+        ]
+      }
+    }
+  ]
+}

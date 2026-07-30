@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gilbom.example/contracts/mqtt/v2/schemas/state.schema.json",
+  "title": "길봄 MQTT v2 State",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "mqtt_id",
+    "boot_id",
+    "seq",
+    "updated_at",
+    "mode",
+    "reason_code",
+    "mission",
+    "battery",
+    "health"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/definitions/schemaVersion"
+    },
+    "mqtt_id": {
+      "$ref": "common.schema.json#/definitions/mqttId"
+    },
+    "boot_id": {
+      "$ref": "common.schema.json#/definitions/uuidV4"
+    },
+    "seq": {
+      "$ref": "common.schema.json#/definitions/seq"
+    },
+    "updated_at": {
+      "$ref": "common.schema.json#/definitions/utcDateTime"
+    },
+    "mode": {
+      "$ref": "common.schema.json#/definitions/robotMode"
+    },
+    "reason_code": {
+      "$ref": "common.schema.json#/definitions/robotStateReason"
+    },
+    "mission": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/definitions/stateMission"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "battery": {
+      "$ref": "common.schema.json#/definitions/stateBattery"
+    },
+    "health": {
+      "$ref": "common.schema.json#/definitions/health"
+    }
+  }
+}

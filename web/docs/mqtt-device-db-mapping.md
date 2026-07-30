@@ -1,5 +1,9 @@
 # 길봄 MQTT Topic · 임베디드 · DB 매핑 정의서
 
+> **DEPRECATED / SUPERSEDED:** 이 문서는 `tbs/v1` 기준의 과거 매핑 보관본이다.
+> 현행 MQTT 계약은 [`final-mqtt-topic-schema-v2.md`](./final-mqtt-topic-schema-v2.md)와
+> [`mqtt-v2-contract-freeze.md`](./mqtt-v2-contract-freeze.md)를 따른다.
+
 > 문서 상태: 구현 기준 초안  
 > 작성일: 2026-07-26  
 > 담당 경계: 팀원 B의 MQTT·로봇·텔레메트리·임무·명령을 중심으로 작성하며, 탐지 사건의 업무 처리는 팀원 C가 담당한다.

@@ -1,0 +1,711 @@
+{
+  "contract_version": "2.0",
+  "status": "FROZEN",
+  "frozen_at": "2026-07-30",
+  "schema_draft": "http://json-schema.org/draft-07/schema#",
+  "fixtures": [
+    {
+      "id": "valid-presence-online",
+      "file": "valid/presence-online.json",
+      "schema": "presence.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/presence",
+      "qos": 1,
+      "retained": true,
+      "received_at": "2026-07-30T01:00:00.050Z",
+      "expected": {
+        "schema_valid": true,
+        "processing": "ACCEPTED",
+        "error_code": null,
+        "db_insert": true,
+        "current_state_update": true,
+        "row_delta": 1,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "valid-presence-offline",
+      "file": "valid/presence-offline.json",
+      "schema": "presence.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/presence",
+      "qos": 1,
+      "retained": true,
+      "received_at": "2026-07-30T03:00:00.000Z",
+      "expected": {
+        "schema_valid": true,
+        "processing": "ACCEPTED",
+        "error_code": null,
+        "db_insert": true,
+        "current_state_update": true,
+        "row_delta": 1,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "valid-state-ready",
+      "file": "valid/state-ready.json",
+      "schema": "state.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/state",
+      "qos": 1,
+      "retained": true,
+      "received_at": "2026-07-30T01:00:01.050Z",
+      "expected": {
+        "schema_valid": true,
+        "processing": "ACCEPTED",
+        "error_code": null,
+        "db_insert": true,
+        "current_state_update": true,
+        "row_delta": 1,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "valid-state-patrolling",
+      "file": "valid/state-patrolling.json",
+      "schema": "state.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/state",
+      "qos": 1,
+      "retained": true,
+      "received_at": "2026-07-30T01:00:02.050Z",
+      "expected": {
+        "schema_valid": true,
+        "processing": "ACCEPTED",
+        "error_code": null,
+        "db_insert": true,
+        "current_state_update": true,
+        "row_delta": 1,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "valid-telemetry",
+      "file": "valid/telemetry.json",
+      "schema": "telemetry.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/telemetry",
+      "qos": 0,
+      "retained": false,
+      "received_at": "2026-07-30T01:00:05.050Z",
+      "expected": {
+        "schema_valid": true,
+        "processing": "ACCEPTED",
+        "error_code": null,
+        "db_insert": true,
+        "current_state_update": true,
+        "row_delta": 1,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "valid-telemetry-gps-invalid",
+      "file": "valid/telemetry-gps-invalid.json",
+      "schema": "telemetry.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/telemetry",
+      "qos": 0,
+      "retained": false,
+      "received_at": "2026-07-30T01:00:10.050Z",
+      "expected": {
+        "schema_valid": true,
+        "processing": "ACCEPTED",
+        "error_code": null,
+        "db_insert": true,
+        "current_state_update": true,
+        "row_delta": 1,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "valid-telemetry-battery-invalid",
+      "file": "valid/telemetry-battery-invalid.json",
+      "schema": "telemetry.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/telemetry",
+      "qos": 0,
+      "retained": false,
+      "received_at": "2026-07-30T01:00:15.050Z",
+      "expected": {
+        "schema_valid": true,
+        "processing": "ACCEPTED",
+        "error_code": null,
+        "db_insert": true,
+        "current_state_update": true,
+        "row_delta": 1,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "valid-incident-event",
+      "file": "valid/incident-event.json",
+      "schema": "incident-event.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/events/incident",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T01:00:20.150Z",
+      "expected": {
+        "schema_valid": true,
+        "processing": "ACCEPTED",
+        "error_code": null,
+        "db_insert": true,
+        "current_state_update": false,
+        "row_delta": 1,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "valid-battery-event",
+      "file": "valid/battery-low-event.json",
+      "schema": "battery-event.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/events/battery",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T01:01:00.150Z",
+      "expected": {
+        "schema_valid": true,
+        "processing": "ACCEPTED",
+        "error_code": null,
+        "db_insert": true,
+        "current_state_update": false,
+        "row_delta": 1,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "valid-safety-event",
+      "file": "valid/safety-stopped-event.json",
+      "schema": "safety-event.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/events/safety",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T01:02:02.500Z",
+      "expected": {
+        "schema_valid": true,
+        "processing": "ACCEPTED",
+        "error_code": null,
+        "db_insert": true,
+        "current_state_update": false,
+        "row_delta": 1,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "valid-mission-event",
+      "file": "valid/mission-completed-event.json",
+      "schema": "mission-event.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/events/mission",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T02:10:00.150Z",
+      "expected": {
+        "schema_valid": true,
+        "processing": "ACCEPTED",
+        "error_code": null,
+        "db_insert": true,
+        "current_state_update": false,
+        "row_delta": 1,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "valid-command-start-mission",
+      "file": "valid/command-start-mission.json",
+      "schema": "command-request.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/commands/request",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T01:10:00.050Z",
+      "expected": {
+        "schema_valid": true,
+        "processing": "DELIVERY_ACCEPTED",
+        "error_code": null,
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": true
+      }
+    },
+    {
+      "id": "valid-command-emergency-stop",
+      "file": "valid/command-emergency-stop.json",
+      "schema": "command-request.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/commands/request",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T01:20:00.050Z",
+      "expected": {
+        "schema_valid": true,
+        "processing": "DELIVERY_ACCEPTED",
+        "error_code": null,
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": true
+      }
+    },
+    {
+      "id": "valid-command-result-accepted",
+      "file": "valid/command-result-accepted.json",
+      "schema": "command-result.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/commands/result",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T01:20:00.180Z",
+      "expected": {
+        "schema_valid": true,
+        "processing": "ACCEPTED",
+        "error_code": null,
+        "db_insert": true,
+        "current_state_update": false,
+        "row_delta": 1,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "valid-command-result-completed",
+      "file": "valid/command-result-completed.json",
+      "schema": "command-result.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/commands/result",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T01:20:00.300Z",
+      "expected": {
+        "schema_valid": true,
+        "processing": "ACCEPTED",
+        "error_code": null,
+        "db_insert": true,
+        "current_state_update": false,
+        "row_delta": 1,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "valid-ingest-receipt",
+      "file": "valid/ingest-receipt-stored.json",
+      "schema": "ingest-receipt.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/ingest/receipt",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T01:00:20.200Z",
+      "expected": {
+        "schema_valid": true,
+        "processing": "DELIVERY_ACCEPTED",
+        "error_code": null,
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "invalid-required-field",
+      "file": "invalid/telemetry-missing-seq.json",
+      "schema": "telemetry.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/telemetry",
+      "qos": 0,
+      "retained": false,
+      "received_at": "2026-07-30T01:00:20.050Z",
+      "expected": {
+        "schema_valid": false,
+        "processing": "REJECTED",
+        "error_code": "MQTT_PAYLOAD_VALIDATION_FAILED",
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "invalid-schema-version",
+      "file": "invalid/telemetry-unsupported-version.json",
+      "schema": "telemetry.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/telemetry",
+      "qos": 0,
+      "retained": false,
+      "received_at": "2026-07-30T01:00:20.050Z",
+      "expected": {
+        "schema_valid": false,
+        "processing": "REJECTED",
+        "error_code": "MQTT_SCHEMA_VERSION_UNSUPPORTED",
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "invalid-enum",
+      "file": "invalid/state-invalid-enum.json",
+      "schema": "state.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/state",
+      "qos": 1,
+      "retained": true,
+      "received_at": "2026-07-30T01:00:20.050Z",
+      "expected": {
+        "schema_valid": false,
+        "processing": "REJECTED",
+        "error_code": "MQTT_PAYLOAD_VALIDATION_FAILED",
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "invalid-latitude",
+      "file": "invalid/telemetry-latitude-out-of-range.json",
+      "schema": "telemetry.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/telemetry",
+      "qos": 0,
+      "retained": false,
+      "received_at": "2026-07-30T01:00:20.050Z",
+      "expected": {
+        "schema_valid": false,
+        "processing": "REJECTED",
+        "error_code": "MQTT_PAYLOAD_VALIDATION_FAILED",
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "invalid-uuid",
+      "file": "invalid/telemetry-invalid-uuid.json",
+      "schema": "telemetry.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/telemetry",
+      "qos": 0,
+      "retained": false,
+      "received_at": "2026-07-30T01:00:20.050Z",
+      "expected": {
+        "schema_valid": false,
+        "processing": "REJECTED",
+        "error_code": "MQTT_PAYLOAD_MALFORMED",
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "invalid-timezone",
+      "file": "invalid/telemetry-timezone-missing.json",
+      "schema": "telemetry.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/telemetry",
+      "qos": 0,
+      "retained": false,
+      "received_at": "2026-07-30T01:00:20.050Z",
+      "expected": {
+        "schema_valid": false,
+        "processing": "REJECTED",
+        "error_code": "MQTT_PAYLOAD_MALFORMED",
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "invalid-state-battery",
+      "file": "invalid/state-battery-inconsistent.json",
+      "schema": "state.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/state",
+      "qos": 1,
+      "retained": true,
+      "received_at": "2026-07-30T01:00:20.050Z",
+      "expected": {
+        "schema_valid": false,
+        "processing": "REJECTED",
+        "error_code": "MQTT_PAYLOAD_VALIDATION_FAILED",
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "invalid-position-null-rule",
+      "file": "invalid/telemetry-position-inconsistent.json",
+      "schema": "telemetry.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/telemetry",
+      "qos": 0,
+      "retained": false,
+      "received_at": "2026-07-30T01:00:20.050Z",
+      "expected": {
+        "schema_valid": false,
+        "processing": "REJECTED",
+        "error_code": "MQTT_PAYLOAD_VALIDATION_FAILED",
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "invalid-event-ttl",
+      "file": "invalid/incident-ttl-out-of-range.json",
+      "schema": "incident-event.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/events/incident",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T01:00:20.150Z",
+      "expected": {
+        "schema_valid": false,
+        "processing": "REJECTED",
+        "error_code": "MQTT_PAYLOAD_VALIDATION_FAILED",
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "invalid-mission-result",
+      "file": "invalid/mission-terminal-result-missing.json",
+      "schema": "mission-event.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/events/mission",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T02:10:00.150Z",
+      "expected": {
+        "schema_valid": false,
+        "processing": "REJECTED",
+        "error_code": "MQTT_PAYLOAD_VALIDATION_FAILED",
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "invalid-command-parameters",
+      "file": "invalid/command-start-parameters-invalid.json",
+      "schema": "command-request.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/commands/request",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T01:10:00.050Z",
+      "expected": {
+        "schema_valid": false,
+        "processing": "REJECTED",
+        "error_code": "MQTT_PAYLOAD_VALIDATION_FAILED",
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "invalid-command-time-order",
+      "file": "invalid/command-expiry-before-issued.json",
+      "schema": "command-request.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/commands/request",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T01:20:00.050Z",
+      "semantic_check": "expires_after_issued",
+      "expected": {
+        "schema_valid": true,
+        "processing": "REJECTED",
+        "error_code": "MQTT_PAYLOAD_VALIDATION_FAILED",
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "invalid-bbox-order",
+      "file": "invalid/incident-bbox-ordering-invalid.json",
+      "schema": "incident-event.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/events/incident",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T01:00:20.150Z",
+      "semantic_check": "bbox_order",
+      "expected": {
+        "schema_valid": true,
+        "processing": "REJECTED",
+        "error_code": "MQTT_PAYLOAD_VALIDATION_FAILED",
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "scenario-topic-payload-mismatch",
+      "file": "valid/telemetry.json",
+      "schema": "telemetry.schema.json",
+      "topic": "tbs/v2/robots/RBT-999/telemetry",
+      "qos": 0,
+      "retained": false,
+      "received_at": "2026-07-30T01:00:05.050Z",
+      "semantic_check": "topic_payload_mqtt_id",
+      "expected": {
+        "schema_valid": true,
+        "processing": "REJECTED",
+        "error_code": "MQTT_ID_MISMATCH",
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "scenario-qos-mismatch",
+      "file": "valid/telemetry.json",
+      "schema": "telemetry.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/telemetry",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T01:00:05.050Z",
+      "semantic_check": "topic_qos",
+      "expected": {
+        "schema_valid": true,
+        "processing": "REJECTED",
+        "error_code": "MQTT_QOS_MISMATCH",
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "scenario-expired-event",
+      "file": "valid/incident-event.json",
+      "schema": "incident-event.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/events/incident",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T01:05:20.000Z",
+      "semantic_check": "freshness",
+      "expected": {
+        "schema_valid": true,
+        "processing": "REJECTED",
+        "error_code": "MQTT_MESSAGE_EXPIRED",
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "scenario-old-telemetry",
+      "file": "valid/telemetry.json",
+      "schema": "telemetry.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/telemetry",
+      "qos": 0,
+      "retained": false,
+      "received_at": "2026-07-30T01:01:05.000Z",
+      "semantic_check": "freshness",
+      "expected": {
+        "schema_valid": true,
+        "processing": "REJECTED",
+        "error_code": "MQTT_MESSAGE_EXPIRED",
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "scenario-event-retry",
+      "file": "invalid/incident-retry.json",
+      "schema": "incident-event.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/events/incident",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T01:00:22.150Z",
+      "semantic_check": "event_retry",
+      "baseline": "valid/incident-event.json",
+      "expected": {
+        "schema_valid": true,
+        "processing": "IDEMPOTENT",
+        "error_code": null,
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "scenario-sequence-conflict",
+      "file": "invalid/battery-sequence-conflict.json",
+      "schema": "battery-event.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/events/battery",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T01:00:21.150Z",
+      "semantic_check": "sequence_conflict",
+      "baseline": "valid/incident-event.json",
+      "expected": {
+        "schema_valid": true,
+        "processing": "REJECTED",
+        "error_code": "MQTT_SEQUENCE_CONFLICT",
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "scenario-previous-boot",
+      "file": "invalid/telemetry-previous-boot.json",
+      "schema": "telemetry.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/telemetry",
+      "qos": 0,
+      "retained": false,
+      "received_at": "2026-07-30T01:00:20.050Z",
+      "semantic_check": "previous_boot",
+      "context": {
+        "boot_status": "REPLACED_BY_NEW_BOOT"
+      },
+      "expected": {
+        "schema_valid": true,
+        "processing": "REJECTED",
+        "error_code": "MQTT_REPLAY_REJECTED",
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "scenario-expired-command",
+      "file": "valid/command-start-mission.json",
+      "schema": "command-request.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/commands/request",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T01:11:00.001Z",
+      "semantic_check": "command_expired",
+      "expected": {
+        "schema_valid": true,
+        "processing": "EXPIRED_RESULT",
+        "error_code": null,
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    },
+    {
+      "id": "scenario-command-duplicate",
+      "file": "valid/command-start-mission.json",
+      "schema": "command-request.schema.json",
+      "topic": "tbs/v2/robots/RBT-001/commands/request",
+      "qos": 1,
+      "retained": false,
+      "received_at": "2026-07-30T01:10:00.100Z",
+      "semantic_check": "command_duplicate",
+      "context": {
+        "command_id_processed": true
+      },
+      "expected": {
+        "schema_valid": true,
+        "processing": "IDEMPOTENT",
+        "error_code": null,
+        "db_insert": false,
+        "current_state_update": false,
+        "row_delta": 0,
+        "execute_command": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "schema_version": "2.0",
+  "message_id": "6960f55d-ddd9-49d9-a350-44a5d3c4a601",
+  "mqtt_id": "RBT-001",
+  "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
+  "seq": 4,
+  "sampled_at": "2026-07-30T01:00:10.000Z",
+  "mission_id": "MIS-20260730-001",
+  "position": {
+    "valid": false,
+    "lat": null,
+    "lon": null,
+    "heading_deg": null
+  },
+  "motion": {
+    "moving": true,
+    "speed_mps": null
+  },
+  "battery": {
+    "valid": true,
+    "percent": 87.4,
+    "state": "NORMAL",
+    "source": "MEASURED"
+  },
+  "system": {
+    "jetson_temp_c": 41.8
+  },
+  "mission": {
+    "state": "RUNNING",
+    "elapsed_sec": 10,
+    "incident_count": 0
+  }
+}

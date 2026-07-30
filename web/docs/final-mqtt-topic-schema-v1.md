@@ -1,5 +1,10 @@
 # 길봄 Final MQTT Topic Schema v1.0
 
+> **DEPRECATED / SUPERSEDED:** 이 문서는 과거 v1 계약 보관본이다. 신규 구현과 검증은
+> [`final-mqtt-topic-schema-v2.md`](./final-mqtt-topic-schema-v2.md),
+> [`asyncapi-mqtt-v2.yaml`](./asyncapi-mqtt-v2.yaml), `mqtt-v2/schemas/`를 따른다.
+> v1 namespace와 payload를 신규 배포에 사용하지 않는다.
+
 > MQTT Topic과 JSON Payload 구조만 정리한 문서  
 > Namespace: `tbs/v1/robots/{robot_id}/...`  
 > JSON Key: `snake_case`  

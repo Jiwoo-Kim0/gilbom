@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0",
+  "message_id": "cbb96e6b-c3cd-4fd2-af09-c3a84e559f22",
+  "mqtt_id": "RBT-001",
+  "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
+  "seq": 10,
+  "sampled_at": "2026-07-30T01:00:20.000Z",
+  "mission_id": null,
+  "position": {
+    "valid": false,
+    "lat": null,
+    "lon": null,
+    "heading_deg": null
+  },
+  "motion": {
+    "moving": false,
+    "speed_mps": null
+  },
+  "battery": {
+    "valid": false,
+    "percent": null,
+    "state": "UNKNOWN",
+    "source": null
+  },
+  "system": {
+    "jetson_temp_c": null
+  },
+  "mission": null
+}

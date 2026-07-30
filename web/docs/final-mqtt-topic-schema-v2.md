@@ -1,6 +1,7 @@
 # 길봄 Final MQTT Topic Schema v2.0
 
-> 문서 상태: 구현 계약안  
+> 문서 상태: **FROZEN**
+> 동결 일자: 2026-07-30 (Asia/Seoul)
 > Namespace: `tbs/v2/robots/{mqtt_id}/...`
 > Payload Version: `"schema_version": "2.0"`  
 > Encoding: UTF-8 JSON  
@@ -8,6 +9,18 @@
 > Time: ISO 8601 UTC `Z`
 
 이 문서는 로봇·MQTT Broker·웹 백엔드가 주고받는 v2 MQTT Topic과 JSON Payload를 정의한다. 코드 구현 예시는 제외하고 실제 통신에 필요한 경로, 발행 조건, 데이터 형식과 서버 사용처를 중심으로 정리한다.
+
+기계 판독 정본과 검증 자료:
+
+- AsyncAPI: [`asyncapi-mqtt-v2.yaml`](./asyncapi-mqtt-v2.yaml)
+- JSON Schema: [`mqtt-v2/schemas/`](./mqtt-v2/schemas/)
+- Fixture Manifest: [`../../test/fixtures/mqtt/v2/manifest.json`](../../test/fixtures/mqtt/v2/manifest.json)
+- 검증·변경 정책: [`mqtt-v2-contract-freeze.md`](./mqtt-v2-contract-freeze.md)
+
+동결 후 필수 필드·필드 타입·enum·Topic·QoS·Retain·처리 의미를 바꾸거나 선택
+필드를 추가하는 변경은 기존 v2를 수정하지 않고 `schema_version`과 Namespace의
+major version을 올린다. 오탈자·설명·링크처럼 Wire 호환성에 영향이 없는 정정만
+v2에서 허용하며, 정정도 Schema·Fixture·검증 결과와 변경 로그를 함께 남긴다.
 
 ---
 
@@ -1244,8 +1257,9 @@ tbs/v2/robots/{mqtt_id}/commands/result
     "REJECTED",
     "EXPIRED"
   ],
-  "reason_code_example": [
+  "reason_code": [
     "OK",
+    "NONE",
     "SAFETY_CONDITION_NOT_CLEARED",
     "NO_ACTIVE_MISSION",
     "ALREADY_IN_STATE",
@@ -1346,3 +1360,5 @@ MVP에서 Receipt를 사용하지 않으면 Event QoS 1 PUBACK를 기준으로 �
 11. 명령에는 Retain을 사용하지 않고 TTL과 MQTT 5 Message Expiry를 적용한다.
 12. 수신 TTL은 Telemetry 60초, State 300초, Event 60~300초, Command Result
     60초이며 미래 기준시각은 최대 5초까지만 허용한다.
+13. Wire 계약 변경은 이 문서만 단독 수정하지 않고 AsyncAPI, JSON Schema,
+    Fixture Manifest와 자동 검증을 같은 변경에서 갱신한다.

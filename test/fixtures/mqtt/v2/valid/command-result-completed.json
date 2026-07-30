@@ -1,0 +1,14 @@
+{
+  "schema_version": "2.0",
+  "result_id": "e72802e1-bf90-4f79-aa2a-c98d347710c6",
+  "command_id": "95626222-c5c8-47ea-901e-f9e467b275f6",
+  "mqtt_id": "RBT-001",
+  "status": "COMPLETED",
+  "received_at": "2026-07-30T01:20:00.130Z",
+  "completed_at": "2026-07-30T01:20:00.240Z",
+  "reason_code": "OK",
+  "state": {
+    "mode": "SAFE_STOP",
+    "reason_code": "REMOTE_ESTOP"
+  }
+}

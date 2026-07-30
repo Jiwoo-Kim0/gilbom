@@ -1,0 +1,90 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gilbom.example/contracts/mqtt/v2/schemas/battery-event.schema.json",
+  "title": "길봄 MQTT v2 Battery Event",
+  "allOf": [
+    {
+      "$ref": "event-envelope.schema.json"
+    }
+  ],
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "event_type",
+    "mqtt_id",
+    "boot_id",
+    "seq",
+    "source_component",
+    "occurred_at",
+    "sent_at",
+    "ttl_sec",
+    "mission_id",
+    "previous_state",
+    "battery",
+    "threshold_pct",
+    "action_taken"
+  ],
+  "properties": {
+    "schema_version": {},
+    "event_id": {},
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "BATTERY_LOW",
+        "BATTERY_CRITICAL",
+        "BATTERY_RECOVERED",
+        "BATTERY_SENSOR_FAULT",
+        "BATTERY_SENSOR_RECOVERED"
+      ]
+    },
+    "mqtt_id": {},
+    "boot_id": {},
+    "seq": {},
+    "source_component": {
+      "const": "power"
+    },
+    "occurred_at": {},
+    "sent_at": {},
+    "ttl_sec": {},
+    "mission_id": {},
+    "previous_state": {
+      "$ref": "common.schema.json#/definitions/batteryState"
+    },
+    "battery": {
+      "$ref": "common.schema.json#/definitions/stateBattery"
+    },
+    "threshold_pct": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 100
+    },
+    "action_taken": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mission_state",
+        "robot_mode"
+      ],
+      "properties": {
+        "mission_state": {
+          "anyOf": [
+            {
+              "$ref": "common.schema.json#/definitions/missionState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "robot_mode": {
+          "$ref": "common.schema.json#/definitions/robotMode"
+        }
+      }
+    }
+  }
+}

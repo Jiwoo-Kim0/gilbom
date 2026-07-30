@@ -1,0 +1,14 @@
+{
+  "schema_version": "2.0",
+  "command_id": "41b365b0-8cb6-46c8-a6f9-29f4caafba12",
+  "command_type": "EMERGENCY_STOP",
+  "issued_at": "2026-07-30T01:20:00.000Z",
+  "expires_at": "2026-07-30T01:19:59.000Z",
+  "requested_by": {
+    "actor_type": "ADMIN",
+    "actor_id": "ADM-0042"
+  },
+  "parameters": {
+    "reason": "operator_request"
+  }
+}

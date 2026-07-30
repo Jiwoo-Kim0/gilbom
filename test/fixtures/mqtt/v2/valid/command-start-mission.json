@@ -1,0 +1,15 @@
+{
+  "schema_version": "2.0",
+  "command_id": "a75d9cec-b04d-4f66-b18a-4c48782f805a",
+  "command_type": "START_MISSION",
+  "issued_at": "2026-07-30T01:10:00.000Z",
+  "expires_at": "2026-07-30T01:11:00.000Z",
+  "requested_by": {
+    "actor_type": "ADMIN",
+    "actor_id": "ADM-0042"
+  },
+  "parameters": {
+    "mission_id": "MIS-20260730-001",
+    "zone_id": "A-01"
+  }
+}

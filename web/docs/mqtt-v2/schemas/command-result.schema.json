@@ -1,0 +1,99 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gilbom.example/contracts/mqtt/v2/schemas/command-result.schema.json",
+  "title": "길봄 MQTT v2 Command Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "result_id",
+    "command_id",
+    "mqtt_id",
+    "status",
+    "received_at",
+    "completed_at",
+    "reason_code",
+    "state"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/definitions/schemaVersion"
+    },
+    "result_id": {
+      "$ref": "common.schema.json#/definitions/uuidV4"
+    },
+    "command_id": {
+      "$ref": "common.schema.json#/definitions/uuidV4"
+    },
+    "mqtt_id": {
+      "$ref": "common.schema.json#/definitions/mqttId"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "ACCEPTED",
+        "COMPLETED",
+        "FAILED",
+        "REJECTED",
+        "EXPIRED"
+      ]
+    },
+    "received_at": {
+      "$ref": "common.schema.json#/definitions/utcDateTime"
+    },
+    "completed_at": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/definitions/utcDateTime"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "reason_code": {
+      "$ref": "common.schema.json#/definitions/commandResultReason"
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "reason_code"
+      ],
+      "properties": {
+        "mode": {
+          "$ref": "common.schema.json#/definitions/robotMode"
+        },
+        "reason_code": {
+          "$ref": "common.schema.json#/definitions/robotStateReason"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "ACCEPTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "completed_at": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "completed_at": {
+            "$ref": "common.schema.json#/definitions/utcDateTime"
+          }
+        }
+      }
+    }
+  ]
+}

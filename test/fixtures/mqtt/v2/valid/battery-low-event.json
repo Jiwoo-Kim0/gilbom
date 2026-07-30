@@ -1,0 +1,24 @@
+{
+  "schema_version": "2.0",
+  "event_id": "4d42ee50-f8e2-45dc-b348-2b5dd72f83bf",
+  "event_type": "BATTERY_LOW",
+  "mqtt_id": "RBT-001",
+  "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
+  "seq": 7,
+  "source_component": "power",
+  "occurred_at": "2026-07-30T01:01:00.000Z",
+  "sent_at": "2026-07-30T01:01:00.100Z",
+  "ttl_sec": 300,
+  "mission_id": "MIS-20260730-001",
+  "previous_state": "NORMAL",
+  "battery": {
+    "valid": true,
+    "percent": 19.8,
+    "state": "LOW"
+  },
+  "threshold_pct": 20.0,
+  "action_taken": {
+    "mission_state": "PAUSED",
+    "robot_mode": "SAFE_STOP"
+  }
+}

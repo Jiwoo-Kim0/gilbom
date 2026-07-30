@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gilbom.example/contracts/mqtt/v2/schemas/event-envelope.schema.json",
+  "title": "길봄 MQTT v2 Event 공통 Envelope",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "event_id",
+    "event_type",
+    "mqtt_id",
+    "boot_id",
+    "seq",
+    "source_component",
+    "occurred_at",
+    "sent_at",
+    "ttl_sec",
+    "mission_id"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/definitions/schemaVersion"
+    },
+    "event_id": {
+      "$ref": "common.schema.json#/definitions/uuidV4"
+    },
+    "event_type": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]*$"
+    },
+    "mqtt_id": {
+      "$ref": "common.schema.json#/definitions/mqttId"
+    },
+    "boot_id": {
+      "$ref": "common.schema.json#/definitions/uuidV4"
+    },
+    "seq": {
+      "$ref": "common.schema.json#/definitions/seq"
+    },
+    "source_component": {
+      "$ref": "common.schema.json#/definitions/eventSource"
+    },
+    "occurred_at": {
+      "$ref": "common.schema.json#/definitions/utcDateTime"
+    },
+    "sent_at": {
+      "$ref": "common.schema.json#/definitions/utcDateTime"
+    },
+    "ttl_sec": {
+      "$ref": "common.schema.json#/definitions/eventTtlSec"
+    },
+    "mission_id": {
+      "$ref": "common.schema.json#/definitions/missionId"
+    }
+  }
+}

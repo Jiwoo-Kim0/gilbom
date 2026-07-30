@@ -1,0 +1,23 @@
+{
+  "schema_version": "2.0",
+  "mqtt_id": "RBT-001",
+  "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
+  "seq": 1,
+  "updated_at": "2026-07-30T01:00:01.000Z",
+  "mode": "READY",
+  "reason_code": "NONE",
+  "mission": null,
+  "battery": {
+    "valid": true,
+    "percent": 88.2,
+    "state": "NORMAL"
+  },
+  "health": {
+    "camera": "OK",
+    "lidar": "OK",
+    "gps": "DEGRADED",
+    "battery": "OK",
+    "motor": "UNKNOWN",
+    "storage": "OK"
+  }
+}

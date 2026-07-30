@@ -1,0 +1,100 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gilbom.example/contracts/mqtt/v2/schemas/safety-event.schema.json",
+  "title": "길봄 MQTT v2 Safety Event",
+  "allOf": [
+    {
+      "$ref": "event-envelope.schema.json"
+    }
+  ],
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "event_type",
+    "mqtt_id",
+    "boot_id",
+    "seq",
+    "source_component",
+    "occurred_at",
+    "sent_at",
+    "ttl_sec",
+    "mission_id",
+    "reason_code",
+    "measurement",
+    "transition",
+    "auto_resume_allowed"
+  ],
+  "properties": {
+    "schema_version": {},
+    "event_id": {},
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "SAFETY_STOPPED",
+        "SAFETY_CLEARED",
+        "SENSOR_FAULT",
+        "SENSOR_RECOVERED"
+      ]
+    },
+    "mqtt_id": {},
+    "boot_id": {},
+    "seq": {},
+    "source_component": {
+      "const": "safety"
+    },
+    "occurred_at": {},
+    "sent_at": {},
+    "ttl_sec": {},
+    "mission_id": {},
+    "reason_code": {
+      "type": "string",
+      "enum": [
+        "OBSTACLE",
+        "BOUNDARY_LOST",
+        "REMOTE_ESTOP",
+        "LOW_BATTERY",
+        "CRITICAL_BATTERY",
+        "LIDAR_FAULT",
+        "MOTOR_FAULT",
+        "INTERNAL_ERROR"
+      ]
+    },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "distance_m"
+      ],
+      "properties": {
+        "distance_m": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode_before",
+        "mode_after"
+      ],
+      "properties": {
+        "mode_before": {
+          "$ref": "common.schema.json#/definitions/robotMode"
+        },
+        "mode_after": {
+          "$ref": "common.schema.json#/definitions/robotMode"
+        }
+      }
+    },
+    "auto_resume_allowed": {
+      "type": "boolean"
+    }
+  }
+}

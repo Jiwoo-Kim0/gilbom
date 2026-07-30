@@ -1,0 +1,14 @@
+{
+  "schema_version": "2.0",
+  "result_id": "0ff965af-82c5-47b3-a6f6-c0d8bedbd6b5",
+  "command_id": "95626222-c5c8-47ea-901e-f9e467b275f6",
+  "mqtt_id": "RBT-001",
+  "status": "ACCEPTED",
+  "received_at": "2026-07-30T01:20:00.130Z",
+  "completed_at": null,
+  "reason_code": "OK",
+  "state": {
+    "mode": "PATROLLING",
+    "reason_code": "NONE"
+  }
+}

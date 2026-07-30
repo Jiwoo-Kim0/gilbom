@@ -1,0 +1,373 @@
+asyncapi: 3.1.0
+id: urn:gilbom:mqtt:backend:v2
+info:
+  title: 길봄 Backend MQTT v2 API
+  version: 2.0.0
+  description: |
+    길봄 Spring Backend 관점의 MQTT v2 계약이다. `receive`는 Backend가
+    Robot/Broker에서 수신하고, `send`는 Backend가 Robot으로 발행한다.
+    Payload 계약 버전은 문자열 `"2.0"`으로 고정한다.
+defaultContentType: application/json
+x-contract-status: FROZEN
+x-frozen-at: 2026-07-30
+x-human-readable-contract: ./final-mqtt-topic-schema-v2.md
+x-fixture-manifest: ../../test/fixtures/mqtt/v2/manifest.json
+
+servers:
+  localTls:
+    host: localhost:8883
+    protocol: mqtt
+    protocolVersion: "5.0"
+    description: Mosquitto MQTT 5 TLS endpoint. 실제 host와 Secret은 환경 설정으로 주입한다.
+
+channels:
+  presence:
+    address: tbs/v2/robots/{mqtt_id}/presence
+    description: Robot 연결·종료·LWT Presence
+    parameters:
+      mqtt_id:
+        $ref: "#/components/parameters/mqttId"
+    messages:
+      presence:
+        $ref: "#/components/messages/presence"
+  state:
+    address: tbs/v2/robots/{mqtt_id}/state
+    description: Robot 현재 상태 Snapshot
+    parameters:
+      mqtt_id:
+        $ref: "#/components/parameters/mqttId"
+    messages:
+      state:
+        $ref: "#/components/messages/state"
+  telemetry:
+    address: tbs/v2/robots/{mqtt_id}/telemetry
+    description: 5초 주기 최신 Telemetry
+    parameters:
+      mqtt_id:
+        $ref: "#/components/parameters/mqttId"
+    messages:
+      telemetry:
+        $ref: "#/components/messages/telemetry"
+  incidentEvent:
+    address: tbs/v2/robots/{mqtt_id}/events/incident
+    description: 점자블록 결함 관측 확정 Event
+    parameters:
+      mqtt_id:
+        $ref: "#/components/parameters/mqttId"
+    messages:
+      incidentEvent:
+        $ref: "#/components/messages/incidentEvent"
+  batteryEvent:
+    address: tbs/v2/robots/{mqtt_id}/events/battery
+    description: 배터리 상태 전이 Event
+    parameters:
+      mqtt_id:
+        $ref: "#/components/parameters/mqttId"
+    messages:
+      batteryEvent:
+        $ref: "#/components/messages/batteryEvent"
+  safetyEvent:
+    address: tbs/v2/robots/{mqtt_id}/events/safety
+    description: 지속 안전 사건 확정·해제 Event
+    parameters:
+      mqtt_id:
+        $ref: "#/components/parameters/mqttId"
+    messages:
+      safetyEvent:
+        $ref: "#/components/messages/safetyEvent"
+  missionEvent:
+    address: tbs/v2/robots/{mqtt_id}/events/mission
+    description: Mission 상태 전이 Event
+    parameters:
+      mqtt_id:
+        $ref: "#/components/parameters/mqttId"
+    messages:
+      missionEvent:
+        $ref: "#/components/messages/missionEvent"
+  commandResult:
+    address: tbs/v2/robots/{mqtt_id}/commands/result
+    description: Robot의 Command 접수·최종 처리 결과
+    parameters:
+      mqtt_id:
+        $ref: "#/components/parameters/mqttId"
+    messages:
+      commandResult:
+        $ref: "#/components/messages/commandResult"
+  commandRequest:
+    address: tbs/v2/robots/{mqtt_id}/commands/request
+    description: Backend가 Robot으로 발행하는 제어 Command
+    parameters:
+      mqtt_id:
+        $ref: "#/components/parameters/mqttId"
+    messages:
+      commandRequest:
+        $ref: "#/components/messages/commandRequest"
+  ingestReceipt:
+    address: tbs/v2/robots/{mqtt_id}/ingest/receipt
+    description: Backend DB 처리 완료 Receipt
+    parameters:
+      mqtt_id:
+        $ref: "#/components/parameters/mqttId"
+    messages:
+      ingestReceipt:
+        $ref: "#/components/messages/ingestReceipt"
+
+operations:
+  receivePresence:
+    action: receive
+    channel:
+      $ref: "#/channels/presence"
+    bindings:
+      mqtt:
+        qos: 1
+        bindingVersion: 0.2.0
+    x-gilbom-publisher-retain: true
+  receiveState:
+    action: receive
+    channel:
+      $ref: "#/channels/state"
+    bindings:
+      mqtt:
+        qos: 1
+        bindingVersion: 0.2.0
+    x-gilbom-publisher-retain: true
+  receiveTelemetry:
+    action: receive
+    channel:
+      $ref: "#/channels/telemetry"
+    bindings:
+      mqtt:
+        qos: 0
+        bindingVersion: 0.2.0
+    x-gilbom-publisher-retain: false
+  receiveIncidentEvent:
+    action: receive
+    channel:
+      $ref: "#/channels/incidentEvent"
+    bindings:
+      mqtt:
+        qos: 1
+        bindingVersion: 0.2.0
+    x-gilbom-publisher-retain: false
+    x-gilbom-message-expiry-source: $message.payload#/ttl_sec
+  receiveBatteryEvent:
+    action: receive
+    channel:
+      $ref: "#/channels/batteryEvent"
+    bindings:
+      mqtt:
+        qos: 1
+        bindingVersion: 0.2.0
+    x-gilbom-publisher-retain: false
+    x-gilbom-message-expiry-source: $message.payload#/ttl_sec
+  receiveSafetyEvent:
+    action: receive
+    channel:
+      $ref: "#/channels/safetyEvent"
+    bindings:
+      mqtt:
+        qos: 1
+        bindingVersion: 0.2.0
+    x-gilbom-publisher-retain: false
+    x-gilbom-message-expiry-source: $message.payload#/ttl_sec
+  receiveMissionEvent:
+    action: receive
+    channel:
+      $ref: "#/channels/missionEvent"
+    bindings:
+      mqtt:
+        qos: 1
+        bindingVersion: 0.2.0
+    x-gilbom-publisher-retain: false
+    x-gilbom-message-expiry-source: $message.payload#/ttl_sec
+  receiveCommandResult:
+    action: receive
+    channel:
+      $ref: "#/channels/commandResult"
+    bindings:
+      mqtt:
+        qos: 1
+        bindingVersion: 0.2.0
+    x-gilbom-publisher-retain: false
+  sendCommandRequest:
+    action: send
+    channel:
+      $ref: "#/channels/commandRequest"
+    bindings:
+      mqtt:
+        qos: 1
+        retain: false
+        messageExpiryInterval:
+          type: integer
+          minimum: 1
+          maximum: 60
+        bindingVersion: 0.2.0
+    x-gilbom-expiry-deadline-source: $message.payload#/expires_at
+  sendIngestReceipt:
+    action: send
+    channel:
+      $ref: "#/channels/ingestReceipt"
+    bindings:
+      mqtt:
+        qos: 1
+        retain: false
+        bindingVersion: 0.2.0
+
+components:
+  parameters:
+    mqttId:
+      description: |
+        서버가 발급한 불변 외부 식별자. Robot 발행 Topic에서는 Payload의
+        `mqtt_id`, MQTT username과 반드시 같아야 한다.
+
+  messages:
+    presence:
+      name: Presence
+      title: Robot Presence
+      contentType: application/json
+      correlationId:
+        location: $message.payload#/boot_id
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: ./mqtt-v2/schemas/presence.schema.json
+      bindings:
+        mqtt:
+          payloadFormatIndicator: 1
+          contentType: application/json
+          bindingVersion: 0.2.0
+    state:
+      name: State
+      title: Robot State
+      contentType: application/json
+      correlationId:
+        location: $message.payload#/boot_id
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: ./mqtt-v2/schemas/state.schema.json
+      bindings:
+        mqtt:
+          payloadFormatIndicator: 1
+          contentType: application/json
+          bindingVersion: 0.2.0
+    telemetry:
+      name: Telemetry
+      title: Robot Telemetry
+      contentType: application/json
+      correlationId:
+        location: $message.payload#/message_id
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: ./mqtt-v2/schemas/telemetry.schema.json
+      bindings:
+        mqtt:
+          payloadFormatIndicator: 1
+          contentType: application/json
+          bindingVersion: 0.2.0
+    incidentEvent:
+      name: IncidentEvent
+      title: Braille Block Incident Event
+      contentType: application/json
+      correlationId:
+        location: $message.payload#/event_id
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: ./mqtt-v2/schemas/incident-event.schema.json
+      bindings:
+        mqtt:
+          payloadFormatIndicator: 1
+          contentType: application/json
+          bindingVersion: 0.2.0
+    batteryEvent:
+      name: BatteryEvent
+      title: Battery Transition Event
+      contentType: application/json
+      correlationId:
+        location: $message.payload#/event_id
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: ./mqtt-v2/schemas/battery-event.schema.json
+      bindings:
+        mqtt:
+          payloadFormatIndicator: 1
+          contentType: application/json
+          bindingVersion: 0.2.0
+    safetyEvent:
+      name: SafetyEvent
+      title: Safety Event
+      contentType: application/json
+      correlationId:
+        location: $message.payload#/event_id
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: ./mqtt-v2/schemas/safety-event.schema.json
+      bindings:
+        mqtt:
+          payloadFormatIndicator: 1
+          contentType: application/json
+          bindingVersion: 0.2.0
+    missionEvent:
+      name: MissionEvent
+      title: Mission Event
+      contentType: application/json
+      correlationId:
+        location: $message.payload#/event_id
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: ./mqtt-v2/schemas/mission-event.schema.json
+      bindings:
+        mqtt:
+          payloadFormatIndicator: 1
+          contentType: application/json
+          bindingVersion: 0.2.0
+    commandResult:
+      name: CommandResult
+      title: Robot Command Result
+      contentType: application/json
+      correlationId:
+        location: $message.payload#/command_id
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: ./mqtt-v2/schemas/command-result.schema.json
+      bindings:
+        mqtt:
+          payloadFormatIndicator: 1
+          contentType: application/json
+          bindingVersion: 0.2.0
+    commandRequest:
+      name: CommandRequest
+      title: Robot Command Request
+      contentType: application/json
+      correlationId:
+        location: $message.payload#/command_id
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: ./mqtt-v2/schemas/command-request.schema.json
+      bindings:
+        mqtt:
+          payloadFormatIndicator: 1
+          contentType: application/json
+          bindingVersion: 0.2.0
+    ingestReceipt:
+      name: IngestReceipt
+      title: Event Ingest Receipt
+      contentType: application/json
+      correlationId:
+        location: $message.payload#/event_id
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          $ref: ./mqtt-v2/schemas/ingest-receipt.schema.json
+      bindings:
+        mqtt:
+          payloadFormatIndicator: 1
+          contentType: application/json
+          bindingVersion: 0.2.0

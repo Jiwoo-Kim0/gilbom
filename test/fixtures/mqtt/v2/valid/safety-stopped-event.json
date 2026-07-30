@@ -1,0 +1,22 @@
+{
+  "schema_version": "2.0",
+  "event_id": "81fd9bd1-8639-47a2-82fd-9f26281dac68",
+  "event_type": "SAFETY_STOPPED",
+  "mqtt_id": "RBT-001",
+  "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
+  "seq": 8,
+  "source_component": "safety",
+  "occurred_at": "2026-07-30T01:02:00.410Z",
+  "sent_at": "2026-07-30T01:02:02.450Z",
+  "ttl_sec": 300,
+  "mission_id": "MIS-20260730-001",
+  "reason_code": "OBSTACLE",
+  "measurement": {
+    "distance_m": 0.72
+  },
+  "transition": {
+    "mode_before": "PATROLLING",
+    "mode_after": "SAFE_STOP"
+  },
+  "auto_resume_allowed": true
+}

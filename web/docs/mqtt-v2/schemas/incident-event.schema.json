@@ -1,0 +1,154 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gilbom.example/contracts/mqtt/v2/schemas/incident-event.schema.json",
+  "title": "길봄 MQTT v2 Incident Event",
+  "allOf": [
+    {
+      "$ref": "event-envelope.schema.json"
+    }
+  ],
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "event_type",
+    "mqtt_id",
+    "boot_id",
+    "seq",
+    "source_component",
+    "occurred_at",
+    "sent_at",
+    "ttl_sec",
+    "mission_id",
+    "location",
+    "incident",
+    "evidence",
+    "model"
+  ],
+  "properties": {
+    "schema_version": {},
+    "event_id": {},
+    "event_type": {
+      "const": "BRAILLE_BLOCK_INCIDENT_DETECTED"
+    },
+    "mqtt_id": {},
+    "boot_id": {},
+    "seq": {},
+    "source_component": {
+      "const": "ai"
+    },
+    "occurred_at": {},
+    "sent_at": {},
+    "ttl_sec": {},
+    "mission_id": {},
+    "location": {
+      "$ref": "common.schema.json#/definitions/location"
+    },
+    "incident": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "asset_type",
+        "block_type",
+        "defect_type",
+        "confidence"
+      ],
+      "properties": {
+        "asset_type": {
+          "const": "BRAILLE_BLOCK"
+        },
+        "block_type": {
+          "type": "string",
+          "enum": [
+            "LINEAR",
+            "DOT",
+            "UNKNOWN"
+          ]
+        },
+        "defect_type": {
+          "const": "DAMAGED"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "damage_ratio": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "image_id",
+        "captured_at",
+        "image_width",
+        "image_height",
+        "bbox_norm"
+      ],
+      "properties": {
+        "image_id": {
+          "anyOf": [
+            {
+              "$ref": "common.schema.json#/definitions/uuidV4"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "captured_at": {
+          "$ref": "common.schema.json#/definitions/utcDateTime"
+        },
+        "image_width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "image_height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bbox_norm": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "common.schema.json#/definitions/nonBlankString"
+        },
+        "version": {
+          "$ref": "common.schema.json#/definitions/nonBlankString"
+        }
+      }
+    }
+  }
+}

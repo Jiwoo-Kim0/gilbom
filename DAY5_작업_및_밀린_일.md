@@ -160,12 +160,12 @@
 
 ### P1. MQTT 계약 검증 산출물
 
-- [ ] `asyncapi-mqtt-v2.yaml`
-- [ ] 공통 Envelope JSON Schema
-- [ ] Presence·State·Telemetry JSON Schema
-- [ ] Event·Mission·Command·Result JSON Schema
-- [ ] 정상·오류 Fixture
-- [ ] 중복·지연·만료 기대 결과와 오류 코드
+- [x] `web/docs/asyncapi-mqtt-v2.yaml`
+- [x] 공통 Envelope JSON Schema
+- [x] Presence·State·Telemetry JSON Schema
+- [x] Event·Mission·Command·Result·Receipt JSON Schema
+- [x] `test/fixtures/mqtt/v2/` 정상·오류 Fixture
+- [x] Manifest에 중복·지연·만료 기대 결과와 오류 코드 기록
 
 ## 5. Day 5 실행 순서
 

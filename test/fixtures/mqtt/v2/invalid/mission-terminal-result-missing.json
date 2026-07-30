@@ -1,0 +1,13 @@
+{
+  "schema_version": "2.0",
+  "event_id": "0392eb4b-ef62-4894-a98d-9b0e61e80e31",
+  "event_type": "MISSION_COMPLETED",
+  "mqtt_id": "RBT-001",
+  "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
+  "seq": 10,
+  "source_component": "mission",
+  "occurred_at": "2026-07-30T02:10:00.000Z",
+  "sent_at": "2026-07-30T02:10:00.120Z",
+  "ttl_sec": 300,
+  "mission_id": "MIS-20260730-001"
+}

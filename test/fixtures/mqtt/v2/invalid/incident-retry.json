@@ -1,0 +1,44 @@
+{
+  "schema_version": "2.0",
+  "event_id": "3cf98dc0-424a-4ef0-9423-57e53fcd72fc",
+  "event_type": "BRAILLE_BLOCK_INCIDENT_DETECTED",
+  "mqtt_id": "RBT-001",
+  "boot_id": "572b2e59-d31f-445f-a43d-7df80ba64203",
+  "seq": 6,
+  "source_component": "ai",
+  "occurred_at": "2026-07-30T01:00:20.000Z",
+  "sent_at": "2026-07-30T01:00:22.120Z",
+  "ttl_sec": 300,
+  "mission_id": "MIS-20260730-001",
+  "location": {
+    "valid": true,
+    "lat": 37.4981,
+    "lon": 127.0279,
+    "zone_id": "A-01"
+  },
+  "incident": {
+    "asset_type": "BRAILLE_BLOCK",
+    "block_type": "LINEAR",
+    "defect_type": "DAMAGED",
+    "confidence": 0.87,
+    "attributes": {
+      "damage_ratio": 0.32
+    }
+  },
+  "evidence": {
+    "image_id": "550e8400-e29b-41d4-a716-446655440000",
+    "captured_at": "2026-07-30T01:00:19.950Z",
+    "image_width": 1280,
+    "image_height": 720,
+    "bbox_norm": [
+      0.16,
+      0.42,
+      0.81,
+      0.95
+    ]
+  },
+  "model": {
+    "name": "tbs-braille-yolo",
+    "version": "1.0.0"
+  }
+}
