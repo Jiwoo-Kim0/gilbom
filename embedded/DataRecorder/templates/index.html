@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SSAFY Bot · DataRecorder</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1e2128; --border: #2e323b;
+    --text: #e6e8ec; --muted: #8b919c;
+    --accent: #4c8dff; --rec: #ff4d4f; --ok: #35c26a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text);
+         font-family: 'Pretendard', 'Noto Sans KR', system-ui, sans-serif; padding: 20px; }
+  h1 { font-size: 18px; font-weight: 700; margin-bottom: 16px; }
+  h1 .sub { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 8px; }
+
+  .layout { display: grid; grid-template-columns: 1fr 300px; gap: 16px; max-width: 1400px; }
+  @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }
+
+  .cams { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 760px) { .cams { grid-template-columns: 1fr; } }
+  .cam { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .cam header { display: flex; justify-content: space-between; align-items: center;
+                padding: 8px 12px; font-size: 13px; color: var(--muted); }
+  .cam img { width: 100%; display: block; aspect-ratio: 4/3; background: #000; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #555; display: inline-block; }
+  .dot.on { background: var(--ok); }
+
+  .panel { background: var(--panel); border: 1px solid var(--border);
+           border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+  .panel h2 { font-size: 12px; font-weight: 600; color: var(--muted);
+              text-transform: uppercase; letter-spacing: .06em; margin-bottom: 12px; }
+
+  #recBtn { width: 100%; padding: 14px; font-size: 16px; font-weight: 700;
+            border: none; border-radius: 8px; cursor: pointer;
+            background: var(--rec); color: #fff; transition: background .15s; }
+  #recBtn.recording { background: #3a3d45; outline: 2px solid var(--rec); }
+  #recBtn:disabled { opacity: .5; cursor: not-allowed; }
+  .rec-info { margin-top: 10px; font-size: 13px; color: var(--muted); line-height: 1.7; }
+  .rec-info b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .blink { animation: blink 1s step-end infinite; color: var(--rec); }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .row { display: flex; justify-content: space-between; font-size: 13px;
+         padding: 5px 0; border-bottom: 1px solid var(--border); }
+  .row:last-child { border-bottom: none; }
+  .row .k { color: var(--muted); }
+  .row .v { font-variant-numeric: tabular-nums; }
+  .v.warn { color: var(--rec); font-weight: 600; }
+  .v.good { color: var(--ok); }
+
+  .bar-wrap { margin: 6px 0 12px; }
+  .bar-label { display: flex; justify-content: space-between; font-size: 12px;
+               color: var(--muted); margin-bottom: 4px; }
+  .bar { position: relative; height: 10px; background: #2a2d35; border-radius: 5px; }
+  .bar .fill { position: absolute; top: 0; bottom: 0; background: var(--accent); border-radius: 5px; }
+  .bar .center-tick { position: absolute; left: 50%; top: -2px; bottom: -2px;
+                      width: 2px; background: var(--muted); }
+</style>
+</head>
+<body>
+  <h1>🎥 DataRecorder <span class="sub">SSAFY Bot · 주행 데이터 녹화</span></h1>
+
+  <div class="layout">
+    <div class="cams">
+      <div class="cam">
+        <header><span>주행 카메라 (nav · video0)</span><span class="dot" id="dot-nav"></span></header>
+        <img src="/stream/nav" alt="nav camera">
+      </div>
+      <div class="cam">
+        <header><span>전방 카메라 (front · video2)</span><span class="dot" id="dot-front"></span></header>
+        <img src="/stream/front" alt="front camera">
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>녹화</h2>
+        <button id="recBtn" disabled>● 녹화 시작</button>
+        <div class="rec-info" id="recInfo">상태 확인 중…</div>
+      </div>
+
+      <div class="panel">
+        <h2>컨트롤러</h2>
+        <div class="bar-wrap">
+          <div class="bar-label"><span>조향</span><span id="angleVal">–</span></div>
+          <div class="bar"><div class="center-tick"></div><div class="fill" id="steerFill"></div></div>
+        </div>
+        <div class="bar-wrap">
+          <div class="bar-label"><span>스로틀</span><span id="speedVal">–</span></div>
+          <div class="bar"><div class="fill" id="throttleFill" style="left:0"></div></div>
+        </div>
+        <div class="row"><span class="k">연결</span><span class="v" id="jsConn">–</span></div>
+        <div class="row"><span class="k">방향</span><span class="v" id="dirVal">–</span></div>
+        <div class="row"><span class="k">최대 스로틀 (X−/Y+)</span><span class="v" id="capVal">–</span></div>
+        <div class="row"><span class="k">비상정지</span><span class="v" id="estopVal">–</span></div>
+      </div>
+
+      <div class="panel">
+        <h2>마지막 세션</h2>
+        <div class="rec-info" id="lastSession">없음</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+let recording = false;
+
+$('recBtn').addEventListener('click', async () => {
+  $('recBtn').disabled = true;
+  await fetch(recording ? '/api/record/stop' : '/api/record/start', { method: 'POST' });
+  await refresh();
+});
+
+function fmtTime(sec) {
+  const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+async function refresh() {
+  try {
+    const st = await (await fetch('/api/status')).json();
+
+    // cameras
+    for (const name of ['nav', 'front'])
+      $('dot-' + name).classList.toggle('on', st.cameras[name]?.alive);
+
+    // recorder
+    recording = st.recorder.recording;
+    const btn = $('recBtn');
+    btn.disabled = false;
+    btn.classList.toggle('recording', recording);
+    btn.textContent = recording ? '■ 녹화 중지' : '● 녹화 시작';
+    if (recording) {
+      const f = st.recorder.frames;
+      $('recInfo').innerHTML =
+        `<span class="blink">●</span> <b>${st.recorder.session}</b><br>` +
+        `경과 <b>${fmtTime(st.recorder.elapsed_sec)}</b><br>` +
+        `nav <b>${f.nav ?? 0}</b> · front <b>${f.front ?? 0}</b> 프레임`;
+    } else {
+      $('recInfo').textContent = '대기 중 — 컨트롤러 A 버튼으로도 토글 가능';
+    }
+    const last = st.recorder.last_session;
+    if (last) {
+      const files = Object.values(last.files).map(v => `${v.frames}f`).join(' · ');
+      $('lastSession').innerHTML = `<b>${last.session}</b><br>${fmtTime(last.duration_sec)} · ${files}`;
+    }
+
+    // bot
+    const b = st.bot;
+    $('jsConn').textContent = b.connected ? '연결됨' : '끊김';
+    $('jsConn').className = 'v ' + (b.connected ? 'good' : 'warn');
+    $('dirVal').textContent = b.direction;
+    $('capVal').textContent = b.throttle_cap + '%';
+    $('estopVal').textContent = b.estop ? '작동!' : '해제';
+    $('estopVal').className = 'v ' + (b.estop ? 'warn' : '');
+    $('angleVal').textContent = b.angle + '°';
+    $('speedVal').textContent = b.speed + '%' + (b.direction === 'BACKWARD' ? ' (후진)' : '');
+
+    // steering bar: center-out fill
+    const norm = (b.angle - b.angle_center) / b.angle_span;   // -1 .. 1
+    const fill = $('steerFill');
+    if (norm >= 0) { fill.style.left = '50%'; fill.style.width = (norm * 50) + '%'; }
+    else { fill.style.left = (50 + norm * 50) + '%'; fill.style.width = (-norm * 50) + '%'; }
+    $('throttleFill').style.width = (b.speed) + '%';
+  } catch (e) { /* server restarting */ }
+}
+
+refresh();
+setInterval(refresh, 500);
+</script>
+</body>
+</html>
