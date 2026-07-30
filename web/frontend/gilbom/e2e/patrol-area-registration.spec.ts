@@ -81,6 +81,23 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
   let missionCreatePayload: Record<string, unknown> | null = null
 
   await page.addInitScript((coordinates) => {
+    type FakeMapInteractionOptions = {
+      draggable?: boolean
+      pinchZoom?: boolean
+      scrollWheel?: boolean
+      keyboardShortcuts?: boolean
+      disableDoubleClickZoom?: boolean
+      disableDoubleTapZoom?: boolean
+      disableTwoFingerTapZoom?: boolean
+      zoomControl?: boolean
+    }
+    const previewState = {
+      centers: [] as Array<[longitude: number, latitude: number]>,
+      mapOptions: [] as FakeMapInteractionOptions[],
+      setZoomCallCount: 0,
+      fitBoundsCallCount: 0,
+    }
+
     class FakeLatLng {
       constructor(
         private readonly latitude: number,
@@ -100,13 +117,24 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
       readonly element: HTMLElement
       clickIndex = 0
 
-      constructor(element: HTMLElement) {
+      constructor(
+        element: HTMLElement,
+        options: FakeMapInteractionOptions,
+      ) {
         this.element = element
+        previewState.mapOptions.push({ ...options })
       }
 
-      setCenter() {}
-      setZoom() {}
-      fitBounds() {}
+      setCenter(position: FakeLatLng) {
+        previewState.centers.push([position.lng(), position.lat()])
+      }
+      setZoom() {
+        previewState.setZoomCallCount += 1
+      }
+
+      fitBounds() {
+        previewState.fitBoundsCallCount += 1
+      }
       destroy() {}
     }
 
@@ -130,6 +158,10 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
     Object.defineProperty(window, 'EventSource', {
       configurable: true,
       value: FakeEventSource,
+    })
+    Object.defineProperty(window, '__patrolAreaPreviewState', {
+      configurable: true,
+      value: previewState,
     })
     Object.defineProperty(window, 'naver', {
       configurable: true,
@@ -315,12 +347,50 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
   await expect(editor).toBeVisible()
   const map = page.getByTestId('patrol-boundary-naver-map')
   await expect(map).toBeVisible()
+  await expect.poll(() => page.evaluate(() => {
+    const state = (
+      window as typeof window & {
+        __patrolAreaPreviewState: {
+          mapOptions: Array<{
+            disableDoubleClickZoom?: boolean
+            disableDoubleTapZoom?: boolean
+            disableTwoFingerTapZoom?: boolean
+          }>
+        }
+      }
+    ).__patrolAreaPreviewState
+    return state.mapOptions.at(0)
+  })).toMatchObject({
+    disableDoubleClickZoom: true,
+    disableDoubleTapZoom: true,
+    disableTwoFingerTapZoom: true,
+  })
 
   await map.click({ position: { x: 80, y: 80 } })
   await map.click({ position: { x: 180, y: 80 } })
   await map.click({ position: { x: 180, y: 180 } })
   await expect(editor.getByText('등록 가능한 Polygon입니다.')).toBeVisible()
   await expect(editor.getByText('3/100개 점')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => {
+    const state = (
+      window as typeof window & {
+        __patrolAreaPreviewState: {
+          centers: Array<[longitude: number, latitude: number]>
+          setZoomCallCount: number
+          fitBoundsCallCount: number
+        }
+      }
+    ).__patrolAreaPreviewState
+    return {
+      centers: state.centers,
+      setZoomCallCount: state.setZoomCallCount,
+      fitBoundsCallCount: state.fitBoundsCallCount,
+    }
+  })).toEqual({
+    centers: [],
+    setZoomCallCount: 0,
+    fitBoundsCallCount: 0,
+  })
 
   await page.locator('#patrol-area-code').fill('DEMO-ZONE-01')
   await page.locator('#patrol-area-name').fill('시연 순찰 구역')
@@ -355,6 +425,47 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
   await page.locator('#mission-create-area').selectOption(AREA_ID)
   await expect(page.locator('#mission-create-area')).toHaveValue(AREA_ID)
   await expect.poll(() => routeRequested).toBe(true)
+  const areaPreview = page.getByTestId('mission-area-selection-preview')
+  await expect(areaPreview).toBeVisible()
+  await expect(areaPreview).toContainText('시연 순찰 구역 선택 구역')
+  await expect(areaPreview).toContainText(
+    '위도 36.1073333 · 경도 128.4166667',
+  )
+  await expect(
+    page.getByTestId('mission-area-preview-naver-map'),
+  ).toBeVisible()
+  await expect.poll(() => page.evaluate(() => {
+    const state = (
+      window as typeof window & {
+        __patrolAreaPreviewState: {
+          mapOptions: Array<Record<string, boolean | undefined>>
+        }
+      }
+    ).__patrolAreaPreviewState
+    return state.mapOptions.at(-1)
+  })).toMatchObject({
+    draggable: false,
+    pinchZoom: false,
+    scrollWheel: false,
+    keyboardShortcuts: false,
+    disableDoubleClickZoom: true,
+    disableDoubleTapZoom: true,
+    disableTwoFingerTapZoom: true,
+    zoomControl: false,
+  })
+  await expect.poll(() => page.evaluate(() => {
+    const state = (
+      window as typeof window & {
+        __patrolAreaPreviewState: {
+          centers: Array<[longitude: number, latitude: number]>
+        }
+      }
+    ).__patrolAreaPreviewState
+    return state.centers.at(-1)
+  })).toEqual([
+    (128.416 + 128.417 + 128.417) / 3,
+    (36.107 + 36.107 + 36.108) / 3,
+  ])
 
   await page.locator('#mission-create-robot').selectOption(ROBOT_ID)
   await expect(page.getByRole('button', { name: '임무 생성' })).toBeEnabled()

@@ -91,6 +91,9 @@ export function PatrolAreaBoundaryEditor({
             DEFAULT_CENTER.longitude,
           ),
           zoom: 17,
+          disableDoubleClickZoom: true,
+          disableDoubleTapZoom: true,
+          disableTwoFingerTapZoom: true,
           zoomControl: true,
           zoomControlOptions: {
             position: maps.Position.TOP_RIGHT,
@@ -178,24 +181,6 @@ export function PatrolAreaBoundaryEditor({
       title: `순찰 구역 경계점 ${index + 1}`,
       zIndex: 20,
     }))
-
-    if (path.length === 1) {
-      map.setCenter(path[0])
-      map.setZoom(18)
-    } else if (path.length > 1) {
-      const longitudes = points.map(([longitude]) => longitude)
-      const latitudes = points.map(([, latitude]) => latitude)
-      map.fitBounds(new maps.LatLngBounds(
-        new maps.LatLng(
-          Math.min(...latitudes),
-          Math.min(...longitudes),
-        ),
-        new maps.LatLng(
-          Math.max(...latitudes),
-          Math.max(...longitudes),
-        ),
-      ))
-    }
 
     return () => {
       polygon?.setMap(null)

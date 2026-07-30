@@ -16,7 +16,7 @@ export type GeoJsonPolygon = {
 
 export type GeoJsonMultiPolygon = {
   type: 'MultiPolygon'
-  coordinates: number[][][][]
+  coordinates: GeoJsonCoordinate[][][]
 }
 
 export type PatrolAreaBoundary = GeoJsonPolygon | GeoJsonMultiPolygon

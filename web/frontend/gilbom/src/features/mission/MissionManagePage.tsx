@@ -36,6 +36,7 @@ import {
   getPatrolRoutes,
 } from './missionApi'
 import { MissionMap } from './MissionMap'
+import { PatrolAreaSelectionPreview } from './PatrolAreaSelectionPreview'
 import type {
   Mission,
   MissionFilters,
@@ -175,6 +176,10 @@ export function MissionManagePage() {
   const activeRobots = useMemo(
     () => robots.filter((robot) => robot.operationalStatus === 'ACTIVE'),
     [robots],
+  )
+  const selectedCreateArea = useMemo(
+    () => activeAreas.find((area) => area.patrolAreaId === createAreaId) ?? null,
+    [activeAreas, createAreaId],
   )
   const pageRunningCount = missions?.content.filter(
     (mission) => mission.status === 'RUNNING',
@@ -605,6 +610,9 @@ export function MissionManagePage() {
                 등록하세요.
               </small>
             </label>
+            {selectedCreateArea ? (
+              <PatrolAreaSelectionPreview area={selectedCreateArea} />
+            ) : null}
             <label className="admin-form-field" htmlFor="mission-create-duration">
               계획 시간(분)
               <input

@@ -42,6 +42,13 @@ declare namespace naver.maps {
     zoom?: number
     minZoom?: number
     maxZoom?: number
+    draggable?: boolean
+    pinchZoom?: boolean
+    scrollWheel?: boolean
+    keyboardShortcuts?: boolean
+    disableDoubleClickZoom?: boolean
+    disableDoubleTapZoom?: boolean
+    disableTwoFingerTapZoom?: boolean
     zoomControl?: boolean
     zoomControlOptions?: ZoomControlOptions
   }
