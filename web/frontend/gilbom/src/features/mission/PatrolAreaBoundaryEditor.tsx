@@ -17,6 +17,7 @@ import './patrol-area-boundary-editor.css'
 
 const NAVER_MAP_CLIENT_ID = import.meta.env.VITE_NAVER_MAP_CLIENT_ID
 const MAX_BOUNDARY_POINTS = 100
+const BOUNDARY_EDITOR_ZOOM = 17
 const DEFAULT_CENTER = {
   latitude: 36.1195,
   longitude: 128.3446,
@@ -96,14 +97,16 @@ export function PatrolAreaBoundaryEditor({
             DEFAULT_CENTER.latitude,
             DEFAULT_CENTER.longitude,
           ),
-          zoom: 17,
+          zoom: BOUNDARY_EDITOR_ZOOM,
+          minZoom: BOUNDARY_EDITOR_ZOOM,
+          maxZoom: BOUNDARY_EDITOR_ZOOM,
+          pinchZoom: false,
+          scrollWheel: false,
+          keyboardShortcuts: false,
           disableDoubleClickZoom: true,
           disableDoubleTapZoom: true,
           disableTwoFingerTapZoom: true,
-          zoomControl: true,
-          zoomControlOptions: {
-            position: maps.Position.TOP_RIGHT,
-          },
+          zoomControl: false,
         })
         mapRef.current = map
         clickListener = maps.Event.addListener(map, 'click', (event) => {

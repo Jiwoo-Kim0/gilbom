@@ -97,6 +97,9 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
       disableDoubleClickZoom?: boolean
       disableDoubleTapZoom?: boolean
       disableTwoFingerTapZoom?: boolean
+      minZoom?: number
+      maxZoom?: number
+      zoom?: number
       zoomControl?: boolean
     }
     const previewState = {
@@ -368,18 +371,32 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
       window as typeof window & {
         __patrolAreaPreviewState: {
           mapOptions: Array<{
+            pinchZoom?: boolean
+            scrollWheel?: boolean
+            keyboardShortcuts?: boolean
             disableDoubleClickZoom?: boolean
             disableDoubleTapZoom?: boolean
             disableTwoFingerTapZoom?: boolean
+            minZoom?: number
+            maxZoom?: number
+            zoom?: number
+            zoomControl?: boolean
           }>
         }
       }
     ).__patrolAreaPreviewState
     return state.mapOptions.at(0)
   })).toMatchObject({
+    zoom: 17,
+    minZoom: 17,
+    maxZoom: 17,
+    pinchZoom: false,
+    scrollWheel: false,
+    keyboardShortcuts: false,
     disableDoubleClickZoom: true,
     disableDoubleTapZoom: true,
     disableTwoFingerTapZoom: true,
+    zoomControl: false,
   })
 
   await map.click({ position: { x: 80, y: 80 } })
