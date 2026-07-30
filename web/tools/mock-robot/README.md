@@ -61,6 +61,31 @@ python tools/mock-robot/mock_robot.py `
 python scripts/mission-mock-e2e.py
 ```
 
+Command 실패·거절·늦은 Result 시나리오는 명령 유형별 Override와 지연 옵션을
+사용한다. `--command-outcome`은 `TYPE=STATUS:REASON` 형식이며 최종 상태는
+`COMPLETED`, `FAILED`, `REJECTED`만 허용한다. `--command-delay-sec`은 ACK와
+최종 Result 발행을 지정한 초만큼 늦춘다.
+
+```powershell
+$env:MQTT_PASSWORD='robot-test MQTT 비밀번호'
+python tools/mock-robot/mock_robot.py `
+  --mqtt-id robot-test `
+  --command-outcome PAUSE_MISSION=FAILED:E2E_FORCED_FAILURE `
+  --command-outcome EMERGENCY_STOP=REJECTED:E2E_SAFETY_REJECTED `
+  --command-delay-sec CANCEL_MISSION=31 `
+  --duplicate-results-for PAUSE_MISSION
+```
+
+Mock Robot은 처리 완료한 `command_id`와 최종 Result를 메모리에 보관한다. 같은
+`command_id`가 다시 전달되면 명령을 재실행하지 않고 기존 Result를 그대로
+재발행한다. `--duplicate-results-for`는 지정한 Command의 같은 ACCEPTED와 최종
+Result를 각각 두 번 발행해 Backend의 `result_id` 멱등성을 검증한다. 전체 비정상
+E2E는 다음과 같다.
+
+```powershell
+python scripts/command-abnormal-e2e.py
+```
+
 주요 Topic:
 
 ```text
