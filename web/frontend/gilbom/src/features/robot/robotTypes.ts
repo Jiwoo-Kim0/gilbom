@@ -42,6 +42,53 @@ export interface RobotRegistrationResponse {
   connectivityStatus: RobotConnectivityStatus
 }
 
+export interface RobotTelemetryStatistics {
+  robotId: string
+  mqttId: string
+  robotName: string
+  from: string
+  to: string
+  sampleCount: number
+  validBatterySampleCount: number
+  averageBatteryPercent: number | null
+  minimumBatteryPercent: number | null
+  averageJetsonTemperatureC: number | null
+  maximumJetsonTemperatureC: number | null
+  averageSpeedMps: number | null
+  maximumSpeedMps: number | null
+  validGpsSampleCount: number
+  invalidGpsSampleCount: number
+  gpsValidRatePercent: number
+  lastSampledAt: string | null
+}
+
+export type RobotTelemetrySeriesInterval = '1m' | '5m' | '15m' | '1h'
+
+export interface RobotTelemetrySeriesPoint {
+  bucketAt: string
+  sampleCount: number
+  validBatterySampleCount: number
+  averageBatteryPercent: number | null
+  minimumBatteryPercent: number | null
+  averageJetsonTemperatureC: number | null
+  maximumJetsonTemperatureC: number | null
+  averageSpeedMps: number | null
+  maximumSpeedMps: number | null
+  validGpsSampleCount: number
+  invalidGpsSampleCount: number
+  gpsValidRatePercent: number
+}
+
+export interface RobotTelemetrySeries {
+  robotId: string
+  mqttId: string
+  robotName: string
+  from: string
+  to: string
+  interval: RobotTelemetrySeriesInterval
+  points: RobotTelemetrySeriesPoint[]
+}
+
 export interface RobotDetail {
   robotId: string
   mqttId: string

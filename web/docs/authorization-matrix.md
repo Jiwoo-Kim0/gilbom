@@ -181,6 +181,8 @@ DB trigger도 같은 lock과 판정 함수를 사용해 직접 DML을 방어한�
 | GET | `/api/v1/robots` | `ROBOT_STATUS_VIEW` | 배정 로봇 |  |  |
 | POST | `/api/v1/robots` | `ROBOT_REGISTER` | 전역 | O | O |
 | GET | `/api/v1/robots/{robotId}` | `ROBOT_STATUS_VIEW` | `VIEWER+` |  |  |
+| GET | `/api/v1/robots/{robotId}/telemetry-statistics` | `ROBOT_STATUS_VIEW` | `VIEWER+`, `[from,to)` 최대 31일 |  |  |
+| GET | `/api/v1/robots/{robotId}/telemetry-series` | `ROBOT_STATUS_VIEW` | `VIEWER+`, `[from,to)` 최대 31일·5,000구간 |  |  |
 | PATCH, DELETE | `/api/v1/robots/{robotId}` | `ROBOT_REGISTER` | 전역 | O | O |
 | GET | `/api/v1/robots/{robotId}/state` | `ROBOT_STATUS_VIEW` | `VIEWER+` |  |  |
 | GET | `/api/v1/robots/{robotId}/telemetry` | `ROBOT_STATUS_VIEW` | `VIEWER+` |  |  |

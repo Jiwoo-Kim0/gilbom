@@ -19,6 +19,7 @@ import { useAuthentication } from '../auth/authenticationContext'
 import { ROBOT_COMMAND_VIEW } from '../auth/permissions'
 import { CommandControlPage } from '../command/CommandControlPage'
 import { getRobot } from './robotApi'
+import { RobotTelemetryStatisticsCard } from './RobotTelemetryStatisticsCard'
 import type {
   RobotDetail,
   RobotRealtimeEvent,
@@ -56,6 +57,7 @@ export function RobotDetailPage() {
   const { user } = useAuthentication()
   const [robot, setRobot] = useState<RobotDetail | null>(null)
   const [commandRealtimeRevision, setCommandRealtimeRevision] = useState(0)
+  const [telemetryRealtimeRevision, setTelemetryRealtimeRevision] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<unknown>(null)
   const canViewCommands = user?.permissions.includes(ROBOT_COMMAND_VIEW) ?? false
@@ -93,6 +95,12 @@ export function RobotDetailPage() {
       || event.eventType === 'COMMAND_STATUS_CHANGED'
     ) {
       setCommandRealtimeRevision((current) => current + 1)
+    }
+    if (
+      event === undefined
+      || event.eventType === 'ROBOT_TELEMETRY_UPDATED'
+    ) {
+      setTelemetryRealtimeRevision((current) => current + 1)
     }
     try {
       setRobot(await getRobot(robotId))
@@ -201,6 +209,12 @@ export function RobotDetailPage() {
               </div>
             </dl>
           </article>
+
+          <RobotTelemetryStatisticsCard
+            key={robot.robotId}
+            robotId={robot.robotId}
+            realtimeRevision={telemetryRealtimeRevision}
+          />
 
           {canViewCommands ? (
             <CommandControlPage

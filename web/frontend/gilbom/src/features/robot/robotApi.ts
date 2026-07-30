@@ -3,6 +3,9 @@ import type {
   RobotDetail,
   RobotListResponse,
   RobotMapResponse,
+  RobotTelemetrySeries,
+  RobotTelemetrySeriesInterval,
+  RobotTelemetryStatistics,
   RobotRegistrationRequest,
   RobotRegistrationResponse,
   RobotSummary,
@@ -49,4 +52,33 @@ export function registerRobot(
 
 export function getRobot(robotId: string): Promise<RobotDetail> {
   return apiJson(`${ROBOT_BASE_PATH}/${encodeURIComponent(robotId)}`)
+}
+
+export function getRobotTelemetryStatistics(
+  robotId: string,
+  from: string,
+  to: string,
+): Promise<RobotTelemetryStatistics> {
+  const query = new URLSearchParams({ from, to })
+  return apiJson(
+    `${ROBOT_BASE_PATH}/${encodeURIComponent(robotId)}`
+      + `/telemetry-statistics?${query}`,
+  )
+}
+
+export function getRobotTelemetrySeries(
+  robotId: string,
+  from: string,
+  to: string,
+  interval: RobotTelemetrySeriesInterval,
+): Promise<RobotTelemetrySeries> {
+  const query = new URLSearchParams({
+    from,
+    to,
+    interval,
+  })
+  return apiJson(
+    `${ROBOT_BASE_PATH}/${encodeURIComponent(robotId)}`
+      + `/telemetry-series?${query}`,
+  )
 }

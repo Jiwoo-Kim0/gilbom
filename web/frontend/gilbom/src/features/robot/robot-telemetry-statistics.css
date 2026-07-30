@@ -1,0 +1,216 @@
+.robot-telemetry-statistics {
+  display: grid;
+  gap: 20px;
+}
+
+.robot-telemetry-statistics-heading {
+  display: flex;
+  gap: 20px;
+  align-items: end;
+  justify-content: space-between;
+}
+
+.robot-telemetry-statistics-heading h3 {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 5px 0 4px;
+}
+
+.robot-telemetry-statistics-heading p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.robot-telemetry-statistics-heading .robot-telemetry-statistics-live-status {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.robot-telemetry-statistics-heading
+  .robot-telemetry-statistics-live-status.is-live {
+  color: var(--success, #2f855a);
+}
+
+.robot-telemetry-statistics-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+}
+
+.robot-telemetry-statistics-filter label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.robot-telemetry-statistics-filter input {
+  min-height: 40px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+}
+
+.robot-telemetry-statistics-filter .secondary-button {
+  min-height: 40px;
+}
+
+.robot-telemetry-statistics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.robot-telemetry-statistics-grid div {
+  display: grid;
+  min-height: 96px;
+  gap: 8px;
+  padding: 15px;
+  align-content: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-muted);
+}
+
+.robot-telemetry-statistics-grid dt,
+.robot-telemetry-statistics-grid small {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.robot-telemetry-statistics-grid dd {
+  margin: 0;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.robot-telemetry-statistics-grid .robot-telemetry-statistics-wide {
+  grid-column: span 3;
+  min-height: 80px;
+}
+
+.robot-telemetry-statistics-empty {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 10px;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  font-size: 13px;
+}
+
+.robot-telemetry-charts {
+  display: grid;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.robot-telemetry-charts-heading h4,
+.robot-telemetry-chart-heading h4 {
+  margin: 0;
+  color: var(--text);
+}
+
+.robot-telemetry-charts-heading p,
+.robot-telemetry-chart-heading p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.robot-telemetry-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.robot-telemetry-chart {
+  min-width: 0;
+  padding: 16px 12px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-muted);
+}
+
+.robot-telemetry-chart:last-child {
+  grid-column: span 2;
+}
+
+.robot-telemetry-chart-heading {
+  padding: 0 8px 8px;
+}
+
+.robot-telemetry-chart .recharts-cartesian-axis-tick-value,
+.robot-telemetry-chart .recharts-legend-item-text {
+  fill: var(--text-muted);
+  color: var(--text-muted) !important;
+  font-size: 11px;
+}
+
+.robot-telemetry-chart .recharts-cartesian-grid line {
+  stroke: var(--line);
+}
+
+@media (max-width: 1040px) {
+  .robot-telemetry-statistics-heading,
+  .robot-telemetry-statistics-filter {
+    align-items: stretch;
+  }
+
+  .robot-telemetry-statistics-heading {
+    flex-direction: column;
+  }
+
+  .robot-telemetry-statistics-filter {
+    width: 100%;
+  }
+
+  .robot-telemetry-statistics-filter label {
+    flex: 1;
+  }
+
+  .robot-telemetry-statistics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .robot-telemetry-statistics-grid .robot-telemetry-statistics-wide {
+    grid-column: span 2;
+  }
+
+  .robot-telemetry-charts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .robot-telemetry-chart:last-child {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 680px) {
+  .robot-telemetry-statistics-filter {
+    flex-direction: column;
+  }
+
+  .robot-telemetry-statistics-filter label,
+  .robot-telemetry-statistics-filter .secondary-button {
+    width: 100%;
+  }
+
+  .robot-telemetry-statistics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .robot-telemetry-statistics-grid .robot-telemetry-statistics-wide {
+    grid-column: auto;
+  }
+}
