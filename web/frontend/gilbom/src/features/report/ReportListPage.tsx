@@ -26,6 +26,7 @@ import {
   formatReportPeriod,
 } from './reportFormat'
 import { ReportStatusBadge } from './ReportStatusBadge'
+import { useReportRealtime } from './useReportRealtime'
 import type {
   ReportGenerationMethod,
   ReportListResponse,
@@ -106,6 +107,12 @@ export function ReportListPage() {
       }
     }
   }, [])
+
+  const refreshFromRealtime = useCallback(() => {
+    void load(page, appliedFilters)
+  }, [appliedFilters, load, page])
+
+  useReportRealtime(refreshFromRealtime)
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
