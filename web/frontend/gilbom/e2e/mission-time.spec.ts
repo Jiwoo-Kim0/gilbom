@@ -236,9 +236,11 @@ test('시간 기반 Mission을 경로 UI 없이 생성하고 진행 정보를 �
   await expect(page.getByRole('button', { name: '임무 생성' })).toBeEnabled()
   await page.getByRole('button', { name: '임무 생성' }).click()
 
-  await expect(page.getByRole('status')).toContainText(
-    'MIS-TIME-002 임무를 생성했습니다.',
-  )
+  await expect(
+    page.getByRole('status').filter({
+      hasText: 'MIS-TIME-002 임무를 생성했습니다.',
+    }),
+  ).toBeVisible()
   expect(createPayload).toEqual({
     robotId: ROBOT_ID,
     patrolAreaId: AREA_ID,

@@ -2,7 +2,7 @@
 
 - 기준일: 2026-07-30
 - 대상: `S15P11D101-489`, `DAY6-B-00-6`
-- 상태: 구현·자동 검증 완료, 실제 로그인 Backend Browser 연동은 후속 검증
+- 상태: 구현·자동 검증·실제 로그인 Backend Browser 연동 완료
 
 ## 1. 사용자 계약
 
@@ -74,10 +74,17 @@ Route 선택·필터·목록·상세 표시는 제공하지 않는다.
 - Backend: 실제 PostGIS Testcontainers로 V1~V29 Migration, Area별 Dummy,
   Mission 생성·조회·ETA, 시간 진행률, PAUSED 증가와 완료 Event 100%를 검증한다.
 - Frontend: ESLint와 production build를 검증한다.
-- Browser: 실제 Chromium에서 로그인 상태와 REST 응답을 결정적 Fixture로 제공해
-  생성 폼, 내부 Dummy ID, 계획시간 Payload, 시간 표시와 Route 비노출을 검증한다.
+- Browser Fixture: 실제 Chromium에서 로그인 상태와 REST 응답을 결정적 Fixture로
+  제공해 생성 폼, 내부 Dummy ID, 계획시간 Payload, 시간 표시와 Route 비노출을
+  검증한다.
+- Browser Live: Docker Frontend `http://127.0.0.1:3000`에서 실제 비밀번호
+  로그인·TOTP MFA를 통과한 뒤 45분 Mission을 생성하고, API
+  `plannedDurationSec=2700`과 PostgreSQL `planned_duration_sec=2700`을
+  대조한다. 고유 임시 계정·Robot·Area·Route·Mission·세션·감사로그는 종료 시
+  정리한다.
 
-브라우저 테스트의 REST는 결정적 Route Fixture이므로 UI 회귀에는 적합하지만,
-실제 인증 세션과 실행 Backend를 통과하는 단일 Browser E2E는 아니다. 실제
-Backend·DB 계약은 별도의 PostGIS 통합 테스트가 담당하며, 실제 로그인
-Backend Browser 연동은 운영형 E2E 후속 항목으로 남긴다.
+운영형 검증은 아래 명령으로 재현한다.
+
+```bash
+python web/scripts/mission-time-browser-e2e.py
+```

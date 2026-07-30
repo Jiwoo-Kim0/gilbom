@@ -290,4 +290,123 @@ npm run test:e2e:mission
   영역 이탈
 - `DAY6-B-00-8`: MQTT→Command→Telemetry→완료 전체 Mock E2E
 
-현재 `DAY6-B-00-6` 판정은 구현 100%, 완료 기준 90%, `IN PROGRESS`다.
+## 9. 실제 로그인·Backend·PostgreSQL Browser E2E 마감
+
+### 9.1 기존 진행률이 90%였던 원인
+
+기존 `mission-time.spec.ts`는 실제 Chromium에서 화면을 실행했지만 인증 상태와
+REST 응답을 Playwright Route Fixture로 제공했다. 따라서 화면·Payload Adapter
+회귀는 검증했어도 다음 운영형 경계는 통과하지 않았다.
+
+```text
+실제 비밀번호 로그인
+→ 실제 TOTP MFA
+→ Docker Frontend :3000
+→ Nginx /api Proxy
+→ 실행 중인 Spring Backend :8080
+→ PostgreSQL Mission INSERT
+```
+
+구현 항목은 끝났지만 위 단일 체인의 증거가 없었으므로 완료 기준을 90%로
+보수적으로 유지했다.
+
+### 9.2 추가한 운영형 E2E
+
+- `web/frontend/gilbom/playwright.live.config.ts`
+  - Docker Frontend `http://127.0.0.1:3000`을 기본 URL로 사용한다.
+  - 개발 서버와 API Fixture를 시작하지 않는다.
+- `web/frontend/gilbom/e2e/mission-time-live.spec.ts`
+  - 실제 이메일·비밀번호로 로그인한다.
+  - RFC 6238 TOTP를 생성해 실제 MFA를 통과한다.
+  - Mission 화면에서 임시 Robot·Area를 선택하고 계획시간 45분을 입력한다.
+  - 실제 POST 요청의 내부 Dummy Route와 `plannedDurationSec=2700`을 검증한다.
+  - 201 응답의 시간 필드·상태·진행률과 화면에 표시된 Mission Code를 검증한다.
+- `web/scripts/mission-time-browser-e2e.py`
+  - 고유 임시 계정·Robot·`robot_current_state`·Area·Dummy Route를 준비한다.
+  - Backend API로 TOTP를 등록한 후 Playwright를 실행한다.
+  - 생성 응답과 PostgreSQL `planned_duration_sec=2700`을 대조한다.
+  - 성공·실패와 무관하게 Mission 이력·Mission·Robot Scope·Current State·
+    Route·Area·Robot·Session·Audit·계정을 정리한다.
+  - cleanup이 실패하면 Browser 검증이 통과했어도 전체 명령을 실패로 반환한다.
+
+### 9.3 실행 중 발견한 문제·원인·해결
+
+#### Docker 재빌드 첫 호출 중단
+
+- 현상: 첫 `docker compose up -d --build backend frontend` 호출이 약 1초 후
+  timeout으로 중단됐다.
+- 원인: 명령 실행 제한을 `1000ms`로 잘못 지정했다.
+- 해결: 충분한 실행 제한으로 재실행했다. 최신 이미지 빌드와 Container 재생성이
+  끝났고 Backend 전체 546개 테스트가 실패 0으로 통과했다.
+
+#### Robot 선택 목록에 임시 Robot이 없음
+
+- 현상: 실제 로그인과 Mission 화면 진입은 성공했지만 Robot Select에 임시
+  Robot Option이 없어 30초 timeout이 발생했다.
+- 원인: `RobotQueryService` 목록 본문은 `telemetry.robot_current_state`를
+  Inner Join한다. 운영 Robot 등록 서비스는 Robot과 Current State를 함께
+  생성하지만 초기 E2E Seed는 `robot.robot`만 직접 추가했다.
+- 해결: 운영 등록 불변식과 동일하게 임시 `robot_current_state(OFFLINE)`를
+  Seed하고 cleanup에도 포함했다.
+- 구분: 제품 등록 흐름의 결함이 아니라 테스트 Seed가 운영 등록 불변식을
+  누락한 문제였다.
+
+#### Playwright Response matcher 오용
+
+- 현상: Area별 Route 실제 응답은 HTTP 200이었으나 `toBeOK()` 호출에서
+  테스트가 실패했다.
+- 원인: `page.waitForResponse()`는 Browser `Response`를 반환하지만
+  `toBeOK()`는 Playwright `APIResponse` 전용 matcher다.
+- 해결: Browser Response의 `status()`를 직접 200과 비교했다.
+
+#### Append-only 이력 때문에 cleanup 실패
+
+- 현상: Browser·Backend·DB 대조는 통과했지만
+  `mission_status_history is append-only`로 임시 데이터 정리가 실패했다.
+- 원인: 운영 감사 요구에 따라 Mission 이력과 Audit Log의 UPDATE·DELETE
+  Trigger가 활성화되어 있다. 초기 cleanup은 Audit Trigger만 고려했다.
+  또한 `try` 내부의 성공 `return` 때문에 `finally` cleanup 실패가 종료코드
+  0을 바꾸지 못했다.
+- 해결: DB Owner로 정확한 임시 사용자 범위 안에서 두 Append-only Trigger를
+  Transaction 동안만 비활성화하고 즉시 복구했다. 반환값은 cleanup 결과까지
+  반영하도록 변경했다. 실패 실행에서 남은 1세트도 제거하고 0건을 확인했다.
+
+#### 지도 로딩 상태와 기존 시간 E2E Selector 충돌
+
+- 현상: 운영형 E2E 완료 후 기존 Mission Fixture 2개를 함께 실행하자 시간
+  Mission 테스트의 `getByRole('status')`가 생성 알림과 지도 상세 로딩 상태
+  두 요소를 찾아 Strict Mode에서 실패했다.
+- 원인: 지도 기능 추가 후 동일 ARIA Role을 쓰는 상태 요소가 하나 늘었지만
+  시간 E2E Selector가 Role 하나만 존재한다고 가정했다.
+- 해결: `MIS-TIME-002 임무를 생성했습니다.` 문구를 가진 Status만 선택하도록
+  범위를 좁혔다. 시간·지도 Chromium E2E 2개가 함께 통과했다.
+
+### 9.4 최종 검증 결과
+
+- 최신 Docker 재빌드:
+  - Frontend lint·production build 통과
+  - Backend 전체 `546`개, 실패 `0`, Skip `99`
+  - Backend·Frontend Container Health 정상
+- `npm run lint`: 통과
+- `npm run build`: 통과
+- `npm run test:e2e:mission`: Chromium `2 passed`
+- `python web/scripts/mission-time-browser-e2e.py`:
+  - 실제 로그인·TOTP MFA 통과
+  - Docker Frontend 3000→Backend 실제 API 통과
+  - 45분 Mission 201 생성
+  - API `plannedDurationSec=2700` 확인
+  - PostgreSQL `planned_duration_sec=2700`, `CREATED`, `0.00%` 확인
+  - 임시 데이터 cleanup 완료
+- 잔존 데이터 확인:
+  - 임시 계정 `0`
+  - 임시 Robot `0`
+  - 임시 Area `0`
+  - 임시 Mission `0`
+
+이번 운영형 E2E는 Mission REST 계약만 사용하므로 MQTT Payload를 변경하지 않았다.
+따라서 `web/docs/final-mqtt-topic-schema-v2.md`와 MQTT JSON Schema에는 추가 변경이
+필요하지 않다.
+
+현재 `S15P11D101-489`, `DAY6-B-00-6` 판정은 완료 기준 100%, `DONE`이다.
+Command·MQTT·Telemetry·완료 Event까지 잇는 전체 Mission 시나리오는 별도
+`DAY6-B-00-8` 범위다.
