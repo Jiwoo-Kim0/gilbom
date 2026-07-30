@@ -55,7 +55,10 @@
 | V28 | Incident 수집 무결성 보강 | `INC-YYYYMMDD-NNNNNN` 일자별 Counter와 신규 쓰기 형식 CHECK, GPS·Patrol Area 미확정 Incident 검토 대기열 및 Event·Mission·Image FK를 추가 |
 | V29 | CSRF token 발급 Rate Limit bucket | 쿠키를 유지하지 않는 공개 `/csrf-token` 반복 호출이 익명 Spring Session 생성을 증폭시키지 못하도록 `IP_CSRF_TOKEN_ISSUANCE` HMAC IP bucket을 인증 Rate Limit 허용 타입에 추가 |
 | V30 | 보고서 상태·버전·승인 불변성 보강 | 버전별 생성 방식·근거 snapshot, 승인 PDF 결합 정보, 생성 멱등 결과 추적을 추가하고 순차 버전·현재 버전 포인터·상태 전이를 DB trigger로 강제 |
-| V31 | 시간 기반 Mission 계약 | `planned_duration_sec` 양수 제약과 기존 Mission 3,600초 Backfill을 추가하고, 기존 ACTIVE Patrol Area에 내부 `AUTONOMOUS_DEFAULT` Route를 보강 |
+| V31 | Robot Image API Key | `/api/v1/images` 로봇 인증용 고엔트로피 Key의 SHA-256 hash·수명주기와 Robot별 단일 활성 Key를 저장 |
+| V32 | 시간 기반 Mission 계약 | `planned_duration_sec` 양수 제약과 기존 Mission 3,600초 Backfill을 추가하고, 기존 ACTIVE Patrol Area에 내부 `AUTONOMOUS_DEFAULT` Route를 보강 |
+| V33 | LLM 호출 quota·credit ledger | 사용자별 UTC 일일 호출 수와 전체 일일 credit을 원자적으로 예약하고 token·안전 실패 코드만 기록해 다중 인스턴스의 rate·budget 우회를 차단 |
+| V34 | 보고서 LLM fallback 사유 | LLM 요청이 template으로 낮아진 원인을 고정 코드로 버전에 보존하되 Prompt·응답·예외 원문 저장을 차단 |
 
 ### V26 결함 통계 Query 인덱스
 
@@ -153,6 +156,58 @@ DB가 알 수 없는 요청 문맥 규칙인 `expectedVersionNo` 일치와 최�
 자기 승인은 서비스 계층에서 추가 검사한다. 상세 상태·API 계약은
 [report-status-contract.md](report-status-contract.md)를 함께 적용한다.
 
+### V31 Robot Image API Key
+
+파일:
+`backend/src/main/resources/db/migration/V31__create_robot_image_api_key.sql`
+
+`storage.robot_image_api_key`는 로봇 HTTPS 이미지 업로드의 `X-API-Key` 원문 대신
+SHA-256 hash와 식별용 prefix만 저장한다. 상태는 `ACTIVE`, `REVOKED`로 제한하고,
+partial unique index로 Robot별 활성 Key를 하나만 허용한다. Runtime role은 검증과
+마지막 사용 시각 갱신에 필요한 `SELECT`, `UPDATE`만 갖는다.
+
+### V32 시간 기반 Mission 계약
+
+파일:
+`backend/src/main/resources/db/migration/V32__add_time_based_mission_contract.sql`
+
+Mission 진행률 분모인 `planned_duration_sec`를 양수로 강제하고 기존 행은 3,600초로
+Backfill한다. 기존 활성 Patrol Area에는 FK 호환용 내부
+`AUTONOMOUS_DEFAULT` Route를 만들되 Robot 명령·지도·진행률 계산에는 사용하지 않는다.
+
+### V33 LLM 호출 quota·credit ledger
+
+파일:
+`backend/src/main/resources/db/migration/V33__add_llm_invocation_quota_ledger.sql`
+
+`request_control.llm_invocation_usage`는 실제 외부 호출 시도마다 한 행을 추가한다.
+호출 전에 최대 입력 8,000 token과 설정된 최대 출력 token의 모델별 credit을
+`STARTED`로 예약하며, 성공 usage가 있으면 실제 credit으로 정산한다. 실패·재시도와
+usage 미제공 응답은 비용을 과소 계산하지 않도록 예약액을 유지한다.
+
+| 저장 | 저장 금지 |
+|---|---|
+| UTC 사용일, 사용자 UUID, `GMS`, 허용 모델 | Prompt·System/Developer Prompt |
+| `STARTED`, `SUCCEEDED`, `FAILED` | Provider 응답·보고서 본문 |
+| 예약·정산 credit, input/output/total token | 이미지 bytes·Base64·data URL |
+| 고정 실패 코드, 시작·완료 시각 | API Key·Authorization·URL·예외 원문 |
+
+동일 UTC 날짜에 대한 `pg_advisory_xact_lock` 아래 사용자별 행 수와 전체
+`accounted_credits` 합계를 확인하고 INSERT한다. 따라서 서로 다른 인스턴스에서 동시에
+budget 마지막 잔액을 확인해도 한 transaction만 예약에 성공한다. 사용자·날짜와
+날짜·모델 access path를 위한 두 인덱스를 둔다.
+
+### V34 보고서 LLM fallback 사유
+
+파일:
+`backend/src/main/resources/db/migration/V34__persist_report_generation_fallback.sql`
+
+`report.report_version.generation_fallback_reason`은 LLM 요청이 정책·quota·장애·응답
+검증 때문에 template으로 낮아진 경우에만 저장한다. CHECK 제약은
+`generation_method = 'TEMPLATE'`와 고정된 안전 코드 조합만 허용한다.
+Prompt·provider 응답·이미지·내부 예외 메시지는 이 필드나 다른 보고서 필드에
+저장하지 않는다.
+
 시스템 Role `ADMIN`, `MANAGER`, `OPERATOR`와 18개 세부 permission 및
 role-permission 관계는 결정적인 UUID로 seed한다. 실제
 관리자 계정은 password hash와 MFA 등록 절차가 필요하므로 migration에서 만들지 않는다.
@@ -167,8 +222,7 @@ docker compose up --build --detach
 docker compose logs backend
 ```
 
-
-Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V31이
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V34가
 순서대로 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증

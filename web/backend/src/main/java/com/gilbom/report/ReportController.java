@@ -24,10 +24,13 @@ import org.springframework.web.bind.annotation.RestController;
 import com.gilbom.audit.AuditRequestContext;
 import com.gilbom.auth.AuthenticatedUserIdResolver;
 import com.gilbom.report.ReportCommandService.CreatedApiReport;
-import com.gilbom.report.ReportDtos.ManualReportCreateRequest;
 import com.gilbom.report.ReportDtos.PageResponse;
+import com.gilbom.report.ReportDtos.ReportCreateRequest;
+import com.gilbom.report.ReportDtos.ReportDecisionRequest;
 import com.gilbom.report.ReportDtos.ReportDetailResponse;
 import com.gilbom.report.ReportDtos.ReportListItemResponse;
+import com.gilbom.report.ReportDtos.ReportRejectionRequest;
+import com.gilbom.report.ReportDtos.ReportTransitionRequest;
 import com.gilbom.report.ReportDtos.ReportUpdateRequest;
 import com.gilbom.report.ReportDtos.ReportVersionResponse;
 import com.gilbom.report.ReportDtos.ReportVersionSummaryResponse;
@@ -115,7 +118,7 @@ public class ReportController {
             UUID idempotencyKey,
             @Valid
             @RequestBody
-            ManualReportCreateRequest request,
+            ReportCreateRequest request,
             Authentication authentication,
             HttpServletRequest servletRequest
     ) {
@@ -174,6 +177,57 @@ public class ReportController {
                 expectedVersionNo,
                 AuditRequestContext.from(servletRequest));
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/{reportId}/submit")
+    @PreAuthorize("hasAuthority('REPORT_UPDATE')")
+    public ReportDetailResponse submitReport(
+            @PathVariable UUID reportId,
+            @Valid
+            @RequestBody
+            ReportTransitionRequest request,
+            Authentication authentication,
+            HttpServletRequest servletRequest
+    ) {
+        return commandService.submit(
+                userIdResolver.require(authentication),
+                reportId,
+                request,
+                AuditRequestContext.from(servletRequest));
+    }
+
+    @PostMapping("/{reportId}/approve")
+    @PreAuthorize("hasAuthority('REPORT_APPROVE')")
+    public ReportDetailResponse approveReport(
+            @PathVariable UUID reportId,
+            @Valid
+            @RequestBody
+            ReportDecisionRequest request,
+            Authentication authentication,
+            HttpServletRequest servletRequest
+    ) {
+        return commandService.approve(
+                userIdResolver.require(authentication),
+                reportId,
+                request,
+                AuditRequestContext.from(servletRequest));
+    }
+
+    @PostMapping("/{reportId}/reject")
+    @PreAuthorize("hasAuthority('REPORT_APPROVE')")
+    public ReportDetailResponse rejectReport(
+            @PathVariable UUID reportId,
+            @Valid
+            @RequestBody
+            ReportRejectionRequest request,
+            Authentication authentication,
+            HttpServletRequest servletRequest
+    ) {
+        return commandService.reject(
+                userIdResolver.require(authentication),
+                reportId,
+                request,
+                AuditRequestContext.from(servletRequest));
     }
 
     @GetMapping("/{reportId}/versions")

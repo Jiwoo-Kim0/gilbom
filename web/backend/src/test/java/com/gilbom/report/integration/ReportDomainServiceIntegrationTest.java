@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -53,11 +54,15 @@ import com.gilbom.report.ReportCreateCommand;
 import com.gilbom.report.ReportCreationIdempotencyRepository;
 import com.gilbom.report.ReportDomainService;
 import com.gilbom.report.ReportGenerationMethod;
+import com.gilbom.report.ReportGenerationFallbackReason;
 import com.gilbom.report.ReportRecord;
 import com.gilbom.report.ReportRepository;
 import com.gilbom.report.ReportStateTransitionService;
 import com.gilbom.report.ReportStatus;
 import com.gilbom.report.ReportType;
+import com.gilbom.report.pdf.ApprovedReportPdfService;
+import com.gilbom.report.pdf.KoreanApprovedReportPdfRenderer;
+import com.gilbom.report.pdf.LocalApprovedReportPdfStorage;
 
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(
@@ -293,6 +298,89 @@ class ReportDomainServiceIntegrationTest {
                     principalHash,
                     keyHash);
         }
+    }
+
+    @Test
+    void claimOwnerAloneBuildsGeneratedCommandAndReplaySkipsIt() {
+        UUID idempotencyKey = UUID.randomUUID();
+        Map<String, Object> requestBody = Map.of(
+                "generationMethod", "LLM",
+                "reportType", "PERIODIC",
+                "periodFrom", PERIOD_FROM.toString(),
+                "periodTo", PERIOD_TO.toString());
+        AtomicInteger generated = new AtomicInteger();
+
+        CreatedReport first = service.createClaimed(
+                requestBody,
+                author(),
+                idempotencyKey,
+                requestContext(),
+                () -> {
+                    generated.incrementAndGet();
+                    return createCommand("claim 소유자 생성");
+                });
+        CreatedReport replay = service.createClaimed(
+                requestBody,
+                author(),
+                idempotencyKey,
+                requestContext(),
+                () -> {
+                    throw new AssertionError(
+                            "replay must not rebuild LLM command");
+                });
+
+        assertThat(first.created()).isTrue();
+        assertThat(replay.created()).isFalse();
+        assertThat(replay.report().reportId())
+                .isEqualTo(first.report().reportId());
+        assertThat(generated).hasValue(1);
+        assertThat(versionCount(first.report().reportId()))
+                .isEqualTo(1);
+        assertThat(auditCount(
+                first.report().reportId(),
+                "REPORT_CREATED")).isEqualTo(1);
+    }
+
+    @Test
+    void persistsSafeFallbackReasonOnlyOnTemplateVersion() {
+        ReportContent fallback = new ReportContent(
+                "fallback 보고서",
+                "테스트 요약",
+                PERIOD_FROM,
+                PERIOD_TO,
+                "template 본문",
+                Map.of("totalDefectCount", 0),
+                ReportContent.emptyEvidence(),
+                null,
+                null,
+                ReportGenerationMethod.TEMPLATE,
+                null,
+                ReportGenerationFallbackReason.LLM_UNAVAILABLE);
+        ReportCreateCommand command = new ReportCreateCommand(
+                ReportType.PERIODIC,
+                Map.of(),
+                fallback);
+
+        ReportRecord created = service.create(
+                        command,
+                        author(),
+                        UUID.randomUUID(),
+                        requestContext())
+                .report();
+
+        assertThat(created.currentVersionGenerationMethod())
+                .isEqualTo(ReportGenerationMethod.TEMPLATE);
+        assertThat(created.currentVersionGenerationFallbackReason())
+                .isEqualTo(ReportGenerationFallbackReason.LLM_UNAVAILABLE);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT generation_fallback_reason
+                FROM report.report_version
+                WHERE report_id = ?
+                  AND version_no = 1
+                """,
+                String.class,
+                created.reportId()))
+                .isEqualTo("LLM_UNAVAILABLE");
     }
 
     @Test
@@ -629,6 +717,14 @@ class ReportDomainServiceIntegrationTest {
         assertThat(approved.approvedVersionNo()).isEqualTo(1);
         assertThat(approved.approvedBy()).isEqualTo(REVIEWER_ID);
         assertThat(approved.approvedAt()).isNotNull();
+        assertThat(approved.approvedPdfVersionNo()).isEqualTo(1);
+        assertThat(approved.approvedPdfStorageKey())
+                .startsWith(
+                        "reports/" + created.reportId() + "/v1/")
+                .endsWith(".pdf");
+        assertThat(approved.approvedPdfSha256()).hasSize(32);
+        assertThat(approved.approvedPdfCreatedAt())
+                .isEqualTo(approved.approvedAt());
 
         assertStateError(
                 () -> service.update(
@@ -646,24 +742,16 @@ class ReportDomainServiceIntegrationTest {
                         requestContext()),
                 ErrorCode.REPORT_STATE_CONFLICT);
 
-        byte[] pdfSha256 = MessageDigest.getInstance("SHA-256")
-                .digest("approved-pdf".getBytes(StandardCharsets.UTF_8));
-        repository.bindApprovedPdf(
-                created.reportId(),
-                1,
-                "reports/" + created.reportId() + "/v1.pdf",
-                pdfSha256,
-                Instant.now());
         ReportRecord withPdf = service.findActive(created.reportId());
         assertThat(withPdf.approvedPdfVersionNo()).isEqualTo(1);
         assertThat(withPdf.approvedPdfSha256())
-                .containsExactly(pdfSha256);
+                .containsExactly(approved.approvedPdfSha256());
 
         assertThatThrownBy(() -> repository.bindApprovedPdf(
                 created.reportId(),
                 1,
                 "reports/" + created.reportId() + "/replacement.pdf",
-                pdfSha256,
+                approved.approvedPdfSha256(),
                 Instant.now()))
                 .isInstanceOf(DataAccessException.class);
     }
@@ -982,6 +1070,9 @@ class ReportDomainServiceIntegrationTest {
             AuditLogService.class,
             AuditLogRepository.class,
             BestEffortAuditLogWriter.class,
+            ApprovedReportPdfService.class,
+            KoreanApprovedReportPdfRenderer.class,
+            LocalApprovedReportPdfStorage.class,
             AuthenticationSessionConfiguration.class,
             PasswordHashingConfiguration.class
     })

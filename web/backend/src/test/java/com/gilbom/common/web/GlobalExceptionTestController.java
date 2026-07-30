@@ -32,6 +32,15 @@ public class GlobalExceptionTestController {
         return request;
     }
 
+    @PostMapping(
+            path = "/test/image-secret",
+            consumes = MediaType.APPLICATION_JSON_VALUE)
+    ImageSecretRequest imageSecret(
+            @Valid @RequestBody ImageSecretRequest request
+    ) {
+        return request;
+    }
+
     @GetMapping("/test/method-validation")
     int methodValidation(@RequestParam @Min(value = 1, message = "1 이상이어야 합니다.") int count) {
         return count;
@@ -111,5 +120,10 @@ public class GlobalExceptionTestController {
     public record SecretRequest(
             @NotBlank(message = "비밀번호는 필수입니다.")
             String password) {
+    }
+
+    public record ImageSecretRequest(
+            @NotBlank(message = "이미지는 필수입니다.")
+            String imageBase64) {
     }
 }

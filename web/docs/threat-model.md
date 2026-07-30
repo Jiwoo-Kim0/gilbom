@@ -152,12 +152,22 @@ LLM은 보고서 초안을 만드는 보조자이며 신뢰하는 의사결정 �
 
 - LLM에는 통계 집계, 결함 유형·심각도, 비식별화된 설명처럼 보고서 작성에 필요한 allowlist 필드만 보낸다.
 - 비밀번호, Token, API Key, 세션·쿠키, TOTP, AWS 정보, 내부 prompt, SQL·스택 트레이스, 관리자 이메일·이름을 보내지 않는다.
-- 원본 이미지, 정밀 위치 좌표, 원본 시스템·감사 로그는 기본 전송 금지다. 필요하면 별도 개인정보·보안 검토를 먼저 수행한다.
+- 정밀 위치 좌표와 원본 시스템·감사 로그는 전송 금지다. 이미지는 별도 비식별화
+  승인 후 기간 내 대표 결함 JPEG 한 장만 bytes로 허용하며, 승인 전·빈 목록에서는
+  텍스트만 사용한다.
+- LLM 이미지에는 얼굴·차량번호·사람 식별 단서와 EXIF/GPS metadata가 없어야 한다.
+  Presigned URL, bucket·object key와 로컬 경로는 전송하지 않는다.
 - 사용자 입력과 결함 설명을 system instruction에 직접 이어붙이지 않고 명확한 데이터 영역으로 분리한다.
 - LLM에 DB, S3, AWS, MQTT 도구 권한이나 임의 URL fetch 권한을 주지 않는다.
 - 공급자 설정에서 학습 사용을 비활성화하고 요청·응답 보존을 비활성화하거나 제공 가능한 최소 기간으로 제한한다.
 - 공급자의 보존·학습 정책을 만족하지 못하면 `generationMethod=LLM`을 비활성화하고 템플릿 방식만 사용한다.
 - outbound 대상 host를 허용 목록으로 제한하고 TLS, timeout, 재시도 상한, 사용자·일별 rate limit과 비용 budget을 적용한다.
+- `429`·`5xx`·network timeout만 최대 한 번 재시도하고, `4xx`·Schema 오류는
+  재시도하지 않는다. 재시도도 PostgreSQL의 사용자별 UTC 일일 호출 수와 전체 일일
+  credit ledger에 별도 시도로 포함한다.
+- 입력은 전용 allowlist DTO와 전송 직전 Secret·PII·URL 패턴 검사를 모두 통과해야
+  한다. 출력은 추가 필드를 거부하고 서버 통계·기간·결함 identity와 대조한 뒤에만
+  실행 불가능한 Markdown text로 렌더링한다.
 - LLM 출력은 길이와 JSON schema를 검증하고 HTML·SQL·명령으로 실행하지 않는다. 화면 출력은 escape한다.
 - LLM 결과는 항상 `DRAFT`로 저장하며 사람이 검토하고 작성자와 다른 권한자가 승인해야 한다.
 - 운영 로그에는 model ID, prompt version, token 수, 지연, 결과 코드, `requestId`만 남기고 prompt·응답 원문은 남기지 않는다.
@@ -177,7 +187,7 @@ LLM은 보고서 초안을 만드는 보조자이며 신뢰하는 의사결정 �
 | `TM-09` | S3 객체 또는 Presigned URL 유출 | 높음 | Private/Public Block, 최소 IAM, 단기 단일 객체 URL, query 로그 금지 | 중간 |
 | `TM-10` | SQL Injection·예외를 통한 내부 구조 노출 | 높음 | parameter binding, 입력 검증, 고정 오류, SQL·bind 로그 금지 | 낮음 |
 | `TM-11` | AWS·LLM Secret 유출과 과도한 IAM | 매우 높음 | workload role, Secrets Manager·KMS, 서비스별 role, 회전, CloudTrail | 중간 |
-| `TM-12` | LLM prompt injection·데이터 유출·환각·비용 폭주 | 높음 | 데이터 allowlist, 도구 권한 없음, schema 검증, no-training, 사람 승인, budget | 중간 |
+| `TM-12` | LLM prompt·이미지 주입, 데이터 유출·환각·비용 폭주 | 높음 | 데이터 allowlist, 이미지 비식별화·1장 상한, URL·도구 권한 없음, schema 검증, no-training, 사람 승인, budget | 중간 |
 | `TM-13` | 감사 로그 변조·부인 방지 실패 | 높음 | 추가 전용, 중요 변경과 동일 트랜잭션, 별도 접근 권한, 백업 | 낮음 |
 | `TM-14` | 공개 API·SSE·MQTT 요청 폭주 | 높음 | Nginx·애플리케이션 rate limit, 연결·payload 상한, timeout, backpressure | 중간 |
 
@@ -204,7 +214,8 @@ LLM은 보고서 초안을 만드는 보조자이며 신뢰하는 의사결정 �
 - 서비스별 IAM role과 Secret·KMS 리소스 제한 검토
 - Git history, Docker image, 프론트 bundle, Jenkins log의 Secret scan
 - MQTT client별 topic ACL, TLS, replay·TTL·Retain 금지 테스트
-- LLM prompt allowlist, 금지값 redaction, 출력 schema·escape, rate·budget 테스트
+- LLM prompt allowlist, 이미지 비식별화 승인·빈 목록 폴백·1장 상한, 금지값 redaction,
+  출력 schema·escape, rate·budget 테스트
 
 위 항목과 `TM-01`~`TM-14`의 필수 통제가 테스트 또는 인프라 검증 항목으로 연결되면 이 위협 모델의 구현 반영이 완료된 것으로 본다.
 

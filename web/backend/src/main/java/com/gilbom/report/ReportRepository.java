@@ -60,6 +60,7 @@ public class ReportRepository {
                     AS version_created_by_display_name,
                 version.creator_type AS version_creator_type,
                 version.generation_method AS version_generation_method,
+                version.generation_fallback_reason,
                 version.llm_model,
                 version.prompt_version,
                 version.change_note,
@@ -160,6 +161,7 @@ public class ReportRepository {
                     llm_model,
                     prompt_version,
                     generation_method,
+                    generation_fallback_reason,
                     change_note,
                     creator_type,
                     created_by,
@@ -169,7 +171,7 @@ public class ReportRepository {
                     ?, ?, ?,
                     CAST(? AS jsonb),
                     CAST(? AS jsonb),
-                    ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 reportId,
@@ -184,6 +186,9 @@ public class ReportRepository {
                 content.llmModel(),
                 content.promptVersion(),
                 content.generationMethod().name(),
+                content.generationFallbackReason() == null
+                        ? null
+                        : content.generationFallbackReason().name(),
                 content.changeNote(),
                 actor.creatorType().name(),
                 actor.userId(),
@@ -406,10 +411,20 @@ public class ReportRepository {
                 ReportGenerationMethod.valueOf(
                         resultSet.getString(
                                 "version_generation_method")),
+                fallbackReason(resultSet.getString(
+                        "generation_fallback_reason")),
                 resultSet.getString("llm_model"),
                 resultSet.getString("prompt_version"),
                 resultSet.getString("change_note"),
                 instant(resultSet, "version_created_at"));
+    }
+
+    private static ReportGenerationFallbackReason fallbackReason(
+                    String value
+            ) {
+        return value == null
+                ? null
+                : ReportGenerationFallbackReason.valueOf(value);
     }
 
     private Map<String, Object> object(String value) {

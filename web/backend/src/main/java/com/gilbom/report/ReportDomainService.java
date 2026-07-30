@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +24,8 @@ import com.gilbom.common.concurrency.ExpectedVersionGuard;
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
 import com.gilbom.report.ReportCreationIdempotencyRepository.Claim;
+import com.gilbom.report.pdf.ApprovedReportPdfArtifact;
+import com.gilbom.report.pdf.ApprovedReportPdfService;
 
 @Service
 public class ReportDomainService {
@@ -35,6 +38,8 @@ public class ReportDomainService {
             "currentVersionNo",
             "approvedVersionNo",
             "approvedBy",
+            "approvedPdfVersionNo",
+            "approvedPdfSha256",
             "deleted"
     );
 
@@ -44,6 +49,7 @@ public class ReportDomainService {
     private final ReportStateTransitionService transitionService;
     private final ExpectedVersionGuard expectedVersionGuard;
     private final AuditLogService auditLogService;
+    private final ApprovedReportPdfService approvedPdfService;
     private final Clock clock;
 
     public ReportDomainService(
@@ -52,6 +58,7 @@ public class ReportDomainService {
             ReportStateTransitionService transitionService,
             ExpectedVersionGuard expectedVersionGuard,
             AuditLogService auditLogService,
+            ApprovedReportPdfService approvedPdfService,
             Clock clock
     ) {
         this.repository = repository;
@@ -59,6 +66,7 @@ public class ReportDomainService {
         this.transitionService = transitionService;
         this.expectedVersionGuard = expectedVersionGuard;
         this.auditLogService = auditLogService;
+        this.approvedPdfService = approvedPdfService;
         this.clock = clock;
     }
 
@@ -69,7 +77,31 @@ public class ReportDomainService {
             UUID idempotencyKey,
             AuditRequestContext requestContext
     ) {
-        Objects.requireNonNull(command, "command must not be null");
+        return createClaimed(
+                command,
+                actor,
+                idempotencyKey,
+                requestContext,
+                () -> command);
+    }
+
+    /**
+     * 멱등 claim 소유자만 생성 입력 조회와 외부 생성을 실행한다.
+     *
+     * <p>fingerprintSource는 HTTP 요청 body의 정규화 DTO이고 commandFactory는
+     * 서버 snapshot 및 LLM 결과로 최종 저장 command를 만든다.</p>
+     */
+    @Transactional
+    public CreatedReport createClaimed(
+            Object fingerprintSource,
+            ReportActor actor,
+            UUID idempotencyKey,
+            AuditRequestContext requestContext,
+            Supplier<ReportCreateCommand> commandFactory
+    ) {
+        Objects.requireNonNull(
+                fingerprintSource,
+                "fingerprintSource must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(
                 idempotencyKey,
@@ -77,9 +109,12 @@ public class ReportDomainService {
         Objects.requireNonNull(
                 requestContext,
                 "requestContext must not be null");
+        Objects.requireNonNull(
+                commandFactory,
+                "commandFactory must not be null");
 
         byte[] requestFingerprint =
-                idempotencyRepository.fingerprint(command);
+                idempotencyRepository.fingerprint(fingerprintSource);
         Claim claim = idempotencyRepository.claim(
                 actor,
                 idempotencyKey,
@@ -88,6 +123,9 @@ public class ReportDomainService {
             return new CreatedReport(claim.replayReport(), false);
         }
 
+        ReportCreateCommand command = Objects.requireNonNull(
+                commandFactory.get(),
+                "commandFactory result must not be null");
         Instant now = clock.instant();
         UUID reportId = UUID.randomUUID();
         String reportCode = reportCode(reportId);
@@ -212,11 +250,21 @@ public class ReportDomainService {
         }
 
         Instant approvedAt = clock.instant();
+        ApprovedReportPdfArtifact pdf = approvedPdfService.create(
+                before,
+                actor.userId(),
+                approvedAt);
         repository.approve(
                 reportId,
                 before.currentVersionNo(),
                 actor.userId(),
                 approvedAt);
+        repository.bindApprovedPdf(
+                reportId,
+                before.currentVersionNo(),
+                pdf.storageKey(),
+                pdf.sha256(),
+                pdf.createdAt());
         ReportRecord approved = requireActiveReport(reportId);
         appendAudit(
                 AuditAction.REPORT_APPROVED,
@@ -407,6 +455,15 @@ public class ReportDomainService {
                 "approvedVersionNo",
                 report.approvedVersionNo());
         values.put("approvedBy", report.approvedBy());
+        values.put(
+                "approvedPdfVersionNo",
+                report.approvedPdfVersionNo());
+        values.put(
+                "approvedPdfSha256",
+                report.approvedPdfSha256() == null
+                        ? null
+                        : java.util.HexFormat.of().formatHex(
+                                report.approvedPdfSha256()));
         values.put("deleted", report.deletedAt() != null);
         return AuditSnapshot.allow(AUDIT_FIELDS, values);
     }

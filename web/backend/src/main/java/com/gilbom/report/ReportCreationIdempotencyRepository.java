@@ -33,8 +33,8 @@ public class ReportCreationIdempotencyRepository {
         this.objectMapper = objectMapper;
     }
 
-    public byte[] fingerprint(ReportCreateCommand command) {
-        return requestFingerprint.hash(command);
+    public byte[] fingerprint(Object normalizedRequestBody) {
+        return requestFingerprint.hash(normalizedRequestBody);
     }
 
     public Claim claim(

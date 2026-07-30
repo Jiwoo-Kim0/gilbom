@@ -31,6 +31,7 @@
 | `Authorization`, `X-API-Key` 헤더 | 금지 | 항상 금지 | 반사 금지 |
 | 인증서 private key | 애플리케이션 DB 저장 금지 | 항상 금지 | 반환 금지 |
 | Presigned URL | 영구 저장 금지 | query string 포함 로그 금지 | 짧은 만료 응답만 허용 |
+| LLM 이미지 bytes·Base64·data URL | 기존 Private 이미지 저장소 외 보고서·멱등·감사 복제 금지 | 항상 금지 | 보고서 API 반환 금지 |
 
 세션 ID는 서버 세션을 찾기 위해 Spring Session 전용 저장소에는 존재할 수 있다. 이를 사용자·감사·통계 테이블에 복제하거나 평문 로그에 기록하는 것은 금지한다.
 
@@ -44,7 +45,8 @@ API Key는 충분한 엔트로피의 난수로 생성하고, 조회용 Key ID와
 password, passwd, passcode, token, access_token, refresh_token,
 secret, api_key, x-api-key, authorization, credential,
 cookie, set-cookie, session, session_id, csrf,
-totp, otp, recovery_code, private_key, presigned_url
+totp, otp, recovery_code, private_key, presigned_url,
+image_bytes, image_base64, image_data_url
 ```
 
 추가 규칙은 다음과 같다.
@@ -56,6 +58,8 @@ totp, otp, recovery_code, private_key, presigned_url
 - 예외 객체를 문자열로 통째로 기록하지 않는다. 안전한 예외 분류와 `requestId`만 구조화한다.
 - SQL 문과 bind parameter는 운영 로그에 기록하지 않는다.
 - 파일 바이트, Base64, 얼굴·차량번호 등 이미지 분석 원문을 기록하지 않는다.
+- LLM 이미지 전송 여부는 장수와 성공 여부만 기록한다. bytes·Base64·data URL,
+  object key, 로컬 경로와 이미지가 결합된 결함 식별자는 기록하지 않는다.
 - IP와 User-Agent는 보안 추적 목적으로 감사 로그에 저장할 수 있지만 화면에는 필요한 권한이 있는 사용자에게만 노출한다.
 
 ## 4. 감사 로그 필드 계약
@@ -177,8 +181,29 @@ Credential 발급·회전·폐기 감사에는 credential ID, type, version, 상
 `before_value`와 `after_value`는 호출 지점별 필드 allowlist를 통과한 값만 받는다.
 공통 snapshot 필터는 중첩 객체와 배열을 재귀 검사하며 비밀번호, Token, 세션 ID,
 Secret, CSRF, TOTP, 복구 코드, private key와 presigned URL을 `[REDACTED]`로
-치환한다. 자유 입력 사유 안의 `key=value`, `Bearer ...` 형태에도 같은 치환을
-적용한다.
+치환한다. `image_bytes`, `image_base64`, `image_data_url`도 같은 방식으로
+치환한다. 자유 입력 사유 안의 `key=value`, `Bearer ...` 형태에도 같은 치환을 적용한다.
+
+LLM 호출 quota ledger는 감사 원문 저장소가 아니다.
+`request_control.llm_invocation_usage`에는 UTC 날짜, 사용자 UUID, 허용 provider·model,
+token·credit, 성공 여부와 고정 실패 코드만 기록한다. Prompt·응답, 결함 설명,
+이미지·Base64, Authorization, URL, stack trace와 예외 메시지를 위한 column을
+두지 않는다. 실패·재시도도 일일 한도와 budget에는 포함하되 실패 원문은 폐기한다.
+
+### 6.1 외부 LLM 이미지 처리
+
+결함 원본 이미지는 `S2 Restricted`이며 기존 Private 이미지 저장소에서만 영구
+보존한다. 외부 LLM 전송은 다음 조건을 모두 충족한 대표 JPEG 한 장에만 허용한다.
+
+- 얼굴·차량번호·사람 식별 단서와 EXIF/GPS metadata 제거 완료
+- 정책 오너가 비식별화 검증 결과를 승인
+- 기간·결함 객체 접근 범위를 서버가 재검사
+- GMS 학습 제외·보존·outbound 정책 gate 통과
+
+승인 전에는 이미지를 보내지 않고 텍스트만으로 보고서를 생성한다. 승인 후에도
+`DefectImageContentReader`의 bytes를 요청 직전에만 Base64로 변환하고, Presigned URL을
+LLM에 전달하지 않는다. 요청 완료 뒤 bytes·Base64 참조를 유지하거나 업무 DB, 감사,
+APM, trace와 오류 객체에 복제하지 않는다.
 
 ## 7. 조회·보존
 

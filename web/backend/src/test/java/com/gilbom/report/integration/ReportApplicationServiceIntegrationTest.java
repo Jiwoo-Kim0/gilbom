@@ -2,9 +2,12 @@ package com.gilbom.report.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -17,6 +20,7 @@ import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Bean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -41,9 +45,11 @@ import com.gilbom.common.idempotency.IdempotencyRequestStore;
 import com.gilbom.report.ReportAccessService;
 import com.gilbom.report.ReportActor;
 import com.gilbom.report.ReportCommandService;
+import com.gilbom.report.ReportContent;
 import com.gilbom.report.ReportCreationIdempotencyRepository;
 import com.gilbom.report.ReportDomainService;
 import com.gilbom.report.ReportGenerationMethod;
+import com.gilbom.report.ReportGenerationFallbackReason;
 import com.gilbom.report.ReportListFilter;
 import com.gilbom.report.ReportQueryRepository;
 import com.gilbom.report.ReportQueryService;
@@ -54,11 +60,23 @@ import com.gilbom.report.ReportStateTransitionService;
 import com.gilbom.report.ReportStatus;
 import com.gilbom.report.ReportType;
 import com.gilbom.report.ReportDtos.ManualReportCreateRequest;
+import com.gilbom.report.ReportDtos.LlmReportCreateRequest;
 import com.gilbom.report.ReportDtos.PageResponse;
+import com.gilbom.report.ReportDtos.ReportDecisionRequest;
 import com.gilbom.report.ReportDtos.ReportDetailResponse;
 import com.gilbom.report.ReportDtos.ReportListItemResponse;
+import com.gilbom.report.ReportDtos.ReportRejectionRequest;
+import com.gilbom.report.ReportDtos.ReportTransitionRequest;
 import com.gilbom.report.ReportDtos.ReportUpdateRequest;
 import com.gilbom.report.ReportDtos.ReportVersionSummaryResponse;
+import com.gilbom.report.generation.ReportGenerationDataService;
+import com.gilbom.report.generation.ReportGenerationDataService.PreparedCreation;
+import com.gilbom.report.generation.ReportGenerationOutcome;
+import com.gilbom.report.generation.ReportLlmGenerationPipeline;
+import com.gilbom.report.generation.ReportLlmPipelineRequest;
+import com.gilbom.report.pdf.ApprovedReportPdfService;
+import com.gilbom.report.pdf.KoreanApprovedReportPdfRenderer;
+import com.gilbom.report.pdf.LocalApprovedReportPdfStorage;
 
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(
@@ -119,21 +137,150 @@ class ReportApplicationServiceIntegrationTest {
     private ReportDomainService domainService;
 
     @Autowired
-    private ReportRepository reportRepository;
-
-    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @Autowired
+    private ReportGenerationDataService generationDataService;
+
+    @Autowired
+    private ReportLlmGenerationPipeline generationPipeline;
+
     @BeforeEach
     void createUsersAndRoles() {
+        reset(generationDataService, generationPipeline);
         createUser(authorId, "REPORT-AUTHOR");
         createUser(reviewerId, "REPORT-REVIEWER");
         createUser(noPermissionUserId, "REPORT-NONE");
         assignRole(authorId, "OPERATOR");
         assignRole(reviewerId, "MANAGER");
+    }
+
+    @Test
+    void llmFallbackCreatesOneDraftAndReplaySkipsPipeline() {
+        UUID idempotencyKey = UUID.randomUUID();
+        LlmReportCreateRequest request =
+                new LlmReportCreateRequest(
+                        ReportGenerationMethod.LLM,
+                        ReportType.PERIODIC,
+                        JULY_1,
+                        JULY_7,
+                        Map.of());
+        ReportLlmPipelineRequest pipelineRequest =
+                mock(ReportLlmPipelineRequest.class);
+        ReportContent fallback = new ReportContent(
+                "LLM fallback 보고서",
+                "안전한 template 요약",
+                JULY_1,
+                JULY_7,
+                "안전한 template 본문",
+                Map.of("defectCount", 0),
+                ReportContent.emptyEvidence(),
+                null,
+                null,
+                ReportGenerationMethod.TEMPLATE,
+                null,
+                ReportGenerationFallbackReason.LLM_UNAVAILABLE);
+        when(generationDataService.prepare(authorId, request))
+                .thenReturn(new PreparedCreation(
+                        Map.of(),
+                        pipelineRequest));
+        when(generationPipeline.generate(pipelineRequest))
+                .thenReturn(new ReportGenerationOutcome(
+                        fallback,
+                        ReportGenerationFallbackReason
+                                .LLM_UNAVAILABLE,
+                        1));
+
+        ReportDetailResponse first = commandService.create(
+                        authorId,
+                        idempotencyKey,
+                        request,
+                        requestContext())
+                .report();
+        ReportDetailResponse replay = commandService.create(
+                        authorId,
+                        idempotencyKey,
+                        request,
+                        requestContext())
+                .report();
+
+        assertThat(first.report().reportId())
+                .isEqualTo(replay.report().reportId());
+        assertThat(first.report().reportStatus())
+                .isEqualTo(ReportStatus.DRAFT);
+        assertThat(first.currentVersion().version()
+                .generationMethod())
+                .isEqualTo(ReportGenerationMethod.TEMPLATE);
+        assertThat(first.currentVersion().version()
+                .generationFallbackReason())
+                .isEqualTo(
+                        ReportGenerationFallbackReason.LLM_UNAVAILABLE);
+        assertThat(versionCount(first.report().reportId()))
+                .isEqualTo(1);
+        assertThat(auditCount(
+                first.report().reportId(),
+                "REPORT_CREATED")).isEqualTo(1);
+        verify(generationDataService, times(1))
+                .prepare(authorId, request);
+        verify(generationPipeline, times(1))
+                .generate(pipelineRequest);
+    }
+
+    @Test
+    void validLlmOutcomePersistsDraftModelAndPromptVersion() {
+        LlmReportCreateRequest request =
+                new LlmReportCreateRequest(
+                        ReportGenerationMethod.LLM,
+                        ReportType.ISSUE,
+                        JULY_1,
+                        JULY_7,
+                        Map.of());
+        ReportLlmPipelineRequest pipelineRequest =
+                mock(ReportLlmPipelineRequest.class);
+        ReportContent llmContent = new ReportContent(
+                "검증된 LLM 보고서",
+                "검증된 LLM 요약",
+                JULY_1,
+                JULY_7,
+                "검증 후 렌더링한 LLM 본문",
+                Map.of("defectCount", 0),
+                ReportContent.emptyEvidence(),
+                "gpt-4.1-mini",
+                "report-v1",
+                ReportGenerationMethod.LLM,
+                null);
+        when(generationDataService.prepare(authorId, request))
+                .thenReturn(new PreparedCreation(
+                        Map.of(),
+                        pipelineRequest));
+        when(generationPipeline.generate(pipelineRequest))
+                .thenReturn(new ReportGenerationOutcome(
+                        llmContent,
+                        null,
+                        1));
+
+        ReportDetailResponse created = commandService.create(
+                        authorId,
+                        UUID.randomUUID(),
+                        request,
+                        requestContext())
+                .report();
+
+        assertThat(created.report().reportStatus())
+                .isEqualTo(ReportStatus.DRAFT);
+        assertThat(created.currentVersion().version()
+                .generationMethod())
+                .isEqualTo(ReportGenerationMethod.LLM);
+        assertThat(created.currentVersion().version().llmModel())
+                .isEqualTo("gpt-4.1-mini");
+        assertThat(created.currentVersion().version().promptVersion())
+                .isEqualTo("report-v1");
+        assertThat(created.currentVersion().version()
+                .generationFallbackReason())
+                .isNull();
     }
 
     @Test
@@ -426,6 +573,105 @@ class ReportApplicationServiceIntegrationTest {
     }
 
     @Test
+    void reviewCommandsEnforcePermissionAndBindImmutablePdf() {
+        ReportDetailResponse created = create(
+                "API 승인 대상",
+                ReportGenerationMethod.MANUAL,
+                ReportType.PERIODIC,
+                JULY_1,
+                JULY_7);
+        UUID reportId = created.report().reportId();
+
+        ReportDetailResponse inReview = commandService.submit(
+                authorId,
+                reportId,
+                new ReportTransitionRequest(1),
+                requestContext());
+        assertThat(inReview.report().reportStatus())
+                .isEqualTo(ReportStatus.IN_REVIEW);
+
+        assertBusinessError(
+                () -> commandService.approve(
+                        noPermissionUserId,
+                        reportId,
+                        new ReportDecisionRequest(1, null),
+                        requestContext()),
+                ErrorCode.REPORT_ACCESS_DENIED);
+
+        ReportDetailResponse approved = commandService.approve(
+                reviewerId,
+                reportId,
+                new ReportDecisionRequest(1, "통계 검토 완료"),
+                requestContext());
+
+        assertThat(approved.report().reportStatus())
+                .isEqualTo(ReportStatus.APPROVED);
+        assertThat(approved.report().approvedVersionNo()).isEqualTo(1);
+        assertThat(approved.report().approvedBy())
+                .isEqualTo(reviewerId);
+        assertThat(approved.approvedPdf()).isNotNull();
+        assertThat(approved.approvedPdf().versionNo()).isEqualTo(1);
+        assertThat(approved.approvedPdf().sha256()).hasSize(64);
+        assertThat(approved.approvedPdf().createdAt())
+                .isEqualTo(approved.report().approvedAt());
+        assertThat(auditCount(reportId, "REPORT_SUBMITTED"))
+                .isEqualTo(1);
+        assertThat(auditCount(reportId, "REPORT_APPROVED"))
+                .isEqualTo(1);
+
+        assertBusinessError(
+                () -> commandService.reject(
+                        reviewerId,
+                        reportId,
+                        new ReportRejectionRequest(
+                                1,
+                                "승인 후 반려 불가"),
+                        requestContext()),
+                ErrorCode.REPORT_STATE_CONFLICT);
+    }
+
+    @Test
+    void rejectionRequiresReasonAndDoesNotCreateVersion() {
+        ReportDetailResponse created = create(
+                "API 반려 대상",
+                ReportGenerationMethod.TEMPLATE,
+                ReportType.ISSUE,
+                JULY_1,
+                JULY_7);
+        UUID reportId = created.report().reportId();
+        commandService.submit(
+                authorId,
+                reportId,
+                new ReportTransitionRequest(1),
+                requestContext());
+
+        assertBusinessError(
+                () -> commandService.reject(
+                        reviewerId,
+                        reportId,
+                        new ReportRejectionRequest(1, " "),
+                        requestContext()),
+                ErrorCode.REPORT_VALIDATION_FAILED);
+
+        ReportDetailResponse rejected = commandService.reject(
+                reviewerId,
+                reportId,
+                new ReportRejectionRequest(
+                        1,
+                        "근거 통계를 보완하세요."),
+                requestContext());
+
+        assertThat(rejected.report().reportStatus())
+                .isEqualTo(ReportStatus.REJECTED);
+        assertThat(rejected.report().currentVersionNo()).isEqualTo(1);
+        assertThat(rejected.lastRejectionReason())
+                .isEqualTo("근거 통계를 보완하세요.");
+        assertThat(versionCount(reportId)).isEqualTo(1);
+        assertThat(auditCount(reportId, "REPORT_REJECTED"))
+                .isEqualTo(1);
+    }
+
+    @Test
     void detailReturnsApprovalAndImmutablePdfIdentity() throws Exception {
         ReportDetailResponse created = create(
                 "승인 보고서",
@@ -445,14 +691,6 @@ class ReportApplicationServiceIntegrationTest {
                 "검토 완료",
                 ReportActor.user(reviewerId),
                 requestContext());
-        byte[] sha256 = MessageDigest.getInstance("SHA-256")
-                .digest("approved-pdf".getBytes(StandardCharsets.UTF_8));
-        reportRepository.bindApprovedPdf(
-                reportId,
-                1,
-                "reports/" + reportId + "/v1.pdf",
-                sha256,
-                approved.approvedAt().plusSeconds(1));
 
         ReportDetailResponse detail =
                 queryService.findReport(authorId, reportId);
@@ -467,7 +705,8 @@ class ReportApplicationServiceIntegrationTest {
         assertThat(detail.approvedPdf().versionNo()).isEqualTo(1);
         assertThat(detail.approvedPdf().sha256())
                 .isEqualTo(java.util.HexFormat.of()
-                        .formatHex(sha256));
+                        .formatHex(
+                                approved.approvedPdfSha256()));
         assertThat(detail.approvedPdf().createdAt())
                 .isAfterOrEqualTo(detail.report().approvedAt());
     }
@@ -630,9 +869,22 @@ class ReportApplicationServiceIntegrationTest {
             AuditLogService.class,
             AuditLogRepository.class,
             BestEffortAuditLogWriter.class,
+            ApprovedReportPdfService.class,
+            KoreanApprovedReportPdfRenderer.class,
+            LocalApprovedReportPdfStorage.class,
             AuthenticationSessionConfiguration.class,
             PasswordHashingConfiguration.class
     })
     static class TestApplication {
+
+        @Bean
+        ReportGenerationDataService reportGenerationDataService() {
+            return mock(ReportGenerationDataService.class);
+        }
+
+        @Bean
+        ReportLlmGenerationPipeline reportLlmGenerationPipeline() {
+            return mock(ReportLlmGenerationPipeline.class);
+        }
     }
 }

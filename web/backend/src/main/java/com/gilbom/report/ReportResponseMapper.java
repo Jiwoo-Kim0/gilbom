@@ -51,6 +51,7 @@ public class ReportResponseMapper {
                         report.periodFrom(),
                         report.periodTo(),
                         report.currentVersionGenerationMethod(),
+                        report.currentVersionGenerationFallbackReason(),
                         report.llmModel(),
                         report.promptVersion(),
                         report.currentVersionChangeNote(),

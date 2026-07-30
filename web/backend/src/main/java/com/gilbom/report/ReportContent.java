@@ -9,7 +9,6 @@ import java.util.UUID;
 
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
-
 public record ReportContent(
         String title,
         String summary,
@@ -21,7 +20,8 @@ public record ReportContent(
         String llmModel,
         String promptVersion,
         ReportGenerationMethod generationMethod,
-        String changeNote
+        String changeNote,
+        ReportGenerationFallbackReason generationFallbackReason
 ) {
 
     private static final int MAXIMUM_TITLE_LENGTH = 200;
@@ -56,10 +56,65 @@ public record ReportContent(
                 && (llmModel == null || promptVersion == null)) {
             throw validationFailure();
         }
+        if (generationMethod == ReportGenerationMethod.LLM
+                && generationFallbackReason != null) {
+            throw validationFailure();
+        }
+        if (generationFallbackReason != null
+                && generationMethod
+                        != ReportGenerationMethod.TEMPLATE) {
+            throw validationFailure();
+        }
         changeNote = optionalText(
                 changeNote,
                 MAXIMUM_CHANGE_NOTE_LENGTH,
                 "changeNote");
+    }
+
+    public ReportContent(
+            String title,
+            String summary,
+            Instant periodFrom,
+            Instant periodTo,
+            String body,
+            Map<String, Object> statistics,
+            Map<String, Object> evidenceSnapshot,
+            String llmModel,
+            String promptVersion,
+            ReportGenerationMethod generationMethod,
+            String changeNote
+    ) {
+        this(
+                title,
+                summary,
+                periodFrom,
+                periodTo,
+                body,
+                statistics,
+                evidenceSnapshot,
+                llmModel,
+                promptVersion,
+                generationMethod,
+                changeNote,
+                null);
+    }
+
+    public ReportContent withGenerationFallbackReason(
+            ReportGenerationFallbackReason fallbackReason
+    ) {
+        return new ReportContent(
+                title,
+                summary,
+                periodFrom,
+                periodTo,
+                body,
+                statistics,
+                evidenceSnapshot,
+                llmModel,
+                promptVersion,
+                generationMethod,
+                changeNote,
+                fallbackReason);
     }
 
     public static Map<String, Object> emptyEvidence() {

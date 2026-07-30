@@ -77,6 +77,7 @@ public class ReportQueryRepository {
                 version.period_from,
                 version.period_to,
                 version.generation_method,
+                version.generation_fallback_reason,
                 version.llm_model,
                 version.prompt_version,
                 version.change_note,
@@ -349,6 +350,8 @@ public class ReportQueryRepository {
                 instant(resultSet, "period_to"),
                 ReportGenerationMethod.valueOf(
                         resultSet.getString("generation_method")),
+                fallbackReason(resultSet.getString(
+                        "generation_fallback_reason")),
                 resultSet.getString("llm_model"),
                 resultSet.getString("prompt_version"),
                 resultSet.getString("change_note"),
@@ -357,6 +360,14 @@ public class ReportQueryRepository {
                 resultSet.getObject("created_by", UUID.class),
                 resultSet.getString("created_by_display_name"),
                 instant(resultSet, "created_at"));
+    }
+
+    private static ReportGenerationFallbackReason fallbackReason(
+                    String value
+            ) {
+        return value == null
+                ? null
+                : ReportGenerationFallbackReason.valueOf(value);
     }
 
     private Map<String, Object> object(String value) {

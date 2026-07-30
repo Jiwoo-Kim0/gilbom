@@ -37,6 +37,8 @@ public record ReportRecord(
         String currentVersionCreatedByDisplayName,
         ReportCreatorType currentVersionCreatorType,
         ReportGenerationMethod currentVersionGenerationMethod,
+        ReportGenerationFallbackReason
+                currentVersionGenerationFallbackReason,
         String llmModel,
         String promptVersion,
         String currentVersionChangeNote,
