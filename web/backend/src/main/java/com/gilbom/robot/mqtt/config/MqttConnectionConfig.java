@@ -7,7 +7,6 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.integration.annotation.ServiceActivator;
 import org.springframework.integration.channel.DirectChannel;
 import org.springframework.integration.mqtt.core.ClientManager;
-import org.springframework.integration.mqtt.core.Mqttv5ClientManager;
 import org.springframework.integration.mqtt.inbound.Mqttv5PahoMessageDrivenChannelAdapter;
 import org.springframework.integration.mqtt.outbound.Mqttv5PahoMessageHandler;
 import org.springframework.context.annotation.Bean;
@@ -45,13 +44,19 @@ public class MqttConnectionConfig {
     }
     //실제 MQTT 클라이언트 연결을 관리하는 매니저
     @Bean
-    public ClientManager<IMqttAsyncClient, MqttConnectionOptions> mqttClientManager(
+    public BoundedMqttv5ClientManager mqttClientManager(
             MqttConnectionOptions connectionOptions,
             MqttProperties properties
     ) {
-        return new Mqttv5ClientManager(
+        BoundedMqttv5ClientManager clientManager =
+                new BoundedMqttv5ClientManager(
                 connectionOptions,
                 properties.getClientId());//브로커에 접속하는 클라(스프링서버)
+        clientManager.setCompletionTimeout(
+                properties.getConnectCompletionTimeout().toMillis());
+        clientManager.setDisconnectCompletionTimeout(
+                properties.getDisconnectCompletionTimeout().toMillis());
+        return clientManager;
     }
     //브로커로부터 받은 메시지가 흘러 들어오는 파이프/ path-variable로 관리하므로 구독자가 정확히 하나 처리
     @Bean
@@ -79,6 +84,10 @@ public class MqttConnectionConfig {
         adapter.setQos(properties.getQos());
         adapter.setPayloadType(String.class);
         adapter.setOutputChannel(mqttInboundChannel);
+        adapter.setCompletionTimeout(
+                properties.getConnectCompletionTimeout().toMillis());
+        adapter.setDisconnectCompletionTimeout(
+                properties.getDisconnectCompletionTimeout().toMillis());
         return adapter;
     }
 

@@ -108,7 +108,7 @@ def psql(
 ) -> str:
     formatting = "--tuples-only --no-align --quiet" if tuples_only else ""
     shell = (
-        'PGPASSWORD="$POSTGRES_PASSWORD" psql '
+        'PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")" psql '
         '--host 127.0.0.1 --username "$POSTGRES_USER" '
         f'--dbname "$1" --no-password --set ON_ERROR_STOP=1 {formatting}'
     )
@@ -137,6 +137,7 @@ class ApiClient:
         body: dict[str, Any] | None = None,
         *,
         csrf: bool = False,
+        extra_headers: dict[str, str] | None = None,
     ) -> tuple[int, Any]:
         if csrf and self.csrf_token is None:
             self.issue_csrf()
@@ -150,6 +151,8 @@ class ApiClient:
             headers["Content-Type"] = "application/json"
         if csrf:
             headers["X-CSRF-TOKEN"] = str(self.csrf_token)
+        if extra_headers is not None:
+            headers.update(extra_headers)
         request = urllib.request.Request(
             BACKEND_URL + path,
             data=data,
@@ -243,7 +246,7 @@ def register_and_authenticate(
     database: str,
     mqtt_id: str,
     suffix: str,
-) -> tuple[ApiClient, str]:
+) -> tuple[ApiClient, str, str]:
     email = f"mission-mock-{suffix}@example.invalid"
     password = "Mission9!" + secrets.token_hex(6)
     client = ApiClient()
@@ -393,7 +396,25 @@ def register_and_authenticate(
         "mfa_confirmation_contract",
     )
     client.csrf_token = confirmation["csrfToken"]
-    return client, robot_id
+    credential = expect_status(
+        client.request(
+            "POST",
+            f"/api/v1/robots/{robot_id}/credentials",
+            csrf=True,
+            extra_headers={"Idempotency-Key": str(uuid.uuid4())},
+        ),
+        201,
+        "mqtt_credential_issuance",
+    )
+    mqtt = credential.get("mqtt") if isinstance(credential, dict) else None
+    ensure(
+        isinstance(mqtt, dict)
+        and mqtt.get("username") == mqtt_id
+        and isinstance(mqtt.get("password"), str)
+        and bool(mqtt["password"]),
+        "mqtt_credential_contract",
+    )
+    return client, robot_id, mqtt["password"]
 
 
 def create_mission_fixture(
@@ -617,12 +638,11 @@ def main() -> int:
     try:
         db_container = compose("ps", "-q", "db")
         ensure(bool(db_container), "database_container")
-        mqtt_init = compose("ps", "-aq", "mqtt-init")
-        ensure(bool(mqtt_init), "mqtt_init_container")
-        mqtt_environment = container_environment(mqtt_init)
-        mqtt_id = mqtt_environment.get("MQTT_ROBOT_USERNAME", "")
-        mqtt_password = mqtt_environment.get("MQTT_ROBOT_PASSWORD", "")
-        ensure(bool(mqtt_id) and bool(mqtt_password), "mqtt_robot_credentials")
+        ensure(
+            bool(compose("ps", "--status", "running", "-q", "mosquitto")),
+            "mosquitto_running",
+        )
+        mqtt_id = "robot-test-" + suffix
         ensure(CA_CERTIFICATE.is_file(), "mqtt_ca_certificate")
 
         if os.getenv("MISSION_MOCK_E2E_SKIP_BACKEND_BUILD") != "1":
@@ -678,7 +698,7 @@ def main() -> int:
         temporary_backend_started = True
         wait_for_health(temporary_backend)
 
-        client, robot_id = register_and_authenticate(
+        client, robot_id, mqtt_password = register_and_authenticate(
             db_container,
             database,
             mqtt_id,

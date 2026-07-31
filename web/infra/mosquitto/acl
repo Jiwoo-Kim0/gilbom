@@ -12,6 +12,7 @@ pattern read  tbs/v2/robots/%u/ingest/receipt
 
 # The backend reads every robot-to-server topic and writes only server-to-robot topics.
 user gilbom
+topic read  $SYS/broker/version
 topic read  tbs/v2/robots/+/presence
 topic read  tbs/v2/robots/+/state
 topic read  tbs/v2/robots/+/telemetry

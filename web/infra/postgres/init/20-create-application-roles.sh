@@ -3,6 +3,57 @@ set -eu
 
 # Docker entrypoint가 빈 DB를 초기화할 때만 실행된다.
 # 비밀번호를 SQL 문자열에 직접 연결하지 않고 psql 변수와 format()으로 안전하게 전달한다.
+
+read_secret_file() {
+  secret_name=$1
+  secret_file=$2
+
+  case "$secret_file" in
+    /*) ;;
+    *)
+      echo "${secret_name} file path must be absolute." >&2
+      exit 1
+      ;;
+  esac
+  if [ ! -f "$secret_file" ] || [ ! -r "$secret_file" ]; then
+    echo "${secret_name} file is missing or unreadable." >&2
+    exit 1
+  fi
+  secret_size="$(wc -c < "$secret_file")"
+  if [ "$secret_size" -gt 16384 ] \
+    || ! awk 'NR > 1 { exit 1 } END { if (NR == 0) exit 1 }' "$secret_file"; then
+    echo "${secret_name} file must contain one line of at most 16 KiB." >&2
+    exit 1
+  fi
+  cat "$secret_file"
+}
+
+if [ -n "${POSTGRES_FLYWAY_PASSWORD_FILE:-}" ]; then
+  if [ -n "${POSTGRES_FLYWAY_PASSWORD:-}" ]; then
+    echo "Set only POSTGRES_FLYWAY_PASSWORD_FILE, not the direct value." >&2
+    exit 1
+  fi
+  POSTGRES_FLYWAY_PASSWORD="$(
+    read_secret_file \
+      POSTGRES_FLYWAY_PASSWORD \
+      "$POSTGRES_FLYWAY_PASSWORD_FILE"
+  )"
+  export POSTGRES_FLYWAY_PASSWORD
+fi
+
+if [ -n "${POSTGRES_APP_PASSWORD_FILE:-}" ]; then
+  if [ -n "${POSTGRES_APP_PASSWORD:-}" ]; then
+    echo "Set only POSTGRES_APP_PASSWORD_FILE, not the direct value." >&2
+    exit 1
+  fi
+  POSTGRES_APP_PASSWORD="$(
+    read_secret_file \
+      POSTGRES_APP_PASSWORD \
+      "$POSTGRES_APP_PASSWORD_FILE"
+  )"
+  export POSTGRES_APP_PASSWORD
+fi
+
 : "${POSTGRES_DB:?POSTGRES_DB must be set}"
 : "${POSTGRES_FLYWAY_USER:?POSTGRES_FLYWAY_USER must be set}"
 : "${POSTGRES_FLYWAY_PASSWORD:?POSTGRES_FLYWAY_PASSWORD must be set}"

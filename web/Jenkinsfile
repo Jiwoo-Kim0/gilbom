@@ -6,7 +6,7 @@ pipeline {
         disableConcurrentBuilds(abortPrevious: true)
         skipDefaultCheckout(true)
         timestamps()
-        timeout(time: 30, unit: 'MINUTES')
+        timeout(time: 45, unit: 'MINUTES')
     }
 
     stages {
@@ -28,29 +28,37 @@ pipeline {
 
         stage('Prepare ephemeral credentials') {
             steps {
-                script {
-                    // CI 비밀번호는 빌드마다 메모리 환경 변수로 만들고 파일·artifact로 남기지 않는다.
-                    env.POSTGRES_ADMIN_PASSWORD = sh(
-                            script: 'openssl rand -hex 32',
-                            returnStdout: true
-                    ).trim()
-                    env.POSTGRES_FLYWAY_PASSWORD = sh(
-                            script: 'openssl rand -hex 32',
-                            returnStdout: true
-                    ).trim()
-                    env.POSTGRES_APP_PASSWORD = sh(
-                            script: 'openssl rand -hex 32',
-                            returnStdout: true
-                    ).trim()
-                    env.MQTT_PASSWORD = sh(
-                            script: 'openssl rand -hex 32',
-                            returnStdout: true
-                    ).trim()
-                    env.MQTT_ROBOT_PASSWORD = sh(
-                            script: 'openssl rand -hex 32',
-                            returnStdout: true
-                    ).trim()
+                dir(env.APP_DIR) {
+                    // CI Secret도 environment가 아니라 build별 ignored 파일로 만들고
+                    // Compose가 runtime에 /run/secrets로만 mount한다.
+                    sh '''
+                        set +x
+                        set -eu
+                        umask 077
+                        mkdir -p secrets
 
+                        openssl rand -hex 32 > secrets/postgres_admin_password
+                        openssl rand -hex 32 > secrets/postgres_flyway_password
+                        openssl rand -hex 32 > secrets/postgres_app_password
+                        openssl rand -hex 32 > secrets/mqtt_backend_password
+                        openssl rand -base64 48 \
+                            | tr -d '\\n' > secrets/gilbom_storage_signing_key
+                        openssl rand -base64 48 \
+                            | tr -d '\\n' > secrets/gilbom_auth_rate_limit_hmac_key
+                        printf '1=' > secrets/gilbom_mfa_totp_keyring
+                        openssl rand -base64 32 \
+                            | tr -d '\\n' >> secrets/gilbom_mfa_totp_keyring
+
+                        # LLM과 초기 관리자는 CI smoke에서 비활성화한다.
+                        : > secrets/gilbom_llm_api_key
+                        : > secrets/gilbom_initial_admin_password
+                        # Compose file secrets preserve host mode. The 0700 parent
+                        # blocks host traversal and 0444 lets UID 1883 read the
+                        # read-only container mount.
+                        chmod 444 secrets/*
+                    '''
+                }
+                script {
                     // 검증은 컨테이너 내부에서 하므로 host port는 임의 포트(0)를 사용해 충돌을 피한다.
                     env.POSTGRES_PORT = '0'
                     env.BACKEND_PORT = '0'
@@ -66,9 +74,10 @@ pipeline {
                     sh '''
                         set -eu
 
-                        # 실제 .env와 대표적인 개인키/keystore 확장자는 추적되면 즉시 실패시킨다.
+                        # 실제 .env, secrets/와 대표적인 개인키/keystore 확장자는
+                        # 추적되면 즉시 실패시킨다.
                         if git ls-files --full-name \
-                            | grep -E '(^|/)\\.env$|\\.(pem|key|p12|pfx|jks|keystore)$|(^|/)passwd$|(^|/)credentials\\.json$|(^|/)service-account[^/]*\\.json$'; then
+                            | grep -E '(^|/)\\.env$|(^|/)secrets/|\\.(pem|key|p12|pfx|jks|keystore)$|(^|/)passwd$|(^|/)credentials\\.json$|(^|/)service-account[^/]*\\.json$'; then
                             echo 'Tracked secret file candidate detected.' >&2
                             exit 1
                         fi
@@ -89,6 +98,11 @@ pipeline {
 
                         # 필수 환경 변수가 모두 해석되는지도 image build 전에 확인한다.
                         docker compose config --quiet
+                        sh scripts/verify-secret-boundary.sh
+                        sh scripts/verify-production-compose.sh
+                        sh -n infra/scripts/*.sh
+                        test -s docs/production-deployment-runbook.md
+                        test -s docs/day7-completion-freeze.md
 
                         # 개발자 선언과 Docker/lockfile의 지원 버전이 어긋나면 빌드하지 않는다.
                         sh scripts/verify-supported-versions.sh
@@ -137,7 +151,19 @@ pipeline {
             steps {
                 dir(env.APP_DIR) {
                     // backend image는 Gradle test, frontend image는 lint와 production build를 포함한다.
-                    sh 'docker compose build backend frontend mqtt-init'
+                    sh '''
+                        set -eu
+                        docker compose build backend frontend mqtt-init
+                        sh scripts/test-verify-production-images.sh
+                        IMAGE_SECURITY_OUTPUT_DIR=.artifacts/image-security \
+                            IMAGE_SCANNER_MODE=auto \
+                            sh scripts/verify-production-images.sh
+                    '''
+                    archiveArtifacts(
+                            artifacts: '.artifacts/image-security/**',
+                            allowEmptyArchive: false,
+                            fingerprint: true
+                    )
                 }
             }
         }
@@ -153,7 +179,10 @@ pipeline {
 
                         # 프론트 Nginx -> 백엔드 API 경로를 호출해 실제 서비스 간 연결을 검증한다.
                         docker compose exec -T frontend \
-                            wget -qO- http://127.0.0.1/api/health \
+                            wget -qO- http://127.0.0.1:8080/healthz \
+                            | grep -Fx 'ok'
+                        docker compose exec -T frontend \
+                            wget -qO- http://127.0.0.1:8080/api/health \
                             | grep -F '"status":"UP"'
 
                         # 전체 Actuator health에는 DB contributor가 포함돼 Backend -> DB 연결도 확인된다.
@@ -161,14 +190,26 @@ pipeline {
                             wget -qO- http://backend:8080/actuator/health \
                             | grep -F '"status":"UP"'
 
+                        # 실제 CI Secret과 민감 request canary가 Backend/Nginx
+                        # container log에 남지 않았는지 검증한다.
+                        BACKEND_CONTAINER="$(docker compose ps -q backend)" \
+                        FRONTEND_CONTAINER="$(docker compose ps -q frontend)" \
+                        SECRET_SCAN_DIR=secrets \
+                        IMAGE_VERIFY_MODE=logs \
+                            sh scripts/verify-production-images.sh
+
+                        # MQTT/DB를 각각 종료·복구하며 liveness와 readiness의
+                        # 장애 격리 정책을 실제 container에서 검증한다.
+                        sh scripts/verify-backend-health-policy.sh
+
                         # BrowserRouter deep link가 Nginx fallback을 통해 React 진입점으로 연결돼야 한다.
                         docker compose exec -T frontend \
-                            wget -qO- http://127.0.0.1/robots \
+                            wget -qO- http://127.0.0.1:8080/robots \
                             | grep -F '<div id="root"></div>'
 
                         # 빈 DB의 extension, V1~V4, RBAC seed와 runtime 최소 권한을 계약 SQL로 확인한다.
                         docker compose exec -T db sh -ec '
-                            export PGPASSWORD="$POSTGRES_PASSWORD"
+                            export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
                             psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
                                 --no-password \
                                 --set "flyway_role=$POSTGRES_FLYWAY_USER" \
@@ -177,10 +218,10 @@ pipeline {
 
                         # 실제 CSRF 요청이 JDBC Session과 attribute를 DB에 쓰는지 확인한다.
                         docker compose exec -T frontend \
-                            wget -qO- http://127.0.0.1/api/v1/auth/csrf-token \
+                            wget -qO- http://127.0.0.1:8080/api/v1/auth/csrf-token \
                             | grep -Fq '"headerName":"X-CSRF-TOKEN"'
                         docker compose exec -T db sh -ec '
-                            export PGPASSWORD="$POSTGRES_PASSWORD"
+                            export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
                             psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
                                 --no-password --tuples-only --no-align --command "
                                     SELECT (
@@ -193,15 +234,39 @@ pipeline {
 
                         # Runtime role DML과 audit/report append-only 보호를 실제 권한으로 검증한다.
                         docker compose exec -T db sh -ec '
-                            export PGPASSWORD="$POSTGRES_APP_PASSWORD"
+                            export PGPASSWORD="$(cat "$POSTGRES_APP_PASSWORD_FILE")"
                             psql --host 127.0.0.1 --username "$POSTGRES_APP_USER" \
                                 --dbname "$POSTGRES_DB" --no-password
                         ' < infra/postgres/verify-initial-schema.sql
                         docker compose exec -T db sh -ec '
-                            export PGPASSWORD="$POSTGRES_FLYWAY_PASSWORD"
+                            export PGPASSWORD="$(cat "$POSTGRES_FLYWAY_PASSWORD_FILE")"
                             psql --host 127.0.0.1 --username "$POSTGRES_FLYWAY_USER" \
                                 --dbname "$POSTGRES_DB" --no-password
                         ' < infra/postgres/verify-append-only.sql
+
+                        # DB 응답을 기다리는 실제 요청을 유지한 채 SIGTERM을 보내
+                        # 요청 완료와 30초 내 graceful shutdown을 함께 검증한다.
+                        sh scripts/verify-backend-graceful-shutdown.sh
+                    '''
+                }
+            }
+        }
+
+        stage('Container report and resilience smoke') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+
+                        # 앞 단계의 CI stack을 먼저 정리해 agent에서 DB 두 개가
+                        # 동시에 메모리를 점유하지 않게 한다. 보고서 smoke는 별도
+                        # project와 새 named volume을 만들고 종료 시 자체 폐기한다.
+                        docker compose down --volumes --remove-orphans
+
+                        # 이미 검증·빌드한 운영 image로 보고서 전체 흐름에 이어
+                        # PID/DB/MQTT/LLM 장애, 자동 재시작과 volume 영속성을 검증한다.
+                        REPORT_SMOKE_SKIP_BUILD=true \
+                            sh scripts/container-resilience-smoke.sh
                     '''
                 }
             }

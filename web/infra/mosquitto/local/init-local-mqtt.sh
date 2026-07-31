@@ -19,6 +19,43 @@ RENEW_BEFORE_SECONDS=2592000
 MQTT_LAN_IP="${MQTT_LAN_IP:-}"
 MQTT_PUBLIC_HOSTNAME="${MQTT_PUBLIC_HOSTNAME:-}"
 
+read_secret_file() {
+  secret_name=$1
+  secret_file=$2
+
+  case "$secret_file" in
+    /*) ;;
+    *)
+      echo "${secret_name} file path must be absolute." >&2
+      exit 1
+      ;;
+  esac
+  if [ ! -f "$secret_file" ] || [ ! -r "$secret_file" ]; then
+    echo "${secret_name} file is missing or unreadable." >&2
+    exit 1
+  fi
+  secret_size="$(wc -c < "$secret_file")"
+  if [ "$secret_size" -gt 16384 ] \
+    || ! awk 'NR > 1 { exit 1 } END { if (NR == 0) exit 1 }' "$secret_file"; then
+    echo "${secret_name} file must contain one line of at most 16 KiB." >&2
+    exit 1
+  fi
+  cat "$secret_file"
+}
+
+if [ -n "${MQTT_PASSWORD_FILE:-}" ]; then
+  if [ -n "${MQTT_PASSWORD:-}" ]; then
+    echo "Set only MQTT_PASSWORD_FILE, not the direct value." >&2
+    exit 1
+  fi
+  MQTT_PASSWORD="$(
+    read_secret_file MQTT_PASSWORD "$MQTT_PASSWORD_FILE"
+  )"
+  export MQTT_PASSWORD
+fi
+
+: "${MQTT_PASSWORD:?MQTT_PASSWORD or MQTT_PASSWORD_FILE must be set}"
+
 mkdir -p "${CERT_DIR}" "${CREDENTIAL_DIR}" "${CA_DIR}"
 
 WORK_DIR="$(mktemp -d /tmp/mqtt-local-init.XXXXXX)"
@@ -210,15 +247,11 @@ else
     "${MQTT_PASSWORD}"
 fi
 
-# Refresh the two local bootstrap accounts without deleting issued robot accounts.
+# Refresh only the Backend bootstrap account without deleting API-issued robots.
 mosquitto_passwd -b \
   "${WORK_DIR}/passwd" \
   "${MQTT_USERNAME}" \
   "${MQTT_PASSWORD}"
-mosquitto_passwd -b \
-  "${WORK_DIR}/passwd" \
-  "${MQTT_ROBOT_USERNAME}" \
-  "${MQTT_ROBOT_PASSWORD}"
 cp "${WORK_DIR}/passwd" "${PASSWORD_FILE}"
 cp "${ACL_SOURCE_FILE}" "${ACL_RUNTIME_FILE}"
 

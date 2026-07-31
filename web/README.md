@@ -16,6 +16,16 @@
 - [Jenkins pipeline](./docs/jenkins-pipeline.md)
 - [Runtime version baseline](./docs/runtime-versions.md)
 - [HTTP request limits and security headers](./docs/http-security-baseline.md)
+- [Day 7 Secret injection](./docs/day7-secret-injection.md)
+- [Day 7 Backend runtime image](./docs/day7-backend-runtime-image.md)
+- [Day 7 Frontend runtime image](./docs/day7-frontend-runtime-image.md)
+- [Day 7 production Compose and networks](./docs/day7-production-compose.md)
+- [Day 7 health, readiness, and shutdown](./docs/day7-health-readiness-shutdown.md)
+- [Day 7 production image verification](./docs/day7-production-image-verification.md)
+- [Day 7 container report smoke](./docs/day7-container-report-smoke.md)
+- [Day 7 resilience and persistence verification](./docs/day7-resilience-verification.md)
+- [Production deployment Runbook](./docs/production-deployment-runbook.md)
+- [Day 7 completion and scoped feature freeze](./docs/day7-completion-freeze.md)
 - [OpenAPI v1](./docs/openapi-v1.yaml)
 
 ## Local infrastructure
@@ -26,9 +36,11 @@ backend, and the React frontend served by Nginx for local development.
 ### Start the application
 
 1. Copy `.env.example` to `.env`.
-2. Fill the five blank PostgreSQL and MQTT passwords in `.env`; use distinct
-   local development passwords.
-3. Build and start the services.
+2. Create the ignored `secrets/` files named in `.env`; use distinct local
+   development values, directory mode `0700`, and file mode `0444`. Do not put
+   their contents in `.env`.
+3. Set the public `VITE_NAVER_MAP_CLIENT_ID` in `.env`.
+4. Build and start the services.
 
 ```bash
 docker compose up --build -d
@@ -46,6 +58,12 @@ Check the backend:
 ```bash
 curl http://localhost:8080/api/health
 curl http://localhost:8080/actuator/health
+```
+
+Check the frontend Nginx readiness:
+
+```bash
+curl http://localhost:3000/healthz
 ```
 
 Open the frontend at `http://localhost:3000`. Requests under `/api` are
@@ -76,3 +94,25 @@ backend runtime account. Spring Session JDBC tables are also managed by Flyway.
 
 Production-specific settings belong in `compose.prod.yaml`; real credentials
 must be supplied by the deployment environment rather than committed files.
+
+## Production Compose
+
+Copy `.env.prod.example` to the ignored `.env.prod`, provision every referenced
+Secret file, then validate and start the production stack:
+
+```bash
+ENV_FILE=.env.prod sh scripts/verify-production-compose.sh
+docker compose --env-file .env.prod -f compose.prod.yaml up --build -d --wait
+IMAGE_SCANNER_MODE=required sh scripts/verify-production-images.sh
+sh scripts/container-resilience-smoke.sh
+```
+
+Only Frontend HTTP and robot-facing MQTT TLS are published. Backend and
+PostgreSQL remain reachable only through their internal Compose networks.
+Terminate public HTTPS at the load balancer or host reverse proxy before
+forwarding to the Frontend container.
+
+`container-resilience-smoke.sh`는 보고서 전체 smoke를 먼저 실행한 뒤 같은 격리
+stack에서 Backend/Frontend 자동 재시작, DB·MQTT·LLM 장애 복구, Secret 경계와
+DB·PDF·이미지 영속성까지 검증한다. 모든 일회성 container·volume·Secret은 자동
+정리된다. 실제 GMS canary는 기본적으로 실행하지 않는다.
