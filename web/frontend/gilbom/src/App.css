@@ -550,6 +550,46 @@
   min-height: 420px;
 }
 
+/*
+ * 지도 마커. Nginx CSP가 style-src 'self'라 마커 HTML에 style 속성을 쓰면
+ * 브라우저가 차단해 크기 0으로 렌더된다(= 마커가 안 보인다). 그래서 마커
+ * 모양은 반드시 여기 클래스로만 정의한다.
+ */
+.defect-marker-box {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+}
+
+.defect-marker {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #fff;
+  border-radius: 50% 50% 50% 0;
+  box-shadow: 0 2px 6px rgb(23 34 28 / 35%);
+  transform: rotate(-45deg);
+}
+
+.defect-marker-received {
+  background: #6f6a5e;
+}
+
+.defect-marker-progress {
+  background: #b8863b;
+}
+
+.defect-marker-done {
+  background: #7a5c0c;
+}
+
+.defect-marker.is-selected {
+  width: 22px;
+  height: 22px;
+  border: 3px solid #17221c;
+}
+
 .defect-map-loading {
   position: absolute;
   inset: 0;

@@ -4,7 +4,6 @@ import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { DefectFilter } from './DefectFilter'
 import { DefectList } from './DefectList'
 import { DefectMap } from './DefectMap'
-import type { DefectMarker, DefectStatus } from './DefectMap'
 import { getDefects } from './defectApi'
 import { EMPTY_DEFECT_FILTERS } from './defectTypes'
 import type {
@@ -67,31 +66,6 @@ function writeFilters(
     params.set('sort', sort)
   }
   return params
-}
-
-/** 지도 범례는 세 가지 색만 쓰므로 6개 상태를 여기에 접어 넣는다. */
-function toMarkerStatus(status: WorkflowStatus): DefectStatus {
-  switch (status) {
-    case 'IN_PROGRESS':
-      return 'progress'
-    case 'RESOLVED':
-    case 'FALSE_POSITIVE':
-    case 'REJECTED':
-      return 'done'
-    default:
-      return 'received'
-  }
-}
-
-function toMarkers(items: DefectListItem[]): DefectMarker[] {
-  return items
-    .filter((defect) => defect.location !== null)
-    .map((defect) => ({
-      id: defect.defectId,
-      lat: defect.location!.latitude,
-      lng: defect.location!.longitude,
-      status: toMarkerStatus(defect.workflowStatus),
-    }))
 }
 
 export function DefectManagePage() {
@@ -170,11 +144,6 @@ export function DefectManagePage() {
     [filters, setSearchParams, sort],
   )
 
-  const markers = useMemo(
-    () => toMarkers(result?.content ?? []),
-    [result],
-  )
-
   return (
     <section className="page-stack" aria-labelledby="defect-page-title">
       <div className="page-heading">
@@ -190,7 +159,13 @@ export function DefectManagePage() {
           onChange={applyFilters}
           disabled={loading && result === null}
         />
-        <DefectMap markers={markers} />
+        {/* 지도는 목록 페이지와 별개로 뷰포트 bbox 기준의 GeoJSON을 직접 조회한다.
+            목록 20건에 묶이지 않고 화면에 보이는 범위 전체를 그린다. */}
+        <DefectMap
+          filters={filters}
+          selectedDefectId={selectedDefectId}
+          onSelect={setSelectedDefectId}
+        />
       </div>
       <DefectList
         page={result}
