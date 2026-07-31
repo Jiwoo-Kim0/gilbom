@@ -165,6 +165,7 @@ export function DefectManagePage() {
           filters={filters}
           selectedDefectId={selectedDefectId}
           onSelect={setSelectedDefectId}
+          onChanged={() => setReloadToken((token) => token + 1)}
         />
       </div>
       <DefectList

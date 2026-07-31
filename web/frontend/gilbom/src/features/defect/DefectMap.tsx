@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { loadNaverMapsScript } from '../../lib/naverMaps'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
+import { DefectDetailCard } from './DefectDetailCard'
 import { getDefectMap } from './defectApi'
 import {
   DEFECT_TYPE_LABELS,
@@ -70,13 +71,16 @@ function createMarkerIcon(
 interface DefectMapProps {
   filters: DefectFilters
   selectedDefectId: string | null
-  onSelect: (defectId: string) => void
+  onSelect: (defectId: string | null) => void
+  /** 카드에서 상태를 바꾸면 목록·지도를 다시 읽는다. */
+  onChanged: () => void
 }
 
 export function DefectMap({
   filters,
   selectedDefectId,
   onSelect,
+  onChanged,
 }: DefectMapProps) {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<naver.maps.Map | null>(null)
@@ -292,6 +296,14 @@ export function DefectMap({
             <p className="defect-map-loading" role="alert">
               {error}
             </p>
+          )}
+          {selectedDefectId !== null && (
+            <DefectDetailCard
+              key={selectedDefectId}
+              defectId={selectedDefectId}
+              onClose={() => onSelect(null)}
+              onChanged={onChanged}
+            />
           )}
         </div>
       )}

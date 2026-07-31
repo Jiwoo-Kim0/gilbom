@@ -590,6 +590,123 @@
   border: 3px solid #17221c;
 }
 
+/* 마커를 클릭하면 지도 위에 뜨는 결함 카드 */
+.defect-card {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  width: min(340px, calc(100% - 32px));
+  flex-direction: column;
+  padding: 16px;
+  border: 1px solid var(--border-subtle, #e0ded6);
+  border-radius: 14px;
+  background: var(--surface, #fff);
+  box-shadow: 0 8px 24px rgb(23 34 28 / 18%);
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.defect-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.defect-card-header h3 {
+  margin: 2px 0 0;
+  font-size: 1.05rem;
+}
+
+.defect-card-close {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  place-items: center;
+}
+
+.defect-card-close:hover {
+  background: var(--surface-muted, #f2f1ec);
+}
+
+.defect-card-image {
+  display: grid;
+  min-height: 150px;
+  border-radius: 10px;
+  background: var(--surface-muted, #f2f1ec);
+  color: var(--text-muted, #6f6a5e);
+  font-size: 0.85rem;
+  place-items: center;
+  overflow: hidden;
+}
+
+.defect-card-image img {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+}
+
+.defect-card-facts {
+  display: grid;
+  margin: 0;
+  gap: 8px;
+}
+
+.defect-card-facts div {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 8px;
+}
+
+.defect-card-facts dt {
+  color: var(--text-muted, #6f6a5e);
+  font-size: 0.82rem;
+}
+
+.defect-card-facts dd {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.defect-card-coord {
+  display: block;
+  color: var(--text-muted, #6f6a5e);
+  font-size: 0.78rem;
+}
+
+.defect-card-actions {
+  display: grid;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle, #e0ded6);
+  gap: 8px;
+}
+
+.defect-card-field {
+  display: grid;
+  gap: 4px;
+  font-size: 0.82rem;
+}
+
+.defect-card-terminal {
+  margin: 0;
+  color: var(--text-muted, #6f6a5e);
+  font-size: 0.82rem;
+}
+
+.defect-card-error {
+  margin: 0;
+  color: #a3341f;
+  font-size: 0.82rem;
+}
+
 .defect-map-loading {
   position: absolute;
   inset: 0;
