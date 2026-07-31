@@ -2,6 +2,9 @@
 spring:
   application:
     name: gilbom-backend
+  lifecycle:
+    # Compose의 30초 SIGKILL 상한보다 먼저 요청·DB pool·MQTT client 정리를 끝낸다.
+    timeout-per-shutdown-phase: ${SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE:20s}
   # STS에서 직접 실행: 별도 지정 없이 local을 기본 프로필로 사용
   # 로컬 Docker에서 실행: SPRING_PROFILES_ACTIVE=local,docker
   # EC2의 Docker에서 실행: SPRING_PROFILES_ACTIVE=ec2,docker
@@ -193,6 +196,9 @@ mqtt:
   qos: ${MQTT_QOS:1}
   # Paho exponential backoff의 상한이다. Broker 복구 뒤 다음 재연결이 오래 지연되지 않게 한다.
   reconnect-max-delay: ${MQTT_RECONNECT_MAX_DELAY:5s}
+  # Broker 장애 중에도 container의 graceful shutdown 상한 전에 연결 정리를 끝낸다.
+  connect-completion-timeout: ${MQTT_CONNECT_COMPLETION_TIMEOUT:10s}
+  disconnect-completion-timeout: ${MQTT_DISCONNECT_COMPLETION_TIMEOUT:5s}
   # Full payload logging is for isolated local communication tests only.
   log-payload: ${MQTT_LOG_PAYLOAD:false}
   inbound-freshness:
