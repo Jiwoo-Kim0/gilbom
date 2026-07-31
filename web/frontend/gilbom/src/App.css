@@ -646,11 +646,42 @@
   overflow: hidden;
 }
 
+/*
+ * bbox 오버레이가 사진과 정확히 겹치려면 figure 상자가 이미지와 같아야 한다.
+ * object-fit: cover는 이미지를 잘라내므로 좌표가 어긋난다. 원본 비율 그대로 둔다.
+ */
+.defect-card-figure {
+  position: relative;
+  display: block;
+  width: 100%;
+  margin: 0;
+  line-height: 0;
+}
+
 .defect-card-image img {
   display: block;
   width: 100%;
-  max-height: 220px;
-  object-fit: cover;
+  height: auto;
+}
+
+.defect-bbox {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.defect-bbox rect {
+  fill: none;
+  stroke: #e0a33a;
+  stroke-width: 2;
+  paint-order: stroke;
+}
+
+.defect-card-bbox-caption {
+  margin: -4px 0 0;
+  color: var(--text-muted, #6f6a5e);
+  font-size: 0.75rem;
 }
 
 .defect-card-facts {
