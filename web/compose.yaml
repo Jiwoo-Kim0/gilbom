@@ -27,6 +27,8 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # 공식 image의 기본 SIGTERM을 유지하고 persistence/connection 정리 시간을 준다.
+    stop_grace_period: 30s
     networks:
       - backend
     logging:
@@ -102,6 +104,7 @@ services:
       SPRING_FLYWAY_USER: ${POSTGRES_FLYWAY_USER:-gilbom_flyway}
       SPRING_FLYWAY_PASSWORD_FILE: /run/secrets/postgres_flyway_password
       SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE: ${SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE:-20s}
+      GILBOM_HEALTH_READINESS_COMPONENTS: ${GILBOM_HEALTH_READINESS_COMPONENTS:-readinessState,db,flywayReadiness,storageReadiness}
       GILBOM_MAX_REQUEST_BODY_SIZE: ${GILBOM_MAX_REQUEST_BODY_SIZE:-1MB}
       GILBOM_MAX_REQUEST_HEADER_SIZE: ${GILBOM_MAX_REQUEST_HEADER_SIZE:-16KB}
       GILBOM_MAX_UPLOAD_FILE_SIZE: ${GILBOM_MAX_UPLOAD_FILE_SIZE:-500KB}

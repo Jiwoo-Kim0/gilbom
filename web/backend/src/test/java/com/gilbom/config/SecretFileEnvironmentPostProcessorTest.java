@@ -121,6 +121,124 @@ class SecretFileEnvironmentPostProcessorTest {
     }
 
     @Test
+    void treatsEmptyLlmSecretAsUnsetOnlyWhenLlmIsDisabled()
+            throws IOException {
+        Path emptyLlmSecret = writeSecret(
+                "empty-llm-api-key",
+                "");
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty("gilbom.llm.enabled", "false")
+                .withProperty(
+                        "GILBOM_LLM_API_KEY_FILE",
+                        emptyLlmSecret.toString());
+
+        new SecretFileEnvironmentPostProcessor()
+                .postProcessEnvironment(
+                        environment,
+                        new SpringApplication());
+
+        assertThat(environment.getProperty("gilbom.llm.api-key"))
+                .isNull();
+        assertThat(environment.getPropertySources().get(
+                SecretFileEnvironmentPostProcessor.PROPERTY_SOURCE_NAME))
+                .isNull();
+    }
+
+    @Test
+    void rejectsEmptyLlmSecretWhenLlmIsEnabled()
+            throws IOException {
+        Path emptyLlmSecret = writeSecret(
+                "empty-enabled-llm-api-key",
+                "");
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty("gilbom.llm.enabled", "true")
+                .withProperty(
+                        "GILBOM_LLM_API_KEY_FILE",
+                        emptyLlmSecret.toString());
+
+        assertThatThrownBy(
+                () -> new SecretFileEnvironmentPostProcessor()
+                        .postProcessEnvironment(
+                                environment,
+                                new SpringApplication()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("gilbom.llm.api-key");
+    }
+
+    @Test
+    void rejectsEmptyRequiredSecretEvenWhenLlmIsDisabled()
+            throws IOException {
+        Path emptyDatabaseSecret = writeSecret(
+                "empty-database-password",
+                "");
+        SecretFileEnvironmentPostProcessor.SecretFileSpec spec =
+                new SecretFileEnvironmentPostProcessor.SecretFileSpec(
+                        "spring.datasource.password",
+                        "SPRING_DATASOURCE_PASSWORD_FILE",
+                        emptyDatabaseSecret);
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty("gilbom.llm.enabled", "false");
+
+        assertThatThrownBy(
+                () -> new SecretFileEnvironmentPostProcessor(
+                        List.of(spec))
+                        .postProcessEnvironment(
+                                environment,
+                                new SpringApplication()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(
+                        "spring.datasource.password");
+    }
+
+    @Test
+    void treatsEmptyInitialAdminSecretAsUnsetOnlyWhenBootstrapIsDisabled()
+            throws IOException {
+        Path emptyInitialPassword = writeSecret(
+                "empty-initial-admin-password",
+                "");
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty(
+                        "gilbom.security.initial-admin.enabled",
+                        "false")
+                .withProperty(
+                        "INITIAL_ADMIN_PASSWORD_FILE",
+                        emptyInitialPassword.toString());
+
+        new SecretFileEnvironmentPostProcessor()
+                .postProcessEnvironment(
+                        environment,
+                        new SpringApplication());
+
+        assertThat(environment.getProperty(
+                "gilbom.security.initial-admin.password"))
+                .isNull();
+    }
+
+    @Test
+    void rejectsEmptyInitialAdminSecretWhenBootstrapIsEnabled()
+            throws IOException {
+        Path emptyInitialPassword = writeSecret(
+                "empty-enabled-initial-admin-password",
+                "");
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty(
+                        "gilbom.security.initial-admin.enabled",
+                        "true")
+                .withProperty(
+                        "INITIAL_ADMIN_PASSWORD_FILE",
+                        emptyInitialPassword.toString());
+
+        assertThatThrownBy(
+                () -> new SecretFileEnvironmentPostProcessor()
+                        .postProcessEnvironment(
+                                environment,
+                                new SpringApplication()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(
+                        "gilbom.security.initial-admin.password");
+    }
+
+    @Test
     void rejectsRelativeExplicitPath() {
         MockEnvironment environment = new MockEnvironment()
                 .withProperty(

@@ -65,3 +65,6 @@ infra/mosquitto/*.bak
 
 # 보안 메타데이터
 *:Zone.Identifier
+
+# CI/local image SBOM and vulnerability reports
+.artifacts/

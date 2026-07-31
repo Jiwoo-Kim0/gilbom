@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.List;
@@ -17,6 +19,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -852,6 +855,96 @@ class ReportDomainServiceIntegrationTest {
                 "REPORT_CREATED")).isEqualTo(1);
     }
 
+    @Test
+    void rollsBackFailedUpdateAndApprovalWithoutPartialState()
+            throws Exception {
+        ReportRecord updateTarget =
+                createReport("수정 원자성 대상");
+        ReportRecord approvalTarget =
+                createReport("승인 원자성 대상");
+        service.submit(
+                approvalTarget.reportId(),
+                1,
+                author(),
+                requestContext());
+
+        jdbcTemplate.execute("""
+                CREATE FUNCTION audit.reject_report_mutation_for_test()
+                RETURNS TRIGGER
+                LANGUAGE plpgsql
+                AS $$
+                BEGIN
+                    IF NEW.action_type IN (
+                        'REPORT_UPDATED',
+                        'REPORT_APPROVED'
+                    ) THEN
+                        RAISE EXCEPTION 'forced mutation failure';
+                    END IF;
+                    RETURN NEW;
+                END;
+                $$
+                """);
+        jdbcTemplate.execute("""
+                CREATE TRIGGER tr_reject_report_mutation_for_test
+                BEFORE INSERT ON audit.audit_log
+                FOR EACH ROW
+                EXECUTE FUNCTION audit.reject_report_mutation_for_test()
+                """);
+        try {
+            assertThatThrownBy(() -> service.update(
+                    updateTarget.reportId(),
+                    1,
+                    content(
+                            "저장되면 안 되는 수정",
+                            "저장되면 안 되는 본문",
+                            "강제 실패"),
+                    author(),
+                    requestContext()))
+                    .isInstanceOf(DataAccessException.class);
+            assertThatThrownBy(() -> service.approve(
+                    approvalTarget.reportId(),
+                    1,
+                    "저장되면 안 되는 승인",
+                    reviewer(),
+                    requestContext()))
+                    .isInstanceOf(DataAccessException.class);
+        } finally {
+            jdbcTemplate.execute("""
+                    DROP TRIGGER tr_reject_report_mutation_for_test
+                    ON audit.audit_log
+                    """);
+            jdbcTemplate.execute("""
+                    DROP FUNCTION audit.reject_report_mutation_for_test()
+                    """);
+        }
+
+        ReportRecord unchangedUpdate =
+                service.findActive(updateTarget.reportId());
+        assertThat(unchangedUpdate.currentVersionNo()).isEqualTo(1);
+        assertThat(unchangedUpdate.title())
+                .isEqualTo("수정 원자성 대상");
+        assertThat(versionCount(updateTarget.reportId())).isEqualTo(1);
+        assertThat(auditCount(
+                updateTarget.reportId(),
+                "REPORT_UPDATED")).isZero();
+
+        ReportRecord unchangedApproval =
+                service.findActive(approvalTarget.reportId());
+        assertThat(unchangedApproval.status())
+                .isEqualTo(ReportStatus.IN_REVIEW);
+        assertThat(unchangedApproval.approvedVersionNo()).isNull();
+        assertThat(unchangedApproval.approvedBy()).isNull();
+        assertThat(unchangedApproval.approvedAt()).isNull();
+        assertThat(unchangedApproval.approvedPdfVersionNo()).isNull();
+        assertThat(unchangedApproval.approvedPdfStorageKey()).isNull();
+        assertThat(unchangedApproval.approvedPdfSha256()).isNull();
+        assertThat(unchangedApproval.approvedPdfCreatedAt()).isNull();
+        assertThat(auditCount(
+                approvalTarget.reportId(),
+                "REPORT_APPROVED")).isZero();
+        assertNoStoredPdf(approvalTarget.reportId());
+    }
+
     private ReportRecord createReport(String title) {
         return service.create(
                         createCommand(title),
@@ -1005,6 +1098,22 @@ class ReportDomainServiceIntegrationTest {
         return jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM " + table,
                 Integer.class);
+    }
+
+    private static void assertNoStoredPdf(UUID reportId)
+            throws Exception {
+        Path reportDirectory = Path.of(
+                System.getProperty("java.io.tmpdir"),
+                "gilbom-report-pdf",
+                "reports",
+                reportId.toString());
+        if (!Files.exists(reportDirectory)) {
+            return;
+        }
+        try (Stream<Path> entries = Files.walk(reportDirectory)) {
+            assertThat(entries)
+                    .noneMatch(Files::isRegularFile);
+        }
     }
 
     private void createUser(

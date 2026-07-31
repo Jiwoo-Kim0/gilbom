@@ -60,6 +60,12 @@ public final class SecretFileEnvironmentPostProcessor
                         "Set only the Secret file property for "
                                 + spec.targetProperty());
             }
+            if (isEmptyDisabledOptionalSecret(
+                    environment,
+                    spec,
+                    secretFile)) {
+                continue;
+            }
             properties.put(
                     spec.targetProperty(),
                     readSecret(secretFile, spec.targetProperty()));
@@ -120,7 +126,8 @@ public final class SecretFileEnvironmentPostProcessor
             } else if (value.endsWith("\n")) {
                 value = value.substring(0, value.length() - 1);
             }
-            if (value.indexOf('\r') >= 0
+            if (!StringUtils.hasText(value)
+                    || value.indexOf('\r') >= 0
                     || value.indexOf('\n') >= 0
                     || value.indexOf('\0') >= 0) {
                 throw invalidSecretFile(targetProperty);
@@ -128,6 +135,53 @@ public final class SecretFileEnvironmentPostProcessor
             return value;
         } catch (IOException exception) {
             throw invalidSecretFile(targetProperty);
+        }
+    }
+
+    /**
+     * 비활성 선택 기능만 빈 file mount를 "Secret 미설정"으로 해석한다.
+     *
+     * <p>LLM과 최초 관리자 bootstrap이 꺼진 배포는 빈 file을 사용할 수 있다.
+     * 기능이 활성 상태이거나 DB·서명키 등 필수 Secret이면 계속 fail-closed다.
+     */
+    private static boolean isEmptyDisabledOptionalSecret(
+            ConfigurableEnvironment environment,
+            SecretFileSpec spec,
+            Path secretFile
+    ) {
+        String enabledProperty;
+        String enabledEnvironmentVariable;
+        if ("gilbom.llm.api-key".equals(
+                spec.targetProperty())) {
+            enabledProperty = "gilbom.llm.enabled";
+            enabledEnvironmentVariable =
+                    "GILBOM_LLM_ENABLED";
+        } else if (
+                "gilbom.security.initial-admin.password"
+                        .equals(spec.targetProperty())) {
+            enabledProperty =
+                    "gilbom.security.initial-admin.enabled";
+            enabledEnvironmentVariable =
+                    "INITIAL_ADMIN_BOOTSTRAP_ENABLED";
+        } else {
+            return false;
+        }
+        boolean enabled = environment.getProperty(
+                enabledProperty,
+                Boolean.class,
+                environment.getProperty(
+                        enabledEnvironmentVariable,
+                        Boolean.class,
+                        false));
+        if (enabled) {
+            return false;
+        }
+        try {
+            return Files.exists(secretFile)
+                    && Files.isReadable(secretFile)
+                    && Files.size(secretFile) == 0;
+        } catch (IOException exception) {
+            return false;
         }
     }
 
