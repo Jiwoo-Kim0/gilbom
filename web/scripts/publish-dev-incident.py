@@ -190,8 +190,9 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--ttl-sec", type=int, default=DEFAULT_TTL_SEC)
     parser.add_argument("--mission-id", default=DEFAULT_MISSION_ID)
     parser.add_argument("--zone-id", default=DEFAULT_ZONE_ID)
-    parser.add_argument("--lat", type=float, default=37.5013)
-    parser.add_argument("--lon", type=float, default=127.0396)
+    # 시연 구역: 구미 진평동. 실제 순찰구역 좌표가 확정되면 이 기본값을 바꾼다.
+    parser.add_argument("--lat", type=float, default=36.1100)
+    parser.add_argument("--lon", type=float, default=128.4200)
     parser.add_argument("--defect-type", default="DAMAGED")
     parser.add_argument("--block-type", default="LINEAR")
     parser.add_argument("--confidence", type=float, default=None,

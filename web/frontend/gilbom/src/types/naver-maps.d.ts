@@ -7,6 +7,8 @@ declare namespace naver.maps {
 
   class LatLngBounds {
     constructor(southWest: LatLng, northEast: LatLng)
+    getSW(): LatLng
+    getNE(): LatLng
   }
 
   class Point {
@@ -62,6 +64,7 @@ declare namespace naver.maps {
   class Map {
     constructor(element: HTMLElement, options: MapOptions)
     getProjection(): MapSystemProjection
+    getBounds(): LatLngBounds
     setCenter(latlng: LatLng): void
     setZoom(zoom: number): void
     fitBounds(bounds: LatLngBounds): void
@@ -86,8 +89,14 @@ declare namespace naver.maps {
 
     function addListener(
       target: Map,
-      eventName: 'bounds_changed' | 'size_changed',
+      eventName: 'bounds_changed' | 'size_changed' | 'idle',
       listener: () => void,
+    ): MapEventListener
+
+    function addListener(
+      target: Marker,
+      eventName: 'click',
+      listener: (event: MapPointerEvent) => void,
     ): MapEventListener
 
     function removeListener(listener: MapEventListener): void
