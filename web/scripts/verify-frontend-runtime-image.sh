@@ -187,6 +187,16 @@ sse_body="$(docker exec "$FRONTEND_CONTAINER" \
 printf '%s\n' "$sse_body" | grep -Fq 'event: runtime-check' \
   || fail "SSE response was not proxied"
 
+docker stop --time 10 "$FRONTEND_CONTAINER" >/dev/null \
+  || fail "Nginx did not stop within its grace period"
+frontend_exit_code="$(docker inspect \
+  --format '{{.State.ExitCode}}' "$FRONTEND_CONTAINER")"
+[ "$frontend_exit_code" -ne 137 ] \
+  || fail "Nginx required SIGKILL"
+docker logs "$FRONTEND_CONTAINER" 2>&1 \
+  | grep -Fq 'signal 3 (SIGQUIT) received' \
+  || fail "Nginx did not receive its graceful quit signal"
+
 image_size="$(docker image inspect \
   --format '{{.Size}}' "$IMAGE_NAME")"
 echo "Frontend runtime image verification: PASS (bytes=${image_size})"

@@ -34,6 +34,7 @@ secrets/
 **/playwright-report/
 **/.nyc_output/
 **/*.log
+.artifacts/
 
 # IDE and OS files
 **/.idea/

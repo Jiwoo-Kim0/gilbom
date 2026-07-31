@@ -591,24 +591,11 @@ def main() -> int:
     try:
         db_container = support.compose("ps", "-q", "db")
         support.ensure(bool(db_container), "database_container")
-        mqtt_init = support.compose("ps", "-aq", "mqtt-init")
-        support.ensure(bool(mqtt_init), "mqtt_init_container")
         support.ensure(
             bool(support.compose("ps", "--status", "running", "-q", "mosquitto")),
             "mosquitto_container",
         )
-        mqtt_environment = support.container_environment(mqtt_init)
-        mqtt_id = mqtt_environment.get("MQTT_ROBOT_USERNAME", "")
-        mqtt_password = mqtt_environment.get("MQTT_ROBOT_PASSWORD", "")
-        backend_mqtt_username = mqtt_environment.get("MQTT_USERNAME", "")
-        backend_mqtt_password = mqtt_environment.get("MQTT_PASSWORD", "")
-        support.ensure(
-            bool(mqtt_id)
-            and bool(mqtt_password)
-            and bool(backend_mqtt_username)
-            and bool(backend_mqtt_password),
-            "mqtt_robot_credentials",
-        )
+        mqtt_id = "robot-test-" + suffix
         support.ensure(
             support.CA_CERTIFICATE.is_file(),
             "mqtt_ca_certificate",
@@ -669,10 +656,23 @@ def main() -> int:
         )
         temporary_backend_started = True
         support.wait_for_health(temporary_backend)
+        backend_environment = support.container_environment(temporary_backend)
+        backend_mqtt_username = backend_environment.get("MQTT_USERNAME", "")
+        backend_mqtt_password = support.command([
+            "docker",
+            "exec",
+            temporary_backend,
+            "cat",
+            "/run/secrets/mqtt_backend_password",
+        ])
+        support.ensure(
+            bool(backend_mqtt_username) and bool(backend_mqtt_password),
+            "backend_mqtt_credentials",
+        )
         frontend_process = roundtrip.start_frontend()
         roundtrip.wait_for_frontend(frontend_process)
 
-        client, robot_id = support.register_and_authenticate(
+        client, robot_id, mqtt_password = support.register_and_authenticate(
             db_container,
             database,
             mqtt_id,

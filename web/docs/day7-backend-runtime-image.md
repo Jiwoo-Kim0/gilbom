@@ -103,22 +103,27 @@ Spring Integration 6.5.10 기본 MQTT manager가 호출하는 Paho 단일 인자
 - JAR 수정 실패와 JDK·Gradle·Git·curl·source·test artifact 부재
 - readiness healthcheck와 SIGTERM 선언
 
-`scripts/verify-backend-graceful-shutdown.sh`는 DB health 요청을 의도적으로
+`scripts/verify-backend-graceful-shutdown.sh`는 DB readiness 요청을 의도적으로
 in-flight 상태로 유지한 뒤 SIGTERM을 보낸다. Backend가 요청 해제 전에는 살아
 있고, 해제 뒤 `Graceful shutdown complete`를 기록하며 exit code 137 없이 30초
 미만에 종료해야 통과한다. 두 검증기는 Jenkins의 image build와 integration smoke
 gate에 포함한다.
 
+Health group 구성, DB·MQTT 장애 전환, transaction 원자성 검증은
+[`day7-health-readiness-shutdown.md`](day7-health-readiness-shutdown.md)에
+정리했다.
+
 ## 7. 확인 결과
 
 | 검증 | 결과 |
 |---|---|
-| Backend 전체 회귀 | `739 tests, failures=0, skipped=0` |
-| Docker builder test | `739 tests, failures=0` (`137 skipped`: build에 Docker socket을 전달하지 않는 정책) |
+| Backend 전체 회귀 | `755 tests, failures=0, skipped=0` |
+| Docker builder test | `755 tests, failures=0` (`147 skipped`: build에 Docker socket을 전달하지 않는 정책) |
 | Runtime 경계·도구·쓰기 | PASS |
 | Non-root + read-only 실제 Spring 기동 | PASS |
-| Broker 장애 + in-flight 요청 SIGTERM | PASS, 8초, SIGKILL 없음 |
-| 최종 image 크기 | `161,094,669 bytes` |
+| DB·MQTT health 장애 전환 | PASS |
+| in-flight 요청 중 SIGTERM | PASS, 2초, SIGKILL 없음 |
+| 최종 image 크기 | `161,099,211 bytes` |
 | 변경 전 image 크기 | `406,801,510 bytes` |
 
 이미지는 약 60.4% 작아져 registry 전송량, 배포 pull 시간과 node 저장 공간이

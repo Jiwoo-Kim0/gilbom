@@ -6,7 +6,7 @@ pipeline {
         disableConcurrentBuilds(abortPrevious: true)
         skipDefaultCheckout(true)
         timestamps()
-        timeout(time: 30, unit: 'MINUTES')
+        timeout(time: 45, unit: 'MINUTES')
     }
 
     stages {
@@ -41,7 +41,6 @@ pipeline {
                         openssl rand -hex 32 > secrets/postgres_flyway_password
                         openssl rand -hex 32 > secrets/postgres_app_password
                         openssl rand -hex 32 > secrets/mqtt_backend_password
-                        openssl rand -hex 32 > secrets/mqtt_robot_password
                         openssl rand -base64 48 \
                             | tr -d '\\n' > secrets/gilbom_storage_signing_key
                         openssl rand -base64 48 \
@@ -101,6 +100,9 @@ pipeline {
                         docker compose config --quiet
                         sh scripts/verify-secret-boundary.sh
                         sh scripts/verify-production-compose.sh
+                        sh -n infra/scripts/*.sh
+                        test -s docs/production-deployment-runbook.md
+                        test -s docs/day7-completion-freeze.md
 
                         # 개발자 선언과 Docker/lockfile의 지원 버전이 어긋나면 빌드하지 않는다.
                         sh scripts/verify-supported-versions.sh
@@ -152,11 +154,16 @@ pipeline {
                     sh '''
                         set -eu
                         docker compose build backend frontend mqtt-init
-                        sh scripts/verify-backend-runtime-image.sh \
-                            gilbom-backend:local
-                        sh scripts/verify-frontend-runtime-image.sh \
-                            gilbom-frontend:local
+                        sh scripts/test-verify-production-images.sh
+                        IMAGE_SECURITY_OUTPUT_DIR=.artifacts/image-security \
+                            IMAGE_SCANNER_MODE=auto \
+                            sh scripts/verify-production-images.sh
                     '''
+                    archiveArtifacts(
+                            artifacts: '.artifacts/image-security/**',
+                            allowEmptyArchive: false,
+                            fingerprint: true
+                    )
                 }
             }
         }
@@ -182,6 +189,18 @@ pipeline {
                         docker compose exec -T frontend \
                             wget -qO- http://backend:8080/actuator/health \
                             | grep -F '"status":"UP"'
+
+                        # 실제 CI Secret과 민감 request canary가 Backend/Nginx
+                        # container log에 남지 않았는지 검증한다.
+                        BACKEND_CONTAINER="$(docker compose ps -q backend)" \
+                        FRONTEND_CONTAINER="$(docker compose ps -q frontend)" \
+                        SECRET_SCAN_DIR=secrets \
+                        IMAGE_VERIFY_MODE=logs \
+                            sh scripts/verify-production-images.sh
+
+                        # MQTT/DB를 각각 종료·복구하며 liveness와 readiness의
+                        # 장애 격리 정책을 실제 container에서 검증한다.
+                        sh scripts/verify-backend-health-policy.sh
 
                         # BrowserRouter deep link가 Nginx fallback을 통해 React 진입점으로 연결돼야 한다.
                         docker compose exec -T frontend \
@@ -228,6 +247,26 @@ pipeline {
                         # DB 응답을 기다리는 실제 요청을 유지한 채 SIGTERM을 보내
                         # 요청 완료와 30초 내 graceful shutdown을 함께 검증한다.
                         sh scripts/verify-backend-graceful-shutdown.sh
+                    '''
+                }
+            }
+        }
+
+        stage('Container report and resilience smoke') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+
+                        # 앞 단계의 CI stack을 먼저 정리해 agent에서 DB 두 개가
+                        # 동시에 메모리를 점유하지 않게 한다. 보고서 smoke는 별도
+                        # project와 새 named volume을 만들고 종료 시 자체 폐기한다.
+                        docker compose down --volumes --remove-orphans
+
+                        # 이미 검증·빌드한 운영 image로 보고서 전체 흐름에 이어
+                        # PID/DB/MQTT/LLM 장애, 자동 재시작과 volume 영속성을 검증한다.
+                        REPORT_SMOKE_SKIP_BUILD=true \
+                            sh scripts/container-resilience-smoke.sh
                     '''
                 }
             }

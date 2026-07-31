@@ -43,18 +43,21 @@ Frontend build 결과의 주 진입 청크는 539.17 kB(gzip 151.56 kB)로 Vite�
 500 kB 경고 기준을 넘는다. build 실패는 아니지만 이미지 전송 크기와 별개로
 브라우저 초기 로딩 성능의 기준값으로 기록한다.
 
-## 2. 기능 동결 원칙
+## 2. 담당 범위 기능 동결 원칙
 
-이 기준선 이후 신규 업무 기능 추가를 중단한다.
+이 기준선은 프로젝트 전체의 신규 기능을 중단시키지 않는다. 이번 작업 담당자의
+완료된 보고서·LLM 및 Day 7 운영 패키징 범위만 기능 확장을 중단한다. 로봇,
+결함과 다른 담당 영역의 기능 개발은 계속한다.
 
 허용 범위는 Dockerfile·Compose·CI/CD·환경설정·Secret 주입·헬스체크·관측성,
 nonroot/read-only 전환, 이미지 경량화, 배포·롤백 안정화, 그리고 이 작업에서
-발견된 결함의 회귀 수정이다. 허용된 수정도 기존 API, DB, 권한, 화면 동작의
+발견된 버그의 회귀 수정이다. 허용된 수정도 기존 API, DB, 권한, 화면 동작의
 회귀 테스트를 통과해야 한다.
 
-새 API, 새 화면 기능, 새 도메인 상태, 새 Flyway 업무 스키마, LLM Prompt·응답
-계약 변경은 금지한다. 운영 차단 결함 때문에 예외가 필요하면 변경 이유와 영향
-범위를 먼저 기록하고 이 문서의 전체 게이트를 다시 실행한다.
+동결된 보고서 영역의 새 API·화면 기능·도메인 상태와 LLM Prompt·응답 계약
+확장은 금지한다. 로봇·결함 영역에 필요한 API·화면·Flyway·MQTT 변경은 이
+동결에 포함되지 않으며 각 영역의 계약과 회귀 검증을 따른다. 공용 runtime이나
+배포 구성에 영향이 있으면 이 문서의 관련 운영 게이트도 다시 실행한다.
 
 ## 3. 서비스 중요도와 실패 경계
 
@@ -226,8 +229,7 @@ Nginx 1.30.4의 compile-time PID·temp 기본값을 사용하지 않고 port 808
   `MQTT_CREDENTIAL_PASSWORD_FILE`, `MQTT_CREDENTIAL_PASSWORD_COMMAND`,
   `MQTT_CREDENTIAL_PROCESS_TIMEOUT`, `MQTT_CREDENTIAL_ACTIVATION_TIMEOUT`,
   `MQTT_CREDENTIAL_VERIFICATION_INTERVAL`,
-  `MQTT_CREDENTIAL_REGISTRY_SCAN_INTERVAL`, `MQTT_ROBOT_USERNAME`,
-  `MQTT_ROBOT_PASSWORD`, `MQTT_TLS_PORT`, `MQTT_BIND_ADDRESS`,
+  `MQTT_CREDENTIAL_REGISTRY_SCAN_INTERVAL`, `MQTT_TLS_PORT`, `MQTT_BIND_ADDRESS`,
   `MQTT_LAN_IP`, `MQTT_PUBLIC_HOSTNAME`, `MOSQUITTO_CERT_DIR`
 - 선택 LLM: `GILBOM_LLM_ENABLED`, `GILBOM_LLM_PROVIDER`,
   `GILBOM_LLM_BASE_URL`, `GILBOM_LLM_MODEL`, `GILBOM_LLM_API_KEY`,
@@ -265,7 +267,6 @@ Secret으로 취급하거나 비밀 주입 경로를 사용하지 않는다.
 | `GILBOM_STORAGE_URL_SIGNING_KEY_BASE64` | 운영 필수 | 이미지 URL 서명용 32-byte 이상 고정 key |
 | `INITIAL_ADMIN_PASSWORD` | 최초 bootstrap만 | 빈 DB 생성 시 일시 주입하고 bootstrap 종료 후 폐기 |
 | `MQTT_PASSWORD` | 로봇 기능 사용 시 필수 | Backend Broker 계정 Secret |
-| `MQTT_ROBOT_PASSWORD` | 로컬 smoke test만 | 운영 로봇 credential로 재사용 금지 |
 | Mosquitto `passwd` 파일 | MQTT 필수 | 해시 파일도 민감정보로 취급. Backend RW/Broker RO, mode `0660` |
 | Broker TLS private key | MQTT TLS 필수 | Broker RO. 이미지·Git·환경변수에 포함하지 않고 파일 Secret으로 mount |
 | 로컬 CA private key | 로컬 발급만 | `mqtt-init` 외 서비스에 mount하지 않고 mode `0600` |

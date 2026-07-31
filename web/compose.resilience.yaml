@@ -1,0 +1,22 @@
+services:
+  # Task 8의 일회성 stack 격리는 유지하면서, 장애 검증에서만 운영 restart
+  # policy를 다시 활성화한다. production image, network, volume, 권한은 바꾸지 않는다.
+  db:
+    restart: unless-stopped
+    labels:
+      com.gilbom.validation-scope: production-resilience
+
+  mosquitto:
+    restart: unless-stopped
+    labels:
+      com.gilbom.validation-scope: production-resilience
+
+  backend:
+    restart: unless-stopped
+    labels:
+      com.gilbom.validation-scope: production-resilience
+
+  frontend:
+    restart: unless-stopped
+    labels:
+      com.gilbom.validation-scope: production-resilience
