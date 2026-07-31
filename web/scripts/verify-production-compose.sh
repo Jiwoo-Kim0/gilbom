@@ -15,7 +15,7 @@ assert_contains() {
   expected=$2
   label=$3
 
-  grep -Fq "$expected" "$file" || fail "$label"
+  grep -Fq -- "$expected" "$file" || fail "$label"
 }
 
 assert_not_contains() {
@@ -23,7 +23,7 @@ assert_not_contains() {
   unexpected=$2
   label=$3
 
-  if grep -Fq "$unexpected" "$file"; then
+  if grep -Fq -- "$unexpected" "$file"; then
     fail "$label"
   fi
 }
@@ -45,6 +45,16 @@ compose() {
 
 compose config --quiet
 compose config > "$CHECK_DIR/full.yaml"
+
+# LLM 비활성 배포는 실제 API key file 없이도 Compose가 해석되어야 한다.
+# /dev/null은 빈 read-only file mount 역할만 하며 image ENV에는 값이 들어가지 않는다.
+GILBOM_LLM_API_KEY_SECRET_FILE=/dev/null \
+  docker compose \
+    --env-file "$ENV_FILE" \
+    -f "$COMPOSE_FILE" \
+    config > "$CHECK_DIR/no-llm-secret.yaml"
+assert_contains "$CHECK_DIR/no-llm-secret.yaml" "file: /dev/null" \
+  "disabled LLM deployment must resolve without a real API key file"
 
 extract_service() {
   service=$1
@@ -99,6 +109,21 @@ assert_contains "$CHECK_DIR/mosquitto.yaml" "MQTT_TLS_SERVER_NAME:" \
 
 assert_contains "$CHECK_DIR/backend.yaml" "condition: service_healthy" \
   "Backend must wait for healthy dependencies"
+assert_contains "$CHECK_DIR/backend.yaml" \
+  "GILBOM_HEALTH_READINESS_COMPONENTS: readinessState,db,flywayReadiness,storageReadiness" \
+  "Backend readiness must include DB, Flyway, and writable storage"
+for llm_runtime_setting in \
+  GILBOM_LLM_CONNECT_TIMEOUT \
+  GILBOM_LLM_READ_TIMEOUT \
+  GILBOM_LLM_MAX_OUTPUT_TOKENS \
+  GILBOM_LLM_DAILY_REQUEST_LIMIT \
+  GILBOM_LLM_DAILY_BUDGET \
+  GILBOM_LLM_MAX_CONCURRENT_REQUESTS \
+  GILBOM_LLM_PROMPT_VERSION
+do
+  assert_contains "$CHECK_DIR/backend.yaml" "$llm_runtime_setting:" \
+    "Backend must receive $llm_runtime_setting at runtime"
+done
 healthy_dependency_count="$(
   grep -c 'condition: service_healthy' "$CHECK_DIR/backend.yaml" || true
 )"
@@ -149,6 +174,19 @@ do
     "$service log size ceiling"
   assert_contains "$CHECK_DIR/$service.yaml" 'max-file: "3"' \
     "$service rotated log count"
+  assert_contains "$CHECK_DIR/$service.yaml" "stop_grace_period:" \
+    "$service graceful stop window"
+  assert_contains "$CHECK_DIR/$service.yaml" "read_only: true" \
+    "$service root filesystem must be read-only"
+  assert_contains "$CHECK_DIR/$service.yaml" "cap_drop:" \
+    "$service capabilities must be declared"
+  assert_contains "$CHECK_DIR/$service.yaml" "- ALL" \
+    "$service must drop all Linux capabilities"
+  assert_contains "$CHECK_DIR/$service.yaml" \
+    "no-new-privileges:true" \
+    "$service must prevent privilege escalation"
+  assert_not_contains "$CHECK_DIR/$service.yaml" "privileged: true" \
+    "$service must not run privileged"
 done
 
 assert_contains "$CHECK_DIR/backend.yaml" "target: /run/secrets/" \

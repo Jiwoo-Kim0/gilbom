@@ -56,6 +56,12 @@ Compose dependency는 다음 순서로 고정한다.
 서비스의 health 상태와 `restart: unless-stopped`로 관찰하며, 애플리케이션의
 DB pool·MQTT reconnect 정책이 복구를 담당한다.
 
+실행 중에는 DB·Flyway·PDF/이미지 쓰기 가능 여부만 Backend 기본 readiness에
+포함한다. MQTT는 별도 `/actuator/health/mqtt`로 노출해 Broker 장애가 DB 기반
+관리 기능까지 차단하지 않게 한다. 로봇 기능을 전체 서비스의 필수 조건으로
+판단한 환경만 `.env.prod`의 `GILBOM_HEALTH_READINESS_COMPONENTS`에
+`mqttConnection`을 추가한다. LLM은 template fallback 대상이라 포함하지 않는다.
+
 ## 3. 영속 데이터와 MQTT 설정
 
 | Named volume | 소비자 | 목적 |
@@ -159,6 +165,8 @@ Nginx worker는 host CPU 전체를 따라가는 `auto` 대신 2개로 고정했�
 - named volume 6개
 - CPU·memory·PID·log 상한
 - `/run/secrets` read-only file Secret target
+- Backend·Frontend·Mosquitto의 read-only rootfs, `cap_drop: ALL`,
+  `no-new-privileges`, graceful stop window
 
 이 검증은 Jenkins repository policy 단계에서도 image build 전에 실행한다.
 
@@ -172,7 +180,23 @@ sh scripts/verify-production-runtime.sh
 이 acceptance는 DB·MQTT·Backend·Frontend health, API proxy, MQTT TLS handshake,
 실제 Docker `PortBindings` 기준 Backend/DB 비공개 port와 Frontend 선행 시작
 방지, Secret read-only mount와 config init 재실행 시 기존 MQTT credential 보존을
-실제 container로 검증한다.
+실제 container로 검증한다. 또한 MQTT와 DB를 차례로 종료·복구해 liveness,
+readiness와 별도 MQTT health의 장애 전환을 확인하고, 마지막에는 in-flight
+readiness 요청 중 Backend에 SIGTERM을 보내 graceful 종료도 확인한다. 실제
+Secret과 요청 canary의 container log 비노출 검사는
+[`day7-production-image-verification.md`](day7-production-image-verification.md)에
+정리했다.
+
+보고서 업무 전체 흐름과 승인 PDF volume 영속성은 별도의 빈-volume acceptance인
+`scripts/container-report-smoke.sh`로 검증한다. 설계, 필수 fallback 시나리오와
+조건부 GMS canary gate는
+[`day7-container-report-smoke.md`](day7-container-report-smoke.md)에 정리했다.
+그 정상 흐름 이후의 PID·DB·MQTT·LLM 장애, 자동 재시작과 전체 volume 영속성은
+`scripts/container-resilience-smoke.sh`로 검증하며 상세 계약은
+[`day7-resilience-verification.md`](day7-resilience-verification.md)에 정리했다.
+실제 운영 배포, health, backup·복구와 rollback 절차는
+[`production-deployment-runbook.md`](production-deployment-runbook.md)를
+정본으로 사용한다.
 
 2026-07-31 최종 결과는 정적 contract와 전체 runtime acceptance 모두 PASS다.
 임시 stack에서 DB와 MQTT health 뒤 Backend, Backend readiness 뒤 Frontend가

@@ -91,6 +91,7 @@ Frontend를 띄우고 다음을 실제 요청으로 검사한다.
 - 일반 `/api` upstream 응답
 - SSE content type·본문·`no-cache`와 buffering 관련 설정
 - index 재검증과 hash asset 장기 캐시
+- 실제 `SIGQUIT` 전달과 10초 안의 정상 종료
 - Node/npm/source/test/sourcemap/Secret 패턴 부재
 
 | 검증 | 결과 |
@@ -100,6 +101,7 @@ Frontend를 띄우고 다음을 실제 요청으로 검사한다.
 | Nginx config | `nginx -t` PASS |
 | Non-root + read-only runtime | PASS |
 | `/healthz`, `/api`, SSE, cache | PASS |
+| Nginx graceful quit | PASS, SIGKILL 없음 |
 | 최종 image 크기 | `65,220,614 bytes` |
 
 주 진입 JavaScript는 약 539 kB로 Vite의 500 kB 경고 기준을 계속 넘는다. 이

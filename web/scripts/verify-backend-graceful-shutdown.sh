@@ -35,10 +35,10 @@ trap cleanup EXIT HUP INT TERM
 docker pause "$DB_CONTAINER" >/dev/null
 DB_PAUSED=true
 
-# DB health contributor가 응답을 기다리게 해 실제 in-flight HTTP 요청을 만든다.
+# DB readiness contributor가 응답을 기다리게 해 실제 in-flight HTTP 요청을 만든다.
 docker exec "$BACKEND_CONTAINER" \
   wget --quiet --output-document=- \
-  http://127.0.0.1:8080/actuator/health >/dev/null 2>&1 &
+  http://127.0.0.1:8080/actuator/health/readiness >/dev/null 2>&1 &
 REQUEST_PID=$!
 
 sleep 2

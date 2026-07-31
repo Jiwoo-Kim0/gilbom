@@ -179,6 +179,30 @@ docker exec "$frontend_id" \
   | grep -Fq '"status":"UP"' \
   || fail "Frontend to Backend API proxy failed"
 
+# 운영 Runbook의 실제 backup 명령도 같은 임시 production-only stack에서
+# 검증한다. bundle은 CHECK_DIR 아래에만 만들고 종료 시 volume과 함께 제거한다.
+BACKUP_ROOT="$CHECK_DIR/backups" \
+ENV_FILE="$ENV_FILE" \
+COMPOSE_FILE="$COMPOSE_FILE" \
+  sh infra/scripts/backup-volumes.sh \
+  || fail "production DB/volume backup workflow failed"
+
+# stop/start 뒤 임의 publish port가 바뀔 수 있으므로 stale binding과 ID를
+# 사용하지 않고 현재 runtime 상태를 다시 조회한다.
+db_id="$(compose ps -q db)"
+mqtt_id="$(compose ps -q mosquitto)"
+backend_id="$(compose ps -q backend)"
+frontend_id="$(compose ps -q frontend)"
+frontend_port="$(compose port frontend 8080)"
+mqtt_port="$(compose port mosquitto 8883)"
+
+BACKEND_CONTAINER="$backend_id" \
+FRONTEND_CONTAINER="$frontend_id" \
+SECRET_SCAN_DIR="$SECRET_DIR" \
+IMAGE_VERIFY_MODE=logs \
+  sh scripts/verify-production-images.sh \
+  || fail "production container log boundary failed"
+
 mqtt_host_port="${mqtt_port##*:}"
 openssl s_client \
   -connect "127.0.0.1:$mqtt_host_port" \
@@ -188,6 +212,12 @@ openssl s_client \
   </dev/null 2>&1 \
   | grep -Fq 'Verify return code: 0 (ok)' \
   || fail "published MQTT TLS handshake failed"
+
+BACKEND_CONTAINER="$backend_id" \
+DB_CONTAINER="$db_id" \
+MQTT_CONTAINER="$mqtt_id" \
+  sh scripts/verify-backend-health-policy.sh \
+  || fail "Backend health transition policy failed"
 
 backend_started="$(
   docker inspect --format '{{.State.StartedAt}}' "$backend_id"
@@ -203,6 +233,11 @@ first_started="$(
 [ "$backend_started" != "$frontend_started" ] \
   && [ "$first_started" = "$backend_started" ] \
   || fail "Frontend started before Backend"
+
+BACKEND_CONTAINER="$backend_id" \
+DB_CONTAINER="$db_id" \
+  sh scripts/verify-backend-graceful-shutdown.sh \
+  || fail "Backend graceful shutdown failed"
 
 echo "Production runtime verification: PASS"
 echo "Frontend=${frontend_port} MQTT_TLS=${mqtt_port}"
