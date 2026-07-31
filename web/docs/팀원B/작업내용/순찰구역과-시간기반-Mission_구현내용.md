@@ -2,8 +2,9 @@
 
 > 담당: 팀원 B — Patrol·Mission
 > 작업일: 2026-07-28 ~ 2026-07-30
-> 연결 Jira: `S15P11D101-379`, `S15P11D101-471`, `S15P11D101-489`
-> 최종 상태: **기능·전체 Mock E2E DONE (LOCAL) / Migration V32 반영 IN PROGRESS**
+> 연결 Jira: `S15P11D101-379`, `S15P11D101-400`, `S15P11D101-404`,
+> `S15P11D101-405`, `S15P11D101-406`, `S15P11D101-489`, `S15P11D101-525`
+> 최종 상태: **DONE (LOCAL)** — 등록·Mission·Mock E2E 완료, 운영 지도·Jetson 확인 대기
 
 이 문서는 Patrol Area 선택부터 Mission 생성, Telemetry 진행률·Trajectory,
 완료 Event와 지도까지 이어지는 **Mission 생명주기 흐름만** 묶는다. MQTT 공통
@@ -32,14 +33,21 @@ Mission 화면은 생성·목록·상세·이력·계획/경과/남은 시간·E
 이탈 경고를 제공한다. 실제 로그인·MFA→Frontend→Backend→PostgreSQL Mission
 생성 E2E도 통과했다.
 
+`/patrol-areas` 전용 화면에서는 Naver 지도에 경계점을 임의 순서로 찍어도
+모든 점을 사용하는 교차 없는 반시계 Polygon으로 정렬해 ACTIVE Area를 등록한다.
+Mission 생성에서 등록 구역을 선택하면 경계점 평균점을 중앙으로 표시하고,
+현재 임무가 없는 ACTIVE Robot의 위치·방향을 같은 지도에서 확인한다.
+
 Command·MQTT까지 연결한 전체 Mock E2E는 2026-07-30 14:28 Playwright 결과에서
 통과했다. START→PAUSE→RESUME→COMPLETED, PAUSED 중 경과시간, 완료 100%,
-상태 이력과 실제 궤적을 확인했다. 다만 관련 Mock·Harness·Test 파일은 작업
-트리에 남아 있어 재실행·CHANGLOG·커밋 정리가 필요하다.
+상태 이력과 실제 궤적을 확인했다.
 
-Migration은 팀원 C Image V31을 유지하고 Mission을 V32로 옮긴 작업 트리 상태다.
-현재 중복 파일은 없지만 삭제·신규 파일이 미커밋이므로 빈 DB 전체 적용 검증과
-공식 반영이 남았다.
+Mission 상세 지도는 Naver Tile·투영은 유지하고 Polygon·Trajectory·Robot
+Marker를 React SVG로 표시한다. Telemetry SSE 갱신 중 기존 상세 DOM과 지도
+인스턴스를 유지해 플리커링과 반복 확대를 제거했다.
+
+Migration은 Image V31, 시간 기반 Mission V32로 정리·커밋됐고 빈 임시 DB에
+V1~V32를 적용한 Backend 전체 625건과 Mission Mock E2E가 통과했다.
 
 ---
 
@@ -48,6 +56,9 @@ Migration은 팀원 C Image V31을 유지하고 Mission을 V32로 옮긴 작업 
 ### 1.1 Patrol Area·Route
 
 - Area 등록·목록·단건·이름/경계 변경·상태 변경
+- `/patrol-areas` 전용 관리 Route
+- 지도 경계점 입력과 직접 좌표 사각형 대체 입력
+- 임의 클릭 순서를 결정적·교차 없는 Polygon 순서로 정규화
 - GeoJSON Polygon/MultiPolygon
 - Route는 같은 `routeCode`의 불변 버전
 - 새 ACTIVE 버전 등록 시 이전 ACTIVE 자동 INACTIVE
@@ -68,6 +79,8 @@ Migration은 팀원 C Image V31을 유지하고 Mission을 V32로 옮긴 작업 
   - 조회 `MISSION_VIEW`
   - 생성·변경 `MISSION_MANAGE`
 - 사용자 Robot Scope 적용
+- 생성 후보는 ACTIVE이면서 현재 임무가 없는 Robot
+- 선택 Area Polygon·경계점 평균 중심·선택 Robot 위치 미리보기
 
 ### 1.3 시간 진행률
 
@@ -96,7 +109,8 @@ GET /api/v1/missions/{missionId}/map?limit=5000
 - 최신 유효 Current Position
 
 Dummy Route Geometry는 API·Layer·범례에서 제외한다. Area 이탈은 경고일 뿐
-진행률을 바꾸지 않는다.
+진행률을 바꾸지 않는다. SSE 갱신은 기존 지도 인스턴스·사용자 Viewport를
+유지하고 SVG 좌표만 다시 투영한다.
 
 ---
 
@@ -123,8 +137,8 @@ Migration 흐름:
   - 기존 Mission 3,600초 Backfill
   - 기존 ACTIVE Area Dummy Route
 
-현재 작업 트리 정본은 Image V31, 시간 Mission V32다. 번호 중복은 없지만
-Migration 이동이 아직 미커밋이므로 정식 반영 전 전체 검증이 필요하다.
+현재 정본은 Image V31, 시간 Mission V32다. V32 이동은 커밋됐고 빈 임시 DB에서
+V1~V32 총 32개 Migration의 Version 중복 0과 Backend 정상 기동을 확인했다.
 
 ### 2.2 Backend
 
@@ -147,18 +161,27 @@ features/mission/missionTypes.ts
 features/mission/missionApi.ts
 features/mission/MissionManagePage.tsx
 features/mission/MissionMap.tsx
+features/mission/PatrolAreaManagePage.tsx
+features/mission/PatrolAreaBoundaryEditor.tsx
+features/mission/PatrolAreaSelectionPreview.tsx
+features/mission/patrolAreaBoundary.ts
 features/mission/mission.css
 features/mission/mission-map.css
+features/mission/patrol-area-boundary-editor.css
+features/mission/patrol-area-selection-preview.css
 ```
 
 화면:
 
+- 전용 순찰 구역 관리·Polygon 등록
+- 경계점 자동 정렬·취소·삭제·초기화
 - Mission 생성
+- 선택 Area·미수행 Robot 지도 미리보기
 - 목록·상세
 - 상태 이력
 - 계획·경과·남은 시간
 - 진행률·ETA·Stale
-- Area·Trajectory·현재 위치
+- SVG Area·Trajectory·현재 위치·heading
 - Area 이탈
 - Naver SDK 실패 시 SVG Fallback
 
@@ -223,6 +246,25 @@ Snapshot을 제공한다.
 Telemetry Event는 “변경됐다”는 알림으로 사용한다. 400ms Debounce 뒤 지도
 Snapshot을 다시 읽어 Marker·Polyline을 일관되게 교체한다.
 
+### 3.7 Polygon 순서는 결정적 휴리스틱으로 정규화한다
+
+사용자가 점을 임의 순서로 찍어도 같은 점 집합은 같은 결과가 되도록 좌표를
+정규화한다. 최근접 순회로 초기 배열을 만들고 2-opt로 교차 간선을 제거한 뒤
+반시계 방향과 시작점을 통일한다. 전역 최단 TSP보다 모든 점 보존·교차 제거·
+결정성과 Browser 실행 비용을 우선했다.
+
+### 3.8 Native Overlay 대신 CSP 안전 SVG를 사용한다
+
+현재 CSP에서 SDK 동적 스타일 기반 Polygon·Marker가 검게 보이거나 왼쪽 위로
+밀렸다. 보안 설정을 바꾸지 않고 Naver 투영 API의 화면 좌표를 React SVG와 외부
+CSS에 전달한다. SVG는 `pointer-events: none`으로 지도 클릭·드래그를 막지 않는다.
+
+### 3.9 Mission 갱신 중 지도 인스턴스를 유지한다
+
+SSE마다 상세 전체를 Spinner로 교체하면 지도도 반복 생성되고 Zoom이 튄다. 기존
+상세가 있으면 백그라운드 로딩 중에도 DOM과 지도 인스턴스를 유지하고, 새
+Snapshot의 SVG 좌표만 갱신한다.
+
 ---
 
 ## 4. 검증과 재현 명령
@@ -255,15 +297,17 @@ python web/scripts/mission-time-browser-e2e.py
 완료 기록:
 
 - Mission 집중 29개 통과
-- Backend 전체 546개 통과(당시 Migration 정본 기준)
+- V32 빈 DB 기반 Backend 전체 625개 통과
 - Frontend lint·production build
 - Chromium Mission Fixture 2개
 - 실제 로그인·MFA Mission E2E 1개
+- 실제 TLS MQTT·Mock Robot Mission 전체 E2E 1개
+- 순찰 구역 등록·Mission 선택 Chromium E2E
+- 최신 Frontend 단위 테스트 37개와 지도 회귀 E2E 2개
 - API·DB 계획시간 2700초 일치
 - 임시 계정·Robot·Area·Mission 잔존 0건
-
-현재 작업 트리는 V32로 이동했으므로 위 과거 성공을 현재 V32 정본의 성공으로
-그대로 재사용하면 안 된다. 빈 DB에서 다시 실행해야 한다.
+- SSE 전후 Mission Map 생성 1회·파괴 0회·`fitBounds` 1회 유지
+- Naver Native Polygon·Polyline·Marker 생성 0건과 SVG 갱신 확인
 
 ---
 
@@ -272,10 +316,9 @@ python web/scripts/mission-time-browser-e2e.py
 ### Migration 번호는 작업 시작 때가 아니라 커밋 직전에 확인한다
 
 동시에 다른 팀이 Migration을 만들면 몇 시간 사이에도 번호가 선점된다. 이
-작업에서도 과거 Image와 Mission이 모두 V31을 사용한 충돌이 있었다. 현재
-작업 트리는 Image V31·Mission V32로 정리되어 번호 중복은 없지만 아직
-재검증·커밋 전이다. `Get-ChildItem`로 버전 그룹 중복을 검사하고 빈 DB
-Testcontainers를 실행해야 한다.
+작업에서도 과거 Image와 Mission이 모두 V31을 사용한 충돌이 있었다. Image를
+V31로 유지하고 Mission을 V32로 이동한 뒤 빈 DB 전체 적용과 Version 중복 검사를
+통과시켰다. 이후에도 새 Migration 전에는 최신 번호를 다시 확인해야 한다.
 
 ### PostGIS 좌표의 정확 실수 비교
 
@@ -298,23 +341,33 @@ Trigger를 비활성화하고 같은 Transaction에서 복구한다. Cleanup 실
 운영 Origin/Key가 없을 때도 SVG Fallback으로 좌표·Layer·이탈 계산을 검증한다.
 실제 Tile Smoke Test는 배포 환경 후속으로 남긴다.
 
+### 지도 Overlay 오류를 CSP 완화로 해결하지 않는다
+
+Polygon이 검거나 좌상단에 나타난 원인은 업무 좌표가 아니라 SDK 동적 스타일과
+현재 CSP의 결합이었다. Nginx 보안 설정은 유지하고 투영 기반 SVG로 해결했다.
+
+### Robot 위치를 Bounds에 넣으면 Area가 너무 작아진다
+
+선택 Robot이 Area에서 멀리 있으면 전국 단위로 축소돼 등록 구역이 보이지 않는다.
+Mission 생성 미리보기의 Bounds는 Area만 사용하고 Robot GPS는 Marker·텍스트
+정보로만 표시한다.
+
 ---
 
 ## 6. 미완 항목
 
 ### 내 몫 — P0
 
-- V31 Image·V32 Mission 상태로 빈 DB 전체 Migration 재검증
-- Mock Mission Event·자동 완료 코드 최종 검토
-- Mock 단위 테스트와 `mission-mock-e2e.py` 재실행
-- 실행 로그·DB 결과·Browser 증거·Cleanup을 새 CHANGLOG에 기록
-- Migration·Mock·Harness·Test 파일 커밋
+- 최신 Frontend Container에서 실제 Naver Tile·SVG Polygon·Robot Marker 육안 확인
+- 실제 Robot Telemetry 수신 중 Mission 상세 지도 플리커링·Viewport 유지 확인
+- 시연용 ACTIVE Area의 `areaCode`와 Embedded Incident `zone_id` 대조
 
 ### 내 몫 — P1
 
 - 장기 Mission Trajectory Downsampling
 - Telemetry History 별도 REST 필요성 결정
 - 진행률과 별도의 순찰 Coverage 품질 지표 검토
+- 복잡한 오목 구역이 필요하면 점 이동·간선 수동 수정 UX 검토
 
 ### 팀원 A
 
@@ -323,7 +376,6 @@ Trigger를 비활성화하고 같은 Transaction에서 복구한다. Cleanup 실
 
 ### 팀원 C
 
-- V31 이미지 Migration 정본 유지와 이후 번호 선점 사항 공유
 - 시연용 ACTIVE Patrol Area 사용
 - Incident의 Mission·Area FK 계약 유지
 
@@ -341,6 +393,16 @@ Trigger를 비활성화하고 같은 Transaction에서 복구한다. Cleanup 실
 - `CHANGLOGS/2026-07-30_1243_mission-map.md`
 - `CHANGLOGS/2026-07-30_1342_time-mission-live-browser-e2e.md`
 - `CHANGLOGS/2026-07-30_1413_mission-migration-version.md`
+- `CHANGLOGS/2026-07-30_1449_mission-mock-e2e.md`
+- `CHANGLOGS/2026-07-30_2006_patrol-area-page-mission-selection.md`
+- `CHANGLOGS/2026-07-30_2025_mission-area-selection-preview.md`
+- `CHANGLOGS/2026-07-30_2049_patrol-area-polygon-ordering.md`
+- `CHANGLOGS/2026-07-30_2122_patrol-area-csp-safe-overlay.md`
+- `CHANGLOGS/2026-07-30_2139_mission-create-idle-robot-preview.md`
+- `CHANGLOGS/2026-07-30_2303_mission-map-svg-flicker.md`
+- Commit `acc4e26` ~ `85986b5` — `S15P11D101-525` 순찰 구역·Mission 생성 보강
+- Commit `79591ce` — Mission 상세 SVG 지도·플리커링 제거
 - `TROUBLESHOOTING/7_PatrolAreaRouteConsistency.md`
 - `TROUBLESHOOTING/10_TimeBasedMission.md`
 - `TROUBLESHOOTING/11_MissionMap.md`
+- `TROUBLESHOOTING/12_MissionMockE2E.md`

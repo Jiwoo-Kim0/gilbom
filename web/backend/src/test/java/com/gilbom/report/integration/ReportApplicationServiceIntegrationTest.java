@@ -281,6 +281,23 @@ class ReportApplicationServiceIntegrationTest {
         assertThat(created.currentVersion().version()
                 .generationFallbackReason())
                 .isNull();
+
+        String auditSnapshots = jdbcTemplate.queryForObject("""
+                SELECT
+                    COALESCE(before_value, '{}'::JSONB)::TEXT
+                    || COALESCE(after_value, '{}'::JSONB)::TEXT
+                FROM audit.audit_log
+                WHERE target_type = 'REPORT'
+                  AND target_id = ?
+                  AND action_type = 'REPORT_CREATED'
+                """,
+                String.class,
+                created.report().reportId());
+        assertThat(auditSnapshots)
+                .doesNotContain("검증된 LLM 보고서")
+                .doesNotContain("검증 후 렌더링한 LLM 본문")
+                .doesNotContain("prompt")
+                .doesNotContain("response");
     }
 
     @Test
@@ -568,6 +585,29 @@ class ReportApplicationServiceIntegrationTest {
                                 "권한 없는 수정",
                                 "권한 없는 수정 본문",
                                 null),
+                        requestContext()),
+                ErrorCode.REPORT_ACCESS_DENIED);
+        assertBusinessError(
+                () -> commandService.softDelete(
+                        noPermissionUserId,
+                        created.report().reportId(),
+                        1,
+                        requestContext()),
+                ErrorCode.REPORT_ACCESS_DENIED);
+        assertBusinessError(
+                () -> commandService.approve(
+                        noPermissionUserId,
+                        created.report().reportId(),
+                        new ReportDecisionRequest(1, null),
+                        requestContext()),
+                ErrorCode.REPORT_ACCESS_DENIED);
+        assertBusinessError(
+                () -> commandService.reject(
+                        noPermissionUserId,
+                        created.report().reportId(),
+                        new ReportRejectionRequest(
+                                1,
+                                "권한 없는 반려"),
                         requestContext()),
                 ErrorCode.REPORT_ACCESS_DENIED);
     }

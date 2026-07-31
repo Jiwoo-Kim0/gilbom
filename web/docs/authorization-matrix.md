@@ -181,6 +181,8 @@ DB trigger도 같은 lock과 판정 함수를 사용해 직접 DML을 방어한�
 | GET | `/api/v1/robots` | `ROBOT_STATUS_VIEW` | 배정 로봇 |  |  |
 | POST | `/api/v1/robots` | `ROBOT_REGISTER` | 전역 | O | O |
 | GET | `/api/v1/robots/{robotId}` | `ROBOT_STATUS_VIEW` | `VIEWER+` |  |  |
+| GET | `/api/v1/robots/{robotId}/telemetry-statistics` | `ROBOT_STATUS_VIEW` | `VIEWER+`, `[from,to)` 최대 31일 |  |  |
+| GET | `/api/v1/robots/{robotId}/telemetry-series` | `ROBOT_STATUS_VIEW` | `VIEWER+`, `[from,to)` 최대 31일·5,000구간 |  |  |
 | PATCH, DELETE | `/api/v1/robots/{robotId}` | `ROBOT_REGISTER` | 전역 | O | O |
 | GET | `/api/v1/robots/{robotId}/state` | `ROBOT_STATUS_VIEW` | `VIEWER+` |  |  |
 | GET | `/api/v1/robots/{robotId}/telemetry` | `ROBOT_STATUS_VIEW` | `VIEWER+` |  |  |
@@ -282,6 +284,7 @@ Controller의 세션 권한과 서비스의 현재 DB 유효 권한을 모두 �
 | POST | `/api/v1/reports/{reportId}/reject` | `REPORT_APPROVE` | 자기 버전 반려는 허용하되 사유 필수 | O | O |
 | GET | `/api/v1/reports/{reportId}/versions` | `REPORT_VIEW` | MVP 권한 단위 |  |  |
 | GET | `/api/v1/reports/{reportId}/versions/{versionNo}` | `REPORT_VIEW` | MVP 권한 단위 |  |  |
+| GET | `/api/v1/stream/reports` | `REPORT_VIEW` | 구독 시 권한·선택 report 범위, 발행 시 객체 범위 재검사 |  |  |
 
 ## 13. 감사·파일·기기 업로드 API
 

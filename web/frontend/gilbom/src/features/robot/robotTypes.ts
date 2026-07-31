@@ -28,6 +28,102 @@ export interface RobotListResponse {
   totalPages: number
 }
 
+export interface RobotRegistrationRequest {
+  robotName: string
+  serialNumber: string
+}
+
+export interface RobotRegistrationResponse {
+  robotId: string
+  mqttId: string
+  robotName: string
+  serialNumber: string
+  operationalStatus: string
+  connectivityStatus: RobotConnectivityStatus
+}
+
+export interface RobotTelemetryStatistics {
+  robotId: string
+  mqttId: string
+  robotName: string
+  from: string
+  to: string
+  sampleCount: number
+  validBatterySampleCount: number
+  averageBatteryPercent: number | null
+  minimumBatteryPercent: number | null
+  averageJetsonTemperatureC: number | null
+  maximumJetsonTemperatureC: number | null
+  averageSpeedMps: number | null
+  maximumSpeedMps: number | null
+  validGpsSampleCount: number
+  invalidGpsSampleCount: number
+  gpsValidRatePercent: number
+  lastSampledAt: string | null
+}
+
+export type RobotTelemetrySeriesInterval = '1m' | '5m' | '15m' | '1h'
+
+export interface RobotTelemetrySeriesPoint {
+  bucketAt: string
+  sampleCount: number
+  validBatterySampleCount: number
+  averageBatteryPercent: number | null
+  minimumBatteryPercent: number | null
+  averageJetsonTemperatureC: number | null
+  maximumJetsonTemperatureC: number | null
+  averageSpeedMps: number | null
+  maximumSpeedMps: number | null
+  validGpsSampleCount: number
+  invalidGpsSampleCount: number
+  gpsValidRatePercent: number
+}
+
+export interface RobotTelemetrySeries {
+  robotId: string
+  mqttId: string
+  robotName: string
+  from: string
+  to: string
+  interval: RobotTelemetrySeriesInterval
+  points: RobotTelemetrySeriesPoint[]
+}
+
+export interface RobotDetail {
+  robotId: string
+  mqttId: string
+  robotName: string
+  serialNumber: string
+  operationalStatus: string
+  connectivityStatus: RobotConnectivityStatus
+  connectionChangedAt: string | null
+  lastReceivedAt: string | null
+  robotMode: string | null
+  stateReasonCode: string | null
+  missionStatus: string | null
+  batteryPercent: number | null
+  batteryState: string | null
+  charging: boolean | null
+  batteryTemperatureC: number | null
+  estimatedRuntimeSec: number | null
+  cameraHealth: string | null
+  lidarHealth: string | null
+  gpsHealth: string | null
+  motorHealth: string | null
+  storageHealth: string | null
+  latitude: number | null
+  longitude: number | null
+  headingDeg: number | null
+  moving: boolean | null
+  speedMps: number | null
+  jetsonTempC: number | null
+  overallHealthStatus: RobotHealthStatus
+  telemetrySampledAt: string | null
+  telemetryReceivedAt: string | null
+  registeredAt: string
+  updatedAt: string
+}
+
 export interface RobotSummary {
   totalRobots: number
   onlineRobots: number

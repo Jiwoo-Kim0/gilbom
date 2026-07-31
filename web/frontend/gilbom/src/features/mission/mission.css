@@ -50,6 +50,117 @@
   align-self: end;
 }
 
+.mission-area-create-card {
+  border-color: color-mix(in srgb, var(--brand) 28%, var(--line));
+}
+
+.mission-area-boundary-mode,
+.mission-area-boundary-field {
+  grid-column: 1 / -1;
+}
+
+.mission-area-boundary-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-muted);
+}
+
+.mission-area-boundary-mode button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.mission-area-boundary-mode button.is-active {
+  color: var(--brand-strong);
+  background: var(--surface);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+}
+
+.mission-area-boundary-mode button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.mission-area-create-summary {
+  display: grid;
+  min-height: 76px;
+  gap: 5px;
+  padding: 13px 15px;
+  align-content: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+}
+
+.mission-area-create-summary strong {
+  color: var(--brand-strong);
+  font-size: 13px;
+}
+
+.mission-area-create-summary span {
+  font-size: 12px;
+}
+
+.patrol-area-list-card {
+  display: grid;
+  min-width: 0;
+  gap: 20px;
+}
+
+.patrol-area-empty {
+  min-height: 220px;
+}
+
+.patrol-area-table {
+  min-width: 720px;
+}
+
+.patrol-area-status,
+.patrol-area-mission-eligible {
+  display: inline-flex;
+  gap: 5px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.patrol-area-status-active,
+.patrol-area-mission-eligible {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.patrol-area-status-inactive {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.patrol-area-status-archived {
+  color: #475569;
+  background: #f1f5f9;
+}
+
+.patrol-area-mission-unavailable {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .mission-view-only {
   padding: 16px 18px;
   border: 1px solid var(--line);

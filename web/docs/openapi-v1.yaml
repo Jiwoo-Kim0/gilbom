@@ -1892,6 +1892,117 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /api/v1/robots/{robotId}/telemetry-statistics:
+    get:
+      tags: [Robots]
+      operationId: getRobotTelemetryStatistics
+      summary: 로봇별 Telemetry 기간 통계 조회
+      description: |
+        권한 범위 내 로봇의 MQTT v2 Telemetry 이력을 sampledAt 기준
+        [from,to)로 집계합니다. 기간은 최대 31일이며 Mission·Incident·결함
+        테이블은 조회하지 않습니다.
+      x-required-permission: ROBOT_STATUS_VIEW
+      security:
+        - serverSession: []
+      parameters:
+        - name: robotId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: true
+          description: 집계에 포함되는 시작 Instant
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: true
+          description: 집계에서 제외되는 종료 Instant. from과의 차이는 최대 31일
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: 로봇 Telemetry 집계
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RobotTelemetryStatisticsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/v1/robots/{robotId}/telemetry-series:
+    get:
+      tags: [Robots]
+      operationId: getRobotTelemetrySeries
+      summary: 로봇별 Telemetry 시계열 조회
+      description: |
+        권한 범위 내 로봇의 MQTT v2 Telemetry 이력을 sampledAt 기준
+        [from,to)로 제한한 뒤 고정 시간 구간으로 집계합니다. 기간은 최대
+        31일이고 반환 가능한 구간은 최대 5,000개입니다. Mission·Incident·
+        결함 테이블은 조회하지 않습니다.
+      x-required-permission: ROBOT_STATUS_VIEW
+      security:
+        - serverSession: []
+      parameters:
+        - name: robotId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: true
+          description: 집계에 포함되는 시작 Instant
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: true
+          description: 집계에서 제외되는 종료 Instant. from과의 차이는 최대 31일
+          schema:
+            type: string
+            format: date-time
+        - name: interval
+          in: query
+          required: false
+          description: UTC Unix Epoch 기준 고정 집계 구간
+          schema:
+            type: string
+            enum: [1m, 5m, 15m, 1h]
+            default: 5m
+      responses:
+        "200":
+          description: 로봇 Telemetry 시계열
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RobotTelemetrySeriesResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
   /api/v1/robots/{robotId}/credentials:
     get:
       tags: [Robots]
@@ -3070,6 +3181,45 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+
+  /api/v1/stream/reports:
+    get:
+      tags: [Reports]
+      operationId: streamReportUpdates
+      summary: 권한·객체 범위 내 보고서 변경 알림
+      description: |
+        CONNECTED와 report.updated 이벤트를 전송하고 15초마다 heartbeat comment를
+        보냅니다. report.updated에는 reportId, reportStatus, currentVersionNo,
+        deleted, occurredAt만 포함합니다.
+        SSE는 변경 알림이며 정본이 아닙니다. 최초 연결과 자동 재연결의 CONNECTED,
+        report.updated 수신 후 클라이언트는 보고서 REST 상세 또는 목록을 다시
+        조회해야 합니다. Last-Event-ID replay는 제공하지 않습니다.
+      x-required-permission: REPORT_VIEW
+      security:
+        - serverSession: []
+      parameters:
+        - name: reportId
+          in: query
+          required: false
+          description: 지정하면 현재 접근 가능한 해당 보고서 이벤트만 구독
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /api/v1/stream/defects:
     get:
@@ -4274,6 +4424,203 @@ components:
         updatedAt:
           type: string
           format: date-time
+
+    RobotTelemetryStatisticsResponse:
+      type: object
+      required:
+        - robotId
+        - mqttId
+        - robotName
+        - from
+        - to
+        - sampleCount
+        - validBatterySampleCount
+        - averageBatteryPercent
+        - minimumBatteryPercent
+        - averageJetsonTemperatureC
+        - maximumJetsonTemperatureC
+        - averageSpeedMps
+        - maximumSpeedMps
+        - validGpsSampleCount
+        - invalidGpsSampleCount
+        - gpsValidRatePercent
+        - lastSampledAt
+      additionalProperties: false
+      properties:
+        robotId:
+          type: string
+          format: uuid
+        mqttId:
+          type: string
+        robotName:
+          type: string
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        sampleCount:
+          type: integer
+          format: int64
+          minimum: 0
+        validBatterySampleCount:
+          type: integer
+          format: int64
+          minimum: 0
+        averageBatteryPercent:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          nullable: true
+        minimumBatteryPercent:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          nullable: true
+        averageJetsonTemperatureC:
+          type: number
+          format: double
+          nullable: true
+        maximumJetsonTemperatureC:
+          type: number
+          format: double
+          nullable: true
+        averageSpeedMps:
+          type: number
+          format: double
+          minimum: 0
+          nullable: true
+        maximumSpeedMps:
+          type: number
+          format: double
+          minimum: 0
+          nullable: true
+        validGpsSampleCount:
+          type: integer
+          format: int64
+          minimum: 0
+        invalidGpsSampleCount:
+          type: integer
+          format: int64
+          minimum: 0
+        gpsValidRatePercent:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+        lastSampledAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    RobotTelemetrySeriesResponse:
+      type: object
+      required:
+        - robotId
+        - mqttId
+        - robotName
+        - from
+        - to
+        - interval
+        - points
+      additionalProperties: false
+      properties:
+        robotId:
+          type: string
+          format: uuid
+        mqttId:
+          type: string
+        robotName:
+          type: string
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        interval:
+          type: string
+          enum: [1m, 5m, 15m, 1h]
+        points:
+          type: array
+          maxItems: 5000
+          items:
+            $ref: "#/components/schemas/RobotTelemetrySeriesPointResponse"
+
+    RobotTelemetrySeriesPointResponse:
+      type: object
+      required:
+        - bucketAt
+        - sampleCount
+        - validBatterySampleCount
+        - averageBatteryPercent
+        - minimumBatteryPercent
+        - averageJetsonTemperatureC
+        - maximumJetsonTemperatureC
+        - averageSpeedMps
+        - maximumSpeedMps
+        - validGpsSampleCount
+        - invalidGpsSampleCount
+        - gpsValidRatePercent
+      additionalProperties: false
+      properties:
+        bucketAt:
+          type: string
+          format: date-time
+        sampleCount:
+          type: integer
+          format: int64
+          minimum: 1
+        validBatterySampleCount:
+          type: integer
+          format: int64
+          minimum: 0
+        averageBatteryPercent:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          nullable: true
+        minimumBatteryPercent:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          nullable: true
+        averageJetsonTemperatureC:
+          type: number
+          format: double
+          nullable: true
+        maximumJetsonTemperatureC:
+          type: number
+          format: double
+          nullable: true
+        averageSpeedMps:
+          type: number
+          format: double
+          minimum: 0
+          nullable: true
+        maximumSpeedMps:
+          type: number
+          format: double
+          minimum: 0
+          nullable: true
+        validGpsSampleCount:
+          type: integer
+          format: int64
+          minimum: 0
+        invalidGpsSampleCount:
+          type: integer
+          format: int64
+          minimum: 0
+        gpsValidRatePercent:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
 
     GeoJsonPolygonOrMultiPolygon:
       type: object

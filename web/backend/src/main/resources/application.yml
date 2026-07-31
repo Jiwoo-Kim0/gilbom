@@ -98,6 +98,10 @@ gilbom:
     pdf:
       # Docker/운영은 영속 volume 경로를 명시하고 IDE/test만 OS 임시 경로를 기본 사용한다.
       storage-root: ${GILBOM_REPORT_PDF_STORAGE_ROOT:${java.io.tmpdir}/gilbom-report-pdf}
+    sse:
+      # 다중 탭 오남용과 단일 인스턴스 emitter 고갈을 함께 제한한다.
+      max-connections-per-user: ${GILBOM_REPORT_SSE_MAX_CONNECTIONS_PER_USER:3}
+      max-connections-total: ${GILBOM_REPORT_SSE_MAX_CONNECTIONS_TOTAL:200}
   llm:
     # 정책 gate를 모두 통과하기 전에는 DisabledLlmClient와 TEMPLATE fallback을 사용한다.
     enabled: ${GILBOM_LLM_ENABLED:false}
@@ -187,6 +191,8 @@ mqtt:
   subscribe-topic: "${MQTT_SUBSCRIBE_TOPIC:tbs/v2/robots/+/presence,tbs/v2/robots/+/state,tbs/v2/robots/+/telemetry,tbs/v2/robots/+/events/#,tbs/v2/robots/+/commands/result}"
   publish-topic: ${MQTT_PUBLISH_TOPIC:tbs/v2/robots/robot-test/commands/request}
   qos: ${MQTT_QOS:1}
+  # Paho exponential backoff의 상한이다. Broker 복구 뒤 다음 재연결이 오래 지연되지 않게 한다.
+  reconnect-max-delay: ${MQTT_RECONNECT_MAX_DELAY:5s}
   # Full payload logging is for isolated local communication tests only.
   log-payload: ${MQTT_LOG_PAYLOAD:false}
   inbound-freshness:

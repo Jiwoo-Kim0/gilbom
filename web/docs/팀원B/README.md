@@ -13,6 +13,8 @@ web/docs/팀원B/
 │  ├─ README.md
 │  ├─ MQTT-v2-계약과-통신보안_구현내용.md
 │  ├─ 로봇-상태수집과-실시간-관제_구현내용.md
+│  ├─ 로봇-Telemetry-기간통계와-시계열_구현내용.md
+│  ├─ 로봇-등록과-MQTT-Credential-관리_구현내용.md
 │  ├─ 로봇-명령-왕복과-ACK_구현내용.md
 │  └─ 순찰구역과-시간기반-Mission_구현내용.md
 ├─ V2/

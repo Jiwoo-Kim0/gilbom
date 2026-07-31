@@ -10,6 +10,8 @@ import jakarta.servlet.http.HttpServletRequest;
 public final class AccessDeniedErrorCodeResolver {
 
     private static final String REPORTS_PATH = "/api/v1/reports";
+    private static final String REPORT_STREAM_PATH =
+            "/api/v1/stream/reports";
 
     private AccessDeniedErrorCodeResolver() {
     }
@@ -21,7 +23,8 @@ public final class AccessDeniedErrorCodeResolver {
             path = path.substring(contextPath.length());
         }
         if (REPORTS_PATH.equals(path)
-                || path.startsWith(REPORTS_PATH + "/")) {
+                || path.startsWith(REPORTS_PATH + "/")
+                || REPORT_STREAM_PATH.equals(path)) {
             return ErrorCode.REPORT_ACCESS_DENIED;
         }
         return ErrorCode.AUTH_FORBIDDEN;

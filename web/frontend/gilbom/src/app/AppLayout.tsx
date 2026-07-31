@@ -4,6 +4,7 @@ import { useAuthentication } from '../features/auth/authenticationContext'
 
 const pageTitles: Record<string, string> = {
   '/robots': '로봇 상태 관리',
+  '/patrol-areas': '순찰 구역 관리',
   '/missions': '순찰 임무 관리',
   '/defects': '점자 보도블록 결함 관리',
   '/reports': '리포트',

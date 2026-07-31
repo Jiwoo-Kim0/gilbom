@@ -4,3 +4,9 @@ __pycache__/
 # MQTT 통신 테스트 패키지 — .env·connection-secret.md 에 브로커 비밀번호가 들어 있다.
 # 전달받은 그대로 두고 커밋하지 않는다 (패키지 README 11항).
 gilbom-mqtt-external-test/
+
+# 개인 일일 작업·Jira 기록
+DailyLog/
+
+# Codex 격리 Gradle 빌드 산출물
+/web/backend/build-codex-*/

@@ -7,14 +7,16 @@ export type MissionStatus =
   | 'CANCELLED'
   | 'FAILED'
 
+export type GeoJsonCoordinate = [longitude: number, latitude: number]
+
 export type GeoJsonPolygon = {
   type: 'Polygon'
-  coordinates: number[][][]
+  coordinates: GeoJsonCoordinate[][]
 }
 
 export type GeoJsonMultiPolygon = {
   type: 'MultiPolygon'
-  coordinates: number[][][][]
+  coordinates: GeoJsonCoordinate[][][]
 }
 
 export type PatrolAreaBoundary = GeoJsonPolygon | GeoJsonMultiPolygon
@@ -137,6 +139,13 @@ export type PatrolArea = {
   updatedAt: string
 }
 
+export type PatrolAreaCreateInput = {
+  areaCode: string
+  areaName: string
+  boundary: PatrolAreaBoundary
+  lifecycleStatus: 'ACTIVE' | 'INACTIVE'
+}
+
 export type PatrolAreaListResponse = {
   areas: PatrolArea[]
 }
@@ -164,6 +173,7 @@ export type RobotOption = {
   serialNumber: string
   operationalStatus: string
   connectivityStatus: string
+  missionStatus: string | null
   overallHealthStatus: string
 }
 

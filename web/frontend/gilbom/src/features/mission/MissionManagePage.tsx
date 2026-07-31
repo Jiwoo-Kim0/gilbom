@@ -6,6 +6,7 @@ import {
   ClipboardList,
   Filter,
   History,
+  MapPinned,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -20,9 +21,12 @@ import {
   useState,
   type FormEvent,
 } from 'react'
+import { NavLink } from 'react-router'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { useAuthentication } from '../auth/authenticationContext'
 import { MISSION_MANAGE } from '../auth/permissions'
+import { getRobotMap } from '../robot/robotApi'
+import type { RobotMapItem } from '../robot/robotTypes'
 import { useRobotRealtime } from '../robot/useRobotRealtime'
 import {
   createMission,
@@ -34,6 +38,7 @@ import {
   getPatrolRoutes,
 } from './missionApi'
 import { MissionMap } from './MissionMap'
+import { PatrolAreaSelectionPreview } from './PatrolAreaSelectionPreview'
 import type {
   Mission,
   MissionFilters,
@@ -146,6 +151,7 @@ export function MissionManagePage() {
   const [selectedMission, setSelectedMission] = useState<Mission | null>(null)
   const [history, setHistory] = useState<MissionStatusHistoryItem[]>([])
   const [robots, setRobots] = useState<RobotOption[]>([])
+  const [robotMapItems, setRobotMapItems] = useState<RobotMapItem[]>([])
   const [areas, setAreas] = useState<PatrolArea[]>([])
   const [createRobotId, setCreateRobotId] = useState('')
   const [createAreaId, setCreateAreaId] = useState('')
@@ -171,8 +177,22 @@ export function MissionManagePage() {
     [areas],
   )
   const activeRobots = useMemo(
-    () => robots.filter((robot) => robot.operationalStatus === 'ACTIVE'),
+    () => robots.filter((robot) => (
+      robot.operationalStatus === 'ACTIVE' && robot.missionStatus === null
+    )),
     [robots],
+  )
+  const selectedCreateArea = useMemo(
+    () => activeAreas.find((area) => area.patrolAreaId === createAreaId) ?? null,
+    [activeAreas, createAreaId],
+  )
+  const selectedCreateRobot = useMemo(
+    () => activeRobots.find((robot) => robot.robotId === createRobotId) ?? null,
+    [activeRobots, createRobotId],
+  )
+  const selectedCreateRobotPosition = useMemo(
+    () => robotMapItems.find((robot) => robot.robotId === createRobotId) ?? null,
+    [createRobotId, robotMapItems],
   )
   const pageRunningCount = missions?.content.filter(
     (mission) => mission.status === 'RUNNING',
@@ -205,9 +225,10 @@ export function MissionManagePage() {
   const loadCatalogs = useCallback(async () => {
     setCatalogLoading(true)
     setCatalogError(null)
-    const [robotResult, areaResult] = await Promise.allSettled([
+    const [robotResult, areaResult, robotMapResult] = await Promise.allSettled([
       getMissionRobotOptions(),
       getPatrolAreas(),
+      getRobotMap(),
     ])
 
     if (robotResult.status === 'fulfilled') {
@@ -216,12 +237,26 @@ export function MissionManagePage() {
     if (areaResult.status === 'fulfilled') {
       setAreas(areaResult.value.areas)
     }
+    if (robotMapResult.status === 'fulfilled') {
+      setRobotMapItems(robotMapResult.value.robots)
+    } else {
+      setRobotMapItems([])
+    }
     if (robotResult.status === 'rejected') {
       setCatalogError(robotResult.reason)
     } else if (areaResult.status === 'rejected') {
       setCatalogError(areaResult.reason)
     }
     setCatalogLoading(false)
+  }, [])
+
+  const loadRobotPositions = useCallback(async () => {
+    try {
+      const result = await getRobotMap()
+      setRobotMapItems(result.robots)
+    } catch {
+      setRobotMapItems([])
+    }
   }, [])
 
   const loadMissionDetail = useCallback(async (missionId: string) => {
@@ -260,11 +295,17 @@ export function MissionManagePage() {
         requestedDetailIdRef.current = null
         void loadMissionDetail(selectedMissionId)
       }
+      if (createExpanded && createRobotId.length > 0) {
+        void loadRobotPositions()
+      }
     }, 250)
   }, [
     appliedFilters,
+    createExpanded,
+    createRobotId,
     loadMissionDetail,
     loadMissions,
+    loadRobotPositions,
     page,
     selectedMissionId,
   ])
@@ -494,6 +535,13 @@ export function MissionManagePage() {
             <RefreshCw size={17} aria-hidden="true" />
             새로고침
           </button>
+          <NavLink
+            className="secondary-button button-with-icon"
+            to="/patrol-areas"
+          >
+            <MapPinned size={17} aria-hidden="true" />
+            구역 관리
+          </NavLink>
           {canManage ? (
             <button
               className="primary-button button-with-icon"
@@ -568,6 +616,10 @@ export function MissionManagePage() {
                   </option>
                 ))}
               </select>
+              <small>
+                ACTIVE 상태이며 현재 임무가 없는 Robot만 표시됩니다.
+                Credential은 Robot 관리에서 발급·회전합니다.
+              </small>
             </label>
             <label className="admin-form-field" htmlFor="mission-create-area">
               순찰 구역
@@ -590,7 +642,19 @@ export function MissionManagePage() {
                   </option>
                 ))}
               </select>
+              <small>
+                등록된 ACTIVE 구역만 표시됩니다. 새 구역은{' '}
+                <NavLink to="/patrol-areas">순찰 구역 관리</NavLink>에서
+                등록하세요.
+              </small>
             </label>
+            {selectedCreateArea ? (
+              <PatrolAreaSelectionPreview
+                area={selectedCreateArea}
+                selectedRobot={selectedCreateRobot}
+                robotPosition={selectedCreateRobotPosition}
+              />
+            ) : null}
             <label className="admin-form-field" htmlFor="mission-create-duration">
               계획 시간(분)
               <input
@@ -872,12 +936,12 @@ export function MissionManagePage() {
           aria-live="polite"
           data-testid="mission-detail"
         >
-          {detailLoading ? (
+          {detailLoading && selectedMission === null ? (
             <div className="admin-loading" role="status">
               <span className="loading-spinner" aria-hidden="true" />
               임무 상세와 상태 이력을 불러오는 중입니다.
             </div>
-          ) : detailError ? (
+          ) : detailError && selectedMission === null ? (
             <div className="page-alert" role="alert">
               {getApiErrorMessage(detailError)}
             </div>
@@ -891,6 +955,12 @@ export function MissionManagePage() {
             </div>
           ) : (
             <>
+              {detailError ? (
+                <div className="page-alert" role="alert">
+                  최신 임무 정보를 불러오지 못해 이전 표시를 유지합니다.{' '}
+                  {getApiErrorMessage(detailError)}
+                </div>
+              ) : null}
               <div className="mission-detail-heading">
                 <div>
                   <MissionStatusBadge status={selectedMission.status} />

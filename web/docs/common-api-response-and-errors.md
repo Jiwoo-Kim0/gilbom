@@ -236,6 +236,9 @@ Validation 오류 하나는 다음 필드를 사용한다.
 - 실행 중인 임무를 다시 시작 → `409 COMMAND_STATE_CONFLICT`
 - 보고서 시작일이 종료일보다 늦음 → `422 REPORT_VALIDATION_FAILED`
 - 통계 `from`과 `to`가 같거나 두 Instant의 차이가 366일을 초과함 → `422 STATISTICS_PERIOD_INVALID`
+- 로봇 Telemetry 통계 기간이 역전·동일하거나 31일을 초과함 → `422 STATISTICS_PERIOD_INVALID`
+- 로봇 Telemetry 시계열이 31일 또는 5,000구간을 초과함 → `422 STATISTICS_PERIOD_INVALID`
+- 로봇 Telemetry 시계열 `interval`이 `1m`, `5m`, `15m`, `1h`가 아님 → `400 COMMON_INVALID_REQUEST`
 - 통계 날짜·UUID를 파싱할 수 없음 → `400 COMMON_INVALID_REQUEST`
 - 통계의 `patrolAreaId` UUID가 유효하지만 존재하지 않음 → `404 PATROL_AREA_NOT_FOUND`
 

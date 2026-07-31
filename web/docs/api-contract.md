@@ -19,6 +19,7 @@ API 계약은 다음 자료의 조합으로 구성한다.
 | 전체 REST/SSE endpoint와 필요 권한 | [`authorization-matrix.md`](./authorization-matrix.md) |
 | 인증·세션·CSRF·MFA 의미 | [`admin-authentication-security.md`](./admin-authentication-security.md) |
 | 통계 기간·집계·빈 데이터 의미 | [`statistics-api-contract.md`](./statistics-api-contract.md) |
+| 로봇별 Telemetry 기간 통계 | [`robot-telemetry-statistics-contract.md`](./robot-telemetry-statistics-contract.md) |
 | 보고서 상태·버전·승인 | [`report-status-contract.md`](./report-status-contract.md) |
 | 아직 OpenAPI로 이전하지 않은 도메인 DTO 초안 | [기존 REST/SSE API 명세서](<../../docs/길봄_MQTT 통신_SWAGGER REST SSE_API 명세서.pdf>) |
 | MQTT topic·payload·QoS·TTL | [`mqtt-v2-contract-freeze.md`](./mqtt-v2-contract-freeze.md) |

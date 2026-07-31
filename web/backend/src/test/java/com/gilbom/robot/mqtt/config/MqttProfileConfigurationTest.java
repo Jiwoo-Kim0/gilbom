@@ -1,5 +1,7 @@
 package com.gilbom.robot.mqtt.config;
 
+import java.time.Duration;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
@@ -27,6 +29,8 @@ class MqttProfileConfigurationTest {
 
                     assertThat(properties.getBroker()).isEqualTo("ssl://localhost:8883");
                     assertThat(properties.getClientId()).isEqualTo("gilbom-local");
+                    assertThat(properties.getReconnectMaxDelay())
+                            .isEqualTo(Duration.ofSeconds(5));
                     assertThat(properties.getSubscribeTopics()).containsExactly(
                             "tbs/v2/robots/+/presence",
                             "tbs/v2/robots/+/state",
@@ -37,6 +41,19 @@ class MqttProfileConfigurationTest {
                     assertThat(properties.getSecurity().getClientCertificate()).isEmpty();
                     assertThat(properties.getSecurity().getClientPrivateKey()).isEmpty();
                 });
+    }
+
+    @Test
+    void reconnectMaxDelayCanBeOverridden() {
+        contextRunner
+                .withPropertyValues(
+                        "spring.profiles.active=local",
+                        "MQTT_RECONNECT_MAX_DELAY=3s"
+                )
+                .run(context -> assertThat(
+                        context.getBean(MqttProperties.class)
+                                .getReconnectMaxDelay())
+                        .isEqualTo(Duration.ofSeconds(3)));
     }
 
     @Test

@@ -11,6 +11,8 @@ declare namespace naver.maps {
 
   class Point {
     constructor(x: number, y: number)
+    readonly x: number
+    readonly y: number
   }
 
   class Size {
@@ -42,16 +44,53 @@ declare namespace naver.maps {
     zoom?: number
     minZoom?: number
     maxZoom?: number
+    draggable?: boolean
+    pinchZoom?: boolean
+    scrollWheel?: boolean
+    keyboardShortcuts?: boolean
+    disableDoubleClickZoom?: boolean
+    disableDoubleTapZoom?: boolean
+    disableTwoFingerTapZoom?: boolean
     zoomControl?: boolean
     zoomControlOptions?: ZoomControlOptions
   }
 
+  interface MapSystemProjection {
+    fromCoordToOffset(coord: LatLng): Point
+  }
+
   class Map {
     constructor(element: HTMLElement, options: MapOptions)
+    getProjection(): MapSystemProjection
     setCenter(latlng: LatLng): void
     setZoom(zoom: number): void
     fitBounds(bounds: LatLngBounds): void
     destroy(): void
+  }
+
+  interface MapPointerEvent {
+    coord: LatLng
+    offset?: Point
+  }
+
+  interface MapEventListener {
+    eventName?: string
+  }
+
+  namespace Event {
+    function addListener(
+      target: Map,
+      eventName: 'click',
+      listener: (event: MapPointerEvent) => void,
+    ): MapEventListener
+
+    function addListener(
+      target: Map,
+      eventName: 'bounds_changed' | 'size_changed',
+      listener: () => void,
+    ): MapEventListener
+
+    function removeListener(listener: MapEventListener): void
   }
 
   interface PolygonOptions {

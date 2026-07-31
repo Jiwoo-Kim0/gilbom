@@ -22,6 +22,14 @@ import paho.mqtt.client as mqtt
 
 
 SCHEMA_VERSION = "2.0"
+COMMAND_TYPES = (
+    "START_MISSION",
+    "PAUSE_MISSION",
+    "RESUME_MISSION",
+    "CANCEL_MISSION",
+    "EMERGENCY_STOP",
+    "CLEAR_EMERGENCY_STOP",
+)
 DEFAULT_CA_CERTIFICATE = (
     Path(__file__).resolve().parents[2]
     / "infra"
@@ -114,13 +122,37 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--command-type",
         default="EMERGENCY_STOP",
-        choices=(
-            "START_MISSION",
-            "PAUSE_MISSION",
-            "RESUME_MISSION",
-            "CANCEL_MISSION",
-            "EMERGENCY_STOP",
-            "CLEAR_EMERGENCY_STOP",
+        choices=COMMAND_TYPES,
+    )
+    parser.add_argument(
+        "--command-outcome",
+        action="append",
+        default=[],
+        metavar="TYPE=STATUS:REASON",
+        help=(
+            "Override one command's final result for an E2E scenario. "
+            "STATUS must be COMPLETED, FAILED, or REJECTED."
+        ),
+    )
+    parser.add_argument(
+        "--command-delay-sec",
+        action="append",
+        default=[],
+        metavar="TYPE=SECONDS",
+        help=(
+            "Delay ACK and final Result for one command type. "
+            "Useful for expiry and late-Result E2E scenarios."
+        ),
+    )
+    parser.add_argument(
+        "--duplicate-results-for",
+        action="append",
+        default=[],
+        choices=COMMAND_TYPES,
+        metavar="TYPE",
+        help=(
+            "Publish the same ACCEPTED and final Result twice for one "
+            "command type to verify server-side deduplication."
         ),
     )
     args = parser.parse_args()
@@ -132,6 +164,41 @@ def parse_args() -> argparse.Namespace:
         parser.error("--battery-percent must be between 0 and 100")
     if args.jetson_temp_step_c < 0.0:
         parser.error("--jetson-temp-step-c must be zero or greater")
+    args.command_outcomes = {}
+    for definition in args.command_outcome:
+        try:
+            command_type, outcome = definition.split("=", 1)
+            status, reason_code = outcome.split(":", 1)
+        except ValueError:
+            parser.error(
+                "--command-outcome must use TYPE=STATUS:REASON"
+            )
+        if (
+            command_type not in COMMAND_TYPES
+            or status not in {"COMPLETED", "FAILED", "REJECTED"}
+            or not reason_code
+        ):
+            parser.error(
+                "--command-outcome contains an unsupported type, "
+                "status, or empty reason"
+            )
+        args.command_outcomes[command_type] = (status, reason_code)
+    args.command_delays = {}
+    for definition in args.command_delay_sec:
+        try:
+            command_type, raw_delay = definition.split("=", 1)
+            delay_seconds = float(raw_delay)
+        except ValueError:
+            parser.error(
+                "--command-delay-sec must use TYPE=SECONDS"
+            )
+        if command_type not in COMMAND_TYPES or delay_seconds < 0:
+            parser.error(
+                "--command-delay-sec contains an unsupported type "
+                "or negative delay"
+            )
+        args.command_delays[command_type] = delay_seconds
+    args.duplicate_results_for = set(args.duplicate_results_for)
     return args
 
 
@@ -194,6 +261,11 @@ class MockRobot:
         self.self_test_requested = threading.Event()
         self.telemetry_thread: threading.Thread | None = None
         self.processed_commands: dict[str, dict[str, Any]] = {}
+        self.command_outcomes: dict[str, tuple[str, str]] = (
+            args.command_outcomes
+        )
+        self.command_delays: dict[str, float] = args.command_delays
+        self.duplicate_results_for: set[str] = args.duplicate_results_for
 
         self.mode = "READY"
         self.state_reason = "NONE"
@@ -627,6 +699,16 @@ class MockRobot:
             )
             return
 
+        command_type = command.get("command_type")
+        delay_seconds = self.command_delays.get(command_type, 0.0)
+        if delay_seconds > 0:
+            print(
+                f"Delaying command result commandId={command_id} "
+                f"type={command_type} seconds={delay_seconds}"
+            )
+            if self.stop_event.wait(delay_seconds):
+                return
+
         accepted = self.command_result(
             command_id,
             "ACCEPTED",
@@ -639,14 +721,32 @@ class MockRobot:
             qos=1,
             retain=False,
         )
+        duplicate_results = command_type in self.duplicate_results_for
+        if duplicate_results:
+            self.publish_json(
+                self.command_result_topic,
+                accepted,
+                qos=1,
+                retain=False,
+            )
+            print(
+                f"Duplicate ACCEPTED Result published commandId={command_id}"
+            )
 
         with self.state_lock:
             mission_id_before = self.mission_id
             mission_started_at_before = self.mission_started_at
 
-        status, reason_code = self.apply_command(command)
+        overridden = self.command_outcomes.get(command_type)
+        if overridden is None:
+            status, reason_code = self.apply_command(command)
+        else:
+            status, reason_code = overridden
+            print(
+                f"Command outcome overridden commandId={command_id} "
+                f"type={command_type} status={status} reason={reason_code}"
+            )
         if status == "COMPLETED":
-            command_type = command.get("command_type")
             with self.state_lock:
                 mission_id_after = self.mission_id
             mission_id = (
@@ -686,12 +786,22 @@ class MockRobot:
                 qos=1,
                 retain=True,
             )
-        self.publish_final_result(
+        final_result = self.publish_final_result(
             command_id,
             received_at,
             status,
             reason_code,
         )
+        if duplicate_results:
+            self.publish_json(
+                self.command_result_topic,
+                final_result,
+                qos=1,
+                retain=False,
+            )
+            print(
+                f"Duplicate final Result published commandId={command_id}"
+            )
 
     def apply_command(self, command: dict[str, Any]) -> tuple[str, str]:
         command_type = command.get("command_type")
@@ -760,7 +870,7 @@ class MockRobot:
         received_at: datetime,
         status: str,
         reason_code: str,
-    ) -> None:
+    ) -> dict[str, Any]:
         result = self.command_result(
             command_id,
             status,
@@ -778,6 +888,7 @@ class MockRobot:
             f"Command result published commandId={command_id} "
             f"status={status} reason={reason_code}"
         )
+        return result
 
     def handle_ingest_receipt(self, receipt: dict[str, Any]) -> None:
         if receipt.get("schema_version") != SCHEMA_VERSION:

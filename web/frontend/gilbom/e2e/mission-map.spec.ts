@@ -85,11 +85,12 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
   await page.addInitScript(() => {
     type EventListener = (event: MessageEvent<string>) => void
     const overlayState = {
-      polygons: 0,
-      polylines: 0,
-      markers: 0,
-      markerLatitude: null as number | null,
-      markerLongitude: null as number | null,
+      mapConstructions: 0,
+      mapDestructions: 0,
+      fitBoundsCalls: 0,
+      nativePolygons: 0,
+      nativePolylines: 0,
+      nativeMarkers: 0,
     }
 
     class FakeLatLng {
@@ -107,58 +108,57 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
       }
     }
 
+    class FakePoint {
+      constructor(
+        readonly x: number,
+        readonly y: number,
+      ) {}
+    }
+
     class FakeMap {
+      constructor() {
+        overlayState.mapConstructions += 1
+      }
+
       setCenter() {}
       setZoom() {}
-      fitBounds() {}
-      destroy() {}
+      fitBounds() {
+        overlayState.fitBoundsCalls += 1
+      }
+      getProjection() {
+        return {
+          fromCoordToOffset(position: FakeLatLng) {
+            return new FakePoint(
+              (position.lng() - 126.99) * 10_000,
+              (37.02 - position.lat()) * 10_000,
+            )
+          },
+        }
+      }
+      destroy() {
+        overlayState.mapDestructions += 1
+      }
     }
 
     class FakePolygon {
-      private active = true
-
       constructor() {
-        overlayState.polygons += 1
+        overlayState.nativePolygons += 1
       }
-
-      setMap(map: unknown) {
-        if (map === null && this.active) {
-          this.active = false
-          overlayState.polygons -= 1
-        }
-      }
+      setMap() {}
     }
 
     class FakePolyline {
-      private active = true
-
       constructor() {
-        overlayState.polylines += 1
+        overlayState.nativePolylines += 1
       }
-
-      setMap(map: unknown) {
-        if (map === null && this.active) {
-          this.active = false
-          overlayState.polylines -= 1
-        }
-      }
+      setMap() {}
     }
 
     class FakeMarker {
-      private active = true
-
-      constructor(options: { position: FakeLatLng }) {
-        overlayState.markers += 1
-        overlayState.markerLatitude = options.position.lat()
-        overlayState.markerLongitude = options.position.lng()
+      constructor() {
+        overlayState.nativeMarkers += 1
       }
-
-      setMap(map: unknown) {
-        if (map === null && this.active) {
-          this.active = false
-          overlayState.markers -= 1
-        }
-      }
+      setMap() {}
     }
 
     class FakeEventSource {
@@ -208,8 +208,18 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
           Polyline: FakePolyline,
           Marker: FakeMarker,
           Size: class FakeSize {},
-          Point: class FakePoint {},
+          Point: FakePoint,
           Position: { TOP_RIGHT: 1 },
+          Event: {
+            addListener(
+              _map: FakeMap,
+              _eventName: string,
+              listener: () => void,
+            ) {
+              return { listener }
+            },
+            removeListener() {},
+          },
         },
       },
     })
@@ -345,22 +355,33 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
   })).toBeVisible()
   await expect(page.getByTestId('mission-naver-map')).toBeVisible()
   await expect(page.getByTestId('mission-map-fallback')).toHaveCount(0)
+  await expect(page.getByTestId('mission-map-projected-overlay')).toBeVisible()
+  await expect(page.getByTestId('mission-area-shape')).toHaveCount(1)
+  await expect(page.getByTestId('mission-trajectory'))
+    .toHaveAttribute('data-point-count', '3')
+  const currentMarker = page.getByTestId('mission-current-position')
+  await expect(currentMarker).toHaveAttribute('data-latitude', '37.006')
+  await expect(currentMarker).toHaveAttribute('data-longitude', '127.006')
+  await expect(currentMarker).toHaveAttribute('data-heading', '45')
+  await expect(currentMarker).toHaveClass(/is-online/u)
   await expect.poll(() => page.evaluate(() => (
     window as Window & {
       __missionMapOverlayState?: {
-        polygons: number
-        polylines: number
-        markers: number
-        markerLatitude: number | null
-        markerLongitude: number | null
+        mapConstructions: number
+        mapDestructions: number
+        fitBoundsCalls: number
+        nativePolygons: number
+        nativePolylines: number
+        nativeMarkers: number
       }
     }
   ).__missionMapOverlayState)).toEqual({
-    polygons: 1,
-    polylines: 1,
-    markers: 1,
-    markerLatitude: 37.006,
-    markerLongitude: 127.006,
+    mapConstructions: 1,
+    mapDestructions: 0,
+    fitBoundsCalls: 1,
+    nativePolygons: 0,
+    nativePolylines: 0,
+    nativeMarkers: 0,
   })
   await expect(page.getByText('실제 궤적 (3)')).toBeVisible()
   await expect(page.getByText('현재 위치가 지정된 순찰 구역 밖입니다.'))
@@ -382,22 +403,29 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
     })
   })
 
+  await expect(currentMarker).toHaveAttribute('data-latitude', '37.02')
+  await expect(currentMarker).toHaveAttribute('data-longitude', '127.02')
+  await expect(currentMarker).toHaveAttribute('data-heading', '90')
+  await expect(page.getByTestId('mission-trajectory'))
+    .toHaveAttribute('data-point-count', '4')
   await expect.poll(() => page.evaluate(() => (
     window as Window & {
       __missionMapOverlayState?: {
-        polygons: number
-        polylines: number
-        markers: number
-        markerLatitude: number | null
-        markerLongitude: number | null
+        mapConstructions: number
+        mapDestructions: number
+        fitBoundsCalls: number
+        nativePolygons: number
+        nativePolylines: number
+        nativeMarkers: number
       }
     }
   ).__missionMapOverlayState)).toEqual({
-    polygons: 1,
-    polylines: 1,
-    markers: 1,
-    markerLatitude: 37.02,
-    markerLongitude: 127.02,
+    mapConstructions: 1,
+    mapDestructions: 0,
+    fitBoundsCalls: 1,
+    nativePolygons: 0,
+    nativePolylines: 0,
+    nativeMarkers: 0,
   })
   await expect(page.getByText('실제 궤적 (4)')).toBeVisible()
   await expect(page.getByText('현재 위치가 지정된 순찰 구역 밖입니다.'))

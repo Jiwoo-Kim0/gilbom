@@ -14,14 +14,15 @@
     "lint": "eslint .",
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "preview": "vite preview",
-    "test:e2e:mission": "playwright test e2e/mission-time.spec.ts e2e/mission-map.spec.ts",
+    "test:e2e:mission": "playwright test e2e/mission-time.spec.ts e2e/mission-map.spec.ts e2e/patrol-area-registration.spec.ts",
     "test:e2e:mission:live": "playwright test e2e/mission-time-live.spec.ts --config=playwright.live.config.ts"
   },
   "dependencies": {
     "lucide-react": "1.27.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "react-router": "8.3.0"
+    "react-router": "8.3.0",
+    "recharts": "3.10.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

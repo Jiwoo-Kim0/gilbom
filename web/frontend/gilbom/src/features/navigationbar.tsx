@@ -4,6 +4,7 @@ import {
   CircleDot,
   ClipboardList,
   FileClock,
+  MapPinned,
   ShieldCheck,
   User,
 } from 'lucide-react'
@@ -50,6 +51,12 @@ const navigationItems: readonly NavigationItem[] = [
     label: '로봇 상태 관리',
     icon: Bot,
     requiredPermission: ROBOT_STATUS_VIEW,
+  },
+  {
+    to: '/patrol-areas',
+    label: '순찰 구역 관리',
+    icon: MapPinned,
+    requiredPermission: MISSION_VIEW,
   },
   {
     to: '/missions',
