@@ -1,0 +1,25 @@
+services:
+  # 이 override는 운영 topology와 image를 그대로 사용하되 자동 재시작을 끈다.
+  # 실패한 container가 restart loop로 성공처럼 보이지 않게 하고, project별 named
+  # volume은 container-report-smoke.sh가 종료 시 항상 폐기한다.
+  db:
+    restart: "no"
+    labels:
+      com.gilbom.validation-scope: container-report-smoke
+
+  mosquitto:
+    restart: "no"
+    labels:
+      com.gilbom.validation-scope: container-report-smoke
+
+  backend:
+    restart: "no"
+    environment:
+      INITIAL_ADMIN_BOOTSTRAP_ENABLED: "true"
+    labels:
+      com.gilbom.validation-scope: container-report-smoke
+
+  frontend:
+    restart: "no"
+    labels:
+      com.gilbom.validation-scope: container-report-smoke

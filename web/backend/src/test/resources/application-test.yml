@@ -1,0 +1,7 @@
+management:
+  endpoint:
+    health:
+      # 도메인 통합 테스트는 필요한 bean만 import하는 축소 context를 사용하므로
+      # 운영 readiness group의 전체 contributor가 없는 것이 정상이다.
+      # 운영 application.yml은 기본 true를 유지하고 실제 image smoke로 검증한다.
+      validate-group-membership: false
