@@ -246,9 +246,10 @@ no-op 람다로 뒀다. Spring이 빈 초기화 때 덮어쓰고, 직접 생성�
 
 `IncidentEventIngestionService`의 발행부는 `SELECT`를 한 번 더 한다. 이유:
 
-- payload에는 `risk_level`이 없다. 서버가 정하는 값이고 현재 DB 기본값 `MEDIUM`이다.
-- payload로 이벤트를 만들면 실제 상태와 어긋나고, **나중에 위험도 계산이 추가될 때
-  조용히 틀린 값을 내보낸다.**
+- payload에는 `risk_level`이 없다. 서버가 계산해서 저장하는 값이다.
+- payload로 이벤트를 만들면 실제 상태와 어긋난다. **작성 시점에는 이 칼럼이 DB 기본값
+  `MEDIUM`으로 고정돼 있었는데, 그때 payload를 근거로 만들었다면 위험도 계산이 붙은 뒤
+  조용히 틀린 값을 내보냈을 것이다.** (실제로 07-30에 계산 로직이 들어왔다 — 7.2절)
 
 사건은 트랙 단위 + 30초 쿨다운이라 빈도가 낮아 SELECT 한 번의 비용은 무시할 수준이다.
 
@@ -386,21 +387,21 @@ CSRF → 로그인 → MFA → 상태 확인 → SSE 구독을 한 번에 처리
 S3 연동 계획이 없다면 지금이 최선이고, 프론트에 "내보내기·근거 이미지는 후속"으로
 공유해야 한다. 붙일 계획이 있다면 두 개를 한 묶음으로 하는 게 효율적이다.
 
-### 7.2 minho에게 넘긴 것
+### 7.2 minho에게 넘겼던 것 — **3개 모두 해소됨 (2026-07-30 확인)**
 
-`IncidentEventIngestionService`와 V22·V23이 그의 작업이다.
+`IncidentEventIngestionService`와 V22·V23이 그의 작업이다. 07-30에 확인했을 때 내가
+넘긴 세 항목이 모두 처리돼 있었다. 무엇이 문제였고 어떻게 해결됐는지 기록으로 남긴다.
+현재 스키마 기준 설명은 [defect-schema.md](../../defect-schema.md) 2.1·2.5·2.6절에 있다.
 
-1. **`risk_level`이 항상 `MEDIUM`** — `createDefect`가 이 칼럼을 넣지 않아 DB 기본값으로
-   고정된다. 계약은 서버가 위치·결함종류·파손범위를 종합해 계산하라고 정한다
-   (`confidence ≠ 위험도`). **내 `severities` 필터와 지도 마커 색이 동작은 하지만 값이
-   무의미하다.**
-2. **`incident_code` 형식이 계약과 다름** — `"INC-" + eventId`(UUID)로 만들어
-   `INC-3cf98dc0-424a-...`가 된다. 계약(22.5)은 `INC-20260723-000031`이다. 그리고
-   `VARCHAR(40)`에 정확히 40자로 한계에 붙어 있어 접두어를 조금만 바꾸면 넘친다.
-3. **GPS 무효 탐지가 조용히 버려진다** — `ingest()`에서 `location.valid == false`거나 zone
-   판정 실패면 결함을 만들지 않고 조기 반환한다. `defect.defect.location`이 `NOT NULL`이라
-   스키마상 강제된 선택이지만, **"탐지는 했지만 위치를 몰라 버린 건"이 집계 어디에도
-   남지 않는다.** 의도한 동작인지 확인이 필요하다.
+| 넘겼던 문제 | 해결 |
+|---|---|
+| `risk_level`이 항상 `MEDIUM`이라 `severities` 필터와 지도 마커 색이 무의미했다 | `risk_level`·`risk_score`·`risk_rule_version`을 저장한다. V1 규칙은 `damage_ratio × 100`이고 25/50/75를 등급 경계로 쓰며 `DAMAGE_RATIO_V1`을 남긴다. `damage_ratio`가 없으면 **AI `confidence`로 대체하지 않고** 점수 NULL·등급 `MEDIUM`·`review_required=true`로 둔다 |
+| `incident_code`가 `"INC-" + eventId`(UUID)라 계약 형식과 달랐고 `VARCHAR(40)` 한계에 붙어 있었다 | `INC-YYYYMMDD-NNNNNN`. 날짜는 `occurred_at`의 Asia/Seoul 일자이고, `defect.incident_code_counter`(V28)가 `INSERT ... ON CONFLICT DO UPDATE ... RETURNING`으로 일자별 순번을 원자적으로 발급한다. 결함 저장이 실패하면 Counter 증가도 함께 롤백된다 |
+| GPS 무효·구역 미확정 탐지가 조용히 버려져 집계 어디에도 남지 않았다 | `defect.incident_ingestion_issue`(V28) 검토 대기열에 남긴다. `issue_type`은 `INVALID_GPS` / `PATROL_AREA_UNRESOLVED`, `issue_status`는 `OPEN` / `RESOLVED` / `DISMISSED`. 가짜 좌표로 결함을 만들지 않으면서 `telemetry.robot_event` 원본과 Image 연결은 같은 트랜잭션에 보존한다 |
+
+**내 코드에 미치는 영향**: `severities` 필터와 지도 마커 색이 이제 의미를 갖는다.
+다만 `damage_ratio`가 없는 관측은 여전히 `MEDIUM`으로 들어오므로, 등급만으로 판단하지 말고
+`review_required`를 함께 봐야 한다.
 
 ### 7.3 구조 개선 후속
 
