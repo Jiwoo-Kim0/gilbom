@@ -34,9 +34,15 @@ assert_contains backend/build.gradle \
   "JavaLanguageVersion.of(21)" \
   "Java toolchain 21"
 assert_count backend/Dockerfile \
-  "amazoncorretto:21.0.12-alpine3.22" \
-  2 \
-  "Java builder/runtime 21.0.12"
+  "FROM amazoncorretto:21.0.12-alpine3.22 AS builder" \
+  1 \
+  "Java builder 21.0.12"
+assert_contains backend/Dockerfile \
+  "FROM alpine:3.22 AS runtime" \
+  "Backend runtime Alpine 3.22"
+assert_contains backend/Dockerfile \
+  "COPY --from=builder /opt/java-runtime /opt/java/openjdk" \
+  "jlink Corretto runtime"
 assert_contains backend/gradle/wrapper/gradle-wrapper.properties \
   "gradle-8.14.3-bin.zip" \
   "Gradle Wrapper 8.14.3"
@@ -45,6 +51,12 @@ assert_contains .java-version "21.0.12" "local Java 21.0.12"
 assert_contains frontend/Dockerfile \
   "node:24.18.0-alpine3.23" \
   "Node Docker 24.18.0"
+assert_contains frontend/Dockerfile \
+  "nginx:1.30.4-alpine AS runtime" \
+  "Nginx runtime 1.30.4"
+assert_contains frontend/Dockerfile \
+  "USER nginx" \
+  "Nginx non-root runtime"
 assert_contains frontend/gilbom/.nvmrc "24.18.0" "local Node 24.18.0"
 assert_contains frontend/gilbom/package.json \
   '"node": "24.18.0"' \
@@ -64,5 +76,13 @@ assert_contains frontend/gilbom/package-lock.json \
 assert_contains frontend/gilbom/package-lock.json \
   '"react-dom": "19.2.8"' \
   "locked React DOM 19.2.8"
+
+assert_count compose.prod.yaml \
+  "image: eclipse-mosquitto:2.1.2-alpine" \
+  2 \
+  "production Mosquitto and config init 2.1.2"
+assert_contains compose.prod.yaml \
+  "image: postgis/postgis:16-3.5" \
+  "production PostgreSQL/PostGIS 16-3.5"
 
 echo "Runtime version pin policy: PASS"

@@ -1,42 +1,346 @@
-name: gilbom-prod
+name: ${COMPOSE_PROJECT_NAME:-gilbom-prod}
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "${LOG_MAX_SIZE:-10m}"
+    max-file: "${LOG_MAX_FILES:-3}"
 
 services:
-  mosquitto:
+  # 공개 설정은 매 배포에 갱신하고, 운영 중 발급된 credential은 named volume에서 보존한다.
+  mosquitto-config-init:
     image: eclipse-mosquitto:2.1.2-alpine
-    container_name: gilbom-mosquitto
-    restart: unless-stopped
-    user: "1883:1883"
-
-    ports:
-      - "${MQTT_TLS_PORT:-8883}:8883"
-
+    restart: "no"
+    user: "0:0"
+    entrypoint:
+      - /bin/sh
+      - -ec
+    command:
+      - |
+        cp /config-source/mosquitto.conf /mosquitto/config/mosquitto.conf
+        cp /config-source/acl /mosquitto/config/acl
+        cp /config-source/run-production-mosquitto.sh /mosquitto/config/run-production-mosquitto.sh
+        if [ ! -s /mosquitto/credentials/passwd ]; then
+          cp /run/secrets/mosquitto_passwd /mosquitto/credentials/passwd
+        fi
+        chown -R 1883:1883 /mosquitto/config /mosquitto/credentials /mosquitto/data
+        chmod 0750 /mosquitto/config /mosquitto/credentials /mosquitto/data
+        chmod 0440 /mosquitto/config/mosquitto.conf /mosquitto/config/acl
+        chmod 0550 /mosquitto/config/run-production-mosquitto.sh
+        chmod 0660 /mosquitto/credentials/passwd
     volumes:
-      - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      - ./infra/mosquitto/acl:/mosquitto/config/acl:ro
-      - ./infra/mosquitto/passwd:/mosquitto/config/passwd:ro
-      - ${MOSQUITTO_CERT_DIR:-/opt/gilbom/mosquitto/certs}:/mosquitto/certs:ro
-
+      - ./infra/mosquitto/mosquitto.conf:/config-source/mosquitto.conf:ro
+      - ./infra/mosquitto/acl:/config-source/acl:ro
+      - ./infra/mosquitto/run-production-mosquitto.sh:/config-source/run-production-mosquitto.sh:ro
+      - mosquitto_config:/mosquitto/config
+      - mosquitto_credentials:/mosquitto/credentials
+      - mosquitto_data:/mosquitto/data
+    secrets:
+      - mosquitto_passwd
+    network_mode: none
     read_only: true
     tmpfs:
-      - /tmp
-      - /mosquitto/data
-      - /mosquitto/log
-
-    security_opt:
-      - no-new-privileges:true
-
+      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
+    cpus: "${MQTT_INIT_CPUS:-0.25}"
+    mem_limit: ${MQTT_INIT_MEMORY_LIMIT:-64m}
+    pids_limit: ${MQTT_INIT_PIDS_LIMIT:-32}
+    logging: *default-logging
 
-    logging:
-      driver: local
-      options:
-        max-size: "10m"
-        max-file: "3"
-=======
-# Reserved for a future production deployment implementation.
-# An empty or local Compose override is not a production configuration.
-# Follow docs/environment-configuration-strategy.md for the approved
-# prod profile, workload IAM role, Secrets Manager/KMS, network, cookie,
-# CORS, session, S3, MQTT, and LLM requirements.
->>>>>>> chaeun
+  mosquitto:
+    image: eclipse-mosquitto:2.1.2-alpine
+    restart: unless-stopped
+    user: "1883:1883"
+    entrypoint:
+      - /bin/sh
+      - /mosquitto/config/run-production-mosquitto.sh
+    depends_on:
+      mosquitto-config-init:
+        condition: service_completed_successfully
+    environment:
+      MQTT_TLS_SERVER_NAME: ${MQTT_TLS_SERVER_NAME:?MQTT_TLS_SERVER_NAME is required}
+    ports:
+      - "${MQTT_BIND_ADDRESS:-0.0.0.0}:${MQTT_TLS_PORT:-8883}:8883"
+    volumes:
+      - mosquitto_config:/mosquitto/config:ro
+      - mosquitto_credentials:/mosquitto/credentials:ro
+      - mosquitto_data:/mosquitto/data
+    secrets:
+      - mosquitto_tls_fullchain
+      - mosquitto_tls_private_key
+      - mqtt_ca_certificate
+      - mqtt_backend_password
+    healthcheck:
+      # Backend 기동 전 TLS chain, 계정 인증과 Broker system topic 응답까지 확인한다.
+      test:
+        - CMD-SHELL
+        - >-
+          mosquitto_sub -h "$$MQTT_TLS_SERVER_NAME" -p 8883
+          --cafile /run/secrets/mqtt_ca_certificate
+          -u gilbom -P "$$(cat /run/secrets/mqtt_backend_password)"
+          -i gilbom-broker-health
+          -t '$$SYS/broker/version' -C 1 -W 5
+          > /dev/null
+      interval: 15s
+      timeout: 8s
+      retries: 8
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+      - /mosquitto/log:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    cpus: "${MQTT_CPUS:-1.0}"
+    mem_limit: ${MQTT_MEMORY_LIMIT:-256m}
+    mem_reservation: ${MQTT_MEMORY_RESERVATION:-64m}
+    pids_limit: ${MQTT_PIDS_LIMIT:-128}
+    networks:
+      edge: {}
+      data:
+        aliases:
+          - ${MQTT_TLS_SERVER_NAME:?MQTT_TLS_SERVER_NAME is required}
+    logging: *default-logging
+
+  db:
+    image: postgis/postgis:16-3.5
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-gilbom}
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:-gilbom_db_admin}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+      POSTGRES_FLYWAY_USER: ${POSTGRES_FLYWAY_USER:-gilbom_flyway}
+      POSTGRES_FLYWAY_PASSWORD_FILE: /run/secrets/postgres_flyway_password
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-gilbom_app}
+      POSTGRES_APP_PASSWORD_FILE: /run/secrets/postgres_app_password
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C
+      TZ: ${TZ:-UTC}
+      PGTZ: ${TZ:-UTC}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init/20-create-application-roles.sh:/docker-entrypoint-initdb.d/20-create-application-roles.sh:ro
+    secrets:
+      - postgres_admin_password
+      - postgres_flyway_password
+      - postgres_app_password
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready --host 127.0.0.1 --username "$${POSTGRES_USER}" --dbname "$${POSTGRES_DB}"
+          && PGPASSWORD="$$(cat "$${POSTGRES_PASSWORD_FILE}")" psql --host 127.0.0.1
+          --username "$${POSTGRES_USER}" --dbname "$${POSTGRES_DB}" --no-password
+          --tuples-only --command 'SELECT PostGIS_Version();' > /dev/null
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 60s
+    shm_size: ${POSTGRES_SHM_SIZE:-256m}
+    cpus: "${POSTGRES_CPUS:-2.0}"
+    mem_limit: ${POSTGRES_MEMORY_LIMIT:-2g}
+    mem_reservation: ${POSTGRES_MEMORY_RESERVATION:-512m}
+    pids_limit: ${POSTGRES_PIDS_LIMIT:-256}
+    networks:
+      - data
+    logging: *default-logging
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: ${BACKEND_IMAGE:-gilbom-backend:local}
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-ec2,docker}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-gilbom}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_APP_USER:-gilbom_app}
+      SPRING_DATASOURCE_PASSWORD_FILE: /run/secrets/postgres_app_password
+      SPRING_FLYWAY_USER: ${POSTGRES_FLYWAY_USER:-gilbom_flyway}
+      SPRING_FLYWAY_PASSWORD_FILE: /run/secrets/postgres_flyway_password
+      SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE: ${SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE:-20s}
+      GILBOM_REPORT_PDF_STORAGE_ROOT: /app/data/report-pdf
+      GILBOM_STORAGE_LOCAL_ROOT_DIRECTORY: /app/data/robot-images
+      GILBOM_STORAGE_URL_SIGNING_KEY_BASE64_FILE: /run/secrets/gilbom_storage_signing_key
+      GILBOM_CORS_ENABLED: ${GILBOM_CORS_ENABLED:-false}
+      GILBOM_CORS_ALLOWED_ORIGINS: ${GILBOM_CORS_ALLOWED_ORIGINS:-}
+      GILBOM_CORS_ALLOW_CREDENTIALS: ${GILBOM_CORS_ALLOW_CREDENTIALS:-true}
+      GILBOM_LLM_ENABLED: ${GILBOM_LLM_ENABLED:-false}
+      GILBOM_LLM_PROVIDER: ${GILBOM_LLM_PROVIDER:-}
+      GILBOM_LLM_BASE_URL: ${GILBOM_LLM_BASE_URL:-https://gms.ssafy.io/gmsapi/api.openai.com/v1}
+      GILBOM_LLM_MODEL: ${GILBOM_LLM_MODEL:-}
+      GILBOM_LLM_API_KEY_FILE: /run/secrets/gilbom_llm_api_key
+      GILBOM_LLM_POLICY_APPROVED: ${GILBOM_LLM_POLICY_APPROVED:-false}
+      GILBOM_LLM_TRAINING_EXCLUSION_APPROVED: ${GILBOM_LLM_TRAINING_EXCLUSION_APPROVED:-false}
+      GILBOM_LLM_DATA_RETENTION_APPROVED: ${GILBOM_LLM_DATA_RETENTION_APPROVED:-false}
+      GILBOM_LLM_OUTBOUND_ALLOWLIST_APPLIED: ${GILBOM_LLM_OUTBOUND_ALLOWLIST_APPLIED:-false}
+      AUTH_RATE_LIMIT_HMAC_KEY_VERSION: ${AUTH_RATE_LIMIT_HMAC_KEY_VERSION:-1}
+      AUTH_RATE_LIMIT_HMAC_KEY_BASE64_FILE: /run/secrets/gilbom_auth_rate_limit_hmac_key
+      MFA_TOTP_SECRET_ENCRYPTION_ENABLED: ${MFA_TOTP_SECRET_ENCRYPTION_ENABLED:-true}
+      MFA_TOTP_SECRET_ACTIVE_KEY_VERSION: ${MFA_TOTP_SECRET_ACTIVE_KEY_VERSION:-1}
+      MFA_TOTP_SECRET_KEYRING_FILE: /run/secrets/gilbom_mfa_totp_keyring
+      INITIAL_ADMIN_BOOTSTRAP_ENABLED: ${INITIAL_ADMIN_BOOTSTRAP_ENABLED:-false}
+      INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:-}
+      INITIAL_ADMIN_PASSWORD_FILE: /run/secrets/gilbom_initial_admin_password
+      INITIAL_ADMIN_DISPLAY_NAME: ${INITIAL_ADMIN_DISPLAY_NAME:-}
+      INITIAL_ADMIN_USER_CODE: ${INITIAL_ADMIN_USER_CODE:-}
+      MQTT_BROKER: ssl://${MQTT_TLS_SERVER_NAME:?MQTT_TLS_SERVER_NAME is required}:8883
+      MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-gilbom-backend-prod}
+      MQTT_USERNAME: ${MQTT_USERNAME:-gilbom}
+      MQTT_PASSWORD_FILE: /run/secrets/mqtt_backend_password
+      MQTT_TRUST_CERTIFICATE: /run/secrets/mqtt_ca_certificate
+      MQTT_PUBLIC_BROKER_URI: ${MQTT_PUBLIC_BROKER_URI:?MQTT_PUBLIC_BROKER_URI is required}
+      MQTT_CREDENTIAL_PROVISIONING_ENABLED: ${MQTT_CREDENTIAL_PROVISIONING_ENABLED:-false}
+      MQTT_CREDENTIAL_PASSWORD_FILE: /app/config/mqtt/credentials/passwd
+      MQTT_CREDENTIAL_PASSWORD_COMMAND: mosquitto_passwd
+      MQTT_CONNECT_COMPLETION_TIMEOUT: ${MQTT_CONNECT_COMPLETION_TIMEOUT:-10s}
+      MQTT_DISCONNECT_COMPLETION_TIMEOUT: ${MQTT_DISCONNECT_COMPLETION_TIMEOUT:-5s}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - report_pdf_data:/app/data/report-pdf
+      - robot_images:/app/data/robot-images
+      - mosquitto_credentials:/app/config/mqtt/credentials
+    secrets:
+      - postgres_app_password
+      - postgres_flyway_password
+      - mqtt_backend_password
+      - mqtt_ca_certificate
+      - gilbom_llm_api_key
+      - gilbom_storage_signing_key
+      - gilbom_auth_rate_limit_hmac_key
+      - gilbom_mfa_totp_keyring
+      - gilbom_initial_admin_password
+    depends_on:
+      db:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - --quiet
+        - --spider
+        - http://127.0.0.1:8080/actuator/health/readiness
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    cpus: "${BACKEND_CPUS:-2.0}"
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-2g}
+    mem_reservation: ${BACKEND_MEMORY_RESERVATION:-512m}
+    pids_limit: ${BACKEND_PIDS_LIMIT:-256}
+    networks:
+      - app
+      - data
+      - llm-egress
+    logging: *default-logging
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_NAVER_MAP_CLIENT_ID: ${VITE_NAVER_MAP_CLIENT_ID:?VITE_NAVER_MAP_CLIENT_ID is required}
+    image: ${FRONTEND_IMAGE:-gilbom-frontend:local}
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_BIND_ADDRESS:-0.0.0.0}:${FRONTEND_HTTP_PORT:-80}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - --quiet
+        - --spider
+        - http://127.0.0.1:8080/healthz
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 10s
+    cpus: "${FRONTEND_CPUS:-0.5}"
+    mem_limit: ${FRONTEND_MEMORY_LIMIT:-128m}
+    mem_reservation: ${FRONTEND_MEMORY_RESERVATION:-32m}
+    pids_limit: ${FRONTEND_PIDS_LIMIT:-64}
+    networks:
+      - edge
+      - app
+    logging: *default-logging
+
+volumes:
+  postgres_data:
+  mosquitto_config:
+  mosquitto_credentials:
+  mosquitto_data:
+  report_pdf_data:
+  robot_images:
+
+secrets:
+  postgres_admin_password:
+    file: ${POSTGRES_ADMIN_PASSWORD_SECRET_FILE:?POSTGRES_ADMIN_PASSWORD_SECRET_FILE is required}
+  postgres_flyway_password:
+    file: ${POSTGRES_FLYWAY_PASSWORD_SECRET_FILE:?POSTGRES_FLYWAY_PASSWORD_SECRET_FILE is required}
+  postgres_app_password:
+    file: ${POSTGRES_APP_PASSWORD_SECRET_FILE:?POSTGRES_APP_PASSWORD_SECRET_FILE is required}
+  mqtt_backend_password:
+    file: ${MQTT_PASSWORD_SECRET_FILE:?MQTT_PASSWORD_SECRET_FILE is required}
+  mqtt_ca_certificate:
+    file: ${MQTT_CA_CERTIFICATE_FILE:?MQTT_CA_CERTIFICATE_FILE is required}
+  mosquitto_passwd:
+    file: ${MOSQUITTO_PASSWORD_FILE_SECRET_FILE:?MOSQUITTO_PASSWORD_FILE_SECRET_FILE is required}
+  mosquitto_tls_fullchain:
+    file: ${MOSQUITTO_TLS_FULLCHAIN_FILE:?MOSQUITTO_TLS_FULLCHAIN_FILE is required}
+  mosquitto_tls_private_key:
+    file: ${MOSQUITTO_TLS_PRIVATE_KEY_SECRET_FILE:?MOSQUITTO_TLS_PRIVATE_KEY_SECRET_FILE is required}
+  gilbom_llm_api_key:
+    file: ${GILBOM_LLM_API_KEY_SECRET_FILE:?GILBOM_LLM_API_KEY_SECRET_FILE is required}
+  gilbom_storage_signing_key:
+    file: ${GILBOM_STORAGE_SIGNING_KEY_SECRET_FILE:?GILBOM_STORAGE_SIGNING_KEY_SECRET_FILE is required}
+  gilbom_auth_rate_limit_hmac_key:
+    file: ${AUTH_RATE_LIMIT_HMAC_KEY_SECRET_FILE:?AUTH_RATE_LIMIT_HMAC_KEY_SECRET_FILE is required}
+  gilbom_mfa_totp_keyring:
+    file: ${MFA_TOTP_KEYRING_SECRET_FILE:?MFA_TOTP_KEYRING_SECRET_FILE is required}
+  gilbom_initial_admin_password:
+    file: ${INITIAL_ADMIN_PASSWORD_SECRET_FILE:?INITIAL_ADMIN_PASSWORD_SECRET_FILE is required}
+
+networks:
+  edge:
+    driver: bridge
+  app:
+    driver: bridge
+    internal: true
+  data:
+    driver: bridge
+    internal: true
+  llm-egress:
+    driver: bridge

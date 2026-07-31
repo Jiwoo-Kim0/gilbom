@@ -31,6 +31,10 @@ class MqttProfileConfigurationTest {
                     assertThat(properties.getClientId()).isEqualTo("gilbom-local");
                     assertThat(properties.getReconnectMaxDelay())
                             .isEqualTo(Duration.ofSeconds(5));
+                    assertThat(properties.getConnectCompletionTimeout())
+                            .isEqualTo(Duration.ofSeconds(10));
+                    assertThat(properties.getDisconnectCompletionTimeout())
+                            .isEqualTo(Duration.ofSeconds(5));
                     assertThat(properties.getSubscribeTopics()).containsExactly(
                             "tbs/v2/robots/+/presence",
                             "tbs/v2/robots/+/state",
@@ -54,6 +58,25 @@ class MqttProfileConfigurationTest {
                         context.getBean(MqttProperties.class)
                                 .getReconnectMaxDelay())
                         .isEqualTo(Duration.ofSeconds(3)));
+    }
+
+    @Test
+    void mqttLifecycleTimeoutsCanBeOverridden() {
+        contextRunner
+                .withPropertyValues(
+                        "spring.profiles.active=local",
+                        "MQTT_CONNECT_COMPLETION_TIMEOUT=7s",
+                        "MQTT_DISCONNECT_COMPLETION_TIMEOUT=3s"
+                )
+                .run(context -> {
+                    MqttProperties properties =
+                            context.getBean(MqttProperties.class);
+
+                    assertThat(properties.getConnectCompletionTimeout())
+                            .isEqualTo(Duration.ofSeconds(7));
+                    assertThat(properties.getDisconnectCompletionTimeout())
+                            .isEqualTo(Duration.ofSeconds(3));
+                });
     }
 
     @Test

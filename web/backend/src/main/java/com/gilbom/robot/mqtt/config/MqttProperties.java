@@ -36,6 +36,8 @@ public class MqttProperties {
     private int qos;
     private boolean logPayload;
     private Duration reconnectMaxDelay = Duration.ofSeconds(5);
+    private Duration connectCompletionTimeout = Duration.ofSeconds(10);
+    private Duration disconnectCompletionTimeout = Duration.ofSeconds(5);
 
     /*For mqtt 보안 전략*/
     // @ConfigurationProperties == mqtt.now-mqtt-security-strategy
@@ -134,6 +136,42 @@ public class MqttProperties {
                             + "and " + Integer.MAX_VALUE + " milliseconds");
         }
         this.reconnectMaxDelay = reconnectMaxDelay;
+    }
+
+    public Duration getConnectCompletionTimeout() {
+        return connectCompletionTimeout;
+    }
+
+    public void setConnectCompletionTimeout(Duration connectCompletionTimeout) {
+        requireShutdownBoundedTimeout(
+                connectCompletionTimeout,
+                "mqtt.connect-completion-timeout");
+        this.connectCompletionTimeout = connectCompletionTimeout;
+    }
+
+    public Duration getDisconnectCompletionTimeout() {
+        return disconnectCompletionTimeout;
+    }
+
+    public void setDisconnectCompletionTimeout(
+            Duration disconnectCompletionTimeout
+    ) {
+        requireShutdownBoundedTimeout(
+                disconnectCompletionTimeout,
+                "mqtt.disconnect-completion-timeout");
+        this.disconnectCompletionTimeout = disconnectCompletionTimeout;
+    }
+
+    private static void requireShutdownBoundedTimeout(
+            Duration timeout,
+            String propertyName
+    ) {
+        if (timeout == null
+                || timeout.compareTo(Duration.ofSeconds(1)) < 0
+                || timeout.compareTo(Duration.ofSeconds(20)) > 0) {
+            throw new IllegalArgumentException(
+                    propertyName + " must be between 1 and 20 seconds");
+        }
     }
 
     public Security getSecurity() {

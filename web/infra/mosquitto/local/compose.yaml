@@ -41,16 +41,25 @@ services:
     user: "0:0"
     environment:
       MQTT_USERNAME: ${MQTT_USERNAME:-gilbom}
-      MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD must be set}
+      MQTT_PASSWORD_FILE: /run/secrets/mqtt_backend_password
       MQTT_ROBOT_USERNAME: ${MQTT_ROBOT_USERNAME:-robot-test}
-      MQTT_ROBOT_PASSWORD: ${MQTT_ROBOT_PASSWORD:?MQTT_ROBOT_PASSWORD must be set}
+      MQTT_ROBOT_PASSWORD_FILE: /run/secrets/mqtt_robot_password
       MQTT_LAN_IP: ${MQTT_LAN_IP:-}
       MQTT_PUBLIC_HOSTNAME: ${MQTT_PUBLIC_HOSTNAME:-}
     volumes:
       - .:/mqtt-local
       - ../acl:/mqtt-input/acl:ro
+    secrets:
+      - mqtt_backend_password
+      - mqtt_robot_password
     tmpfs:
       - /tmp
     command:
       - /bin/sh
       - /mqtt-local/init-local-mqtt.sh
+
+secrets:
+  mqtt_backend_password:
+    file: ${MQTT_PASSWORD_SECRET_FILE:-../../../secrets/mqtt_backend_password}
+  mqtt_robot_password:
+    file: ${MQTT_ROBOT_PASSWORD_SECRET_FILE:-../../../secrets/mqtt_robot_password}

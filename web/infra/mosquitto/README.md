@@ -117,13 +117,15 @@ MQTT_BIND_ADDRESS=0.0.0.0
 MQTT_LAN_IP=192.168.100.191
 MQTT_TLS_PORT=8883
 MQTT_ROBOT_USERNAME=robot-test
-MQTT_ROBOT_PASSWORD=<robot-test 초기 계정 비밀번호>
+MQTT_ROBOT_PASSWORD_SECRET_FILE=./secrets/mqtt_robot_password
 MQTT_PUBLIC_BROKER_URI=ssl://192.168.100.191:8883
 ```
 
 `MQTT_LAN_IP`에는 예시 값을 복사하지 말고 Broker PC에서 확인한 현재 LAN IPv4를
 입력한다. 이 값은 로컬 Broker 인증서의 IP SAN에도 포함된다. IP가 바뀌면 값을
 수정하고 `mqtt-init`을 다시 실행하여 Broker 인증서를 재발급해야 한다.
+`mqtt_robot_password`의 원문은 `.env`가 아니라 ignored `secrets/` 파일에만
+한 줄로 저장한다.
 
 ```bash
 docker compose up --build --detach mqtt-init mosquitto
@@ -306,38 +308,41 @@ openssl x509 \
 
 ```bash
 docker run --rm -it \
-  -v "$PWD/infra/mosquitto:/work" \
+  -v "$PWD/secrets:/work" \
   eclipse-mosquitto:2.1.2-alpine \
-  mosquitto_passwd -c /work/passwd robot-test
+  mosquitto_passwd -c /work/mosquitto_passwd robot-test
 ```
 
 백엔드 계정을 추가할 때는 `-c`를 사용하지 않는다.
 
 ```bash
 docker run --rm -it \
-  -v "$PWD/infra/mosquitto:/work" \
+  -v "$PWD/secrets:/work" \
   eclipse-mosquitto:2.1.2-alpine \
-  mosquitto_passwd /work/passwd gilbom
+  mosquitto_passwd /work/mosquitto_passwd gilbom
 ```
 
 실행 컨테이너의 UID/GID 1883에서만 읽을 수 있도록 비밀번호와 ACL 권한을 제한한다. Git에서 `acl`을 갱신한 뒤에도 이 명령을 다시 실행한다.
 
 ```bash
-sudo chown 1883:1883 infra/mosquitto/passwd infra/mosquitto/acl
-sudo chmod 0600 infra/mosquitto/passwd infra/mosquitto/acl
+chmod 0444 secrets/mosquitto_passwd
 ```
 
 ## 3. EC2 실행
 
 ```bash
 cd web
-docker compose -f compose.prod.yaml config
-docker compose -f compose.prod.yaml up -d
-docker compose -f compose.prod.yaml ps
-docker compose -f compose.prod.yaml logs -f mosquitto
+cp .env.prod.example .env.prod
+# .env.prod의 공개 주소와 Secret 파일 경로를 운영값으로 수정한다.
+ENV_FILE=.env.prod sh scripts/verify-production-compose.sh
+docker compose --env-file .env.prod -f compose.prod.yaml up --build -d --wait
+docker compose --env-file .env.prod -f compose.prod.yaml ps
+docker compose --env-file .env.prod -f compose.prod.yaml logs -f mosquitto
 ```
 
 EC2 보안 그룹 인바운드에서 TCP 8883을 테스트 PC와 IoT 기기의 공인 IP에만 허용한다.
+DB와 Backend port는 host에 publish하지 않는다. Frontend 외부 HTTPS는 load
+balancer 또는 host reverse proxy에서 종료한다.
 
 ## 4. PC에서 TLS 통신 확인
 
@@ -392,7 +397,7 @@ mosquitto_pub \
 Broker 로그에서 ACL 거부를 확인한다.
 
 ```bash
-docker compose -f compose.prod.yaml logs --tail 100 mosquitto
+docker compose --env-file .env.prod -f compose.prod.yaml logs --tail 100 mosquitto
 ```
 
 ## 6. IoT 기기에 전달할 TLS 설정

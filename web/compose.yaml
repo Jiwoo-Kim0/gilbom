@@ -43,11 +43,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-gilbom}
       # Bootstrap 관리 계정은 role/schema 준비에만 사용하고 애플리케이션에는 전달하지 않는다.
       POSTGRES_USER: ${POSTGRES_ADMIN_USER:-gilbom_db_admin}
-      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?POSTGRES_ADMIN_PASSWORD must be set}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
       POSTGRES_FLYWAY_USER: ${POSTGRES_FLYWAY_USER:-gilbom_flyway}
-      POSTGRES_FLYWAY_PASSWORD: ${POSTGRES_FLYWAY_PASSWORD:?POSTGRES_FLYWAY_PASSWORD must be set}
+      POSTGRES_FLYWAY_PASSWORD_FILE: /run/secrets/postgres_flyway_password
       POSTGRES_APP_USER: ${POSTGRES_APP_USER:-gilbom_app}
-      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD must be set}
+      POSTGRES_APP_PASSWORD_FILE: /run/secrets/postgres_app_password
       POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C
       TZ: ${TZ:-UTC}
       PGTZ: ${TZ:-UTC}
@@ -59,13 +59,17 @@ services:
       - postgres_data:/var/lib/postgresql/data
       # 빈 DB 최초 기동 때 Flyway 계정과 runtime 계정을 서로 다른 role로 준비한다.
       - ./infra/postgres/init/20-create-application-roles.sh:/docker-entrypoint-initdb.d/20-create-application-roles.sh:ro
+    secrets:
+      - postgres_admin_password
+      - postgres_flyway_password
+      - postgres_app_password
     healthcheck:
       # 서버 readiness뿐 아니라 대상 DB 접속과 PostGIS 확장 초기화까지 확인한다.
       test:
         - CMD-SHELL
         - >-
           pg_isready --host 127.0.0.1 --username "$${POSTGRES_USER}" --dbname "$${POSTGRES_DB}"
-          && PGPASSWORD="$${POSTGRES_PASSWORD}" psql --host 127.0.0.1
+          && PGPASSWORD="$$(cat "$${POSTGRES_PASSWORD_FILE}")" psql --host 127.0.0.1
           --username "$${POSTGRES_USER}" --dbname "$${POSTGRES_DB}" --no-password
           --tuples-only --command 'SELECT PostGIS_Version();' > /dev/null
       interval: 5s
@@ -94,9 +98,10 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-gilbom}
       # Runtime 계정은 DML만, Flyway 계정은 migration DDL만 수행한다.
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_APP_USER:-gilbom_app}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD must be set}
+      SPRING_DATASOURCE_PASSWORD_FILE: /run/secrets/postgres_app_password
       SPRING_FLYWAY_USER: ${POSTGRES_FLYWAY_USER:-gilbom_flyway}
-      SPRING_FLYWAY_PASSWORD: ${POSTGRES_FLYWAY_PASSWORD:?POSTGRES_FLYWAY_PASSWORD must be set}
+      SPRING_FLYWAY_PASSWORD_FILE: /run/secrets/postgres_flyway_password
+      SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE: ${SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE:-20s}
       GILBOM_MAX_REQUEST_BODY_SIZE: ${GILBOM_MAX_REQUEST_BODY_SIZE:-1MB}
       GILBOM_MAX_REQUEST_HEADER_SIZE: ${GILBOM_MAX_REQUEST_HEADER_SIZE:-16KB}
       GILBOM_MAX_UPLOAD_FILE_SIZE: ${GILBOM_MAX_UPLOAD_FILE_SIZE:-500KB}
@@ -104,7 +109,7 @@ services:
       GILBOM_REPORT_SSE_MAX_CONNECTIONS_PER_USER: ${GILBOM_REPORT_SSE_MAX_CONNECTIONS_PER_USER:-3}
       GILBOM_REPORT_SSE_MAX_CONNECTIONS_TOTAL: ${GILBOM_REPORT_SSE_MAX_CONNECTIONS_TOTAL:-200}
       GILBOM_STORAGE_LOCAL_ROOT_DIRECTORY: ${GILBOM_STORAGE_LOCAL_ROOT_DIRECTORY:-/app/data/robot-images}
-      GILBOM_STORAGE_URL_SIGNING_KEY_BASE64: ${GILBOM_STORAGE_URL_SIGNING_KEY_BASE64:-}
+      GILBOM_STORAGE_URL_SIGNING_KEY_BASE64_FILE: /run/secrets/gilbom_storage_signing_key
       # 기본은 Nginx same-origin 전용이다. true일 때만 정확한 Origin 목록을 전달한다.
       GILBOM_CORS_ENABLED: ${GILBOM_CORS_ENABLED:-false}
       GILBOM_CORS_ALLOWED_ORIGINS: ${GILBOM_CORS_ALLOWED_ORIGINS:-}
@@ -121,7 +126,7 @@ services:
       GILBOM_LLM_PROVIDER: ${GILBOM_LLM_PROVIDER:-}
       GILBOM_LLM_BASE_URL: ${GILBOM_LLM_BASE_URL:-https://gms.ssafy.io/gmsapi/api.openai.com/v1}
       GILBOM_LLM_MODEL: ${GILBOM_LLM_MODEL:-}
-      GILBOM_LLM_API_KEY: ${GILBOM_LLM_API_KEY:-}
+      GILBOM_LLM_API_KEY_FILE: /run/secrets/gilbom_llm_api_key
       GILBOM_LLM_CONNECT_TIMEOUT: ${GILBOM_LLM_CONNECT_TIMEOUT:-3s}
       GILBOM_LLM_READ_TIMEOUT: ${GILBOM_LLM_READ_TIMEOUT:-30s}
       GILBOM_LLM_MAX_OUTPUT_TOKENS: ${GILBOM_LLM_MAX_OUTPUT_TOKENS:-1500}
@@ -138,12 +143,12 @@ services:
       # 초기 관리자 bootstrap은 기본 비활성화하며 실제 값은 ignored .env/외부 Secret에서만 받는다.
       INITIAL_ADMIN_BOOTSTRAP_ENABLED: ${INITIAL_ADMIN_BOOTSTRAP_ENABLED:-false}
       INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:-}
-      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
+      INITIAL_ADMIN_PASSWORD_FILE: /run/secrets/gilbom_initial_admin_password
       INITIAL_ADMIN_DISPLAY_NAME: ${INITIAL_ADMIN_DISPLAY_NAME:-}
       INITIAL_ADMIN_USER_CODE: ${INITIAL_ADMIN_USER_CODE:-}
       # IP 원문 대신 persistent HMAC bucket을 사용한다. 운영에서는 반드시 외부 Secret을 설정한다.
       AUTH_RATE_LIMIT_HMAC_KEY_VERSION: ${AUTH_RATE_LIMIT_HMAC_KEY_VERSION:-1}
-      AUTH_RATE_LIMIT_HMAC_KEY_BASE64: ${AUTH_RATE_LIMIT_HMAC_KEY_BASE64:-}
+      AUTH_RATE_LIMIT_HMAC_KEY_BASE64_FILE: /run/secrets/gilbom_auth_rate_limit_hmac_key
       AUTH_CSRF_TOKEN_ISSUANCE_MAX_REQUESTS: ${AUTH_CSRF_TOKEN_ISSUANCE_MAX_REQUESTS:-60}
       AUTH_CSRF_TOKEN_ISSUANCE_WINDOW: ${AUTH_CSRF_TOKEN_ISSUANCE_WINDOW:-1m}
       AUTH_EMAIL_AVAILABILITY_MAX_REQUESTS: ${AUTH_EMAIL_AVAILABILITY_MAX_REQUESTS:-20}
@@ -162,16 +167,18 @@ services:
       # TOTP keyring 원문은 이미지나 DB가 아니라 실행 환경에서만 주입한다.
       MFA_TOTP_SECRET_ENCRYPTION_ENABLED: ${MFA_TOTP_SECRET_ENCRYPTION_ENABLED:-false}
       MFA_TOTP_SECRET_ACTIVE_KEY_VERSION: ${MFA_TOTP_SECRET_ACTIVE_KEY_VERSION:-1}
-      MFA_TOTP_SECRET_KEYRING: ${MFA_TOTP_SECRET_KEYRING:-}
+      MFA_TOTP_SECRET_KEYRING_FILE: /run/secrets/gilbom_mfa_totp_keyring
       MQTT_BROKER: ${MQTT_BROKER:-ssl://mosquitto:8883}
       MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-gilbom-local-docker}
       MQTT_USERNAME: ${MQTT_USERNAME:-gilbom}
-      MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD must be set}
+      MQTT_PASSWORD_FILE: /run/secrets/mqtt_backend_password
       MQTT_TRUST_CERTIFICATE: ${MQTT_TRUST_CERTIFICATE:-/app/config/mqtt/certs/local-ca-cert.pem}
       MQTT_SUBSCRIBE_TOPIC: ${MQTT_SUBSCRIBE_TOPIC:-tbs/v2/robots/+/presence,tbs/v2/robots/+/state,tbs/v2/robots/+/telemetry,tbs/v2/robots/+/events/#,tbs/v2/robots/+/commands/result}
       MQTT_PUBLISH_TOPIC: ${MQTT_PUBLISH_TOPIC:-tbs/v2/robots/robot-test/commands/request}
       MQTT_QOS: ${MQTT_QOS:-1}
       MQTT_RECONNECT_MAX_DELAY: ${MQTT_RECONNECT_MAX_DELAY:-5s}
+      MQTT_CONNECT_COMPLETION_TIMEOUT: ${MQTT_CONNECT_COMPLETION_TIMEOUT:-10s}
+      MQTT_DISCONNECT_COMPLETION_TIMEOUT: ${MQTT_DISCONNECT_COMPLETION_TIMEOUT:-5s}
       MQTT_PUBLIC_BROKER_URI: ${MQTT_PUBLIC_BROKER_URI:-ssl://localhost:8883}
       MQTT_CREDENTIAL_PROVISIONING_ENABLED: ${MQTT_CREDENTIAL_PROVISIONING_ENABLED:-true}
       MQTT_CREDENTIAL_PASSWORD_FILE: ${MQTT_CREDENTIAL_PASSWORD_FILE:-/app/config/mqtt/credentials/passwd}
@@ -179,9 +186,18 @@ services:
       TZ: ${TZ:-UTC}
     volumes:
       - ./infra/mosquitto/local/runtime/certs:/app/config/mqtt/certs:ro
-      - ./infra/mosquitto/local/runtime/credentials:/app/config/mqtt/credentials
-      - report_pdf_data:/app/data/report-pdf
-      - robot_images:/app/data/robot-images
+      - ./infra/mosquitto/local/runtime/credentials:/app/config/mqtt/credentials:rw
+      - report_pdf_data:/app/data/report-pdf:rw
+      - robot_images:/app/data/robot-images:rw
+    secrets:
+      - postgres_app_password
+      - postgres_flyway_password
+      - mqtt_backend_password
+      - gilbom_llm_api_key
+      - gilbom_storage_signing_key
+      - gilbom_auth_rate_limit_hmac_key
+      - gilbom_mfa_totp_keyring
+      - gilbom_initial_admin_password
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
     depends_on:
@@ -192,9 +208,9 @@ services:
     healthcheck:
       test:
         - CMD
-        - curl
-        - --fail
-        - --silent
+        - wget
+        - --quiet
+        - --spider
         - http://localhost:8080/actuator/health/readiness
       interval: 10s
       timeout: 5s
@@ -202,6 +218,11 @@ services:
       start_period: 30s
     security_opt:
       - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    cap_drop:
+      - ALL
     stop_grace_period: 30s
     networks:
       - backend
@@ -220,7 +241,7 @@ services:
     image: gilbom-frontend:local
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-3000}:80"
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:8080"
     depends_on:
       backend:
         condition: service_healthy
@@ -230,13 +251,19 @@ services:
         - wget
         - --quiet
         - --spider
-        - http://127.0.0.1/health
+        - http://127.0.0.1:8080/healthz
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 10s
     security_opt:
       - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    cap_drop:
+      - ALL
+    stop_grace_period: 10s
     networks:
       - backend
     logging:
@@ -255,9 +282,9 @@ services:
     user: "0:0"
     environment:
       MQTT_USERNAME: ${MQTT_USERNAME:-gilbom}
-      MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD must be set}
+      MQTT_PASSWORD_FILE: /run/secrets/mqtt_backend_password
       MQTT_ROBOT_USERNAME: ${MQTT_ROBOT_USERNAME:-robot-test}
-      MQTT_ROBOT_PASSWORD: ${MQTT_ROBOT_PASSWORD:?MQTT_ROBOT_PASSWORD must be set}
+      MQTT_ROBOT_PASSWORD_FILE: /run/secrets/mqtt_robot_password
       # 외부 로봇이 IP로 TLS 검증할 때 Broker 인증서 SAN에 포함할 현재 PC의 LAN IPv4다.
       MQTT_LAN_IP: ${MQTT_LAN_IP:-}
       # ngrok TCP 등 외부 hostname으로 접속할 때 Broker 인증서 DNS SAN에 포함한다.
@@ -265,6 +292,9 @@ services:
     volumes:
       - ./infra/mosquitto/local:/mqtt-local
       - ./infra/mosquitto/acl:/mqtt-input/acl:ro
+    secrets:
+      - mqtt_backend_password
+      - mqtt_robot_password
     # 재실행 때 이전 임시 passwd 파일이 남지 않도록 컨테이너 정지 시 폐기되는 tmpfs를 사용한다.
     tmpfs:
       - /tmp
@@ -281,6 +311,28 @@ volumes:
   report_pdf_data:
   # S3 전환 전 로컬 결함 이미지를 backend 컨테이너 재생성 뒤에도 유지한다.
   robot_images:
+
+secrets:
+  postgres_admin_password:
+    file: ${POSTGRES_ADMIN_PASSWORD_SECRET_FILE:-./secrets/postgres_admin_password}
+  postgres_flyway_password:
+    file: ${POSTGRES_FLYWAY_PASSWORD_SECRET_FILE:-./secrets/postgres_flyway_password}
+  postgres_app_password:
+    file: ${POSTGRES_APP_PASSWORD_SECRET_FILE:-./secrets/postgres_app_password}
+  mqtt_backend_password:
+    file: ${MQTT_PASSWORD_SECRET_FILE:-./secrets/mqtt_backend_password}
+  mqtt_robot_password:
+    file: ${MQTT_ROBOT_PASSWORD_SECRET_FILE:-./secrets/mqtt_robot_password}
+  gilbom_llm_api_key:
+    file: ${GILBOM_LLM_API_KEY_SECRET_FILE:-./secrets/gilbom_llm_api_key}
+  gilbom_storage_signing_key:
+    file: ${GILBOM_STORAGE_SIGNING_KEY_SECRET_FILE:-./secrets/gilbom_storage_signing_key}
+  gilbom_auth_rate_limit_hmac_key:
+    file: ${AUTH_RATE_LIMIT_HMAC_KEY_SECRET_FILE:-./secrets/gilbom_auth_rate_limit_hmac_key}
+  gilbom_mfa_totp_keyring:
+    file: ${MFA_TOTP_KEYRING_SECRET_FILE:-./secrets/gilbom_mfa_totp_keyring}
+  gilbom_initial_admin_password:
+    file: ${INITIAL_ADMIN_PASSWORD_SECRET_FILE:-./secrets/gilbom_initial_admin_password}
 
 networks:
   backend:
