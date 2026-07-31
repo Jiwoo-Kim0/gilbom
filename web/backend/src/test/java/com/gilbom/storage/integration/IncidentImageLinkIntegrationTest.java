@@ -324,6 +324,76 @@ class IncidentImageLinkIntegrationTest {
                 .isEmpty();
     }
 
+    // ------------------------------------------------ 단건 결함 보고서용 이미지
+
+    @Test
+    void suppliesTheImageOfTheRequestedDefectOnly() {
+        assignAdminRole(ADMIN_ID);
+        // 위험도가 더 높은 결함을 먼저 만든다. 기간 기준 조회라면 이쪽이 뽑힌다.
+        UUID loudEventId = UUID.fromString(
+                "24000000-0000-4000-8000-000000000205");
+        upload(loudEventId, jpeg(64, 64));
+        ingest(incident(loudEventId, 1, uploadedImageId(loudEventId)));
+
+        UUID targetEventId = UUID.fromString(
+                "24000000-0000-4000-8000-000000000206");
+        byte[] targetContent = jpeg(200, 100);
+        UUID targetImageId = upload(targetEventId, targetContent);
+        // 2m 밖에 두어 별개 결함이 되게 한다.
+        IncidentIngestionResult target = ingest(
+                incidentAt(targetEventId, 2, targetImageId, 37.498500, 127.028500));
+
+        List<DefectReportImage> images =
+                reportImageService.findReportImagesForDefect(
+                        ADMIN_ID,
+                        target.defectId());
+
+        assertThat(images).hasSize(1);
+        assertThat(images.getFirst().defectId()).isEqualTo(target.defectId());
+        assertThat(images.getFirst().content()).isEqualTo(targetContent);
+        assertThat(images.getFirst().width()).isEqualTo(200);
+    }
+
+    @Test
+    void returnsNoImageForADefectThatHasNone() {
+        assignAdminRole(ADMIN_ID);
+        UUID eventId = UUID.fromString(
+                "24000000-0000-4000-8000-000000000207");
+        IncidentIngestionResult result = ingest(incident(eventId, 1, null));
+
+        assertThat(reportImageService.findReportImagesForDefect(
+                ADMIN_ID,
+                result.defectId()))
+                .isEmpty();
+    }
+
+    @Test
+    void hidesASingleDefectOutsideTheRequestingUsersScope() {
+        UUID viewerId = UUID.fromString(
+                "24000000-0000-4000-8000-000000000302");
+        createUser(viewerId, "RPT-VIEWER-2", "rpt-viewer-2@example.invalid");
+        UUID eventId = UUID.fromString(
+                "24000000-0000-4000-8000-000000000208");
+        UUID imageId = upload(eventId, jpeg(48, 48));
+        IncidentIngestionResult result =
+                ingest(incident(eventId, 1, imageId));
+
+        assertThat(reportImageService.findReportImagesForDefect(
+                viewerId,
+                result.defectId()))
+                .isEmpty();
+    }
+
+    @Test
+    void rejectsAMissingDefectIdForSingleDefectReports() {
+        assertThatThrownBy(() ->
+                reportImageService.findReportImagesForDefect(ADMIN_ID, null))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(ErrorCode.REPORT_VALIDATION_FAILED));
+    }
+
     @Test
     void rejectsAnInvertedReportPeriod() {
         assertThatThrownBy(() -> reportImageService.findReportImages(
@@ -388,10 +458,38 @@ class IncidentImageLinkIntegrationTest {
         }
     }
 
+    private UUID uploadedImageId(UUID eventId) {
+        return jdbcTemplate.queryForObject("""
+                SELECT image_id FROM storage.robot_image WHERE event_id = ?
+                """,
+                UUID.class,
+                eventId);
+    }
+
     private static IncidentEventPayload incident(
             UUID eventId,
             long sequence,
             UUID imageId
+    ) {
+        return incidentAt(eventId, sequence, imageId, 37.497900, 127.027600);
+    }
+
+    private static IncidentEventPayload incidentAt(
+            UUID eventId,
+            long sequence,
+            UUID imageId,
+            double latitude,
+            double longitude
+    ) {
+        return newIncident(eventId, sequence, imageId, latitude, longitude);
+    }
+
+    private static IncidentEventPayload newIncident(
+            UUID eventId,
+            long sequence,
+            UUID imageId,
+            double latitude,
+            double longitude
     ) {
         return new IncidentEventPayload(
                 "2.0",
@@ -408,8 +506,8 @@ class IncidentImageLinkIntegrationTest {
                 "MIS-20260728-001",
                 new IncidentEventPayload.Location(
                         true,
-                        37.497900,
-                        127.027600,
+                        latitude,
+                        longitude,
                         "A-01"),
                 new IncidentEventPayload.Incident(
                         IncidentEventPayload.AssetType.BRAILLE_BLOCK,

@@ -6,6 +6,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -92,6 +93,81 @@ public class DefectReportImageService {
                     .ifPresent(images::add);
         }
         return List.copyOf(images);
+    }
+
+    /**
+     * 결함 한 건을 대상으로 하는 보고서용 이미지다.
+     *
+     * <p>기간 기준 조회({@link #findReportImages})는 그 기간의 대표 결함을 고르므로,
+     * 특정 결함으로 보고서를 만들 때 쓰면 대개 다른 결함의 이미지가 나온다. 호출부가
+     * 근거와 이미지의 defectId가 같은지 검사하고 있어 그 이미지는 걸러지고, 결과적으로
+     * 이미지 없는 보고서가 조용히 만들어진다. 그래서 단건 경로를 따로 둔다.
+     *
+     * @return 0~1개. 접근 범위 밖이거나 이미지가 없으면 빈 리스트
+     */
+    @Transactional(readOnly = true)
+    public List<DefectReportImage> findReportImagesForDefect(
+            UUID userId,
+            UUID defectId
+    ) {
+        if (userId == null || defectId == null) {
+            throw new BusinessException(
+                    ErrorCode.REPORT_VALIDATION_FAILED,
+                    "보고서 대상 결함이 필요합니다.");
+        }
+        return findCandidateForDefect(userId, defectId)
+                .flatMap(candidate -> imageLoader
+                        .load(candidate.imageId())
+                        .map(loaded -> toReportImage(candidate, loaded)))
+                .map(List::of)
+                .orElseGet(List::of);
+    }
+
+    /**
+     * 대표 결함 선정 없이 지정한 결함의 대표 관측 이미지만 찾는다. 가시 범위는
+     * 기간 조회와 같은 조건을 쓴다.
+     */
+    private Optional<ImageCandidate> findCandidateForDefect(
+            UUID userId,
+            UUID defectId
+    ) {
+        return jdbcTemplate.query("""
+                SELECT
+                    d.defect_id,
+                    d.incident_code,
+                    d.defect_type,
+                    d.risk_level,
+                    evidence.image_id
+                FROM defect.defect d
+                JOIN LATERAL (
+                    SELECT observation.image_id
+                    FROM defect.defect_observation observation
+                    WHERE (
+                            observation.defect_id = d.defect_id
+                            OR observation.defect_id IN (
+                                SELECT merged.defect_id
+                                FROM defect.defect merged
+                                WHERE merged.merged_into_defect_id = d.defect_id
+                            )
+                        )
+                      AND observation.image_id IS NOT NULL
+                    ORDER BY observation.is_representative DESC,
+                             observation.confidence DESC,
+                             observation.created_at DESC
+                    LIMIT 1
+                ) evidence ON TRUE
+                WHERE d.defect_id = :defectId
+                  AND
+                """ + DefectScopeService.VISIBLE_DEFECT_PREDICATE,
+                Map.of("userId", userId, "defectId", defectId),
+                (resultSet, rowNumber) -> new ImageCandidate(
+                        resultSet.getObject("defect_id", UUID.class),
+                        resultSet.getString("incident_code"),
+                        resultSet.getString("defect_type"),
+                        resultSet.getString("risk_level"),
+                        resultSet.getObject("image_id", UUID.class)))
+                .stream()
+                .findFirst();
     }
 
     private static DefectReportImage toReportImage(
