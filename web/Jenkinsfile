@@ -41,7 +41,6 @@ pipeline {
                         openssl rand -hex 32 > secrets/postgres_flyway_password
                         openssl rand -hex 32 > secrets/postgres_app_password
                         openssl rand -hex 32 > secrets/mqtt_backend_password
-                        openssl rand -hex 32 > secrets/mqtt_robot_password
                         openssl rand -base64 48 \
                             | tr -d '\\n' > secrets/gilbom_storage_signing_key
                         openssl rand -base64 48 \

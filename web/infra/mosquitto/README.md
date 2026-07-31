@@ -116,16 +116,14 @@ Broker PC의 LAN IPv4로 직접 연결한다. 기본 Compose는 안전하게 loc
 MQTT_BIND_ADDRESS=0.0.0.0
 MQTT_LAN_IP=192.168.100.191
 MQTT_TLS_PORT=8883
-MQTT_ROBOT_USERNAME=robot-test
-MQTT_ROBOT_PASSWORD_SECRET_FILE=./secrets/mqtt_robot_password
 MQTT_PUBLIC_BROKER_URI=ssl://192.168.100.191:8883
 ```
 
 `MQTT_LAN_IP`에는 예시 값을 복사하지 말고 Broker PC에서 확인한 현재 LAN IPv4를
 입력한다. 이 값은 로컬 Broker 인증서의 IP SAN에도 포함된다. IP가 바뀌면 값을
 수정하고 `mqtt-init`을 다시 실행하여 Broker 인증서를 재발급해야 한다.
-`mqtt_robot_password`의 원문은 `.env`가 아니라 ignored `secrets/` 파일에만
-한 줄로 저장한다.
+로봇 MQTT 계정은 고정 로컬 Secret으로 만들지 않고 Credential API에서 로봇별로
+발급한다.
 
 ```bash
 docker compose up --build --detach mqtt-init mosquitto
@@ -304,23 +302,17 @@ openssl x509 \
 
 명령은 저장소의 `web` 디렉터리에서 실행한다.
 
-`-c`는 기존 파일을 덮어쓰므로 최초 계정 생성 때 한 번만 사용한다.
+`-c`는 기존 파일을 덮어쓰므로 Backend 최초 계정 생성 때 한 번만 사용한다.
 
 ```bash
 docker run --rm -it \
   -v "$PWD/secrets:/work" \
   eclipse-mosquitto:2.1.2-alpine \
-  mosquitto_passwd -c /work/mosquitto_passwd robot-test
+  mosquitto_passwd -c /work/mosquitto_passwd gilbom
 ```
 
-백엔드 계정을 추가할 때는 `-c`를 사용하지 않는다.
-
-```bash
-docker run --rm -it \
-  -v "$PWD/secrets:/work" \
-  eclipse-mosquitto:2.1.2-alpine \
-  mosquitto_passwd /work/mosquitto_passwd gilbom
-```
+로봇 계정은 이 파일에 수동으로 추가하지 않는다. 로봇 등록 뒤 Credential API가
+발급·회전·폐기하고 같은 verifier 파일에 반영한다.
 
 실행 컨테이너의 UID/GID 1883에서만 읽을 수 있도록 비밀번호와 ACL 권한을 제한한다. Git에서 `acl`을 갱신한 뒤에도 이 명령을 다시 실행한다.
 
@@ -354,8 +346,8 @@ balancer 또는 host reverse proxy에서 종료한다.
 mosquitto_sub \
   -h i15d101.p.ssafy.io -p 8883 \
   --tls-use-os-certs \
-  -u robot-test -P '테스트 비밀번호' \
-  -t 'tbs/v2/robots/robot-test/commands/request' -v -d
+  -u '<발급된 MQTT username>' -P '<일회성 password>' \
+  -t 'tbs/v2/robots/<발급된 MQTT username>/commands/request' -v -d
 ```
 
 터미널 2에서 로봇 텔레메트리를 발행한다.
@@ -364,10 +356,10 @@ mosquitto_sub \
 mosquitto_pub \
   -h i15d101.p.ssafy.io -p 8883 \
   --tls-use-os-certs \
-  -u robot-test -P '테스트 비밀번호' \
-  -t 'tbs/v2/robots/robot-test/telemetry' \
+  -u '<발급된 MQTT username>' -P '<일회성 password>' \
+  -t 'tbs/v2/robots/<발급된 MQTT username>/telemetry' \
   -q 0 \
-  -m '{"schema_version":"2.0","message_id":"fb9c4472-226d-4473-b684-f0d8282292bd","mqtt_id":"robot-test","boot_id":"572b2e59-d31f-445f-a43d-7df80ba64203","seq":1,"sampled_at":"2026-07-26T05:15:35.000Z","mission_id":null,"position":{"valid":true,"lat":37.5013,"lon":127.0396,"heading_deg":null},"motion":{"moving":false,"speed_mps":null},"battery":{"valid":true,"percent":87.0,"state":"NORMAL","source":"MEASURED"},"system":{"jetson_temp_c":41.5},"mission":null}' \
+  -m '{"schema_version":"2.0","message_id":"fb9c4472-226d-4473-b684-f0d8282292bd","mqtt_id":"<발급된 MQTT username>","boot_id":"572b2e59-d31f-445f-a43d-7df80ba64203","seq":1,"sampled_at":"2026-07-26T05:15:35.000Z","mission_id":null,"position":{"valid":true,"lat":37.5013,"lon":127.0396,"heading_deg":null},"motion":{"moving":false,"speed_mps":null},"battery":{"valid":true,"percent":87.0,"state":"NORMAL","source":"MEASURED"},"system":{"jetson_temp_c":41.5},"mission":null}' \
   -d
 ```
 
@@ -383,13 +375,14 @@ mosquitto_sub \
 
 ## 5. ACL 부정 테스트
 
-`robot-test`는 자기 텔레메트리는 발행할 수 있지만 다른 로봇 Topic에는 발행할 수 없어야 한다.
+발급된 로봇 계정은 자기 텔레메트리는 발행할 수 있지만 다른 로봇 Topic에는
+발행할 수 없어야 한다.
 
 ```bash
 mosquitto_pub \
   -h i15d101.p.ssafy.io -p 8883 \
   --tls-use-os-certs \
-  -u robot-test -P '테스트 비밀번호' \
+  -u '<발급된 MQTT username>' -P '<일회성 password>' \
   -t 'tbs/v2/robots/robot-999/telemetry' \
   -m '{"test":"must-be-denied"}' -d
 ```
@@ -419,7 +412,7 @@ SERVER_CA=Let's Encrypt 인증서를 검증할 CA
 ## 7. 내일까지 통신 완료 기준
 
 - [ ] PC → EC2 8883 TLS handshake 성공
-- [ ] `robot-test` 로그인 성공
+- [ ] Credential API에서 발급한 로봇 계정 로그인 성공
 - [ ] 로봇 Topic 텔레메트리 발행 성공
 - [ ] 백엔드 계정의 텔레메트리 구독 성공
 - [ ] 백엔드 명령 발행 → 로봇 명령 구독 성공

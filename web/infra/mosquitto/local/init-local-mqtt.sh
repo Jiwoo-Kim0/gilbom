@@ -54,19 +54,7 @@ if [ -n "${MQTT_PASSWORD_FILE:-}" ]; then
   export MQTT_PASSWORD
 fi
 
-if [ -n "${MQTT_ROBOT_PASSWORD_FILE:-}" ]; then
-  if [ -n "${MQTT_ROBOT_PASSWORD:-}" ]; then
-    echo "Set only MQTT_ROBOT_PASSWORD_FILE, not the direct value." >&2
-    exit 1
-  fi
-  MQTT_ROBOT_PASSWORD="$(
-    read_secret_file MQTT_ROBOT_PASSWORD "$MQTT_ROBOT_PASSWORD_FILE"
-  )"
-  export MQTT_ROBOT_PASSWORD
-fi
-
 : "${MQTT_PASSWORD:?MQTT_PASSWORD or MQTT_PASSWORD_FILE must be set}"
-: "${MQTT_ROBOT_PASSWORD:?MQTT_ROBOT_PASSWORD or MQTT_ROBOT_PASSWORD_FILE must be set}"
 
 mkdir -p "${CERT_DIR}" "${CREDENTIAL_DIR}" "${CA_DIR}"
 
@@ -259,15 +247,11 @@ else
     "${MQTT_PASSWORD}"
 fi
 
-# Refresh the two local bootstrap accounts without deleting issued robot accounts.
+# Refresh only the Backend bootstrap account without deleting API-issued robots.
 mosquitto_passwd -b \
   "${WORK_DIR}/passwd" \
   "${MQTT_USERNAME}" \
   "${MQTT_PASSWORD}"
-mosquitto_passwd -b \
-  "${WORK_DIR}/passwd" \
-  "${MQTT_ROBOT_USERNAME}" \
-  "${MQTT_ROBOT_PASSWORD}"
 cp "${WORK_DIR}/passwd" "${PASSWORD_FILE}"
 cp "${ACL_SOURCE_FILE}" "${ACL_RUNTIME_FILE}"
 

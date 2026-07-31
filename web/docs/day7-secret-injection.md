@@ -31,7 +31,6 @@ Secret UID/GID/mode 기능으로 같은 읽기 전용 경계를 만든다.
 | DB Flyway 비밀번호 | `POSTGRES_FLYWAY_PASSWORD_SECRET_FILE` | `/run/secrets/postgres_flyway_password` | DB init script와 Backend loader |
 | DB runtime 비밀번호 | `POSTGRES_APP_PASSWORD_SECRET_FILE` | `/run/secrets/postgres_app_password` | DB init script와 Backend loader |
 | Backend MQTT 비밀번호 | `MQTT_PASSWORD_SECRET_FILE` | `/run/secrets/mqtt_backend_password` | `mqtt-init`과 Backend loader |
-| 로컬 시험 로봇 비밀번호 | `MQTT_ROBOT_PASSWORD_SECRET_FILE` | `/run/secrets/mqtt_robot_password` | 로컬 `mqtt-init` 전용 |
 | 운영 MQTT CA certificate | `MQTT_CA_CERTIFICATE_FILE` | `/run/secrets/mqtt_ca_certificate` | Backend TLS trust |
 | 운영 Mosquitto verifier | `MOSQUITTO_PASSWORD_FILE_SECRET_FILE` | `/run/secrets/mosquitto_passwd` | 운영 credential volume 최초 seed |
 | 운영 Mosquitto certificate | `MOSQUITTO_TLS_FULLCHAIN_FILE` | `/run/secrets/mosquitto_tls_fullchain` | Broker TLS |
@@ -55,7 +54,8 @@ DB와 MQTT도 직접 environment 주입을 유지하지 않는다.
 - Flyway/runtime role 초기화 스크립트는 각각의 `_FILE`을 읽은 뒤 SQL 변수로만
   전달한다.
 - Backend datasource와 Flyway는 같은 mount의 읽기 전용 사본을 사용한다.
-- Backend MQTT 접속 비밀번호와 로컬 시험 로봇 비밀번호는 서로 다른 파일이다.
+- Backend MQTT 접속 비밀번호만 초기 Secret으로 주입한다. 로봇 비밀번호는
+  Credential API가 로봇별로 발급하며 Compose Secret으로 미리 만들지 않는다.
 - Broker가 사용하는 Mosquitto `passwd`는 원문 비밀번호 파일과 별개의 verifier
   파일이며 기존처럼 Backend RW, Broker RO로 유지한다.
 - 운영 `mosquitto_passwd` Secret은 credential named volume이 비어 있을 때만
