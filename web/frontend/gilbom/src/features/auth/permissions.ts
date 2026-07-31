@@ -10,6 +10,10 @@ export const REPORT_VIEW = 'REPORT_VIEW'
 export const REPORT_CREATE = 'REPORT_CREATE'
 export const REPORT_UPDATE = 'REPORT_UPDATE'
 export const REPORT_APPROVE = 'REPORT_APPROVE'
+export const DEFECT_STATUS_VIEW = 'DEFECT_STATUS_VIEW'
+export const DEFECT_STATUS_UPDATE = 'DEFECT_STATUS_UPDATE'
+export const DEFECT_MERGE = 'DEFECT_MERGE'
+export const DEFECT_EXPORT = 'DEFECT_EXPORT'
 
 export type FrontendPermission =
   | typeof ADMIN_SETTINGS_MANAGE
@@ -24,6 +28,10 @@ export type FrontendPermission =
   | typeof REPORT_CREATE
   | typeof REPORT_UPDATE
   | typeof REPORT_APPROVE
+  | typeof DEFECT_STATUS_VIEW
+  | typeof DEFECT_STATUS_UPDATE
+  | typeof DEFECT_MERGE
+  | typeof DEFECT_EXPORT
 
 export function hasPermission(
   permissions: readonly string[],
