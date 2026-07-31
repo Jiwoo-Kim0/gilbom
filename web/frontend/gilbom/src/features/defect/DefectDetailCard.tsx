@@ -8,7 +8,13 @@ import {
   REPORT_CREATE,
   hasPermission,
 } from '../auth/permissions'
-import { changeDefectStatus, getDefect, getDefectImageUrl } from './defectApi'
+import {
+  changeDefectStatus,
+  getDefect,
+  getDefectHistory,
+  getDefectImageUrl,
+  getDefectObservations,
+} from './defectApi'
 import {
   ALLOWED_TRANSITIONS,
   DEFECT_TYPE_LABELS,
@@ -19,7 +25,10 @@ import {
 } from './defectTypes'
 import type {
   DefectDetail,
+  DefectHistoryItem,
   DefectImageUrl,
+  DefectObservation,
+  PageResponse,
   Resolution,
   WorkflowStatus,
 } from './defectTypes'
@@ -40,6 +49,51 @@ type ImageState =
   | { kind: 'none' }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; image: DefectImageUrl }
+
+type CardTab = 'info' | 'observations' | 'history'
+
+/**
+ * 이력 탭은 열었을 때만 부른다. 카드를 띄울 때마다 세 번 조회하지 않는다.
+ *
+ * <p>`loading`을 따로 두지 않는 이유는 effect 본문에서 동기로 setState를 하지 않기
+ * 위해서다(eslint `react-hooks/set-state-in-effect`). 탭이 열려 있는데 아직 `idle`이면
+ * 조회 중이라는 뜻이다.
+ */
+type HistoryState<T> =
+  | { kind: 'idle' }
+  | { kind: 'error'; message: string }
+  | { kind: 'ready'; page: PageResponse<T> }
+
+function formatShortDateTime(value: string): string {
+  return new Date(value).toLocaleString('ko-KR', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+/**
+ * 변경 이력의 before/after snapshot에서 실제로 바뀐 항목만 뽑는다.
+ * 서버가 전체 snapshot을 주므로 그대로 보여주면 무엇이 바뀌었는지 알기 어렵다.
+ */
+function changedFields(
+  before: Record<string, unknown> | null,
+  after: Record<string, unknown> | null,
+): { key: string; from: string; to: string }[] {
+  if (after === null) {
+    return []
+  }
+  const format = (value: unknown) =>
+    value === null || value === undefined ? '—' : String(value)
+  return Object.keys(after)
+    .filter((key) => format(before?.[key]) !== format(after[key]))
+    .map((key) => ({
+      key,
+      from: format(before?.[key]),
+      to: format(after[key]),
+    }))
+}
 
 /**
  * AI가 검출한 영역을 사진 위에 그린다.
@@ -103,6 +157,14 @@ export function DefectDetailCard({
   const [loadError, setLoadError] = useState<string | null>(null)
   const [image, setImage] = useState<ImageState>({ kind: 'loading' })
 
+  const [tab, setTab] = useState<CardTab>('info')
+  const [observations, setObservations] = useState<
+    HistoryState<DefectObservation>
+  >({ kind: 'idle' })
+  const [history, setHistory] = useState<HistoryState<DefectHistoryItem>>({
+    kind: 'idle',
+  })
+
   const [nextStatus, setNextStatus] = useState<WorkflowStatus | ''>('')
   const [resolution, setResolution] = useState<Resolution | ''>('')
   const [reason, setReason] = useState('')
@@ -152,6 +214,45 @@ export function DefectDetailCard({
 
   useEffect(() => load(), [load])
 
+  // 탭을 처음 열 때만 조회한다. 상태를 바꾸면 이력이 달라지므로 그때 다시 읽는다.
+  useEffect(() => {
+    if (tab !== 'observations' || observations.kind !== 'idle') return
+    let cancelled = false
+
+    getDefectObservations(defectId)
+      .then((page) => {
+        if (!cancelled) setObservations({ kind: 'ready', page })
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setObservations({ kind: 'error', message: getApiErrorMessage(cause) })
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [defectId, tab, observations.kind])
+
+  useEffect(() => {
+    if (tab !== 'history' || history.kind !== 'idle') return
+    let cancelled = false
+
+    getDefectHistory(defectId)
+      .then((page) => {
+        if (!cancelled) setHistory({ kind: 'ready', page })
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setHistory({ kind: 'error', message: getApiErrorMessage(cause) })
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [defectId, tab, history.kind])
+
   const defect = detail?.defect ?? null
   const allowed: WorkflowStatus[] = defect
     ? ALLOWED_TRANSITIONS[defect.workflowStatus]
@@ -181,6 +282,8 @@ export function DefectDetailCard({
         setNextStatus('')
         setResolution('')
         setReason('')
+        // 상태가 바뀌면 변경 이력이 늘어난다. 다음에 탭을 열 때 다시 읽게 한다.
+        setHistory({ kind: 'idle' })
         onChanged()
       })
       .catch((cause: unknown) => {
@@ -235,7 +338,129 @@ export function DefectDetailCard({
             </p>
           )}
 
-          <dl className="defect-card-facts">
+          <div className="defect-card-tabs" role="tablist">
+            {(
+              [
+                ['info', '정보'],
+                ['observations', `관측 ${defect.observationCount}`],
+                ['history', '변경 이력'],
+              ] as [CardTab, string][]
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="tab"
+                aria-selected={tab === value}
+                className={`defect-card-tab${tab === value ? ' is-selected' : ''}`}
+                onClick={() => setTab(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'observations' && (
+            <div className="defect-card-timeline">
+              {observations.kind === 'idle' && <p>불러오는 중…</p>}
+              {observations.kind === 'error' && (
+                <p className="defect-card-error" role="alert">
+                  {observations.message}
+                </p>
+              )}
+              {observations.kind === 'ready'
+                && observations.page.content.length === 0 && (
+                <p className="defect-card-terminal">관측 기록이 없습니다.</p>
+              )}
+              {observations.kind === 'ready'
+                && observations.page.content.map((observation) => (
+                  <div key={observation.eventId} className="defect-timeline-row">
+                    <div className="defect-timeline-head">
+                      <strong>
+                        {formatShortDateTime(
+                          observation.evidenceCapturedAt
+                            ?? observation.createdAt,
+                        )}
+                      </strong>
+                      {observation.representative && (
+                        <em className="defect-review-flag">대표</em>
+                      )}
+                    </div>
+                    <p>
+                      신뢰도{' '}
+                      {observation.confidence === null
+                        ? '—'
+                        : `${Math.round(observation.confidence * 100)}%`}
+                      {observation.damageRatio !== null
+                        && ` · 파손 ${Math.round(observation.damageRatio * 100)}%`}
+                      {observation.imageId === null && ' · 이미지 없음'}
+                    </p>
+                    {observation.modelName !== null && (
+                      <p className="defect-card-coord">
+                        {observation.modelName}
+                        {observation.modelVersion !== null
+                          && ` v${observation.modelVersion}`}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              {observations.kind === 'ready'
+                && observations.page.totalElements
+                  > observations.page.content.length && (
+                <p className="defect-card-coord">
+                  외 {observations.page.totalElements
+                    - observations.page.content.length}건 더 있음
+                </p>
+              )}
+            </div>
+          )}
+
+          {tab === 'history' && (
+            <div className="defect-card-timeline">
+              {history.kind === 'idle' && <p>불러오는 중…</p>}
+              {history.kind === 'error' && (
+                <p className="defect-card-error" role="alert">
+                  {history.message}
+                </p>
+              )}
+              {history.kind === 'ready' && history.page.content.length === 0 && (
+                <p className="defect-card-terminal">
+                  아직 변경 이력이 없습니다.
+                </p>
+              )}
+              {history.kind === 'ready'
+                && history.page.content.map((item) => (
+                  <div key={item.historyId} className="defect-timeline-row">
+                    <div className="defect-timeline-head">
+                      <strong>{formatShortDateTime(item.createdAt)}</strong>
+                      <em className="defect-card-coord">{item.changeType}</em>
+                    </div>
+                    {item.beforeStatus !== null && item.afterStatus !== null && (
+                      <p>
+                        {WORKFLOW_STATUS_LABELS[item.beforeStatus]
+                          ?? item.beforeStatus}
+                        {' → '}
+                        {WORKFLOW_STATUS_LABELS[item.afterStatus]
+                          ?? item.afterStatus}
+                      </p>
+                    )}
+                    {changedFields(item.beforeValues, item.afterValues).map(
+                      (change) => (
+                        <p key={change.key} className="defect-card-coord">
+                          {change.key}: {change.from} → {change.to}
+                        </p>
+                      ),
+                    )}
+                    {item.reason !== null && (
+                      <p className="defect-card-reason">{item.reason}</p>
+                    )}
+                  </div>
+                ))}
+            </div>
+          )}
+
+          <dl
+            className={`defect-card-facts${tab === 'info' ? '' : ' is-hidden'}`}
+          >
             <div>
               <dt>위치</dt>
               <dd>
