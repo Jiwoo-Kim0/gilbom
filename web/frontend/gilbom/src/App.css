@@ -685,6 +685,35 @@
   font-size: 0.75rem;
 }
 
+.defect-stream-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  margin: 0;
+  background: var(--surface-muted, #f2f1ec);
+  color: var(--text-muted, #6f6a5e);
+  font-size: 0.78rem;
+  gap: 6px;
+}
+
+.defect-stream-connected {
+  color: #2f6b45;
+}
+
+.defect-stream-reconnecting {
+  color: #a3341f;
+}
+
+.defect-toast {
+  padding: 10px 14px;
+  border: 1px solid #d8c79a;
+  border-radius: 10px;
+  margin: 0;
+  background: #fdf6e3;
+  font-size: 0.85rem;
+}
+
 .defect-card-tabs {
   display: flex;
   border-bottom: 1px solid var(--border-subtle, #e0ded6);

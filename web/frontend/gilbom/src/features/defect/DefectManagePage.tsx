@@ -5,7 +5,12 @@ import { DefectFilter } from './DefectFilter'
 import { DefectList } from './DefectList'
 import { DefectMap } from './DefectMap'
 import { getDefects } from './defectApi'
-import { EMPTY_DEFECT_FILTERS } from './defectTypes'
+import { useDefectRealtime } from './useDefectRealtime'
+import {
+  DEFECT_TYPE_LABELS,
+  EMPTY_DEFECT_FILTERS,
+  RISK_LEVEL_LABELS,
+} from './defectTypes'
 import type {
   DefectFilters,
   DefectListItem,
@@ -130,6 +135,13 @@ export function DefectManagePage() {
     [setSearchParams, sort],
   )
 
+  const refresh = useCallback(() => {
+    setReloadToken((token) => token + 1)
+  }, [])
+
+  // 실시간 알림은 "다시 읽어라"만 알려준다. 데이터는 목록·지도가 각자 다시 읽는다.
+  const { status: streamStatus, lastEvent } = useDefectRealtime(refresh)
+
   const changeSort = useCallback(
     (next: string) => {
       setSearchParams(writeFilters(filters, 0, next), { replace: true })
@@ -152,7 +164,26 @@ export function DefectManagePage() {
           <h2 id="defect-page-title">실시간 결함 상태 모니터링</h2>
           <p>시스템에서 감지된 최신 결함 목록 및 위치 현황입니다.</p>
         </div>
+        {/*
+          연결이 끊긴 채 조용히 있으면 "결함이 없다"로 오해한다. 상태를 항상 보여준다.
+        */}
+        <p
+          className={`defect-stream-status defect-stream-${streamStatus}`}
+          role="status"
+        >
+          {streamStatus === 'connected' && '실시간 연결됨'}
+          {streamStatus === 'connecting' && '실시간 연결 중…'}
+          {streamStatus === 'reconnecting' && '연결이 끊겨 재연결 중…'}
+        </p>
       </div>
+
+      {lastEvent !== null && lastEvent.eventType === 'defect.created' && (
+        <p className="defect-toast" role="status">
+          새 결함 {lastEvent.incidentCode} ·{' '}
+          {DEFECT_TYPE_LABELS[lastEvent.defectType] ?? lastEvent.defectType} ·{' '}
+          {RISK_LEVEL_LABELS[lastEvent.riskLevel] ?? lastEvent.riskLevel}
+        </p>
+      )}
       <div className="defect-layout">
         <DefectFilter
           filters={filters}
@@ -165,7 +196,7 @@ export function DefectManagePage() {
           filters={filters}
           selectedDefectId={selectedDefectId}
           onSelect={setSelectedDefectId}
-          onChanged={() => setReloadToken((token) => token + 1)}
+          onChanged={refresh}
         />
       </div>
       <DefectList
