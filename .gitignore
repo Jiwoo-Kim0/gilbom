@@ -5,8 +5,11 @@ __pycache__/
 # 전달받은 그대로 두고 커밋하지 않는다 (패키지 README 11항).
 gilbom-mqtt-external-test/
 
-# 개인 일일 작업·Jira 기록
-DailyLog/
+# 개인 일일 작업·Jira 기록은 기본적으로 제외한다.
+# Day 7 실제 장비 통합 계획 두 건은 팀 공유 문서이므로 예외로 추적한다.
+DailyLog/*
+!DailyLog/2026-07-31_Day7_상세_구현.md
+!DailyLog/2026-07-31_JIRA_Day7_작업.md
 
 # Codex 격리 Gradle 빌드 산출물
 /web/backend/build-codex-*/
