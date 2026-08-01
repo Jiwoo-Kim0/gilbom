@@ -100,6 +100,7 @@ pipeline {
                         docker compose config --quiet
                         sh scripts/verify-secret-boundary.sh
                         sh scripts/verify-production-compose.sh
+                        sh scripts/verify-certbot-automation.sh
                         sh -n infra/scripts/*.sh
                         test -s docs/production-deployment-runbook.md
                         test -s docs/day7-completion-freeze.md

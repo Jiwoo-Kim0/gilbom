@@ -6,12 +6,20 @@ set +x
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)"
 COMPOSE_FILE="${COMPOSE_FILE:-$PROJECT_DIR/compose.prod.yaml}"
-ENV_FILE="${ENV_FILE:-$PROJECT_DIR/.env.prod}"
+ENV_FILE="${ENV_FILE:-}"
+RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-}"
+IMAGE_ENV_FILE="${IMAGE_ENV_FILE:-}"
 RELEASE_DIR="${RELEASE_DIR:-$PROJECT_DIR/.artifacts/releases}"
 IMAGE_SCANNER_MODE="${IMAGE_SCANNER_MODE:-required}"
 ALLOW_MUTABLE_IMAGE_TAGS="${ALLOW_MUTABLE_IMAGE_TAGS:-false}"
 DEPLOY_PULL="${DEPLOY_PULL:-false}"
 CHECK_DIR="$(mktemp -d)"
+
+if [ -z "$ENV_FILE" ] \
+    && [ -z "$RUNTIME_ENV_FILE" ] \
+    && [ -z "$IMAGE_ENV_FILE" ]; then
+  ENV_FILE="$PROJECT_DIR/.env.prod"
+fi
 
 cleanup() {
   rm -r "$CHECK_DIR" >/dev/null 2>&1 || true
@@ -25,16 +33,35 @@ fail() {
 trap cleanup EXIT HUP INT TERM
 umask 077
 
-[ -f "$ENV_FILE" ] || fail "ENV_FILE does not exist"
+if [ -n "$ENV_FILE" ]; then
+  [ -z "$RUNTIME_ENV_FILE" ] && [ -z "$IMAGE_ENV_FILE" ] \
+    || fail "ENV_FILE cannot be combined with split environment files"
+  [ -f "$ENV_FILE" ] || fail "ENV_FILE does not exist"
+else
+  [ -n "$RUNTIME_ENV_FILE" ] \
+    || fail "RUNTIME_ENV_FILE is required when ENV_FILE is not used"
+  [ -n "$IMAGE_ENV_FILE" ] \
+    || fail "IMAGE_ENV_FILE is required when ENV_FILE is not used"
+  [ -f "$RUNTIME_ENV_FILE" ] || fail "RUNTIME_ENV_FILE does not exist"
+  [ -f "$IMAGE_ENV_FILE" ] || fail "IMAGE_ENV_FILE does not exist"
+fi
 [ -f "$COMPOSE_FILE" ] || fail "COMPOSE_FILE does not exist"
 command -v docker >/dev/null 2>&1 || fail "Docker CLI is required"
 command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required"
 
 compose() {
-  docker compose \
-    --env-file "$ENV_FILE" \
-    -f "$COMPOSE_FILE" \
-    "$@"
+  if [ -n "$ENV_FILE" ]; then
+    docker compose \
+      --env-file "$ENV_FILE" \
+      -f "$COMPOSE_FILE" \
+      "$@"
+  else
+    docker compose \
+      --env-file "$RUNTIME_ENV_FILE" \
+      --env-file "$IMAGE_ENV_FILE" \
+      -f "$COMPOSE_FILE" \
+      "$@"
+  fi
 }
 
 service_image() {
@@ -114,6 +141,8 @@ assert_immutable_application_image "$backend_image" Backend
 assert_immutable_application_image "$frontend_image" Frontend
 
 ENV_FILE="$ENV_FILE" \
+RUNTIME_ENV_FILE="$RUNTIME_ENV_FILE" \
+IMAGE_ENV_FILE="$IMAGE_ENV_FILE" \
 COMPOSE_FILE="$COMPOSE_FILE" \
   sh "$PROJECT_DIR/scripts/verify-production-compose.sh"
 

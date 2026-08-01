@@ -16,17 +16,18 @@ fail() {
 }
 
 compose() {
-  set -- docker compose
   if [ -n "$ENV_FILE" ]; then
-    set -- "$@" --env-file "$ENV_FILE"
+    docker compose \
+      --env-file "$ENV_FILE" \
+      -f "$COMPOSE_FILE" \
+      "$@"
   else
-    set -- \
-      "$@" \
+    docker compose \
       --env-file "$RUNTIME_ENV_FILE" \
-      --env-file "$IMAGE_ENV_FILE"
+      --env-file "$IMAGE_ENV_FILE" \
+      -f "$COMPOSE_FILE" \
+      "$@"
   fi
-  set -- "$@" -f "$COMPOSE_FILE"
-  "$@"
 }
 
 sync_nginx_certificate() {
