@@ -394,6 +394,10 @@ export function DefectDetailCard({
                         && ` · 파손 ${Math.round(observation.damageRatio * 100)}%`}
                       {observation.imageId === null && ' · 이미지 없음'}
                     </p>
+                    <p className="defect-card-coord">
+                      {observation.robotName ?? '이름 없는 로봇'}
+                      {' 탐지'}
+                    </p>
                     {observation.modelName !== null && (
                       <p className="defect-card-coord">
                         {observation.modelName}
