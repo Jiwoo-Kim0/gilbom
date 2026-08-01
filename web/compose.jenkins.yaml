@@ -52,7 +52,6 @@ services:
       DOCKER_CERT_PATH: /certs/client
       DOCKER_BUILDKIT: "1"
       COMPOSE_PARALLEL_LIMIT: "1"
-      CI_DOCKER_NETWORK: gilbom-ci
       JENKINS_OPTS: --httpPort=8080
       JAVA_OPTS: -Xms512m -Xmx1536m
     ports:

@@ -151,11 +151,10 @@ pipeline {
                             test -n "${DOCKER_HOST:-}"
                             test "${DOCKER_TLS_VERIFY:-}" = "1"
                             test -r "${DOCKER_CERT_PATH:-/certs/client}/ca.pem"
-                            ci_network="${CI_DOCKER_NETWORK:-gilbom-ci}"
 
                             docker run --rm \
                                 --user "$(id -u):$(id -g)" \
-                                --network "$ci_network" \
+                                --add-host docker:host-gateway \
                                 --env DOCKER_HOST="$DOCKER_HOST" \
                                 --env DOCKER_TLS_VERIFY=1 \
                                 --env DOCKER_CERT_PATH=/certs/client \

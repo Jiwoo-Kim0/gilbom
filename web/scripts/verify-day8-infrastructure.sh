@@ -106,6 +106,15 @@ assert_contains compose.jenkins.yaml \
 assert_contains compose.jenkins.yaml \
   'DOCKER_TLS_VERIFY: "1"' \
   "Jenkins must verify the DinD certificate"
+assert_contains Jenkinsfile \
+  '--add-host docker:host-gateway' \
+  "DinD test container must resolve the TLS daemon through its host gateway"
+assert_not_contains Jenkinsfile \
+  '--network "$ci_network"' \
+  "host Docker networks must not be passed to the nested DinD daemon"
+assert_not_contains compose.jenkins.yaml \
+  'CI_DOCKER_NETWORK:' \
+  "Jenkins must not expose a host Docker network name to nested DinD"
 assert_contains compose.jenkins.yaml \
   '${JENKINS_BIND_ADDRESS:-127.0.0.1}' \
   "Jenkins UI must default to loopback"

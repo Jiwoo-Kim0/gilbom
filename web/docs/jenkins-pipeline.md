@@ -64,6 +64,11 @@ Jenkins UI는 기본 `127.0.0.1:8081`, Docker TLS 2376은 host에 publish하지 
 `Jenkinsfile`은 host Docker socket 개발 환경과 TLS DinD를 모두 지원하지만 운영
 Compose는 host socket을 mount하지 않는다.
 
+호스트 Docker의 `gilbom-ci` network는 Jenkins와 DinD service를 연결하는 바깥
+network이며 DinD 내부 daemon에는 존재하지 않는다. DinD가 생성하는 Backend test
+container에는 `docker:host-gateway`를 추가해 같은 network 이름을 중첩 생성하지
+않고 TLS endpoint `tcp://docker:2376`과 Testcontainers의 공개 port에 접근한다.
+
 Jenkins Git Client는 HTTPS Username/Password Credential을 전달하기 위한 일회성
 `askpass` script를 `java.io.tmpdir`에서 실행한다. Jenkins의 `/tmp`는 container
 종료 시 사라지는 256 MiB tmpfs로 유지하고 `nosuid,nodev`를 적용하되, checkout에
