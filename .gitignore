@@ -13,3 +13,6 @@ DailyLog/*
 
 # Codex 격리 Gradle 빌드 산출물
 /web/backend/build-codex-*/
+
+# Windows download metadata
+*:Zone.Identifier
