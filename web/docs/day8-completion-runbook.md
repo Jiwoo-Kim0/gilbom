@@ -36,11 +36,15 @@ sh scripts/verify-frontend-tls.sh "gilbom-frontend:$release_sha"
 ```
 
 CI에서 image 검사와 전체 Backend/Frontend 테스트가 성공한 뒤 세 image를
-`docker image save`로 내보내고 SHA-256 sidecar를 만든다. 파일명과 image tag의
-revision이 같아야 한다.
+`docker image save`로 내보낸다. EC2 운영 파일도 같은 revision의 Git archive로
+고정하고 SHA-256 sidecar를 만든다. 파일명과 image tag의 revision이 같아야 한다.
 
 ```sh
 mkdir -p ".artifacts/release/$release_sha"
+git archive --format=tar "HEAD:web" \
+  | gzip -n \
+  > ".artifacts/release/$release_sha/gilbom-web-$release_sha.tar.gz"
+
 for image in backend frontend
 do
   docker image save "gilbom-$image:$release_sha" \
@@ -55,11 +59,11 @@ docker image save gilbom-jenkins:2.555.3-docker-29.6.2 \
 )
 ```
 
-## 2. EC2 운영 경로와 새 운영 파일
+## 2. EC2 운영 경로
 
-GitLab의 같은 revision을 `/opt/gilbom/deploy`에 배치한 뒤 실행한다.
-이 스크립트는 정해진 경로와 권한만 맞추며 기존 volume이나 Secret을 삭제하지
-않는다.
+현재 `/opt/gilbom/deploy`에 있는 스크립트로 먼저 운영 경로를 확인한다. 이
+스크립트는 정해진 경로와 권한만 맞추며 기존 volume이나 Secret을 삭제하지 않는다.
+같은 revision의 새 운영 파일 배치는 다음 절에서 수행한다.
 
 ```sh
 cd /opt/gilbom/deploy
@@ -99,17 +103,51 @@ sudo env \
 하나라도 없거나 hash가 다르면 운영 backup은 실패하고 기존 서비스가 다시 기동된다.
 참조되지 않는 orphan JPEG는 복구 가능성을 위해 archive에 함께 보존한다.
 
-MobaXterm으로 세 image archive와 `SHA256SUMS`를 `/home/ubuntu/day8-release/`에
-올린 뒤 검증하고 load한다.
+MobaXterm으로 source archive, 세 image archive, `SHA256SUMS`를
+`/home/ubuntu/day8-release/`에 올린 뒤 검증한다. 이 임시 경로는 미리 존재하지
+않아도 되며 MobaXterm에서 새 폴더로 만들면 된다.
 
 ```sh
 cd /home/ubuntu/day8-release
 sha256sum -c SHA256SUMS
+
+source_archive="gilbom-web-<40자리 release_sha>.tar.gz"
+test -f "$source_archive"
+archive_runtime_state="$(
+  tar -tzf "$source_archive" \
+    | grep -E '(^|/)(runtime\.env|image\.env)$|(^|/)secrets/[^/]+$' \
+    | grep -Ev '(^|/)secrets/\.gitignore$' \
+    || true
+)"
+if [ -n "$archive_runtime_state" ]; then
+  echo "source archive contains runtime state" >&2
+  exit 1
+fi
+
+sudo tar \
+  --extract \
+  --gzip \
+  --file "$source_archive" \
+  --directory /opt/gilbom/deploy \
+  --no-same-owner
+
+cd /opt/gilbom/deploy
+sudo docker compose \
+  --env-file runtime.env \
+  --env-file image.env \
+  -f compose.prod.yaml \
+  config --quiet
+
+cd /home/ubuntu/day8-release
 for archive in ./*.tar.gz
 do
+  [ "$archive" != "./$source_archive" ] || continue
   gzip -dc "$archive" | sudo docker image load
 done
 ```
+
+source archive에는 Git 추적 운영 파일만 들어 있으므로 기존 `runtime.env`,
+`image.env`, `/opt/gilbom/secrets`, named volume은 보존된다.
 
 `image.env`를 편집기로 열어 두 줄을 한 줄씩 설정한다. 긴 `sed` 명령을 터미널에서
 줄바꿈해 실행하지 않는다.
