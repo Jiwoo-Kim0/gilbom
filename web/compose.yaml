@@ -309,7 +309,8 @@ volumes:
   postgres_data:
   # 승인 PDF는 승인 버전·SHA-256과 결합되므로 backend 재배포 뒤에도 유지한다.
   report_pdf_data:
-  # S3 전환 전 로컬 결함 이미지를 backend 컨테이너 재생성 뒤에도 유지한다.
+  # 결함 이미지 원본. 외부 오브젝트 스토리지를 쓰지 않으므로 이 볼륨이 유일한 사본이다.
+  # DB의 storage.robot_image와 항상 같이 백업한다. `down -v`는 이미지를 지운다.
   robot_images:
 
 secrets:

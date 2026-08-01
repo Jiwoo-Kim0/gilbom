@@ -12,7 +12,8 @@ import org.springframework.stereotype.Component;
  * relaxed binding이 {@code GILBOM_STORAGE_LOCAL_ROOT_DIRECTORY} 같은 환경변수를
  * 그대로 바인딩하므로, 환경별 값은 배포 환경변수로만 주입하면 된다.
  *
- * <p>S3 어댑터가 추가되면 bucket·region 항목이 여기에 붙고 provider만 바뀐다.
+ * <p>저장소는 로컬 디스크로 확정이다(2026-08-01). 항목이 로컬 경로와 URL 서명에만
+ * 몰려 있는 것은 그 때문이다.
  */
 @Component
 @ConfigurationProperties(prefix = "gilbom.storage")
@@ -27,7 +28,7 @@ public class StorageProperties {
     private String localRootDirectory = "./data/robot-images";
 
     /**
-     * 발급한 이미지 조회 URL의 유효 시간. S3 presigned URL로 바뀌어도 같은 값을 쓴다.
+     * 발급한 이미지 조회 URL의 유효 시간.
      */
     private Duration urlTtl = Duration.ofMinutes(5);
 
