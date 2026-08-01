@@ -1,0 +1,93 @@
+name: ${JENKINS_PROJECT_NAME:-gilbom-jenkins}
+
+x-logging: &jenkins-logging
+  driver: json-file
+  options:
+    max-size: "${JENKINS_LOG_MAX_SIZE:-10m}"
+    max-file: "${JENKINS_LOG_MAX_FILES:-3}"
+
+services:
+  docker:
+    image: docker:29.6.2-dind-alpine3.24
+    restart: unless-stopped
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: /certs
+      DOCKER_DRIVER: overlay2
+      HEALTHCHECK_TCP_PORT: "2376"
+    volumes:
+      - jenkins_docker_certs:/certs
+      - jenkins_docker_data:/var/lib/docker
+      # Remote daemon의 bind mount가 Jenkins와 같은 절대 workspace를 보게 한다.
+      - ${JENKINS_HOME_DIR:-/opt/jenkins/home}:/var/jenkins_home
+    healthcheck:
+      test:
+        - CMD
+        - docker
+        - info
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    cpus: "${JENKINS_DIND_CPUS:-2.0}"
+    mem_limit: ${JENKINS_DIND_MEMORY_LIMIT:-4g}
+    mem_reservation: ${JENKINS_DIND_MEMORY_RESERVATION:-512m}
+    pids_limit: ${JENKINS_DIND_PIDS_LIMIT:-512}
+    networks:
+      - ci
+    logging: *jenkins-logging
+
+  jenkins:
+    build:
+      context: .
+      dockerfile: infra/jenkins/Dockerfile
+    image: ${JENKINS_IMAGE:-gilbom-jenkins:2.555.3-docker-29.6.2}
+    restart: unless-stopped
+    depends_on:
+      docker:
+        condition: service_healthy
+    environment:
+      DOCKER_HOST: tcp://docker:2376
+      DOCKER_TLS_VERIFY: "1"
+      DOCKER_CERT_PATH: /certs/client
+      DOCKER_BUILDKIT: "1"
+      COMPOSE_PARALLEL_LIMIT: "1"
+      CI_DOCKER_NETWORK: gilbom-ci
+      JENKINS_OPTS: --httpPort=8080
+      JAVA_OPTS: -Xms512m -Xmx1536m
+    ports:
+      - "${JENKINS_BIND_ADDRESS:-127.0.0.1}:${JENKINS_HTTP_PORT:-8081}:8080"
+    volumes:
+      - ${JENKINS_HOME_DIR:-/opt/jenkins/home}:/var/jenkins_home
+      - jenkins_docker_certs:/certs:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl --fail --silent http://127.0.0.1:8080/login >/dev/null
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: "${JENKINS_CPUS:-2.0}"
+    mem_limit: ${JENKINS_MEMORY_LIMIT:-2g}
+    mem_reservation: ${JENKINS_MEMORY_RESERVATION:-512m}
+    pids_limit: ${JENKINS_PIDS_LIMIT:-512}
+    networks:
+      - ci
+    logging: *jenkins-logging
+
+volumes:
+  jenkins_docker_certs:
+  jenkins_docker_data:
+
+networks:
+  ci:
+    name: gilbom-ci
+    driver: bridge

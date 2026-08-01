@@ -53,8 +53,19 @@ assert_contains compose.prod.yaml \
 assert_contains compose.prod.yaml \
   "file: \${MOSQUITTO_TLS_PRIVATE_KEY_SECRET_FILE:" \
   "production Mosquitto TLS private key Secret"
+assert_contains compose.monitoring.yaml \
+  "GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password" \
+  "Grafana administrator password file"
+if grep -Eq \
+  '^[[:space:]]+GF_SECURITY_ADMIN_PASSWORD:' \
+  compose.monitoring.yaml; then
+  fail "Grafana password must not be a plaintext environment variable"
+fi
+if grep -Fq '/var/run/docker.sock' compose.jenkins.yaml; then
+  fail "Jenkins must use TLS DinD instead of the host Docker socket"
+fi
 
-for compose_file in compose.yaml compose.prod.yaml
+for compose_file in compose.yaml compose.prod.yaml compose.monitoring.yaml
 do
   if grep -En \
     '^[[:space:]]+(POSTGRES_PASSWORD|POSTGRES_FLYWAY_PASSWORD|POSTGRES_APP_PASSWORD|SPRING_DATASOURCE_PASSWORD|SPRING_FLYWAY_PASSWORD|MQTT_PASSWORD|GILBOM_LLM_API_KEY|GILBOM_STORAGE_URL_SIGNING_KEY_BASE64|AUTH_RATE_LIMIT_HMAC_KEY_BASE64|MFA_TOTP_SECRET_KEYRING|INITIAL_ADMIN_PASSWORD):' \

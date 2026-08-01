@@ -57,6 +57,12 @@ HEALTH_MEMBERS = ("camera", "lidar", "gps", "battery", "motor", "storage")
 
 SOURCE_COMPONENTS = frozenset({"ai", "power", "safety", "mission"})
 
+#: incident.location.zone_id 에 서버가 거는 패턴 (예: "A-01").
+#: 로봇은 START_MISSION 이 준 값을 그대로 echo 하므로 이 패턴을 만들지는 않는다 —
+#: 다만 벗어난 값이 오면 그 미션의 incident 가 전부 조용히 거부되므로 미리 경고한다.
+#: ⚠️ 서버 patrol_area.area_code 에는 아직 같은 제약이 없다 (웹팀 확인 대기).
+ZONE_ID_PATTERN = r"^[A-Z]-[0-9]{2}$"
+
 INCIDENT_EVENT_TYPE = "BRAILLE_BLOCK_INCIDENT_DETECTED"
 ASSET_TYPE_BRAILLE_BLOCK = "BRAILLE_BLOCK"
 BLOCK_TYPES = frozenset({"LINEAR", "DOT", "UNKNOWN"})

@@ -1,0 +1,33 @@
+[Unit]
+Description=OrinCar robot MQTT communication
+# 시계 의존을 명시한다. commands 의 expires_at 판정과 서버의 freshness 검사가
+# 둘 다 NTP 동기를 전제한다 (계약 §17). 시계가 밀리면 유효한 명령을 버리거나
+# 만료된 명령을 실행하고, 발행한 telemetry·event 도 서버가 거부한다.
+After=network-online.target time-sync.target
+Wants=network-online.target time-sync.target
+
+[Service]
+Type=simple
+User=ubuntu
+# ca_cert·outbox_path 의 상대경로가 여기 기준은 아니다 — ca_cert 는 config.yaml
+# 위치 기준으로 풀리고, outbox_path 는 작업 디렉터리 기준이다.
+WorkingDirectory=/home/ubuntu/SSAFY/embedded
+EnvironmentFile=/etc/orincar/orincar.env
+# -u: 버퍼링을 끄고 journald 가 로그를 바로 받게 한다.
+ExecStart=/usr/bin/python3 -u main.py
+
+# 비정상 종료 자동 복구. 브로커가 죽어 있어도 로봇은 떠 있어야 한다.
+Restart=always
+RestartSec=5
+
+# SIGTERM 을 받으면 main.py 가 바퀴를 먼저 세우고 SHUTTING_DOWN state 와
+# presence OFFLINE(GRACEFUL_SHUTDOWN) 을 발행한 뒤 끊는다. 그 시간을 준다 —
+# 여기서 SIGKILL 로 끊으면 브로커가 LWT(UNGRACEFUL_DISCONNECT)를 대신 내보낸다.
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# 비밀값이 저널에 새지 않게 한다.
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

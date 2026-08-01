@@ -443,6 +443,14 @@ class MessageFactory:
             raise ValueError("ACCEPTED result must leave completed_at null")
         if status != "ACCEPTED" and completed_at is None:
             raise ValueError(f"{status} result requires completed_at")
+        if completed_at is not None and completed_at < received_at:
+            # 서버 DTO 는 completed_at >= received_at 도 함께 요구한다. 시계가 뒤로
+            # 튀면(NTP 스텝) 여기서 안 막힌 result 가 MQTT_PAYLOAD_VALIDATION_FAILED
+            # 로 조용히 버려지고, 관제 화면의 명령은 영원히 ACCEPTED 에 멈춘다.
+            # ISO-8601 UTC 고정 폭 문자열이라 사전순 비교가 시각순 비교와 같다.
+            raise ValueError(
+                f"completed_at({completed_at}) must not precede received_at({received_at})"
+            )
         return {
             "schema_version": SCHEMA_VERSION,
             "result_id": new_uuid(),

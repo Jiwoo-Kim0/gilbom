@@ -16,3 +16,18 @@ DailyLog/*
 
 # Windows download metadata
 *:Zone.Identifier
+
+# ── 임베디드: 밀리면 안 되는 것들 ─────────────────────────────────────────────
+# 실 Credential 주입 파일 — MQTT_PASSWORD·API Key 가 들어간다. example 만 추적한다.
+embedded/scripts/orincar.env
+# 비밀값 .env 전부 (스모크 도구·목 로봇이 옆에 만드는 것 포함)
+embedded/**/.env
+test/통신테스트/.env
+# 로봇 런타임 데이터 — Outbox(sqlite)·증거 이미지 (embedded/var/)
+embedded/var/
+embedded/**/*.sqlite3
+# 카메라 녹화물 — 용량 크고 현장 영상이다
+embedded/DataRecorder/recordings/
+# 모델 변환 산출물 — Jetson 에서 생성되는 수백 MB 바이너리
+embedded/**/*.engine
+embedded/**/*.onnx
