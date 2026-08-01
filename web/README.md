@@ -111,11 +111,12 @@ sh scripts/container-resilience-smoke.sh
 ```
 
 Production Compose never builds application images. Frontend Nginx publishes
-HTTP 80 and HTTPS 443, while robot-facing MQTT publishes TLS 8883. Backend and
+HTTP 80 only for ACME HTTP-01 and HTTPS redirect, and serves the application
+exclusively on HTTPS 443. Robot-facing MQTT publishes TLS 8883. Backend and
 PostgreSQL remain reachable only through their internal Compose networks.
-Before the first certificate exists, Frontend exposes only the ACME HTTP-01
-webroot and bootstrap health response; `infra/certbot/certificate.sh issue`
-installs the certificate copy and reloads Nginx into HTTPS mode.
+Before the first certificate exists, Frontend exposes only the ACME webroot and
+bootstrap health response; `infra/certbot/certificate.sh issue` installs the
+certificate copy and reloads Nginx into HTTPS mode.
 
 `container-resilience-smoke.sh`는 보고서 전체 smoke를 먼저 실행한 뒤 같은 격리
 stack에서 Backend/Frontend 자동 재시작, DB·MQTT·LLM 장애 복구, Secret 경계와

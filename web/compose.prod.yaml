@@ -267,7 +267,9 @@ services:
     image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE is required}
     restart: unless-stopped
     environment:
-      GILBOM_NGINX_TLS_MODE: ${GILBOM_NGINX_TLS_MODE:-auto}
+      # 운영 애플리케이션은 HTTP serving 모드로 내릴 수 없다. 인증서가 없으면
+      # ACME bootstrap만 제공하고, 인증서가 있으면 HTTPS와 HTTP redirect만 제공한다.
+      GILBOM_NGINX_TLS_MODE: auto
     ports:
       - "${FRONTEND_BIND_ADDRESS:-0.0.0.0}:${FRONTEND_HTTP_PORT:-80}:8080"
       - "${FRONTEND_BIND_ADDRESS:-0.0.0.0}:${FRONTEND_HTTPS_PORT:-443}:8443"

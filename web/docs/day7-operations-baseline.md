@@ -119,7 +119,8 @@ Frontend의 약 248 MiB `node_modules`는 더 이상 builder로 전송되지 않
 | Backend | 8080 | `127.0.0.1:${BACKEND_PORT:-8080}` |
 | Frontend/Nginx | 8080 | `127.0.0.1:${FRONTEND_PORT:-3000}` |
 | 로컬 MQTT TLS | 8883 | `${MQTT_BIND_ADDRESS:-127.0.0.1}:${MQTT_TLS_PORT:-8883}` |
-| 운영 Frontend | 8080 | `${FRONTEND_BIND_ADDRESS:-0.0.0.0}:${FRONTEND_HTTP_PORT:-80}` |
+| 운영 Frontend HTTP | 8080 | `${FRONTEND_BIND_ADDRESS:-0.0.0.0}:${FRONTEND_HTTP_PORT:-80}` |
+| 운영 Frontend HTTPS | 8443 | `${FRONTEND_BIND_ADDRESS:-0.0.0.0}:${FRONTEND_HTTPS_PORT:-443}` |
 | 운영 MQTT | 8883 | `${MQTT_BIND_ADDRESS:-0.0.0.0}:${MQTT_TLS_PORT:-8883}` |
 | 운영 Backend | 8080 | 없음 |
 | 운영 PostgreSQL | 5432 | 없음 |
@@ -127,9 +128,9 @@ Frontend의 약 248 MiB `node_modules`는 더 이상 builder로 전송되지 않
 | MQTT TLS/mTLS 시험 | 8883 | `0.0.0.0:8883`에 해당, 격리 시험에서만 사용 |
 
 로컬 DB·Backend·Frontend·MQTT는 기본적으로 loopback에만 공개된다. 운영
-`compose.prod.yaml`은 Frontend HTTP와 MQTT TLS만 publish한다. Frontend HTTPS는
-외부 TLS terminator가 필요하며 MQTT bind address와 host 방화벽은 승인된 로봇
-source CIDR로 제한해야 한다.
+`compose.prod.yaml`은 Frontend HTTP·HTTPS와 MQTT TLS만 publish한다. HTTP는
+ACME HTTP-01과 HTTPS redirect 전용이며 애플리케이션은 HTTPS에서만 제공한다.
+MQTT bind address와 host 방화벽은 승인된 로봇 source CIDR로 제한해야 한다.
 
 ### 5.2 영속 볼륨과 bind mount
 

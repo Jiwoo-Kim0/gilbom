@@ -51,7 +51,8 @@ Nginx worker는 운영 기본 CPU quota와 SSE 동시 연결을 고려해 2개�
 운영 `auto` 모드는 인증서가 없으면 HTTP-01 challenge와 bootstrap health만
 노출하고, 인증서가 있으면 8080의 애플리케이션 요청을 HTTPS로 308 redirect한다.
 실제 정적 파일과 API·SSE proxy는 8443에서 제공한다. 로컬 Compose는 `off` 모드로
-기존 HTTP 개발 경로를 유지한다.
+기존 HTTP 개발 경로를 유지한다. 운영 Compose는 `auto`를 상수로 주입하므로
+`runtime.env`에서 `off`로 변경할 수 없다.
 
 | 경로 | 정책 |
 |---|---|

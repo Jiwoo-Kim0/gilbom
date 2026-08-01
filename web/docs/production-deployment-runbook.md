@@ -157,7 +157,9 @@ docker compose \
 
 의존 순서는 PostgreSQL·MQTT health, Backend readiness, Frontend health다.
 인증서가 아직 없으면 Frontend는 ACME bootstrap 모드로 기동한다. 이 상태에서는
-애플리케이션을 HTTP로 공개하지 않는다.
+애플리케이션을 HTTP로 공개하지 않는다. 운영 Compose의 TLS mode는 `auto`로
+고정되어 있으며 `runtime.env`에 `GILBOM_NGINX_TLS_MODE=off`를 넣어도 적용되지
+않는다.
 
 ### 6.1 최초 인증서 발급
 

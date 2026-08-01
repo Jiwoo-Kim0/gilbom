@@ -45,7 +45,8 @@ group/NAT proxy와 함께 적용한다. 그 통제가 확인되기 전에는
 Frontend image는 HTTP 8080과 HTTPS 8443을 제공한다. 인증서가 없으면 HTTP-01
 challenge와 bootstrap health만 제공하고, 인증서가 준비되면 HTTP 요청을 HTTPS로
 redirect한다. `application-ec2.yml`의 Secure Session cookie가 정상 동작하려면
-외부 사용자 경로는 반드시 HTTPS여야 한다.
+외부 사용자 경로는 반드시 HTTPS여야 한다. 운영 Compose는 TLS mode를 `auto`로
+고정하므로 환경 파일로 HTTP 애플리케이션 serving을 활성화할 수 없다.
 
 Compose dependency는 다음 순서로 고정한다.
 

@@ -68,6 +68,18 @@ openssl req \
 cp "$SECRET_DIR/mosquitto_tls_fullchain.pem" \
   "$SECRET_DIR/mqtt_ca_certificate.pem"
 
+openssl req \
+  -x509 \
+  -newkey rsa:2048 \
+  -sha256 \
+  -nodes \
+  -days 1 \
+  -subj /CN=localhost \
+  -addext subjectAltName=DNS:localhost,IP:127.0.0.1 \
+  -keyout "$CERTBOT_DIR/nginx/privkey.pem" \
+  -out "$CERTBOT_DIR/nginx/fullchain.pem" \
+  >/dev/null 2>&1
+
 docker run --rm \
   --user "$(id -u):$(id -g)" \
   --entrypoint /bin/sh \
@@ -80,6 +92,9 @@ docker run --rm \
   '
 
 chmod 0444 "$SECRET_DIR"/*
+chmod 0444 \
+  "$CERTBOT_DIR/nginx/fullchain.pem" \
+  "$CERTBOT_DIR/nginx/privkey.pem"
 
 cp .env.prod.example "$ENV_FILE"
 sed -i \
@@ -87,7 +102,6 @@ sed -i \
   -e 's|^FRONTEND_BIND_ADDRESS=.*|FRONTEND_BIND_ADDRESS=127.0.0.1|' \
   -e 's|^FRONTEND_HTTP_PORT=.*|FRONTEND_HTTP_PORT=0|' \
   -e 's|^FRONTEND_HTTPS_PORT=.*|FRONTEND_HTTPS_PORT=0|' \
-  -e 's|^GILBOM_NGINX_TLS_MODE=.*|GILBOM_NGINX_TLS_MODE=off|' \
   -e 's|^CERTBOT_EMAIL=.*|CERTBOT_EMAIL=runtime-check@example.invalid|' \
   -e "s|^CERTBOT_CONF_DIR=.*|CERTBOT_CONF_DIR=$CERTBOT_DIR/conf|" \
   -e "s|^CERTBOT_WWW_DIR=.*|CERTBOT_WWW_DIR=$CERTBOT_DIR/www|" \
@@ -182,11 +196,19 @@ mqtt_port="$(compose port mosquitto 8883)"
 [ -n "$mqtt_port" ] || fail "MQTT TLS host port is missing"
 
 docker exec "$frontend_id" \
-  wget --quiet --output-document=- http://127.0.0.1:8080/healthz \
+  wget \
+    --quiet \
+    --no-check-certificate \
+    --output-document=- \
+    https://127.0.0.1:8443/healthz \
   | grep -Fxq ok \
   || fail "Frontend /healthz failed"
 docker exec "$frontend_id" \
-  wget --quiet --output-document=- http://127.0.0.1:8080/api/health \
+  wget \
+    --quiet \
+    --no-check-certificate \
+    --output-document=- \
+    https://127.0.0.1:8443/api/health \
   | grep -Fq '"status":"UP"' \
   || fail "Frontend to Backend API proxy failed"
 

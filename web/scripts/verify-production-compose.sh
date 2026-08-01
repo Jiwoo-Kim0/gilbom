@@ -158,6 +158,8 @@ assert_contains "$CHECK_DIR/frontend.yaml" "target: 8080" \
   "Frontend must publish Nginx port 8080"
 assert_contains "$CHECK_DIR/frontend.yaml" "target: 8443" \
   "Frontend must publish Nginx TLS port 8443"
+assert_contains "$CHECK_DIR/frontend.yaml" "GILBOM_NGINX_TLS_MODE: auto" \
+  "Production Frontend must not allow HTTP application serving mode"
 assert_contains "$CHECK_DIR/mosquitto.yaml" "target: 8883" \
   "Mosquitto must publish only TLS port 8883"
 assert_contains "$CHECK_DIR/mosquitto.yaml" "MQTT_TLS_SERVER_NAME:" \
