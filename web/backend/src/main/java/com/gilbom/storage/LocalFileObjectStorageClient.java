@@ -13,13 +13,18 @@ import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
 
 /**
- * S3 버킷이 준비되기 전까지 쓰는 로컬 디스크 어댑터다.
+ * 이미지 바이트를 서버 로컬 디스크에 두는 어댑터다.
  *
- * <p>업로드·조회·LLM 입력이 모두 이 구현 위에서 완결되므로, S3 전환은 일정상
- * 선행 작업이 아니라 교체 작업이 된다.
+ * <p>팀이 외부 오브젝트 스토리지를 쓰지 않기로 정해(2026-08-01) <b>이것이 유일한
+ * 구현</b>이다. 업로드·조회·LLM 입력이 모두 이 위에서 완결된다.
  *
- * <p>이 어댑터가 쓴 행은 bucket_name이 {@code local-disk}로 남는다. S3 어댑터가
- * 추가돼도 그 행들은 계속 이 구현이 읽는다.
+ * <p>이 어댑터가 쓴 행은 bucket_name이 {@code local-disk}로 남는다. 값이 한 종류뿐
+ * 이어도 읽기가 bucket으로 구현을 고르는 구조는 유지한다. 그래야 나중에 저장소가
+ * 하나 더 생겨도 이미 올라간 행을 옮기지 않아도 된다.
+ *
+ * <p><b>운영 주의.</b> 이 경로는 반드시 영속 volume이어야 한다. 복제본이 없으므로
+ * 디스크를 잃으면 이미지도 잃는다. DB의 {@code storage.robot_image}와 항상 같이
+ * 백업해야 한다. 한쪽만 남으면 메타데이터는 있는데 파일이 없는 상태가 된다.
  */
 @Component
 public class LocalFileObjectStorageClient implements ObjectStorageClient {

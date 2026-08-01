@@ -97,6 +97,16 @@ function prefilledPeriod(mode: ReportEditorMode, value: string | null): string {
 
 export function ReportEditorPage({ mode }: { mode: ReportEditorMode }) {
   const { reportId = '' } = useParams()
+
+  // 결함 카드의 "리포트 생성"이 넘겨주는 값이다. 있으면 그 결함 한 건짜리 보고서가 된다.
+  const [searchParams] = useSearchParams()
+  const defectId = mode === 'create' ? searchParams.get('defectId') : null
+  const defectIncidentCode = searchParams.get('incidentCode')
+
+  // 결함 없이 들어오면 LLM을 고를 수 없으므로 수동을 기본으로 둔다.
+  const initialGenerationMethod: CreateGenerationMethod =
+    defectId === null ? 'MANUAL' : 'LLM'
+
   const navigate = useNavigate()
   const createAttemptRef = useRef(new ReportCreateAttempt())
   const submittingRef = useRef(false)
@@ -107,15 +117,10 @@ export function ReportEditorPage({ mode }: { mode: ReportEditorMode }) {
   const [statisticsLoading, setStatisticsLoading] = useState(false)
   const [error, setError] = useState<unknown>(null)
   const [generationMethod, setGenerationMethod] =
-    useState<CreateGenerationMethod>('MANUAL')
+    useState<CreateGenerationMethod>(initialGenerationMethod)
   const [reportType, setReportType] = useState<ReportType>('PERIODIC')
   const [title, setTitle] = useState('')
   const [summary, setSummary] = useState('')
-  // 결함 카드의 "리포트 생성"이 넘겨주는 값이다. 있으면 그 결함 한 건짜리 보고서가 된다.
-  const [searchParams] = useSearchParams()
-  const defectId = mode === 'create' ? searchParams.get('defectId') : null
-  const defectIncidentCode = searchParams.get('incidentCode')
-
   const [periodFrom, setPeriodFrom] = useState(() =>
     prefilledPeriod(mode, searchParams.get('from')),
   )
@@ -482,18 +487,30 @@ export function ReportEditorPage({ mode }: { mode: ReportEditorMode }) {
                   <strong>템플릿</strong>
                   <span>안전한 일반 텍스트 틀 사용</span>
                 </label>
-                <label className={generationMethod === 'LLM' ? 'is-selected' : ''}>
+                {/*
+                  LLM 보고서는 결함 한 건을 근거로만 만든다. 대상 결함 없이 들어온
+                  경우(보고서 목록의 "새 보고서")에는 고를 수 없게 한다.
+                */}
+                <label
+                  className={`${generationMethod === 'LLM' ? 'is-selected' : ''}${
+                    defectId === null ? ' is-disabled' : ''
+                  }`}
+                >
                   <input
                     type="radio"
                     name="generationMethod"
                     value="LLM"
                     checked={generationMethod === 'LLM'}
                     onChange={() => applyTemplate('LLM')}
-                    disabled={submitting}
+                    disabled={submitting || defectId === null}
                   />
                   <Sparkles size={20} aria-hidden="true" />
                   <strong>LLM</strong>
-                  <span>서버 검증 후 DRAFT 생성</span>
+                  <span>
+                    {defectId === null
+                      ? '결함 상세에서 "리포트 생성"으로 시작하세요'
+                      : '서버 검증 후 DRAFT 생성'}
+                  </span>
                 </label>
               </div>
             </section>

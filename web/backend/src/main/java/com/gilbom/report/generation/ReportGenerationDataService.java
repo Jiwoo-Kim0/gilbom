@@ -11,6 +11,8 @@ import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.gilbom.common.error.BusinessException;
+import com.gilbom.common.error.ErrorCode;
 import com.gilbom.report.ReportDtos.LlmReportCreateRequest;
 import com.gilbom.report.generation.ReportGenerationDataRepository.EvidenceJson;
 import com.gilbom.report.generation.ReportGenerationDataRepository.Snapshot;
@@ -46,6 +48,14 @@ public class ReportGenerationDataService {
         ReportGenerationCriteria criteria =
                 ReportGenerationCriteria.from(
                         request.filterCriteria());
+        // LLM 보고서는 결함 한 건을 근거로만 만든다. 기간 전체를 근거로 삼는 형태는
+        // 제품에서 쓰지 않으므로, 대상 결함 없이 들어오면 만들지 않고 거부한다.
+        // 사람이 직접 쓰는 MANUAL·TEMPLATE 보고서는 이 경로를 타지 않는다.
+        if (!criteria.isSingleDefect()) {
+            throw new BusinessException(
+                    ErrorCode.REPORT_VALIDATION_FAILED,
+                    "LLM 보고서는 대상 결함을 지정해야 합니다.");
+        }
         ReportLlmInput.Period period = new ReportLlmInput.Period(
                 request.periodFrom(),
                 request.periodTo());
