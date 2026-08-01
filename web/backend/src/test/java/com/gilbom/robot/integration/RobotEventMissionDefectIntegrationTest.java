@@ -627,6 +627,87 @@ class RobotEventMissionDefectIntegrationTest {
     }
 
     @Test
+    void startsNewDefectWhenTheResolvedOneIsDetectedAgain() {
+        // 수리가 끝난 자리에서 다시 탐지되면 같은 결함이 아니다. 옛 결함에 관측만
+        // 붙이면 "수리했는데 또 났다"는 사실이 관측 횟수 뒤로 숨는다.
+        IncidentIngestionResult first = incidentIngestionService.ingest(
+                incidentEvent(
+                        UUID.fromString(
+                                "23000000-0000-4000-8000-000000000401"),
+                        1,
+                        127.027600,
+                        37.497900,
+                        0.87),
+                "{\"event_type\":\"BRAILLE_BLOCK_INCIDENT_DETECTED\"}",
+                BASE_TIME.plusSeconds(2));
+        jdbcTemplate.update("""
+                UPDATE defect.defect
+                SET workflow_status = 'RESOLVED'
+                WHERE defect_id = ?
+                """,
+                first.defectId());
+
+        // 병합 반경 2m 안쪽이다. 상태만 아니면 흡수됐을 거리다.
+        IncidentIngestionResult afterRepair = incidentIngestionService.ingest(
+                incidentEvent(
+                        UUID.fromString(
+                                "23000000-0000-4000-8000-000000000402"),
+                        2,
+                        127.027610,
+                        37.497905,
+                        0.91),
+                "{\"event_type\":\"BRAILLE_BLOCK_INCIDENT_DETECTED\"}",
+                BASE_TIME.plusSeconds(4));
+
+        assertThat(afterRepair.defectId()).isNotEqualTo(first.defectId());
+        assertThat(count("defect.defect")).isEqualTo(2);
+        // 종결된 결함은 그대로 둔다. 되살아나면 안 된다.
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT observation_count
+                FROM defect.defect
+                WHERE defect_id = ?
+                """,
+                Integer.class,
+                first.defectId())).isOne();
+    }
+
+    @Test
+    void keepsAbsorbingDetectionsThatWereDismissedAsFalsePositive() {
+        // 오탐으로 판정한 대상은 순찰마다 다시 잡힌다. 새 결함으로 쌓으면 목록이
+        // 같은 오탐으로 잠기므로, 이미 기각한 기록에 붙인다.
+        IncidentIngestionResult first = incidentIngestionService.ingest(
+                incidentEvent(
+                        UUID.fromString(
+                                "23000000-0000-4000-8000-000000000411"),
+                        1,
+                        127.027600,
+                        37.497900,
+                        0.87),
+                "{\"event_type\":\"BRAILLE_BLOCK_INCIDENT_DETECTED\"}",
+                BASE_TIME.plusSeconds(2));
+        jdbcTemplate.update("""
+                UPDATE defect.defect
+                SET workflow_status = 'FALSE_POSITIVE'
+                WHERE defect_id = ?
+                """,
+                first.defectId());
+
+        IncidentIngestionResult again = incidentIngestionService.ingest(
+                incidentEvent(
+                        UUID.fromString(
+                                "23000000-0000-4000-8000-000000000412"),
+                        2,
+                        127.027610,
+                        37.497905,
+                        0.91),
+                "{\"event_type\":\"BRAILLE_BLOCK_INCIDENT_DETECTED\"}",
+                BASE_TIME.plusSeconds(4));
+
+        assertThat(again.defectId()).isEqualTo(first.defectId());
+        assertThat(count("defect.defect")).isOne();
+    }
+
+    @Test
     void calculatesRiskBandsAndDailyIncidentCodeSequence() {
         IncidentIngestionResult low = incidentIngestionService.ingest(
                 incidentEvent(

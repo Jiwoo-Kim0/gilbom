@@ -339,6 +339,14 @@ public class IncidentEventIngestionService
                 SELECT d.defect_id
                 FROM defect.defect d
                 WHERE d.merged_into_defect_id IS NULL
+                  -- 수리가 끝난 자리에서 다시 탐지되면 같은 결함이 아니라 새
+                  -- 결함이다. 옛 결함에 관측만 붙이면 "수리했는데 또 났다"는
+                  -- 사실이 관측 횟수 뒤로 숨고, 종결된 결함이 되살아난다.
+                  --
+                  -- FALSE_POSITIVE와 REJECTED는 일부러 제외하지 않았다. 오탐으로
+                  -- 판정한 대상은 순찰마다 다시 잡히므로, 빼면 같은 오탐이 매번
+                  -- 새 결함으로 쌓여 목록이 잠긴다. 이미 기각한 기록에 붙는 편이 낫다.
+                  AND d.workflow_status <> 'RESOLVED'
                   AND d.defect_type = ?
                   AND d.block_type = ?
                   AND d.patrol_area_id IS NOT DISTINCT FROM ?
