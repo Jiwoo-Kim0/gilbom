@@ -16,6 +16,7 @@
 - JSON Schema: [`mqtt-v2/schemas/`](./mqtt-v2/schemas/)
 - Fixture Manifest: [`../../test/fixtures/mqtt/v2/manifest.json`](../../test/fixtures/mqtt/v2/manifest.json)
 - 검증·변경 정책: [`mqtt-v2-contract-freeze.md`](./mqtt-v2-contract-freeze.md)
+- Jetson Day 7 통합 절차: [`jetson-mqtt-v2-day7-integration-runbook.md`](<./팀원B/V2/jetson-mqtt-v2-day7-integration-runbook.md>)
 
 동결 후 필수 필드·필드 타입·enum·Topic·QoS·Retain·처리 의미를 바꾸거나 선택
 필드를 추가하는 변경은 기존 v2를 수정하지 않고 `schema_version`과 Namespace의
