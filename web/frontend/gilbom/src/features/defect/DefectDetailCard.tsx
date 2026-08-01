@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { X } from 'lucide-react'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
+import { DefectEditModal } from './DefectEditModal'
 import { useAuthentication } from '../auth/authenticationContext'
 import {
   DEFECT_STATUS_UPDATE,
@@ -18,6 +19,7 @@ import {
 import {
   ALLOWED_TRANSITIONS,
   DEFECT_TYPE_LABELS,
+  isTerminal,
   RESOLUTIONS,
   RESOLUTION_LABELS,
   RISK_LEVEL_LABELS,
@@ -170,6 +172,7 @@ export function DefectDetailCard({
   const [reason, setReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [editing, setEditing] = useState(false)
 
   const load = useCallback(() => {
     let cancelled = false
@@ -257,6 +260,18 @@ export function DefectDetailCard({
   const allowed: WorkflowStatus[] = defect
     ? ALLOWED_TRANSITIONS[defect.workflowStatus]
     : []
+  // 수정을 막는 사유. null이면 수정할 수 있다. 서버 requireChangeable와 같은 규칙이라
+  // 여기서 걸러내면 저장 눌러서 409를 받는 일이 없다.
+  const notEditable: string | null = (() => {
+    if (defect === null) return '불러오는 중입니다.'
+    if (detail?.mergedIntoDefectId != null) {
+      return '병합된 결함은 대표 결함에서 수정해야 합니다.'
+    }
+    if (isTerminal(defect.workflowStatus)) {
+      return '종결된 결함은 수정할 수 없습니다.'
+    }
+    return null
+  })()
   // 서버 DefectWorkflow와 같은 규칙이다. 완료 처리에는 처리 결과가 필요하다.
   const resolutionRequired = nextStatus === 'RESOLVED'
   const canSubmit =
@@ -598,6 +613,20 @@ export function DefectDetailCard({
               </>
             )}
 
+            {canUpdate && (
+              <button
+                type="button"
+                className="secondary-button"
+                // 서버 requireChangeable와 같은 조건이다. 종결·병합된 결함은
+                // 저장 시점에 409가 나므로 애초에 열지 않는다.
+                disabled={notEditable !== null}
+                title={notEditable ?? undefined}
+                onClick={() => setEditing(true)}
+              >
+                결함 수정
+              </button>
+            )}
+
             {canCreateReport && (
               <button
                 type="button"
@@ -618,6 +647,19 @@ export function DefectDetailCard({
               </button>
             )}
           </div>
+
+          {editing && (
+            <DefectEditModal
+              defect={defect}
+              onClose={() => setEditing(false)}
+              onUpdated={(updated) => {
+                setDetail(updated)
+                // 유형·심각도가 바뀌면 축마다 이력이 남는다. 다시 읽게 한다.
+                setHistory({ kind: 'idle' })
+                onChanged()
+              }}
+            />
+          )}
         </>
       )}
     </aside>
