@@ -11,6 +11,8 @@ services:
     depends_on:
       mqtt-init:
         condition: service_completed_successfully
+    environment:
+      MQTT_USERNAME: ${MQTT_USERNAME:-gilbom}
     ports:
       # 기본은 localhost 전용이다. 팀원 PC와 LAN 통신할 때만 MQTT_BIND_ADDRESS=0.0.0.0으로 바꾼다.
       - "${MQTT_BIND_ADDRESS:-127.0.0.1}:${MQTT_TLS_PORT:-8883}:8883"
@@ -18,6 +20,22 @@ services:
       - ./infra/mosquitto/local/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./infra/mosquitto/local/run-local-mosquitto.sh:/mosquitto/config/run-local-mosquitto.sh:ro
       - ./infra/mosquitto/local/runtime:/mosquitto/local:ro
+    secrets:
+      - mqtt_backend_password
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mosquitto_sub -h 127.0.0.1 -p 8883
+          --cafile /mosquitto/local/certs/local-ca-cert.pem
+          -u "$${MQTT_USERNAME}" -P "$$(cat /run/secrets/mqtt_backend_password)"
+          -i gilbom-local-broker-health
+          -t '$$SYS/broker/version' -C 1 -W 5
+          > /dev/null
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 10s
     read_only: true
     tmpfs:
       - /tmp
@@ -207,7 +225,7 @@ services:
       db:
         condition: service_healthy
       mosquitto:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test:
         - CMD

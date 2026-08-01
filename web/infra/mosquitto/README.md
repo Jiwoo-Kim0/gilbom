@@ -69,6 +69,13 @@ Git에 커밋하지 않는다. 새로 저장소를 받은 개발자는
 `init-local-mqtt.sh`를 직접 실행할 필요 없이 기본 `compose.yaml`을 실행하면
 `mqtt-init` 서비스가 필요한 로컬 파일을 생성한다.
 
+`mqtt-init`은 인증 자산 생성에만 root를 사용하고 완료 전에 `local/runtime/`과
+`local/ca/`의 소유자를 bind source 소유자로 되돌린다. Runtime group은 1883을
+유지하므로 Broker와 Backend는 필요한 파일을 읽고 쓸 수 있고, 개발자와 Jenkins는
+컨테이너 종료 뒤 workspace를 정상적으로 정리할 수 있다. 로컬 Broker의 Docker
+healthcheck는 TLS CA 검증, Backend 계정 인증과 `$SYS/broker/version` 응답을
+함께 확인한다.
+
 환경별 실행 방법은 [`PROFILES.md`](./PROFILES.md)를 참고한다.
 
 ## Credential 회전·폐기 TLS Cutover 검증
@@ -94,9 +101,9 @@ Windows Docker Desktop bind mount는 passwd 변경이 Broker 컨테이너에 보
 때까지 지연될 수 있어 단계별 최대 120초를 기다린다. 필요하면
 `MQTT_CUTOVER_MAX_ATTEMPTS`로 초 단위 재시도 횟수를 조정한다. 제한 시간 안에
 reload되지 않으면 성공으로 간주하지 않고 실패한다.
-보상 verifier를 직접 복구한 뒤에는 password-file을 다시 `root:1883`,
-`0660`으로 맞춘다. Mosquitto의 root-owner 요구를 만족하면서 uid/gid 1883인
-Broker와 Backend가 group 권한으로 읽고 쓸 수 있게 한다.
+보상 verifier를 직접 복구한 뒤에는 password-file을 bind source owner와
+group `1883`, mode `0660`으로 맞춘다. uid/gid 1883인 Broker와 Backend의
+group 접근을 유지하면서 host workspace 소유권을 보존한다.
 
 검증 컨테이너에서 `mosquitto` DNS가 해석되지 않으면 컨테이너가 과거
 `gilbom_default` 네트워크에 남아 있는지 확인하고, 임시 `network connect` 대신

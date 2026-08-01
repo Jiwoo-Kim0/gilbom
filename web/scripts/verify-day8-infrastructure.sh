@@ -152,6 +152,29 @@ assert_contains scripts/verify-production-runtime.sh \
 assert_not_contains scripts/verify-production-runtime.sh \
   'CHECK_DIR="$(mktemp -d)"' \
   "production runtime verification must not bind Jenkins-local /tmp paths"
+assert_contains compose.yaml \
+  '-i gilbom-local-broker-health' \
+  "local Mosquitto must expose a TLS and authenticated Docker healthcheck"
+assert_contains infra/mosquitto/local/compose.yaml \
+  '-i gilbom-local-broker-health' \
+  "standalone local Mosquitto must expose the same Docker healthcheck"
+[ "$(grep -Fc -- 'condition: service_healthy' compose.yaml)" -ge 3 ] \
+  || fail "local Backend must wait for both DB and Mosquitto health"
+assert_contains infra/mosquitto/local/init-local-mqtt.sh \
+  'STATE_OWNER_UID="$(stat -c' \
+  "mqtt-init must discover the bind source owner"
+assert_contains infra/mosquitto/local/init-local-mqtt.sh \
+  'chown -R "${STATE_OWNER_UID}:1883" "${RUNTIME_DIR}"' \
+  "mqtt-init runtime assets must remain removable by the workspace owner"
+assert_contains infra/mosquitto/local/init-local-mqtt.sh \
+  'chown -R "${STATE_OWNER_UID}:${STATE_OWNER_GID}" "${CA_DIR}"' \
+  "mqtt-init CA assets must remain removable by the workspace owner"
+assert_not_contains infra/mosquitto/local/init-local-mqtt.sh \
+  'chown 0:0 "${CA_KEY_FILE}"' \
+  "mqtt-init must not leave a root-owned CA key in the workspace"
+assert_contains infra/mosquitto/local/verify-credential-cutover.sh \
+  'PASSWORD_FILE_OWNER="${MQTT_CUTOVER_PASSWORD_FILE_OWNER:-${STATE_OWNER_UID}:1883}"' \
+  "credential cutover compensation must preserve workspace ownership"
 assert_not_contains Jenkinsfile \
   '--network "$ci_network"' \
   "host Docker networks must not be passed to the nested DinD daemon"

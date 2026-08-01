@@ -21,6 +21,9 @@
   artifact로 보존하고 수정 가능한 Critical 취약점을 배포 차단한다.
 - Compose의 health dependency가 준비된 뒤 프론트 Nginx를 통해 Backend API를
   호출한다. 컨테이너가 단순히 실행 중인지만 확인하지 않는다.
+- 로컬 Mosquitto healthcheck는 TLS chain, Backend 계정 인증과 system topic
+  응답을 확인한다. Integration smoke는 Broker 중단·재시작 뒤 이 Docker health와
+  Backend MQTT health가 모두 복구되는지 검증한다.
 - 프론트 컨테이너에서 Backend 전체 Actuator health를 호출해 DB health
   contributor까지 `UP`인지 확인한다.
 - Integration smoke의 실제 Secret과 Authorization·prompt·LLM response canary가
@@ -85,6 +88,11 @@ Frontend TLS와 최종 보고서·복원력 smoke가 Docker container에 bind하
 같은 절대 경로로 보는 ignored workspace
 `.artifacts/docker-bind-work/`에서만 생성하고 각 검증 종료 시 해당 run
 directory를 삭제한다.
+
+로컬 `mqtt-init`은 root one-shot으로 인증 자산을 만들되 `runtime/`과 `ca/`
+소유권을 bind source의 Jenkins UID/GID로 되돌린다. Broker와 Backend 접근에는
+GID 1883을 유지하므로 runtime 기능을 보존하면서 `deleteDir()`가 workspace를
+정리할 수 있다.
 
 Jenkins Git Client는 HTTPS Username/Password Credential을 전달하기 위한 일회성
 `askpass` script를 `java.io.tmpdir`에서 실행한다. Jenkins의 `/tmp`는 container

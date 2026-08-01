@@ -11,6 +11,8 @@ services:
     depends_on:
       mqtt-init:
         condition: service_completed_successfully
+    environment:
+      MQTT_USERNAME: ${MQTT_USERNAME:-gilbom}
 
     ports:
       - "${MQTT_BIND_ADDRESS:-127.0.0.1}:${MQTT_TLS_PORT:-8883}:8883"
@@ -19,6 +21,24 @@ services:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./run-local-mosquitto.sh:/mosquitto/config/run-local-mosquitto.sh:ro
       - ./runtime:/mosquitto/local:ro
+
+    secrets:
+      - mqtt_backend_password
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mosquitto_sub -h 127.0.0.1 -p 8883
+          --cafile /mosquitto/local/certs/local-ca-cert.pem
+          -u "$${MQTT_USERNAME}" -P "$$(cat /run/secrets/mqtt_backend_password)"
+          -i gilbom-local-broker-health
+          -t '$$SYS/broker/version' -C 1 -W 5
+          > /dev/null
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 10s
 
     read_only: true
     tmpfs:

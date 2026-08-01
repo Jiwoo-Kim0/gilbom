@@ -68,7 +68,7 @@ nonroot/read-only 전환, 이미지 경량화, 배포·롤백 안정화, 그리�
 | 필수 | Frontend/Nginx | 사용자 진입점과 `/api` reverse proxy다. Backend readiness 뒤 공개한다. |
 | 로봇 기능 의존 | MQTT Broker | 로봇 상태·Telemetry·명령에는 필수지만 웹 핵심 기능의 필수 등급에는 넣지 않는다. |
 | 선택 | LLM/GMS | 비활성·정책 미승인·외부 장애 시 외부 호출 없이 `TEMPLATE` fallback을 사용한다. |
-| 로컬 초기화 보조 | `mqtt-init` | 로컬 CA, Broker 인증서, password file을 준비하고 종료하는 one-shot 서비스다. |
+| 로컬 초기화 보조 | `mqtt-init` | 로컬 CA, Broker 인증서, password file을 준비하고 생성물 소유권을 bind source 소유자에게 돌려준 뒤 종료하는 one-shot 서비스다. |
 
 운영 Compose는 로봇 통합 기능이 포함된 배포 단위로 정의해 DB와 MQTT가 모두
 healthy인 뒤 Backend를 시작한다. 웹 기능만 분리 운영해야 하는 환경은 별도 승인된
@@ -102,9 +102,9 @@ Frontend의 약 248 MiB `node_modules`는 더 이상 builder로 전송되지 않
 
 | 파일 | 용도 | 상태 |
 |---|---|---|
-| `compose.yaml` | DB, Backend, Frontend, Mosquitto, `mqtt-init` 로컬 전체 스택 | 문법 검증 PASS |
+| `compose.yaml` | DB, Backend, Frontend, Mosquitto, `mqtt-init` 로컬 전체 스택 | Broker TLS·인증 health와 문법 검증 PASS |
 | `compose.prod.yaml` | DB, MQTT, Backend, Frontend와 config init 운영 스택 | 문법·포트·network·dependency·resource 정책 검증 PASS |
-| `infra/mosquitto/local/compose.yaml` | 로컬 TLS Broker 단독 실행 | 문법 검증 PASS |
+| `infra/mosquitto/local/compose.yaml` | 로컬 TLS Broker 단독 실행 | Broker TLS·인증 health와 문법 검증 PASS |
 | `infra/mosquitto/test/compose.yaml` | localhost 평문 MQTT 시험 | 문법 검증 PASS |
 | `infra/mosquitto/tls/compose.yaml` | 운영 형태 TLS 시험 | 문법 검증 PASS |
 | `infra/mosquitto/mtls/compose.yaml` | mTLS 시험 | 문법 검증 PASS |
@@ -146,7 +146,7 @@ MQTT bind address와 host 방화벽은 승인된 로봇 source CIDR로 제한해
 | `mosquitto_credentials` | `/mosquitto/credentials`, `/app/config/mqtt/credentials` | Backend RW, Broker RO | 운영 mutable password verifier |
 | `mosquitto_data` | `/mosquitto/data` | Broker RW | QoS session·inflight persistence |
 | Mosquitto 설정·실행 스크립트 | `/mosquitto/config/*` | Broker RO | Broker 설정과 wrapper |
-| `infra/mosquitto/local` | `/mqtt-local` | `mqtt-init` RW | 로컬 인증 자산 생성 |
+| `infra/mosquitto/local` | `/mqtt-local` | `mqtt-init` RW | 로컬 인증 자산 생성 후 source UID/GID로 소유권 정상화 |
 | `infra/mosquitto/acl` | `/mqtt-input/acl` | `mqtt-init` RO | ACL 원본 |
 | 운영 `passwd`, ACL, 인증서 디렉터리 | `/mosquitto/config/*`, `/mosquitto/certs` | Broker RO | 운영 Broker 인증 자산 |
 
@@ -165,7 +165,7 @@ DB·PDF·이미지를 함께 삭제하므로 운영 절차에서 금지하거나
 | Nginx body/proxy temp | `/tmp/client_temp`, `proxy_temp`, `fastcgi_temp`, `uwsgi_temp`, `scgi_temp` | 동일 tmpfs. SSE proxy buffering은 비활성 |
 | Nginx log | stdout, stderr | 파일 쓰기와 별도 영속 볼륨 불필요 |
 | Mosquitto | `/tmp`, `/mosquitto/data`, `/mosquitto/log` | Compose tmpfs. 현재 `persistence false`, log는 stdout |
-| `mqtt-init` | `/mqtt-local/runtime/**`, `/mqtt-local/ca/**`, `/tmp/mqtt-local-init.*` | 로컬 bind mount와 tmpfs. root one-shot만 기록 |
+| `mqtt-init` | `/mqtt-local/runtime/**`, `/mqtt-local/ca/**`, `/tmp/mqtt-local-init.*` | root one-shot이 생성하지만 bind source UID/GID로 되돌려 개발자·Jenkins cleanup을 보장 |
 | PostgreSQL | `/var/lib/postgresql/data` | 영속 RW |
 
 Nginx 1.30.4의 compile-time PID·temp 기본값을 사용하지 않고 port 8080과

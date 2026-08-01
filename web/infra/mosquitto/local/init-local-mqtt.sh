@@ -58,6 +58,11 @@ fi
 
 mkdir -p "${CERT_DIR}" "${CREDENTIAL_DIR}" "${CA_DIR}"
 
+# Bind mount 생성물은 source 디렉터리 소유자에게 돌려줘 Jenkins와 개발자가
+# 컨테이너 종료 후에도 workspace를 정리할 수 있게 한다.
+STATE_OWNER_UID="$(stat -c '%u' "${LOCAL_DIR}")"
+STATE_OWNER_GID="$(stat -c '%g' "${LOCAL_DIR}")"
+
 WORK_DIR="$(mktemp -d /tmp/mqtt-local-init.XXXXXX)"
 SERVER_OPENSSL_CONFIG="${WORK_DIR}/openssl-local-runtime.cnf"
 
@@ -255,20 +260,20 @@ mosquitto_passwd -b \
 cp "${WORK_DIR}/passwd" "${PASSWORD_FILE}"
 cp "${ACL_SOURCE_FILE}" "${ACL_RUNTIME_FILE}"
 
-chown 0:1883 "${CREDENTIAL_DIR}" 2>/dev/null || true
-chown 1883:1883 \
-  "${CA_CERT_FILE}" \
-  "${SERVER_CERT_FILE}" \
-  "${SERVER_KEY_FILE}" \
-  "${ACL_RUNTIME_FILE}" 2>/dev/null || true
-chown 0:1883 "${PASSWORD_FILE}" 2>/dev/null || true
-chown 0:0 "${CA_KEY_FILE}" 2>/dev/null || true
+# 기존 실행이 남긴 root/1883 소유 파일도 매번 정상화한다. Runtime은 source
+# 소유자가 관리하고 group 1883으로 Broker와 Backend 접근을 유지한다.
+chown -R "${STATE_OWNER_UID}:1883" "${RUNTIME_DIR}"
+chown -R "${STATE_OWNER_UID}:${STATE_OWNER_GID}" "${CA_DIR}"
 
-chmod 644 "${CA_CERT_FILE}" "${SERVER_CERT_FILE}"
-chmod 640 "${SERVER_KEY_FILE}"
+chmod 750 "${RUNTIME_DIR}" "${CERT_DIR}"
 chmod 770 "${CREDENTIAL_DIR}"
+chmod 644 "${CA_CERT_FILE}" "${SERVER_CERT_FILE}"
+chmod 640 "${SERVER_KEY_FILE}" "${ACL_RUNTIME_FILE}"
 chmod 660 "${PASSWORD_FILE}"
-chmod 700 "${ACL_RUNTIME_FILE}"
+chmod 700 "${CA_DIR}"
 chmod 600 "${CA_KEY_FILE}"
+if [ -e "${LEGACY_PASSWORD_FILE}" ]; then
+  chmod 600 "${LEGACY_PASSWORD_FILE}"
+fi
 
 echo "MQTT local TLS assets and password file are ready."
