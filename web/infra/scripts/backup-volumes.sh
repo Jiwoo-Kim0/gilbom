@@ -90,6 +90,32 @@ done
 compose stop frontend backend mosquitto
 QUIESCED=true
 
+# robot_images가 JPEG의 유일한 사본이므로 DB가 참조하는 모든 AVAILABLE
+# object_key와 hash를 먼저 고정한다. orphan 파일은 복구 가능성을 위해 함께
+# 보존하되, DB가 참조하는 파일이 없거나 변조된 경우에는 backup 성공으로 보지 않는다.
+robot_image_database_manifest="$bundle/robot_images.database.sha256"
+compose exec -T db sh -ec '
+  export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+  exec psql \
+    --host 127.0.0.1 \
+    --username "$POSTGRES_USER" \
+    --dbname "$POSTGRES_DB" \
+    --no-password \
+    --tuples-only \
+    --no-align \
+    --quiet \
+    --set ON_ERROR_STOP=1 \
+    --command "
+      SELECT sha256_hex || '\''  '\'' || object_key
+      FROM storage.robot_image
+      WHERE bucket_name = '\''local-disk'\''
+        AND image_status = '\''AVAILABLE'\''
+        AND deleted_at IS NULL
+      ORDER BY object_key;
+    "
+' > "$robot_image_database_manifest"
+chmod 0600 "$robot_image_database_manifest"
+
 BACKUP_DIR="$bundle" \
 ENV_FILE="$ENV_FILE" \
 RUNTIME_ENV_FILE="$RUNTIME_ENV_FILE" \
@@ -126,9 +152,63 @@ do
   chmod 0600 "$archive"
 done
 
+robot_images_volume="$(
+  docker volume ls \
+    --filter "label=com.docker.compose.project=$project_name" \
+    --filter "label=com.docker.compose.volume=robot_images" \
+    --quiet
+)"
+[ -n "$robot_images_volume" ] \
+  || fail "named volume is missing: robot_images"
+robot_image_volume_manifest="$bundle/robot_images.volume.sha256"
+docker run \
+  --rm \
+  --read-only \
+  --mount "type=volume,src=$robot_images_volume,dst=/source,readonly" \
+  --mount "type=bind,src=$bundle,dst=/backup" \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
+  alpine:3.22 \
+  sh -ec '
+    cd /source
+    find . -type f -name "*.jpg" -exec sha256sum {} \; \
+      | sed "s#  \./#  #" \
+      | sort > /backup/robot_images.volume.sha256
+    chown "$1:$2" /backup/robot_images.volume.sha256
+  ' sh "$(id -u)" "$(id -g)"
+chmod 0600 "$robot_image_volume_manifest"
+
+missing_image=false
+while IFS= read -r expected_image
+do
+  [ -n "$expected_image" ] || continue
+  if ! grep -Fxq "$expected_image" "$robot_image_volume_manifest"; then
+    printf '%s\n' \
+      "Missing or altered robot image: ${expected_image#*  }" >&2
+    missing_image=true
+  fi
+done < "$robot_image_database_manifest"
+[ "$missing_image" = false ] \
+  || fail "robot_images volume does not cover every AVAILABLE database row"
+
+database_image_count="$(wc -l < "$robot_image_database_manifest" | tr -d ' ')"
+volume_image_count="$(wc -l < "$robot_image_volume_manifest" | tr -d ' ')"
+{
+  printf 'database_available_images=%s\n' "$database_image_count"
+  printf 'volume_jpeg_files=%s\n' "$volume_image_count"
+  printf '%s\n' 'database_image_coverage=PASS'
+} > "$bundle/robot_images.summary"
+chmod 0600 "$bundle/robot_images.summary"
+
 (
   cd "$bundle"
-  sha256sum ./*.dump ./*.tar.gz > SHA256SUMS
+  sha256sum \
+    ./*.dump \
+    ./*.dump.sha256 \
+    ./*.tar.gz \
+    ./robot_images.database.sha256 \
+    ./robot_images.volume.sha256 \
+    ./robot_images.summary \
+    > SHA256SUMS
 )
 chmod 0600 "$bundle/SHA256SUMS"
 

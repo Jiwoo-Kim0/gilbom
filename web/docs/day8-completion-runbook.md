@@ -31,15 +31,21 @@ sh scripts/verify-production-compose.sh
 sh scripts/verify-secret-boundary.sh
 sh scripts/verify-day8-infrastructure.sh
 sh scripts/verify-supported-versions.sh
+sh scripts/verify-frontend-csp-source.sh
 sh scripts/verify-frontend-tls.sh "gilbom-frontend:$release_sha"
 ```
 
 CI에서 image 검사와 전체 Backend/Frontend 테스트가 성공한 뒤 세 image를
-`docker image save`로 내보내고 SHA-256 sidecar를 만든다. 파일명과 image tag의
-revision이 같아야 한다.
+`docker image save`로 내보낸다. EC2 운영 파일도 같은 revision의 Git archive로
+고정하고 SHA-256 sidecar를 만든다. 파일명과 image tag의 revision이 같아야 한다.
 
 ```sh
 mkdir -p ".artifacts/release/$release_sha"
+repository_root="$(git rev-parse --show-toplevel)"
+git -C "$repository_root" archive --format=tar "HEAD:web" . \
+  | gzip -n \
+  > ".artifacts/release/$release_sha/gilbom-web-$release_sha.tar.gz"
+
 for image in backend frontend
 do
   docker image save "gilbom-$image:$release_sha" \
@@ -54,11 +60,11 @@ docker image save gilbom-jenkins:2.555.3-docker-29.6.2 \
 )
 ```
 
-## 2. EC2 운영 경로와 새 운영 파일
+## 2. EC2 운영 경로
 
-GitLab의 같은 revision을 `/opt/gilbom/deploy`에 배치한 뒤 실행한다.
-이 스크립트는 정해진 경로와 권한만 맞추며 기존 volume이나 Secret을 삭제하지
-않는다.
+현재 `/opt/gilbom/deploy`에 있는 스크립트로 먼저 운영 경로를 확인한다. 이
+스크립트는 정해진 경로와 권한만 맞추며 기존 volume이나 Secret을 삭제하지 않는다.
+같은 revision의 새 운영 파일 배치는 다음 절에서 수행한다.
 
 ```sh
 cd /opt/gilbom/deploy
@@ -93,17 +99,56 @@ sudo env \
   sh infra/scripts/backup-volumes.sh
 ```
 
-MobaXterm으로 세 image archive와 `SHA256SUMS`를 `/home/ubuntu/day8-release/`에
-올린 뒤 검증하고 load한다.
+출력 bundle의 `robot_images.summary`에는
+`database_image_coverage=PASS`가 있어야 한다. DB가 참조하는 AVAILABLE 이미지가
+하나라도 없거나 hash가 다르면 운영 backup은 실패하고 기존 서비스가 다시 기동된다.
+참조되지 않는 orphan JPEG는 복구 가능성을 위해 archive에 함께 보존한다.
+
+MobaXterm으로 source archive, 세 image archive, `SHA256SUMS`를
+`/home/ubuntu/day8-release/`에 올린 뒤 검증한다. 이 임시 경로는 미리 존재하지
+않아도 되며 MobaXterm에서 새 폴더로 만들면 된다.
 
 ```sh
 cd /home/ubuntu/day8-release
 sha256sum -c SHA256SUMS
+
+source_archive="gilbom-web-<40자리 release_sha>.tar.gz"
+test -f "$source_archive"
+archive_runtime_state="$(
+  tar -tzf "$source_archive" \
+    | grep -E '(^|/)(runtime\.env|image\.env)$|(^|/)secrets/[^/]+$' \
+    | grep -Ev '(^|/)secrets/\.gitignore$' \
+    || true
+)"
+if [ -n "$archive_runtime_state" ]; then
+  echo "source archive contains runtime state" >&2
+  exit 1
+fi
+
+sudo tar \
+  --extract \
+  --gzip \
+  --file "$source_archive" \
+  --directory /opt/gilbom/deploy \
+  --no-same-owner
+
+cd /opt/gilbom/deploy
+sudo docker compose \
+  --env-file runtime.env \
+  --env-file image.env \
+  -f compose.prod.yaml \
+  config --quiet
+
+cd /home/ubuntu/day8-release
 for archive in ./*.tar.gz
 do
+  [ "$archive" != "./$source_archive" ] || continue
   gzip -dc "$archive" | sudo docker image load
 done
 ```
+
+source archive에는 Git 추적 운영 파일만 들어 있으므로 기존 `runtime.env`,
+`image.env`, `/opt/gilbom/secrets`, named volume은 보존된다.
 
 `image.env`를 편집기로 열어 두 줄을 한 줄씩 설정한다. 긴 `sed` 명령을 터미널에서
 줄바꿈해 실행하지 않는다.
@@ -237,7 +282,8 @@ sudo docker run --rm --network host \
 ```
 
 출력에 `image-idempotency=PASS`와 `day8-result event_id=... image_id=...`가
-있어야 한다. 운영 화면에서 보고서 한 건을 승인해 PDF가 생성된 상태에서 두 UUID를
+있어야 한다. 방금 생성된 결함 상세 카드의 `리포트 생성`을 눌러 단건 LLM 보고서를
+만든 뒤, 별도 승인 권한 계정으로 검토 요청·승인하여 PDF가 생성된 상태에서 두 UUID를
 다음 gate에 전달한다. 이 gate는 DB `local-disk`/object key/hash, MQTT Incident
 연결, 실제 파일, 승인 PDF와 Backend 재생성 전후 모든 hash, 서명 Secret의 지속성을
 검사한다.
@@ -272,8 +318,9 @@ python .\scripts\verify-day8-signed-image.py
 
 - HTTPS 인증서 경고 없음, 로그인·MFA 성공
 - 새 결함 상세 JPEG와 bbox가 표시되고 새로고침 후에도 다시 표시됨
+- 새 결함 상세 카드에서 생성한 보고서의 근거가 해당 defect 한 건으로 고정됨
 - 승인 보고서 PDF 다운로드 성공
-- 지도 tile, 줌 `+/-`, 우하단 저작권, 마커·팝업·bbox가 정상
+- 결함·로봇 지도 tile, 줌 `+/-`, 우하단 저작권, 마커·방향·팝업·bbox가 정상
 - Console에 `nrbe.pstatic.net/styles/...` CSP 차단이 없음
 - HTTP URL이 HTTPS로 308 Redirect
 
@@ -292,6 +339,6 @@ Cloud Console의 허용 Web Service URL에
 - `verify-day8-auxiliary-runtime.sh` PASS
 - `verify-day8-persistence.sh` PASS
 - `verify-day8-signed-image.py`에서 정상·변조·만료 PASS
-- 위 브라우저 6항목 수동 PASS
+- 위 브라우저 7항목 수동 PASS
 
 셋 중 하나라도 실행 전이거나 SKIPPED면 “구현 완료, 운영 인수 미완료” 상태다.

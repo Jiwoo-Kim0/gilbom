@@ -15,6 +15,7 @@ import {
   type MouseEvent,
 } from 'react'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
+import { lockBodyScroll } from '../../shared/dom/bodyScrollLock'
 import type { RobotStreamStatus } from '../robot/robotTypes'
 import {
   getRobotCommand,
@@ -138,8 +139,7 @@ export function CommandHistoryPanel({
     if (selectedCommandId === null) {
       return
     }
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
+    const releaseBodyScroll = lockBodyScroll()
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
@@ -149,7 +149,7 @@ export function CommandHistoryPanel({
 
     window.addEventListener('keydown', handleKeyDown)
     return () => {
-      document.body.style.overflow = previousOverflow
+      releaseBodyScroll()
       window.removeEventListener('keydown', handleKeyDown)
     }
   }, [closeDetail, selectedCommandId])

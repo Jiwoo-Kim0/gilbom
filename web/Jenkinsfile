@@ -102,6 +102,7 @@ pipeline {
                         sh scripts/verify-production-compose.sh
                         sh scripts/verify-certbot-automation.sh
                         sh scripts/verify-day8-infrastructure.sh
+                        sh scripts/verify-frontend-csp-source.sh
                         sh -n infra/scripts/*.sh
                         test -s docs/production-deployment-runbook.md
                         test -s docs/day7-completion-freeze.md

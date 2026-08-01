@@ -135,11 +135,19 @@ done
 [ "$(stat -c '%a' /opt/gilbom/backups)" = 700 ] \
   || fail "/opt/gilbom/backups must be mode 0700"
 
-swap_bytes="$(
-  swapon --show --bytes --noheadings --output SIZE \
-    | awk '{total += $1} END {print total + 0}'
+swap_file_active_bytes="$(
+  swapon --show=NAME,SIZE --bytes --noheadings \
+    | awk '$1 == "/swapfile" {total += $2} END {print total + 0}'
 )"
-[ "$swap_bytes" -ge 4294967296 ] || fail "at least 4 GiB active swap is required"
+[ -f /swapfile ] || fail "/swapfile is missing"
+swap_file_bytes="$(stat -c '%s' /swapfile)"
+[ "$swap_file_bytes" -ge 4294967296 ] \
+  || fail "/swapfile must be at least 4 GiB"
+# mkswap reserves space for its header, so the active SIZE is smaller than
+# the source file. Verify the 4 GiB file and allow up to 1 MiB of metadata.
+minimum_active_swap_bytes=$((swap_file_bytes - 1048576))
+[ "$swap_file_active_bytes" -ge "$minimum_active_swap_bytes" ] \
+  || fail "active swap is smaller than the 4 GiB swapfile usable area"
 grep -Eq '^[[:space:]]*/swapfile[[:space:]]+none[[:space:]]+swap[[:space:]]+sw[[:space:]]+0[[:space:]]+0([[:space:]]|$)' \
   /etc/fstab \
   || fail "/swapfile persistence is missing from /etc/fstab"
@@ -340,16 +348,19 @@ latest_checksum="$(
 (
   cd "$(dirname "$latest_checksum")"
   sha256sum -c SHA256SUMS
+  grep -Fxq 'database_image_coverage=PASS' robot_images.summary
   for archive in ./*.tar.gz
   do
     tar -tzf "$archive" >/dev/null
   done
+  dump_file="$(find . -maxdepth 1 -type f -name '*.dump' -print)"
+  [ "$(printf '%s\n' "$dump_file" | grep -c .)" -eq 1 ]
   docker run \
     --rm \
     --interactive \
     --entrypoint pg_restore \
     postgis/postgis:16-3.5 \
-    --list < postgres.dump >/dev/null
+    --list < "$dump_file" >/dev/null
 ) || fail "latest backup integrity verification failed"
 
 printf '%s\n' \

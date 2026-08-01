@@ -91,18 +91,16 @@ export function RobotFleetGrid({
               <div className="robot-fleet-metrics">
                 <div className="robot-fleet-metric">
                   <span>배터리 수준</span>
-                  <div className="robot-battery-bar">
-                    <span
-                      className="robot-battery-bar-fill"
-                      style={{
-                        width: `${
-                          robot.batteryPercent === null
-                            ? 0
-                            : Math.max(0, Math.min(100, robot.batteryPercent))
-                        }%`,
-                      }}
-                    />
-                  </div>
+                  <progress
+                    className="robot-battery-progress"
+                    max={100}
+                    value={
+                      robot.batteryPercent === null
+                        ? 0
+                        : Math.max(0, Math.min(100, robot.batteryPercent))
+                    }
+                    aria-label={`${robot.name} 배터리 수준`}
+                  />
                   <strong>
                     {robot.batteryPercent === null
                       ? '—'

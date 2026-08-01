@@ -374,7 +374,9 @@ def create_llm_report(session: ApiSession) -> dict[str, Any]:
             "reportType": "PERIODIC",
             "periodFrom": PERIOD_FROM,
             "periodTo": PERIOD_TO,
-            "filterCriteria": {},
+            # 운영 UI와 같은 단건 결함 생성 계약을 검증한다. LLM 보고서는
+            # 이제 대상 결함 없이 생성할 수 없다.
+            "filterCriteria": {"defectId": FIXTURE_DEFECT_ID},
         },
         expected=(201,),
         csrf=True,
