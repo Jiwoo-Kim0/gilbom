@@ -178,6 +178,8 @@ public final class DefectDtos {
             UUID eventId,
             UUID defectId,
             UUID robotId,
+            /** robot.robot에서 가져온 표시용 이름. 로봇 행이 없으면 null이다. */
+            String robotName,
             boolean locationValid,
             GeoPoint location,
             Double locationAccuracyM,

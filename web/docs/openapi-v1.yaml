@@ -6051,6 +6051,12 @@ components:
         eventId: { type: string, format: uuid }
         defectId: { type: string, format: uuid }
         robotId: { type: string, format: uuid }
+        robotName:
+          type: string
+          nullable: true
+          maxLength: 100
+          description: >-
+            탐지한 로봇의 표시용 이름입니다. 로봇 행이 없으면 null입니다.
         locationValid: { type: boolean }
         location:
           $ref: "#/components/schemas/DefectGeoPoint"

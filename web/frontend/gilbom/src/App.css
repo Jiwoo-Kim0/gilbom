@@ -2415,3 +2415,53 @@ button:disabled {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
+
+/* 결함 수정 모달 — 상세 카드 위에 겹친다. CSP가 인라인 스타일을 막으므로 전부 클래스로 둔다. */
+.defect-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgb(15 23 42 / 55%);
+}
+
+.defect-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: min(26rem, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 1.25rem;
+  border: 1px solid var(--surface-border, #e2e8f0);
+  border-radius: 0.75rem;
+  background: var(--surface, #fff);
+  box-shadow: 0 12px 32px rgb(15 23 42 / 25%);
+}
+
+.defect-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.defect-modal-header h3 {
+  margin: 0;
+}
+
+.defect-modal-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.defect-card-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
