@@ -63,16 +63,31 @@ def arguments(auto_complete_sec: int = 0) -> SimpleNamespace:
         mqtt_id="robot-mission-test",
         ca_certificate=Path(__file__),
         battery_percent=87.0,
+        battery_step_percent=0.0,
+        position_step_m=0.0,
+        position_update_interval=0.0,
+        speed_mps=0.8,
         jetson_temp_c=41.5,
         jetson_temp_step_c=0.0,
         gps_invalid=False,
         latitude=37.5013,
         longitude=127.0396,
+        initial_mission_id=None,
+        initial_zone_id=None,
+        initial_mission_state="RUNNING",
+        initial_mission_elapsed_sec=0,
         telemetry_interval=0.1,
+        state_interval=30.0,
+        safety_event_interval=0.0,
+        battery_event_interval=0.0,
+        incident_event_interval=0.0,
         mission_auto_complete_sec=auto_complete_sec,
         self_test=False,
         spring_url="http://localhost",
         command_type="START_MISSION",
+        command_outcomes={},
+        command_delays={},
+        duplicate_results_for=set(),
         host="localhost",
         port=8883,
     )
@@ -200,6 +215,109 @@ class MockRobotMissionTest(unittest.TestCase):
             "MOCK_COMMAND_CANCELLED",
         )
         self.assertIsNone(self.robot.mission_id)
+
+    def test_periodic_event_payloads_cover_all_event_families(self) -> None:
+        safety_events = [self.robot.safety_event_payload() for _ in range(4)]
+        battery_events = [self.robot.battery_event_payload() for _ in range(5)]
+        incident = self.robot.incident_event_payload()
+
+        self.assertEqual(
+            [event["event_type"] for event in safety_events],
+            [
+                "SAFETY_STOPPED",
+                "SAFETY_CLEARED",
+                "SENSOR_FAULT",
+                "SENSOR_RECOVERED",
+            ],
+        )
+        self.assertEqual(
+            [event["event_type"] for event in battery_events],
+            [
+                "BATTERY_LOW",
+                "BATTERY_CRITICAL",
+                "BATTERY_RECOVERED",
+                "BATTERY_SENSOR_FAULT",
+                "BATTERY_SENSOR_RECOVERED",
+            ],
+        )
+        self.assertEqual(
+            incident["event_type"],
+            "BRAILLE_BLOCK_INCIDENT_DETECTED",
+        )
+        self.assertEqual(incident["source_component"], "ai")
+        self.assertIsNone(incident["mission_id"])
+        self.assertTrue(incident["location"]["valid"])
+        self.assertEqual(
+            len({
+                event["event_id"]
+                for event in [*safety_events, *battery_events, incident]
+            }),
+            10,
+        )
+
+    def test_telemetry_values_change_while_mission_is_running(self) -> None:
+        self.robot.args.jetson_temp_step_c = 0.2
+        self.robot.args.battery_step_percent = 0.5
+        self.robot.args.position_step_m = 1.0
+        self.robot.handle_command(command(
+            "START_MISSION",
+            {"mission_id": "MIS-MOCK-MOVING", "zone_id": "A-01"},
+        ))
+        before = self.robot.telemetry_payload()
+
+        self.robot.advance_telemetry_values()
+        after = self.robot.telemetry_payload()
+
+        self.assertNotEqual(
+            before["system"]["jetson_temp_c"],
+            after["system"]["jetson_temp_c"],
+        )
+        self.assertNotEqual(
+            before["battery"]["percent"],
+            after["battery"]["percent"],
+        )
+        self.assertNotEqual(
+            before["position"]["lat"],
+            after["position"]["lat"],
+        )
+        self.assertTrue(after["motion"]["moving"])
+        self.assertEqual(after["motion"]["speed_mps"], 0.8)
+
+    def test_gps_position_changes_only_after_its_own_interval(self) -> None:
+        self.robot.args.position_step_m = 1.0
+        self.robot.args.position_update_interval = 20.0
+        self.robot.handle_command(command(
+            "START_MISSION",
+            {"mission_id": "MIS-MOCK-GPS", "zone_id": "A-01"},
+        ))
+        initial = (self.robot.latitude, self.robot.longitude)
+        due_at = self.robot.next_position_update_at
+
+        self.robot.advance_telemetry_values(monotonic_now=due_at - 0.1)
+        self.assertEqual((self.robot.latitude, self.robot.longitude), initial)
+
+        self.robot.advance_telemetry_values(monotonic_now=due_at)
+        self.assertNotEqual((self.robot.latitude, self.robot.longitude), initial)
+        self.assertEqual(self.robot.next_position_update_at, due_at + 20.0)
+
+    def test_active_mission_context_can_be_restored_after_restart(self) -> None:
+        restored_args = arguments()
+        restored_args.initial_mission_id = "MIS-DB-ACTIVE"
+        restored_args.initial_zone_id = "DB-AREA"
+        restored_args.initial_mission_state = "RUNNING"
+        restored_args.initial_mission_elapsed_sec = 120
+        restored_args.latitude = 36.1189518
+        restored_args.longitude = 128.3445461
+        restored = mock_robot.MockRobot(restored_args, "test-password")
+
+        telemetry = restored.telemetry_payload()
+
+        self.assertEqual(restored.mode, "PATROLLING")
+        self.assertEqual(restored.zone_id, "DB-AREA")
+        self.assertEqual(telemetry["mission_id"], "MIS-DB-ACTIVE")
+        self.assertGreaterEqual(telemetry["mission"]["elapsed_sec"], 120)
+        self.assertEqual(telemetry["position"]["lat"], 36.1189518)
+        self.assertEqual(telemetry["position"]["lon"], 128.3445461)
 
 
 if __name__ == "__main__":

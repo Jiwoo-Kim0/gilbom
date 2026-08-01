@@ -85,6 +85,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ca-certificate", type=Path, default=DEFAULT_CA_CERTIFICATE)
     parser.add_argument("--telemetry-interval", type=float, default=5.0)
     parser.add_argument(
+        "--state-interval",
+        type=float,
+        default=30.0,
+        help="Republish retained State at this interval; zero disables it.",
+    )
+    parser.add_argument(
+        "--safety-event-interval",
+        type=float,
+        default=0.0,
+        help="Publish rotating Safety test events; zero disables them.",
+    )
+    parser.add_argument(
+        "--battery-event-interval",
+        type=float,
+        default=0.0,
+        help="Publish rotating Battery test events; zero disables them.",
+    )
+    parser.add_argument(
+        "--incident-event-interval",
+        type=float,
+        default=0.0,
+        help="Publish Incident test events; zero disables them.",
+    )
+    parser.add_argument(
         "--mission-auto-complete-sec",
         type=int,
         default=0,
@@ -96,6 +120,33 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--latitude", type=float, default=37.5013)
     parser.add_argument("--longitude", type=float, default=127.0396)
     parser.add_argument("--battery-percent", type=float, default=87.0)
+    parser.add_argument(
+        "--battery-step-percent",
+        type=float,
+        default=0.0,
+        help="Change battery percentage after each telemetry sample; zero disables it.",
+    )
+    parser.add_argument(
+        "--position-step-m",
+        type=float,
+        default=0.0,
+        help="Move the GPS test position by this many meters while PATROLLING.",
+    )
+    parser.add_argument(
+        "--position-update-interval",
+        type=float,
+        default=0.0,
+        help=(
+            "Minimum seconds between GPS position changes while PATROLLING; "
+            "zero changes it after every telemetry sample."
+        ),
+    )
+    parser.add_argument(
+        "--speed-mps",
+        type=float,
+        default=0.8,
+        help="Reported speed while PATROLLING.",
+    )
     parser.add_argument("--jetson-temp-c", type=float, default=41.5)
     parser.add_argument(
         "--jetson-temp-step-c",
@@ -107,6 +158,26 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--gps-invalid", action="store_true")
+    parser.add_argument(
+        "--initial-mission-id",
+        help="Restore an already active Mission code after restarting this test bot.",
+    )
+    parser.add_argument(
+        "--initial-zone-id",
+        help="DB patrol Area code paired with --initial-mission-id.",
+    )
+    parser.add_argument(
+        "--initial-mission-state",
+        choices=("RUNNING", "PAUSED"),
+        default="RUNNING",
+        help="Mission state restored with --initial-mission-id.",
+    )
+    parser.add_argument(
+        "--initial-mission-elapsed-sec",
+        type=int,
+        default=0,
+        help="Elapsed Mission seconds restored after restarting this test bot.",
+    )
     parser.add_argument(
         "--self-test",
         action="store_true",
@@ -158,12 +229,36 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.telemetry_interval <= 0:
         parser.error("--telemetry-interval must be greater than zero")
+    for option_name in (
+        "state_interval",
+        "safety_event_interval",
+        "battery_event_interval",
+        "incident_event_interval",
+    ):
+        if getattr(args, option_name) < 0:
+            parser.error(
+                f"--{option_name.replace('_', '-')} must be zero or greater"
+            )
     if args.mission_auto_complete_sec < 0:
         parser.error("--mission-auto-complete-sec must be zero or greater")
     if not 0.0 <= args.battery_percent <= 100.0:
         parser.error("--battery-percent must be between 0 and 100")
+    if args.battery_step_percent < 0.0:
+        parser.error("--battery-step-percent must be zero or greater")
+    if args.position_step_m < 0.0:
+        parser.error("--position-step-m must be zero or greater")
+    if args.position_update_interval < 0.0:
+        parser.error("--position-update-interval must be zero or greater")
+    if args.speed_mps < 0.0:
+        parser.error("--speed-mps must be zero or greater")
     if args.jetson_temp_step_c < 0.0:
         parser.error("--jetson-temp-step-c must be zero or greater")
+    if (args.initial_mission_id is None) != (args.initial_zone_id is None):
+        parser.error(
+            "--initial-mission-id and --initial-zone-id must be provided together"
+        )
+    if args.initial_mission_elapsed_sec < 0:
+        parser.error("--initial-mission-elapsed-sec must be zero or greater")
     args.command_outcomes = {}
     for definition in args.command_outcome:
         try:
@@ -260,6 +355,7 @@ class MockRobot:
         self.connected_event = threading.Event()
         self.self_test_requested = threading.Event()
         self.telemetry_thread: threading.Thread | None = None
+        self.periodic_threads: dict[str, threading.Thread] = {}
         self.processed_commands: dict[str, dict[str, Any]] = {}
         self.command_outcomes: dict[str, tuple[str, str]] = (
             args.command_outcomes
@@ -272,12 +368,39 @@ class MockRobot:
         self.mission_id: str | None = None
         self.mission_state: str | None = None
         self.mission_started_at: datetime | None = None
+        self.zone_id: str | None = None
+        if args.initial_mission_id is not None:
+            self.mission_id = args.initial_mission_id
+            self.mission_state = args.initial_mission_state
+            self.mission_started_at = utc_now() - timedelta(
+                seconds=args.initial_mission_elapsed_sec
+            )
+            self.zone_id = args.initial_zone_id
+            if args.initial_mission_state == "PAUSED":
+                self.mode = "PAUSED"
+                self.state_reason = "REMOTE_PAUSE"
+            else:
+                self.mode = "PATROLLING"
+        self.latitude = args.latitude
+        self.longitude = args.longitude
+        self.position_step_count = 0
+        self.position_direction = 1
+        self.next_position_update_at = (
+            time.monotonic() + args.position_update_interval
+        )
+        self.battery_percent = args.battery_percent
+        self.battery_direction = -1
         self.jetson_temp_c = args.jetson_temp_c
         self.jetson_temp_direction = 1
+        self.safety_event_index = 0
+        self.battery_event_index = 0
 
         self.presence_topic = topic(self.mqtt_id, "presence")
         self.state_topic = topic(self.mqtt_id, "state")
         self.telemetry_topic = topic(self.mqtt_id, "telemetry")
+        self.safety_event_topic = topic(self.mqtt_id, "events/safety")
+        self.battery_event_topic = topic(self.mqtt_id, "events/battery")
+        self.incident_event_topic = topic(self.mqtt_id, "events/incident")
         self.mission_event_topic = topic(self.mqtt_id, "events/mission")
         self.command_request_topic = topic(self.mqtt_id, "commands/request")
         self.command_result_topic = topic(self.mqtt_id, "commands/result")
@@ -353,9 +476,9 @@ class MockRobot:
         }
 
     def battery_state(self) -> str:
-        if self.args.battery_percent <= 10.0:
+        if self.battery_percent <= 10.0:
             return "CRITICAL"
-        if self.args.battery_percent <= 20.0:
+        if self.battery_percent <= 20.0:
             return "LOW"
         return "NORMAL"
 
@@ -378,7 +501,7 @@ class MockRobot:
                 "mission": mission,
                 "battery": {
                     "valid": True,
-                    "percent": self.args.battery_percent,
+                    "percent": self.battery_percent,
                     "state": self.battery_state(),
                 },
                 "health": {
@@ -409,9 +532,13 @@ class MockRobot:
 
             position = {
                 "valid": not self.args.gps_invalid,
-                "lat": None if self.args.gps_invalid else self.args.latitude,
-                "lon": None if self.args.gps_invalid else self.args.longitude,
-                "heading_deg": None,
+                "lat": None if self.args.gps_invalid else self.latitude,
+                "lon": None if self.args.gps_invalid else self.longitude,
+                "heading_deg": (
+                    None
+                    if self.args.gps_invalid or self.mode != "PATROLLING"
+                    else (45.0 if self.position_direction > 0 else 225.0)
+                ),
             }
             moving = self.mode == "PATROLLING"
             return {
@@ -425,11 +552,11 @@ class MockRobot:
                 "position": position,
                 "motion": {
                     "moving": moving,
-                    "speed_mps": None,
+                    "speed_mps": self.args.speed_mps if moving else 0.0,
                 },
                 "battery": {
                     "valid": True,
-                    "percent": self.args.battery_percent,
+                    "percent": self.battery_percent,
                     "state": self.battery_state(),
                     "source": "MEASURED",
                     "voltage_v": None,
@@ -444,28 +571,204 @@ class MockRobot:
                 "mission": mission,
             }
 
-    def advance_telemetry_values(self) -> None:
+    def advance_telemetry_values(
+        self,
+        *,
+        monotonic_now: float | None = None,
+    ) -> None:
         step = self.args.jetson_temp_step_c
-        if step == 0.0:
-            return
-
+        current_monotonic = (
+            time.monotonic() if monotonic_now is None else monotonic_now
+        )
         with self.state_lock:
-            lower_bound = self.args.jetson_temp_c
-            upper_bound = lower_bound + step * 5
-            next_temperature = (
-                self.jetson_temp_c
-                + step * self.jetson_temp_direction
-            )
-            if (
-                next_temperature > upper_bound
-                or next_temperature < lower_bound
-            ):
-                self.jetson_temp_direction *= -1
+            if step > 0.0:
+                lower_bound = self.args.jetson_temp_c
+                upper_bound = lower_bound + step * 5
                 next_temperature = (
                     self.jetson_temp_c
                     + step * self.jetson_temp_direction
                 )
-            self.jetson_temp_c = round(next_temperature, 3)
+                if (
+                    next_temperature > upper_bound
+                    or next_temperature < lower_bound
+                ):
+                    self.jetson_temp_direction *= -1
+                    next_temperature = (
+                        self.jetson_temp_c
+                        + step * self.jetson_temp_direction
+                    )
+                self.jetson_temp_c = round(next_temperature, 3)
+
+            battery_step = self.args.battery_step_percent
+            if battery_step > 0.0:
+                lower_battery = max(0.0, self.args.battery_percent - battery_step * 10)
+                next_battery = (
+                    self.battery_percent
+                    + battery_step * self.battery_direction
+                )
+                if next_battery < lower_battery or next_battery > self.args.battery_percent:
+                    self.battery_direction *= -1
+                    next_battery = (
+                        self.battery_percent
+                        + battery_step * self.battery_direction
+                    )
+                self.battery_percent = round(next_battery, 2)
+
+            position_due = (
+                self.args.position_update_interval == 0.0
+                or current_monotonic >= self.next_position_update_at
+            )
+            if (
+                self.args.position_step_m > 0.0
+                and self.mode == "PATROLLING"
+                and position_due
+            ):
+                self.position_step_count += self.position_direction
+                if abs(self.position_step_count) >= 10:
+                    self.position_direction *= -1
+                latitude_step = self.args.position_step_m / 111_320.0
+                longitude_step = self.args.position_step_m / 88_000.0
+                self.latitude = round(
+                    self.args.latitude + latitude_step * self.position_step_count,
+                    7,
+                )
+                self.longitude = round(
+                    self.args.longitude + longitude_step * self.position_step_count,
+                    7,
+                )
+                self.next_position_update_at = (
+                    current_monotonic + self.args.position_update_interval
+                )
+
+    def event_envelope(
+        self,
+        event_type: str,
+        source_component: str,
+        mission_id: str | None,
+    ) -> dict[str, Any]:
+        occurred_at = utc_now()
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "event_id": str(uuid.uuid4()),
+            "event_type": event_type,
+            "mqtt_id": self.mqtt_id,
+            "boot_id": self.boot_id,
+            "seq": self.next_sequence(),
+            "source_component": source_component,
+            "occurred_at": format_instant(occurred_at),
+            "sent_at": format_instant(),
+            "ttl_sec": 300,
+            "mission_id": mission_id,
+        }
+
+    def safety_event_payload(self) -> dict[str, Any]:
+        cycle = (
+            ("SAFETY_STOPPED", "OBSTACLE", 0.25, "SAFE_STOP"),
+            ("SAFETY_CLEARED", "OBSTACLE", 1.5, None),
+            ("SENSOR_FAULT", "LIDAR_FAULT", None, None),
+            ("SENSOR_RECOVERED", "LIDAR_FAULT", None, None),
+        )
+        event_type, reason_code, distance_m, forced_mode_after = cycle[
+            self.safety_event_index % len(cycle)
+        ]
+        self.safety_event_index += 1
+        with self.state_lock:
+            mission_id = self.mission_id
+            current_mode = self.mode
+        mode_before = "SAFE_STOP" if event_type == "SAFETY_CLEARED" else current_mode
+        mode_after = forced_mode_after or current_mode
+        payload = self.event_envelope(event_type, "safety", mission_id)
+        payload.update({
+            "reason_code": reason_code,
+            "measurement": {"distance_m": distance_m},
+            "transition": {
+                "mode_before": mode_before,
+                "mode_after": mode_after,
+            },
+            "auto_resume_allowed": False,
+        })
+        return payload
+
+    def battery_event_payload(self) -> dict[str, Any]:
+        cycle = (
+            ("BATTERY_LOW", "NORMAL", True, 18.0, "LOW", 20.0),
+            ("BATTERY_CRITICAL", "LOW", True, 8.0, "CRITICAL", 10.0),
+            ("BATTERY_RECOVERED", "LOW", True, 70.0, "NORMAL", 20.0),
+            ("BATTERY_SENSOR_FAULT", "NORMAL", False, None, "UNKNOWN", None),
+            (
+                "BATTERY_SENSOR_RECOVERED",
+                "UNKNOWN",
+                True,
+                self.battery_percent,
+                self.battery_state(),
+                None,
+            ),
+        )
+        (
+            event_type,
+            previous_state,
+            valid,
+            percent,
+            battery_state,
+            threshold_pct,
+        ) = cycle[self.battery_event_index % len(cycle)]
+        self.battery_event_index += 1
+        with self.state_lock:
+            mission_id = self.mission_id
+            mission_state = self.mission_state
+            robot_mode = self.mode
+        payload = self.event_envelope(event_type, "power", mission_id)
+        payload.update({
+            "previous_state": previous_state,
+            "battery": {
+                "valid": valid,
+                "percent": percent,
+                "state": battery_state,
+            },
+            "threshold_pct": threshold_pct,
+            "action_taken": {
+                "mission_state": mission_state,
+                "robot_mode": robot_mode,
+            },
+        })
+        return payload
+
+    def incident_event_payload(self) -> dict[str, Any]:
+        with self.state_lock:
+            mission_id = self.mission_id
+        occurred_at = format_instant()
+        payload = self.event_envelope(
+            "BRAILLE_BLOCK_INCIDENT_DETECTED",
+            "ai",
+            mission_id,
+        )
+        payload.update({
+            "location": {
+                "valid": not self.args.gps_invalid,
+                "lat": None if self.args.gps_invalid else self.latitude,
+                "lon": None if self.args.gps_invalid else self.longitude,
+                "zone_id": None,
+            },
+            "incident": {
+                "asset_type": "BRAILLE_BLOCK",
+                "block_type": "LINEAR",
+                "defect_type": "DAMAGED",
+                "confidence": 0.91,
+                "attributes": {"damage_ratio": 0.35},
+            },
+            "evidence": {
+                "image_id": None,
+                "captured_at": occurred_at,
+                "image_width": 1280,
+                "image_height": 720,
+                "bbox_norm": [0.2, 0.25, 0.65, 0.75],
+            },
+            "model": {
+                "name": "gilbom-mock-detector",
+                "version": "mock-1.0.0",
+            },
+        })
+        return payload
 
     def current_result_state(self) -> dict[str, str]:
         with self.state_lock:
@@ -590,6 +893,7 @@ class MockRobot:
                 daemon=True,
             )
             self.telemetry_thread.start()
+        self.start_periodic_publishers()
         print(
             "Connected. Subscribing to "
             f"{self.command_request_topic} and {self.ingest_receipt_topic}"
@@ -818,8 +1122,12 @@ class MockRobot:
                 self.mission_id = mission_id
                 self.mission_state = "RUNNING"
                 self.mission_started_at = utc_now()
+                self.zone_id = zone_id
                 self.mode = "PATROLLING"
                 self.state_reason = "NONE"
+                self.next_position_update_at = (
+                    time.monotonic() + self.args.position_update_interval
+                )
                 return "COMPLETED", "OK"
 
             if command_type == "PAUSE_MISSION":
@@ -844,6 +1152,7 @@ class MockRobot:
                 self.mission_id = None
                 self.mission_state = None
                 self.mission_started_at = None
+                self.zone_id = None
                 self.mode = "READY"
                 self.state_reason = "NONE"
                 return "COMPLETED", "OK"
@@ -914,6 +1223,83 @@ class MockRobot:
                     self.advance_telemetry_values()
                     self.maybe_auto_complete_mission(telemetry)
             self.stop_event.wait(self.args.telemetry_interval)
+
+    def start_periodic_publishers(self) -> None:
+        publishers = (
+            (
+                "state",
+                self.args.state_interval,
+                self.state_topic,
+                self.state_payload,
+                1,
+                True,
+            ),
+            (
+                "safety-event",
+                self.args.safety_event_interval,
+                self.safety_event_topic,
+                self.safety_event_payload,
+                1,
+                False,
+            ),
+            (
+                "battery-event",
+                self.args.battery_event_interval,
+                self.battery_event_topic,
+                self.battery_event_payload,
+                1,
+                False,
+            ),
+            (
+                "incident-event",
+                self.args.incident_event_interval,
+                self.incident_event_topic,
+                self.incident_event_payload,
+                1,
+                False,
+            ),
+        )
+        for name, interval, mqtt_topic, payload_factory, qos, retain in publishers:
+            if interval <= 0:
+                continue
+            current = self.periodic_threads.get(name)
+            if current is not None and current.is_alive():
+                continue
+            thread = threading.Thread(
+                target=self.periodic_publish_loop,
+                args=(
+                    name,
+                    interval,
+                    mqtt_topic,
+                    payload_factory,
+                    qos,
+                    retain,
+                ),
+                name=f"{self.mqtt_id}-{name}",
+                daemon=True,
+            )
+            self.periodic_threads[name] = thread
+            thread.start()
+
+    def periodic_publish_loop(
+        self,
+        name: str,
+        interval: float,
+        mqtt_topic: str,
+        payload_factory,
+        qos: int,
+        retain: bool,
+    ) -> None:
+        while not self.stop_event.wait(interval):
+            if not self.connected_event.is_set():
+                continue
+            payload = payload_factory()
+            result = self.publish_json(mqtt_topic, payload, qos=qos, retain=retain)
+            if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                print(
+                    f"Periodic publish name={name} topic={mqtt_topic} "
+                    f"seq={payload.get('seq')}"
+                )
 
     def maybe_auto_complete_mission(
         self,
