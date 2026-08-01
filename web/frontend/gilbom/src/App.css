@@ -2523,3 +2523,28 @@ button:disabled {
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* 축척 바 — 네이버 컨트롤이 CSP 아래에서 잘려 직접 그린다. 컨테이너 모서리에
+   붙지 않도록 여백을 충분히 준다. 잘렸던 원인이 그것이었다. */
+.defect-map-scale {
+  position: absolute;
+  /* 맨 아래 줄은 네이버 로고 자리다. 그 위에 얹는다. */
+  bottom: 34px;
+  left: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 85%);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.defect-map-scale-bar path {
+  stroke: currentcolor;
+  stroke-width: 1.5;
+}

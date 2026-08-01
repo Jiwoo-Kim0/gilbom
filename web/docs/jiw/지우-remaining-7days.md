@@ -534,7 +534,7 @@ scripts/backup-defect-images.sh      # 볼륨 tar + DB 덤프 + manifest
 
 | 항목 | 내용 | 소유 |
 | --- | --- | --- |
-| **Naver Maps CSP 정책** | Nginx CSP가 `style-src 'self'`라 지도 SDK가 자기 UI(줌 컨트롤 등)를 그리는 인라인 스타일까지 차단된다. 우리 마커는 CSS 클래스로 옮겨 해결했지만 **SDK 내부는 우리가 못 고친다.** `'unsafe-inline'` 허용 여부는 보안 정책 판단이다 | **A** |
+| ~~**Naver Maps CSP 정책**~~ | **8/1 해소 — A를 기다리지 않고 우리 쪽에서 끝냈다.** `style-src 'self'`가 인라인 속성뿐 아니라 **네이버 스타일시트 자체를 막아** 컨트롤이 여백 없이 잘렸다. 줌은 SMALL + 오른쪽 위로 줄이고, 축척은 SDK 것을 끄고 `getBounds()`로 직접 그렸다(SVG 기하 속성이라 CSP와 무관). `'unsafe-inline'`은 건드리지 않았다 | — |
 | **로봇 지도 마커도 같은 문제** | `RobotMap.tsx`의 `createMarkerIcon`이 인라인 `style`을 쓴다. 로봇 마커를 아직 띄워본 적이 없어 드러나지 않았을 뿐, 지금 상태로는 **로봇 마커도 안 보인다** | **B** |
 | **통신테스트 MQTT 스크립트가 계약과 어긋남** | `test/통신테스트/mqtt_tls_test.py`가 `ttl_sec` 누락, `robot_id`(→`mqtt_id`), `zone_id` 패턴 위반으로 전부 `MQTT_PAYLOAD_MALFORMED`가 된다. **임베디드에도 배포된 자산**이라 방치하면 그쪽이 헤맨다 | **B** |
 | ~~단건 결함 보고서~~ | **8/1 해소.** 보고서 생성 수정 권한을 받아 C가 직접 마무리했다 (아래 별도 절) | — |

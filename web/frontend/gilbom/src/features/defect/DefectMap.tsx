@@ -42,6 +42,54 @@ function toneOf(status: WorkflowStatus): DefectStatusTone {
 // 구미시청 인근 — 조회 결과가 없을 때의 기본 뷰포트.
 const DEFAULT_CENTER = { lat: 36.1195, lng: 128.3446 }
 const DEFAULT_ZOOM = 14
+/** 축척 바가 차지할 최대 너비. 이 안에 들어가는 가장 큰 "깔끔한" 거리를 고른다. */
+const SCALE_MAX_WIDTH_PX = 96
+/** 1·2·5 계열만 쓴다. 33m 같은 값은 눈대중에 쓸모가 없다. */
+const SCALE_STEPS_M = [
+  1, 2, 5, 10, 20, 50, 100, 200, 500,
+  1000, 2000, 5000, 10000, 20000, 50000,
+]
+
+type MapScale = { label: string; widthPx: number }
+
+/**
+ * 화면 1px이 몇 m인지로 축척 바를 만든다.
+ *
+ * <p>네이버 SDK의 축척 컨트롤을 쓰지 않는 이유는 CSP다. `style-src 'self'`가 네이버
+ * 스타일시트를 통째로 막아 여백·배경이 사라지고, 어느 모서리에 두든 지도 컨테이너의
+ * `overflow: hidden`에 잘렸다. 우리 CSS로 그리면 그 문제가 없다.
+ */
+function computeScale(
+  bounds: naver.maps.LatLngBounds,
+  widthPx: number,
+): MapScale | null {
+  if (widthPx <= 0) {
+    return null
+  }
+  const southWest = bounds.getSW()
+  const northEast = bounds.getNE()
+  const centerLat = (southWest.lat() + northEast.lat()) / 2
+  // 경도 1도의 거리는 위도에 따라 줄어든다. 적도 기준 값에 cos을 곱해 보정한다.
+  const metersPerDegree = 111_320 * Math.cos((centerLat * Math.PI) / 180)
+  const spanMeters = Math.abs(northEast.lng() - southWest.lng())
+    * metersPerDegree
+  if (!Number.isFinite(spanMeters) || spanMeters <= 0) {
+    return null
+  }
+
+  const metersPerPixel = spanMeters / widthPx
+  const step = [...SCALE_STEPS_M]
+    .reverse()
+    .find((value) => value / metersPerPixel <= SCALE_MAX_WIDTH_PX)
+  if (step === undefined) {
+    return null
+  }
+  return {
+    label: step >= 1000 ? `${step / 1000}km` : `${step}m`,
+    widthPx: Math.round(step / metersPerPixel),
+  }
+}
+
 /** 지도를 끌 때마다 조회하지 않도록 idle 이후 잠깐 기다린다. */
 const VIEWPORT_DEBOUNCE_MS = 300
 
@@ -91,6 +139,7 @@ export function DefectMap({
   const [bbox, setBbox] = useState('')
   const [features, setFeatures] = useState<DefectMapFeature[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [scale, setScale] = useState<MapScale | null>(null)
   /**
    * 결함 위치로 지도를 한 번 맞췄는지. 기본 뷰포트(구미)와 실제 결함 위치가
    * 다를 수 있어, 처음에는 전체를 조회해 그 범위로 이동한다. 이 전에 뷰포트
@@ -106,13 +155,48 @@ export function DefectMap({
       .then(() => {
         if (cancelled || !mapElementRef.current || !window.naver) return
         const { maps } = window.naver
+        // CSP가 style-src 'self'라 SDK가 자기 컨트롤에 입히는 인라인 스타일이
+        // 막힌다. 스킨을 되살리려면 'unsafe-inline'이 필요한데 그건 보안 판단이라,
+        // 대신 눈에 덜 띄고 지도를 가리지 않는 배치로 줄인다.
+        //
+        //   - 기본 LARGE 줌 컨트롤은 왼쪽 위에서 마커를 가린다 -> SMALL + 오른쪽 위
+        //   - 축척 바는 어느 모서리에 둬도 잘려서 껐다. 대신 직접 그린다
+        //
+        // SDK 버전에 따라 ZoomControlStyle이 없을 수 있다. 그때는 style을 넘기지
+        // 않아 기본값으로 두고, 위치 지정만 살린다.
         const map = new maps.Map(mapElementRef.current, {
           center: new maps.LatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng),
           zoom: DEFAULT_ZOOM,
           zoomControl: true,
+          zoomControlOptions: {
+            position: maps.Position?.TOP_RIGHT,
+            style: maps.ZoomControlStyle?.SMALL,
+          },
+          // 축척은 우리가 직접 그린다. computeScale 주석 참고.
+          scaleControl: false,
         })
         mapRef.current = map
         setMapStatus('ready')
+
+        // 축척은 조회를 유발하지 않으므로 아래 fittedRef 가드와 debounce를 타지
+        // 않는다. 가드는 첫 조회 결과를 지우지 않으려고 bbox에만 거는 것이다.
+        const refreshScale = () => {
+          const next = computeScale(
+            map.getBounds(),
+            mapElementRef.current?.clientWidth ?? 0,
+          )
+          // 같은 값이면 렌더를 만들지 않는다. bounds_changed는 드래그 중 자주 온다.
+          setScale((previous) =>
+            previous?.label === next?.label
+            && previous?.widthPx === next?.widthPx
+              ? previous
+              : next,
+          )
+        }
+        // fitBounds가 뷰포트를 바꾸지 않으면 idle이 한 번도 오지 않는다.
+        // 그때도 축척은 보여야 하므로 여기서 한 번 계산해 둔다.
+        refreshScale()
+        maps.Event.addListener(map, 'bounds_changed', refreshScale)
 
         // 지도 이동이 멈출 때만 뷰포트를 갱신한다. 외부 시스템 콜백이라
         // effect 본문에서 동기로 setState 하는 것과는 다르다.
@@ -289,6 +373,27 @@ export function DefectMap({
       ) : (
         <div className="defect-map-canvas-wrap">
           <div className="defect-map-canvas" ref={mapElementRef} />
+          {scale !== null && (
+            <div className="defect-map-scale" aria-label={`축척 ${scale.label}`}>
+              {/*
+                너비가 배율마다 달라져 클래스로 뺄 수 없다. style 속성은 CSP에
+                막히므로, bbox 오버레이와 같이 SVG 기하 속성으로 그린다.
+              */}
+              <svg
+                className="defect-map-scale-bar"
+                width={scale.widthPx}
+                height="8"
+                aria-hidden="true"
+              >
+                <path
+                  d={`M1 1 V7 H${scale.widthPx - 1} V1`}
+                  fill="none"
+                  vectorEffect="non-scaling-stroke"
+                />
+              </svg>
+              <span>{scale.label}</span>
+            </div>
+          )}
           {mapStatus === 'loading' && (
             <p className="defect-map-loading">지도를 불러오는 중입니다…</p>
           )}
