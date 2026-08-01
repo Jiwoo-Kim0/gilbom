@@ -19,7 +19,14 @@ public record ReportGenerationCriteria(
         UUID patrolAreaId,
         List<UUID> robotIds,
         List<DefectType> defectTypes,
-        List<DefectWorkflowStatus> workflowStatuses
+        List<DefectWorkflowStatus> workflowStatuses,
+        /**
+         * 지정하면 결함 한 건만 근거로 삼는 단건 보고서가 된다.
+         *
+         * <p>통계 집계는 좁히지 않는다. 통계는 기간·구역 현황을 보여주는 값이라
+         * 한 건으로 줄이면 의미가 없어진다. 근거 결함과 이미지만 이 결함으로 고정한다.
+         */
+        UUID defectId
 ) {
 
     private static final int MAXIMUM_ROBOT_IDS = 100;
@@ -27,7 +34,8 @@ public record ReportGenerationCriteria(
             "patrolAreaId",
             "robotIds",
             "defectTypes",
-            "workflowStatuses");
+            "workflowStatuses",
+            "defectId");
 
     public ReportGenerationCriteria {
         robotIds = unique(robotIds, MAXIMUM_ROBOT_IDS);
@@ -56,7 +64,13 @@ public record ReportGenerationCriteria(
                         DefectType.class),
                 enumList(
                         values.get("workflowStatuses"),
-                        DefectWorkflowStatus.class));
+                        DefectWorkflowStatus.class),
+                uuid(values.get("defectId")));
+    }
+
+    /** 결함 한 건을 대상으로 하는 보고서인지. */
+    public boolean isSingleDefect() {
+        return defectId != null;
     }
 
     public Map<String, Object> toSnapshot() {
@@ -84,6 +98,9 @@ public record ReportGenerationCriteria(
                     workflowStatuses.stream()
                             .map(Enum::name)
                             .toList());
+        }
+        if (defectId != null) {
+            result.put("defectId", defectId.toString());
         }
         return java.util.Collections.unmodifiableMap(result);
     }

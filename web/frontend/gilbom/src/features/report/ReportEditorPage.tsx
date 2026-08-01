@@ -19,6 +19,7 @@ import {
   Link,
   useNavigate,
   useParams,
+  useSearchParams,
 } from 'react-router'
 import {
   ApiError,
@@ -82,6 +83,18 @@ function toInstant(value: string): string {
   return instant.toISOString()
 }
 
+/**
+ * 결함 카드에서 넘어온 기간을 폼 초기값으로 쓴다. 값이 없거나 해석할 수 없으면
+ * 빈 문자열이라 기존처럼 사용자가 직접 고른다.
+ */
+function prefilledPeriod(mode: ReportEditorMode, value: string | null): string {
+  if (mode !== 'create' || value === null) {
+    return ''
+  }
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? '' : toDateTimeLocal(value)
+}
+
 export function ReportEditorPage({ mode }: { mode: ReportEditorMode }) {
   const { reportId = '' } = useParams()
   const navigate = useNavigate()
@@ -98,8 +111,17 @@ export function ReportEditorPage({ mode }: { mode: ReportEditorMode }) {
   const [reportType, setReportType] = useState<ReportType>('PERIODIC')
   const [title, setTitle] = useState('')
   const [summary, setSummary] = useState('')
-  const [periodFrom, setPeriodFrom] = useState('')
-  const [periodTo, setPeriodTo] = useState('')
+  // 결함 카드의 "리포트 생성"이 넘겨주는 값이다. 있으면 그 결함 한 건짜리 보고서가 된다.
+  const [searchParams] = useSearchParams()
+  const defectId = mode === 'create' ? searchParams.get('defectId') : null
+  const defectIncidentCode = searchParams.get('incidentCode')
+
+  const [periodFrom, setPeriodFrom] = useState(() =>
+    prefilledPeriod(mode, searchParams.get('from')),
+  )
+  const [periodTo, setPeriodTo] = useState(() =>
+    prefilledPeriod(mode, searchParams.get('to')),
+  )
   const [content, setContent] = useState('')
   const [changeNote, setChangeNote] = useState('')
   const [statistics, setStatistics] = useState<ReportStatisticsSnapshot | null>(
@@ -248,6 +270,9 @@ export function ReportEditorPage({ mode }: { mode: ReportEditorMode }) {
             reportType,
             periodFrom: from,
             periodTo: to,
+            // 결함 카드에서 넘어온 경우 그 결함 한 건만 근거로 삼는다.
+            // 통계는 기간 전체를 유지한다(단건으로 좁히면 의미가 없다).
+            ...(defectId === null ? {} : { filterCriteria: { defectId } }),
           }
           : {
             generationMethod,
@@ -479,6 +504,12 @@ export function ReportEditorPage({ mode }: { mode: ReportEditorMode }) {
               <div>
                 <p className="eyebrow">REPORT SCOPE</p>
                 <h3>유형과 대상 기간</h3>
+                {defectId !== null && (
+                  <p>
+                    결함 {defectIncidentCode ?? defectId} 한 건을 근거로
+                    생성합니다. 통계는 아래 기간 전체를 기준으로 집계됩니다.
+                  </p>
+                )}
               </div>
             </div>
             <div className="report-form-grid">

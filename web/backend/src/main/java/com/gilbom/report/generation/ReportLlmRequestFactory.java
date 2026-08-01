@@ -57,18 +57,19 @@ public class ReportLlmRequestFactory {
             return new LlmGenerationRequest(
                     prepared.promptInput());
         }
-        List<DefectReportImage> selected =
-                imageService.get().findReportImages(
-                        actorUserId,
-                        period.from(),
-                        period.to(),
-                        CURRENT_MAX_IMAGES);
-        if (selected == null || selected.isEmpty()) {
-            return new LlmGenerationRequest(
-                    prepared.promptInput());
-        }
-        List<LlmImageContent> images = selected.stream()
+        // 이미지는 근거 결함에서 직접 고른다. 기간으로 따로 고르면 근거와 다른 결함의
+        // 이미지가 나와 아래 matchesEvidence에서 걸러지고, 결과적으로 이미지 없는
+        // 보고서가 조용히 만들어진다. 결함 한 건짜리 보고서에서 특히 그렇다.
+        // defectEvidence는 위험도 순으로 정렬되어 있다.
+        List<LlmImageContent> images = prepared.source()
+                .defectEvidence()
+                .stream()
                 .limit(CURRENT_MAX_IMAGES)
+                .flatMap(evidence -> imageService.get()
+                        .findReportImagesForDefect(
+                                actorUserId,
+                                evidence.defectId())
+                        .stream())
                 .filter(image -> matchesEvidence(
                         image,
                         prepared))
