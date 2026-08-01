@@ -1,7 +1,5 @@
 package com.gilbom.report.generation;
 
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,9 +24,6 @@ public class ReportGenerationDataService {
     private static final TypeReference<Map<String, Object>> JSON_OBJECT =
             new TypeReference<>() {
             };
-    private static final DateTimeFormatter TITLE_DATE =
-            DateTimeFormatter.ISO_LOCAL_DATE
-                    .withZone(ZoneOffset.UTC);
 
     private final ReportGenerationDataRepository repository;
     private final ObjectMapper objectMapper;
@@ -72,23 +67,21 @@ public class ReportGenerationDataService {
                         snapshot.typeCounts(),
                         snapshot.riskCounts()),
                 snapshot.evidence());
+        // 조회 결과에 그 결함이 없으면 근거가 0건인 보고서가 된다. 없는 결함,
+        // 접근 범위 밖 결함, 기간 밖 결함이 모두 여기로 온다. 셋을 구분하지 않는
+        // 것은 결함 조회(DEFECT_NOT_FOUND)와 같은 방침이다 — 존재 여부를 숨긴다.
+        if (snapshot.evidence().isEmpty()) {
+            throw new BusinessException(
+                    ErrorCode.REPORT_VALIDATION_FAILED,
+                    "대상 결함을 찾을 수 없습니다.");
+        }
         Map<String, Object> evidenceSnapshot =
                 evidenceSnapshot(snapshot.evidenceMetadata());
         // 단건 보고서는 결함 코드를 제목에 넣어야 목록에서 구분된다.
-        String incidentCode = criteria.isSingleDefect()
-                ? snapshot.evidence().stream()
-                        .findFirst()
-                        .map(ReportLlmInput.DefectEvidence::incidentCode)
-                        .orElse(null)
-                : null;
-        String title = incidentCode != null
-                ? "%s 결함 보고서".formatted(incidentCode)
-                : "%s~%s 이상 탐지 보고서".formatted(
-                        TITLE_DATE.format(period.from()),
-                        TITLE_DATE.format(period.to()));
-        String summary = incidentCode != null
-                ? "결함 %s 한 건에 대한 보고서입니다.".formatted(incidentCode)
-                : "선택한 기간의 접근 가능한 순찰·결함 통계를 정리한 보고서입니다.";
+        String incidentCode = snapshot.evidence().getFirst().incidentCode();
+        String title = "%s 결함 보고서".formatted(incidentCode);
+        String summary =
+                "결함 %s 한 건에 대한 보고서입니다.".formatted(incidentCode);
         return new PreparedCreation(
                 criteria.toSnapshot(),
                 new ReportLlmPipelineRequest(

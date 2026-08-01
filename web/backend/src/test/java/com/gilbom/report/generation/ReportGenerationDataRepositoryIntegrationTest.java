@@ -1,6 +1,7 @@
 package com.gilbom.report.generation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Instant;
 import java.util.Map;
@@ -23,7 +24,13 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import com.gilbom.auth.password.PasswordHashingConfiguration;
+import com.gilbom.common.error.BusinessException;
+import com.gilbom.common.error.ErrorCode;
+import com.gilbom.report.ReportDtos.LlmReportCreateRequest;
+import com.gilbom.report.ReportGenerationMethod;
+import com.gilbom.report.ReportType;
 import com.gilbom.report.generation.ReportGenerationDataRepository.Snapshot;
+import com.gilbom.report.generation.ReportGenerationDataService.PreparedCreation;
 
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(
@@ -44,6 +51,10 @@ class ReportGenerationDataRepositoryIntegrationTest {
     private static final UUID BOOT_ID = UUID.randomUUID();
     private static final UUID DEFECT_ID = UUID.randomUUID();
     private static final UUID EVENT_ID = UUID.randomUUID();
+    private static final Instant PERIOD_FROM =
+            Instant.parse("2026-07-01T00:00:00Z");
+    private static final Instant PERIOD_TO =
+            Instant.parse("2026-07-08T00:00:00Z");
 
     @Container
     private static final PostgreSQLContainer<?> DATABASE =
@@ -75,6 +86,9 @@ class ReportGenerationDataRepositoryIntegrationTest {
 
     @Autowired
     private ReportGenerationDataRepository repository;
+
+    @Autowired
+    private ReportGenerationDataService service;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -148,6 +162,83 @@ class ReportGenerationDataRepositoryIntegrationTest {
                             .isEqualTo("A-01");
                 });
         assertThat(snapshot.evidenceMetadata()).hasSize(1);
+    }
+
+
+    // ------------------------------------------------- prepare()
+    //
+    // prepare()는 HTTP 요청을 서버가 조회한 스냅샷으로 바꾸는 지점이다. 여기서
+    // 근거 결함·제목·통계 범위가 한꺼번에 정해지는데, 저장소가 실제 SQL이라
+    // mock으로는 검증되지 않는다.
+
+    @Test
+    void rejectsLlmReportWithoutTargetDefect() {
+        // 기간 전체를 근거로 하는 LLM 보고서는 제품에서 쓰지 않는다.
+        // 목록의 "새 보고서" 버튼으로도 이 경로에 들어올 수 있어 서버에서 막는다.
+        assertThatThrownBy(() -> service.prepare(ADMIN_ID, llmRequest(null)))
+                .isInstanceOf(BusinessException.class)
+                .extracting(cause ->
+                        ((BusinessException) cause).errorCode())
+                .isEqualTo(ErrorCode.REPORT_VALIDATION_FAILED);
+    }
+
+    @Test
+    void rejectsDefectThatIsNotVisibleToTheActor() {
+        // 없는 결함·접근 범위 밖 결함·기간 밖 결함이 모두 같은 응답이어야 한다.
+        // 근거 0건인 보고서가 조용히 만들어지던 구멍이다.
+        assertThatThrownBy(() ->
+                service.prepare(ADMIN_ID, llmRequest(UUID.randomUUID())))
+                .isInstanceOf(BusinessException.class)
+                .extracting(cause ->
+                        ((BusinessException) cause).errorCode())
+                .isEqualTo(ErrorCode.REPORT_VALIDATION_FAILED);
+    }
+
+    @Test
+    void fixesEvidenceAndTitleToTheRequestedDefect() {
+        PreparedCreation prepared =
+                service.prepare(ADMIN_ID, llmRequest(DEFECT_ID));
+
+        assertThat(prepared.pipelineRequest().templateTitle())
+                .isEqualTo("INC-20260703-000001 결함 보고서");
+        assertThat(prepared.pipelineRequest().input().defectEvidence())
+                .singleElement()
+                .satisfies(evidence ->
+                        assertThat(evidence.defectId()).isEqualTo(DEFECT_ID));
+        // 감사 근거로 남는 스냅샷도 그 결함 하나여야 한다.
+        assertThat(prepared.filterCriteria())
+                .containsEntry("defectId", DEFECT_ID.toString());
+    }
+
+    @Test
+    void keepsStatisticsAcrossTheWholePeriod() {
+        // 단건 보고서라고 통계까지 그 결함 하나로 줄이면 "결함 수 1"이 되어
+        // 의미가 없어진다. 근거만 좁히고 집계는 기간 전체로 둔다.
+        Snapshot wholePeriod = repository.load(
+                ADMIN_ID,
+                PERIOD_FROM,
+                PERIOD_TO,
+                ReportGenerationCriteria.from(Map.of()));
+        PreparedCreation prepared =
+                service.prepare(ADMIN_ID, llmRequest(DEFECT_ID));
+
+        assertThat(prepared.pipelineRequest().input().statistics()
+                .aggregate().observationCount())
+                .isEqualTo(wholePeriod.aggregate().observationCount());
+        assertThat(prepared.pipelineRequest().input().statistics()
+                .defectsByStatus())
+                .hasSameSizeAs(wholePeriod.statusCounts());
+    }
+
+    private static LlmReportCreateRequest llmRequest(UUID defectId) {
+        return new LlmReportCreateRequest(
+                ReportGenerationMethod.LLM,
+                ReportType.PERIODIC,
+                PERIOD_FROM,
+                PERIOD_TO,
+                defectId == null
+                        ? Map.of()
+                        : Map.of("defectId", defectId.toString()));
     }
 
     private void createGenerationFixture() {
@@ -272,6 +363,7 @@ class ReportGenerationDataRepositoryIntegrationTest {
     @EnableAutoConfiguration
     @Import({
             ReportGenerationDataRepository.class,
+            ReportGenerationDataService.class,
             PasswordHashingConfiguration.class
     })
     static class TestApplication {
