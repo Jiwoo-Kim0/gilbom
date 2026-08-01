@@ -91,7 +91,24 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
       nativePolygons: 0,
       nativePolylines: 0,
       nativeMarkers: 0,
+      mapAttachedOverlays: 0,
+      overlayDraws: 0,
+      trajectoryPointCount: 0,
+      trajectoryPathUpdates: 0,
+      markerLatitude: null as number | null,
+      markerLongitude: null as number | null,
+      markerPositionUpdates: 0,
+      fittedSouthWestLatitude: null as number | null,
+      fittedSouthWestLongitude: null as number | null,
+      fittedNorthEastLatitude: null as number | null,
+      fittedNorthEastLongitude: null as number | null,
+      zoomControlEnabled: false,
+      zoomControlStyle: null as number | null,
     }
+    const mapListeners = new Map<string, Set<() => void>>()
+    let projectionOffsetX = 0
+    let projectionOffsetY = 0
+    let projectionScale = 10_000
 
     class FakeLatLng {
       constructor(
@@ -116,21 +133,39 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
     }
 
     class FakeMap {
-      constructor() {
+      constructor(
+        readonly element: HTMLElement,
+        options: {
+          zoomControl?: boolean
+          zoomControlOptions?: { style?: number }
+        },
+      ) {
         overlayState.mapConstructions += 1
+        overlayState.zoomControlEnabled = options.zoomControl === true
+        overlayState.zoomControlStyle = options.zoomControlOptions?.style ?? null
+        window.setTimeout(() => {
+          mapListeners.get('init')?.forEach((listener) => listener())
+        }, 0)
       }
 
       setCenter() {}
       setZoom() {}
-      fitBounds() {
+      fitBounds(bounds: FakeLatLngBounds) {
         overlayState.fitBoundsCalls += 1
+        overlayState.fittedSouthWestLatitude = bounds.southWest.lat()
+        overlayState.fittedSouthWestLongitude = bounds.southWest.lng()
+        overlayState.fittedNorthEastLatitude = bounds.northEast.lat()
+        overlayState.fittedNorthEastLongitude = bounds.northEast.lng()
+        window.setTimeout(() => {
+          mapListeners.get('idle')?.forEach((listener) => listener())
+        }, 0)
       }
       getProjection() {
         return {
           fromCoordToOffset(position: FakeLatLng) {
             return new FakePoint(
-              (position.lng() - 126.99) * 10_000,
-              (37.02 - position.lat()) * 10_000,
+              (position.lng() - 126.99) * projectionScale + projectionOffsetX,
+              (37.02 - position.lat()) * projectionScale + projectionOffsetY,
             )
           },
         }
@@ -148,17 +183,76 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
     }
 
     class FakePolyline {
-      constructor() {
+      constructor(options: { path: FakeLatLng[] }) {
         overlayState.nativePolylines += 1
+        overlayState.trajectoryPointCount = options.path.length
       }
       setMap() {}
+      setPath(path: FakeLatLng[]) {
+        overlayState.trajectoryPointCount = path.length
+        overlayState.trajectoryPathUpdates += 1
+      }
     }
 
     class FakeMarker {
-      constructor() {
+      constructor(options: { position: FakeLatLng }) {
         overlayState.nativeMarkers += 1
+        overlayState.markerLatitude = options.position.lat()
+        overlayState.markerLongitude = options.position.lng()
       }
       setMap() {}
+      setPosition(position: FakeLatLng) {
+        overlayState.markerLatitude = position.lat()
+        overlayState.markerLongitude = position.lng()
+        overlayState.markerPositionUpdates += 1
+      }
+      setIcon() {}
+      setTitle() {}
+    }
+
+    class FakeLatLngBounds {
+      constructor(
+        readonly southWest: FakeLatLng,
+        readonly northEast: FakeLatLng,
+      ) {}
+    }
+
+    class FakeOverlayView {
+      private map: FakeMap | null = null
+
+      constructor() {
+        overlayState.mapAttachedOverlays += 1
+      }
+
+      setMap(map: FakeMap | null) {
+        if (this.map !== null) {
+          this.onRemove()
+        }
+        this.map = map
+        if (map !== null) {
+          this.onAdd()
+          overlayState.overlayDraws += 1
+          this.draw()
+        }
+      }
+      getMap() {
+        return this.map
+      }
+      getPanes() {
+        if (this.map === null) {
+          throw new Error('Overlay has no map')
+        }
+        return { overlayLayer: this.map.element }
+      }
+      getProjection() {
+        if (this.map === null) {
+          throw new Error('Overlay has no map')
+        }
+        return this.map.getProjection()
+      }
+      onAdd() {}
+      draw() {}
+      onRemove() {}
     }
 
     class FakeEventSource {
@@ -202,23 +296,33 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
       value: {
         maps: {
           LatLng: FakeLatLng,
-          LatLngBounds: class FakeLatLngBounds {},
+          LatLngBounds: FakeLatLngBounds,
           Map: FakeMap,
+          OverlayView: FakeOverlayView,
           Polygon: FakePolygon,
           Polyline: FakePolyline,
           Marker: FakeMarker,
           Size: class FakeSize {},
           Point: FakePoint,
           Position: { TOP_RIGHT: 1 },
+          ZoomControlStyle: { SMALL: 2 },
           Event: {
             addListener(
               _map: FakeMap,
-              _eventName: string,
+              eventName: string,
               listener: () => void,
             ) {
-              return { listener }
+              const listeners = mapListeners.get(eventName) ?? new Set()
+              listeners.add(listener)
+              mapListeners.set(eventName, listeners)
+              return { eventName, listener }
             },
-            removeListener() {},
+            removeListener(listener: {
+              eventName: string
+              listener: () => void
+            }) {
+              mapListeners.get(listener.eventName)?.delete(listener.listener)
+            },
           },
         },
       },
@@ -226,6 +330,24 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
     Object.defineProperty(window, '__missionMapOverlayState', {
       configurable: true,
       value: overlayState,
+    })
+    Object.defineProperty(window, '__moveMissionMap', {
+      configurable: true,
+      value: (offsetX: number, offsetY: number) => {
+        projectionOffsetX += offsetX
+        projectionOffsetY += offsetY
+        mapListeners.get('drag')?.forEach((listener) => listener())
+        mapListeners.get('panning')?.forEach((listener) => listener())
+        mapListeners.get('bounds_changed')?.forEach((listener) => listener())
+      },
+    })
+    Object.defineProperty(window, '__zoomMissionMap', {
+      configurable: true,
+      value: (scale: number) => {
+        projectionScale = scale
+        mapListeners.get('zooming')?.forEach((listener) => listener())
+        mapListeners.get('bounds_changed')?.forEach((listener) => listener())
+      },
     })
     Object.defineProperty(window, '__emitMissionRobotEvent', {
       configurable: true,
@@ -355,15 +477,19 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
   })).toBeVisible()
   await expect(page.getByTestId('mission-naver-map')).toBeVisible()
   await expect(page.getByTestId('mission-map-fallback')).toHaveCount(0)
-  await expect(page.getByTestId('mission-map-projected-overlay')).toBeVisible()
-  await expect(page.getByTestId('mission-area-shape')).toHaveCount(1)
-  await expect(page.getByTestId('mission-trajectory'))
-    .toHaveAttribute('data-point-count', '3')
+  await expect(page.getByTestId('mission-map-projected-overlay')).toHaveCount(0)
+  const nativeOverlay = page.getByTestId('mission-map-native-overlay')
+  await expect(nativeOverlay).toBeVisible()
+  await expect(nativeOverlay).toHaveAttribute('overflow', 'visible')
+  await expect(nativeOverlay).toHaveCSS('overflow', 'visible')
+  const areaShape = page.getByTestId('mission-area-shape')
+  const trajectory = page.getByTestId('mission-trajectory')
   const currentMarker = page.getByTestId('mission-current-position')
+  await expect(areaShape).toHaveCount(1)
+  await expect(trajectory).toHaveAttribute('data-point-count', '3')
   await expect(currentMarker).toHaveAttribute('data-latitude', '37.006')
   await expect(currentMarker).toHaveAttribute('data-longitude', '127.006')
   await expect(currentMarker).toHaveAttribute('data-heading', '45')
-  await expect(currentMarker).toHaveClass(/is-online/u)
   await expect.poll(() => page.evaluate(() => (
     window as Window & {
       __missionMapOverlayState?: {
@@ -373,20 +499,66 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
         nativePolygons: number
         nativePolylines: number
         nativeMarkers: number
+        mapAttachedOverlays: number
+        fittedSouthWestLatitude: number | null
+        fittedSouthWestLongitude: number | null
+        fittedNorthEastLatitude: number | null
+        fittedNorthEastLongitude: number | null
+        zoomControlEnabled: boolean
+        zoomControlStyle: number | null
       }
     }
-  ).__missionMapOverlayState)).toEqual({
+  ).__missionMapOverlayState)).toMatchObject({
     mapConstructions: 1,
     mapDestructions: 0,
     fitBoundsCalls: 1,
     nativePolygons: 0,
     nativePolylines: 0,
     nativeMarkers: 0,
+    mapAttachedOverlays: 1,
+    fittedSouthWestLatitude: 37,
+    fittedSouthWestLongitude: 127,
+    fittedNorthEastLatitude: 37.01,
+    fittedNorthEastLongitude: 127.01,
+    zoomControlEnabled: true,
+    zoomControlStyle: 2,
   })
   await expect(page.getByText('실제 궤적 (3)')).toBeVisible()
   await expect(page.getByText('현재 위치가 지정된 순찰 구역 밖입니다.'))
     .toHaveCount(0)
   await expect(page.getByText('계획 경로')).toHaveCount(0)
+
+  const initialAreaPath = await areaShape.getAttribute('d')
+  const initialMarkerTransform = await currentMarker.getAttribute('transform')
+  await page.evaluate(() => {
+    const moveMissionMap = (
+      window as Window & {
+        __moveMissionMap?: (offsetX: number, offsetY: number) => void
+      }
+    ).__moveMissionMap
+    moveMissionMap?.(35, 20)
+  })
+  await expect(areaShape).not.toHaveAttribute('d', initialAreaPath ?? '')
+  await expect(currentMarker).not.toHaveAttribute(
+    'transform',
+    initialMarkerTransform ?? '',
+  )
+
+  const draggedAreaPath = await areaShape.getAttribute('d')
+  const draggedMarkerTransform = await currentMarker.getAttribute('transform')
+  await page.evaluate(() => {
+    const zoomMissionMap = (
+      window as Window & {
+        __zoomMissionMap?: (scale: number) => void
+      }
+    ).__zoomMissionMap
+    zoomMissionMap?.(15_000)
+  })
+  await expect(areaShape).not.toHaveAttribute('d', draggedAreaPath ?? '')
+  await expect(currentMarker).not.toHaveAttribute(
+    'transform',
+    draggedMarkerTransform ?? '',
+  )
 
   snapshotVersion = 2
   await page.evaluate(() => {
@@ -406,8 +578,7 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
   await expect(currentMarker).toHaveAttribute('data-latitude', '37.02')
   await expect(currentMarker).toHaveAttribute('data-longitude', '127.02')
   await expect(currentMarker).toHaveAttribute('data-heading', '90')
-  await expect(page.getByTestId('mission-trajectory'))
-    .toHaveAttribute('data-point-count', '4')
+  await expect(trajectory).toHaveAttribute('data-point-count', '4')
   await expect.poll(() => page.evaluate(() => (
     window as Window & {
       __missionMapOverlayState?: {
@@ -417,15 +588,29 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
         nativePolygons: number
         nativePolylines: number
         nativeMarkers: number
+        mapAttachedOverlays: number
+        fittedSouthWestLatitude: number | null
+        fittedSouthWestLongitude: number | null
+        fittedNorthEastLatitude: number | null
+        fittedNorthEastLongitude: number | null
+        zoomControlEnabled: boolean
+        zoomControlStyle: number | null
       }
     }
-  ).__missionMapOverlayState)).toEqual({
+  ).__missionMapOverlayState)).toMatchObject({
     mapConstructions: 1,
     mapDestructions: 0,
     fitBoundsCalls: 1,
     nativePolygons: 0,
     nativePolylines: 0,
     nativeMarkers: 0,
+    mapAttachedOverlays: 1,
+    fittedSouthWestLatitude: 37,
+    fittedSouthWestLongitude: 127,
+    fittedNorthEastLatitude: 37.01,
+    fittedNorthEastLongitude: 127.01,
+    zoomControlEnabled: true,
+    zoomControlStyle: 2,
   })
   await expect(page.getByText('실제 궤적 (4)')).toBeVisible()
   await expect(page.getByText('현재 위치가 지정된 순찰 구역 밖입니다.'))

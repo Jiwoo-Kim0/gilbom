@@ -73,6 +73,10 @@ declare namespace naver.maps {
     fromCoordToOffset(coord: LatLng): Point
   }
 
+  interface MapPanes {
+    overlayLayer: HTMLElement
+  }
+
   class Map {
     constructor(element: HTMLElement, options: MapOptions)
     getProjection(): MapSystemProjection
@@ -82,6 +86,16 @@ declare namespace naver.maps {
     setZoom(zoom: number): void
     fitBounds(bounds: LatLngBounds): void
     destroy(): void
+  }
+
+  class OverlayView {
+    setMap(map: Map | null): void
+    getMap(): Map | null
+    getPanes(): MapPanes
+    getProjection(): MapSystemProjection
+    onAdd(): void
+    draw(): void
+    onRemove(): void
   }
 
   interface MapPointerEvent {
@@ -102,7 +116,16 @@ declare namespace naver.maps {
 
     function addListener(
       target: Map,
-      eventName: 'bounds_changed' | 'size_changed' | 'idle',
+      eventName:
+        | 'bounds_changed'
+        | 'size_changed'
+        | 'idle'
+        | 'init'
+        | 'drag'
+        | 'dragend'
+        | 'panning'
+        | 'zooming'
+        | 'zoom_changed',
       listener: () => void,
     ): MapEventListener
 
@@ -146,10 +169,12 @@ declare namespace naver.maps {
   class Polyline {
     constructor(options: PolylineOptions)
     setMap(map: Map | null): void
+    setPath(path: LatLng[]): void
   }
 
   interface MarkerIcon {
-    content: string
+    content?: string
+    url?: string
     size?: Size
     anchor?: Point
   }
@@ -166,6 +191,8 @@ declare namespace naver.maps {
     constructor(options: MarkerOptions)
     setMap(map: Map | null): void
     setPosition(latlng: LatLng): void
+    setIcon(icon: MarkerIcon | string): void
+    setTitle(title: string): void
     getPosition(): LatLng
   }
 }
