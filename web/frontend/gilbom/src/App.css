@@ -2465,3 +2465,86 @@ button:disabled {
   gap: 0.5rem;
   font-size: 0.875rem;
 }
+
+/* 병합 다중 선택 — 체크박스 열은 권한이 있을 때만 붙으므로 modifier로 분리한다. */
+.defect-table.is-selectable .defect-table-row {
+  grid-template-columns: 32px 90px 1.4fr 1.4fr 1.1fr 0.8fr 0.6fr;
+}
+
+.defect-merge-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-muted);
+  font-size: 14px;
+}
+
+.defect-merge-bar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.defect-merge-candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.defect-merge-candidate {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.defect-merge-candidate span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.defect-card-link {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent, #2563eb);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* 축척 바 — 네이버 컨트롤이 CSP 아래에서 잘려 직접 그린다. 컨테이너 모서리에
+   붙지 않도록 여백을 충분히 준다. 잘렸던 원인이 그것이었다. */
+.defect-map-scale {
+  position: absolute;
+  /* 맨 아래 줄은 네이버 로고 자리다. 그 위에 얹는다. */
+  bottom: 34px;
+  left: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 85%);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.defect-map-scale-bar path {
+  stroke: currentcolor;
+  stroke-width: 1.5;
+}

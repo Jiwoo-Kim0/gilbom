@@ -56,9 +56,13 @@ interface DefectListProps {
   error: string | null
   sort: string
   selectedDefectId: string | null
+  /** 병합 권한이 있을 때만 체크박스 열을 낸다. */
+  selectable: boolean
+  checkedIds: string[]
   onSortChange: (sort: string) => void
   onPageChange: (page: number) => void
   onSelect: (defectId: string) => void
+  onToggleCheck: (defectId: string) => void
   onRetry: () => void
 }
 
@@ -68,9 +72,12 @@ export function DefectList({
   error,
   sort,
   selectedDefectId,
+  selectable,
+  checkedIds,
   onSortChange,
   onPageChange,
   onSelect,
+  onToggleCheck,
   onRetry,
 }: DefectListProps) {
   const items = page?.content ?? []
@@ -104,8 +111,17 @@ export function DefectList({
         </div>
       </div>
 
-      <div className="defect-table" role="table" aria-label="결함 상세 목록">
+      <div
+        className={`defect-table${selectable ? ' is-selectable' : ''}`}
+        role="table"
+        aria-label="결함 상세 목록"
+      >
         <div className="defect-table-row defect-table-head" role="row">
+          {selectable && (
+            <span role="columnheader">
+              <span className="sr-only">병합 선택</span>
+            </span>
+          )}
           {columns.map((column) => (
             <span key={column} role="columnheader">
               {column}
@@ -160,6 +176,18 @@ export function DefectList({
               }
             }}
           >
+            {selectable && (
+              <span role="cell">
+                <input
+                  type="checkbox"
+                  aria-label={`${defect.incidentCode} 병합 대상으로 선택`}
+                  checked={checkedIds.includes(defect.defectId)}
+                  // 행 클릭은 상세 열기다. 체크는 그것과 별개 동작이라 전파를 막는다.
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={() => onToggleCheck(defect.defectId)}
+                />
+              </span>
+            )}
             <span role="cell">{defect.incidentCode}</span>
             <span role="cell">
               {DEFECT_TYPE_LABELS[defect.defectType] ?? defect.defectType}

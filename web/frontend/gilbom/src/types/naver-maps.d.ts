@@ -37,7 +37,17 @@ declare namespace naver.maps {
     BOTTOM_RIGHT,
   }
 
+  enum ZoomControlStyle {
+    LARGE,
+    SMALL,
+  }
+
   interface ZoomControlOptions {
+    position?: Position
+    style?: ZoomControlStyle
+  }
+
+  interface ScaleControlOptions {
     position?: Position
   }
 
@@ -55,6 +65,8 @@ declare namespace naver.maps {
     disableTwoFingerTapZoom?: boolean
     zoomControl?: boolean
     zoomControlOptions?: ZoomControlOptions
+    scaleControl?: boolean
+    scaleControlOptions?: ScaleControlOptions
   }
 
   interface MapSystemProjection {
