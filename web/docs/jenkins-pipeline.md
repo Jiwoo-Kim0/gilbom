@@ -45,6 +45,8 @@
   resource/log 상한과 `/run/secrets` target을 검증한다.
 - repository policy에서 운영 배포·rollback·backup·Secret 생성 스크립트의
   POSIX shell 구문과 Runbook/담당 범위 동결 문서 존재를 함께 확인한다.
+- repository policy는 `secrets/` 아래 추적 파일을 차단하되, 실제 Secret이
+  추적되지 않게 만드는 `secrets/.gitignore` 한 경로만 허용한다.
 - 종료 시 named volume을 제거해 다음 빌드도 빈 DB 최초 migration부터 검증한다.
 
 ## Jenkins agent prerequisites
@@ -68,6 +70,12 @@ Jenkins Git Client는 HTTPS Username/Password Credential을 전달하기 위한 
 필요한 script 실행은 허용한다. `/tmp`를 `noexec`로 두면 Credential이 올바르게
 등록돼 있어도 `jenkins-gitclient-pass*.sh-copy: Permission denied`로 checkout이
 실패한다.
+
+Jenkins의 `Free Temp Space` monitor 기본 Offline 임계값 1 GiB는 이 tmpfs 상한보다
+크므로 그대로 두면 빈 tmpfs도 Built-In Node를 Offline 처리한다. Custom Jenkins
+image는 Offline 임계값 64 MiB, warning 임계값 128 MiB를 영속 설정한다. Monitor를
+끄지 않으므로 비정상적인 임시파일 증가로 여유 공간이 64 MiB 아래가 되면 빌드는
+계속 차단된다.
 
 각 build는 `.artifacts/runtime/build-resources.txt`에 메모리, root filesystem,
 Docker storage와 실행 container 사용량을 기록한다. 이 artifact를 보고 15GB

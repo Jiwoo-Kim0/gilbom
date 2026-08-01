@@ -18,5 +18,7 @@ COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins \
 
 COPY --chown=jenkins:jenkins infra/jenkins/init.groovy.d/01-executor-count.groovy \
     /usr/share/jenkins/ref/init.groovy.d/01-executor-count.groovy
+COPY --chown=jenkins:jenkins infra/jenkins/init.groovy.d/02-temporary-space-monitor.groovy \
+    /usr/share/jenkins/ref/init.groovy.d/02-temporary-space-monitor.groovy
 
 USER jenkins

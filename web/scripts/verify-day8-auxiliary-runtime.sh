@@ -188,6 +188,10 @@ docker exec "$jenkins_id" /bin/sh -ec '
   [ "$DOCKER_TLS_VERIFY" = 1 ]
   [ "$COMPOSE_PARALLEL_LIMIT" = 1 ]
   grep -Fq "<numExecutors>1</numExecutors>" /var/jenkins_home/config.xml
+  grep -Fq "<freeSpaceThreshold>64MB</freeSpaceThreshold>" \
+    /var/jenkins_home/nodeMonitors.xml
+  grep -Fq "<freeSpaceWarningThreshold>128MB</freeSpaceWarningThreshold>" \
+    /var/jenkins_home/nodeMonitors.xml
   probe="$(mktemp /tmp/gilbom-jenkins-exec.XXXXXX)"
   trap '\''rm -f "$probe"'\'' EXIT HUP INT TERM
   printf "%s\n" "#!/bin/sh" "exit 0" > "$probe"

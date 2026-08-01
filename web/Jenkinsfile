@@ -75,9 +75,11 @@ pipeline {
                         set -eu
 
                         # 실제 .env, secrets/와 대표적인 개인키/keystore 확장자는
-                        # 추적되면 즉시 실패시킨다.
+                        # 추적되면 즉시 실패시킨다. secrets 전체를 ignore하기 위한
+                        # 빈 디렉터리 정책 파일 secrets/.gitignore만 허용한다.
                         if git ls-files --full-name \
-                            | grep -E '(^|/)\\.env$|(^|/)secrets/|\\.(pem|key|p12|pfx|jks|keystore)$|(^|/)passwd$|(^|/)credentials\\.json$|(^|/)service-account[^/]*\\.json$'; then
+                            | grep -E '(^|/)\\.env$|(^|/)secrets/|\\.(pem|key|p12|pfx|jks|keystore)$|(^|/)passwd$|(^|/)credentials\\.json$|(^|/)service-account[^/]*\\.json$' \
+                            | grep -Ev '(^|/)secrets/\\.gitignore$'; then
                             echo 'Tracked secret file candidate detected.' >&2
                             exit 1
                         fi

@@ -88,6 +88,15 @@ assert_contains compose.jenkins.yaml \
 assert_contains infra/jenkins/init.groovy.d/01-executor-count.groovy \
   'instance.setNumExecutors(1)' \
   "Jenkins executor count must be initialized to one"
+assert_contains infra/jenkins/init.groovy.d/02-temporary-space-monitor.groovy \
+  'def minimumFreeSpace = "64MB"' \
+  "Jenkins temporary-space offline threshold must fit its bounded tmpfs"
+assert_contains infra/jenkins/init.groovy.d/02-temporary-space-monitor.groovy \
+  'def warningFreeSpace = "128MB"' \
+  "Jenkins temporary-space warning threshold must fit its bounded tmpfs"
+assert_contains infra/jenkins/Dockerfile \
+  '02-temporary-space-monitor.groovy' \
+  "Jenkins image must install the temporary-space monitor policy"
 assert_contains compose.jenkins.yaml \
   'COMPOSE_PARALLEL_LIMIT: "1"' \
   "Jenkins Compose concurrency must be one"
@@ -124,6 +133,9 @@ assert_contains infra/jenkins/jenkins.env.example \
 assert_contains Jenkinsfile \
   "disableConcurrentBuilds(abortPrevious: true)" \
   "Jenkins job concurrency guard is missing"
+assert_contains Jenkinsfile \
+  "grep -Ev '(^|/)secrets/\\\\.gitignore$'" \
+  "Jenkins repository policy must allow only the Secret ignore policy file"
 assert_contains Jenkinsfile \
   ".artifacts/runtime/build-resources.txt" \
   "build-time resource evidence is not collected"
