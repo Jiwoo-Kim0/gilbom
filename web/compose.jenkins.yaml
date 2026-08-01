@@ -70,7 +70,10 @@ services:
       start_period: 60s
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777
+      # Jenkins Git Client는 HTTPS Credential을 전달하는 일회성 askpass
+      # script를 java.io.tmpdir에서 실행한다. tmpfs의 휘발성·크기 제한과
+      # nosuid/nodev는 유지하되 Git checkout에 필요한 실행만 허용한다.
+      - /tmp:rw,exec,nosuid,nodev,size=256m,mode=1777
     cap_drop:
       - ALL
     security_opt:

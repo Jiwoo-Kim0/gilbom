@@ -62,6 +62,13 @@ Jenkins UI는 기본 `127.0.0.1:8081`, Docker TLS 2376은 host에 publish하지 
 `Jenkinsfile`은 host Docker socket 개발 환경과 TLS DinD를 모두 지원하지만 운영
 Compose는 host socket을 mount하지 않는다.
 
+Jenkins Git Client는 HTTPS Username/Password Credential을 전달하기 위한 일회성
+`askpass` script를 `java.io.tmpdir`에서 실행한다. Jenkins의 `/tmp`는 container
+종료 시 사라지는 256 MiB tmpfs로 유지하고 `nosuid,nodev`를 적용하되, checkout에
+필요한 script 실행은 허용한다. `/tmp`를 `noexec`로 두면 Credential이 올바르게
+등록돼 있어도 `jenkins-gitclient-pass*.sh-copy: Permission denied`로 checkout이
+실패한다.
+
 각 build는 `.artifacts/runtime/build-resources.txt`에 메모리, root filesystem,
 Docker storage와 실행 container 사용량을 기록한다. 이 artifact를 보고 15GB
 host에서 Jenkins 2GB, DinD 4GB 상한과 build cache 정리 주기를 조정한다.

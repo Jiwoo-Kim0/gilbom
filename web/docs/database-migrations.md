@@ -59,6 +59,7 @@
 | V32 | 시간 기반 Mission 계약 | `planned_duration_sec` 양수 제약과 기존 Mission 3,600초 Backfill을 추가하고, 기존 ACTIVE Patrol Area에 내부 `AUTONOMOUS_DEFAULT` Route를 보강 |
 | V33 | LLM 호출 quota·credit ledger | 사용자별 UTC 일일 호출 수와 전체 일일 credit을 원자적으로 예약하고 token·안전 실패 코드만 기록해 다중 인스턴스의 rate·budget 우회를 차단 |
 | V34 | 보고서 LLM fallback 사유 | LLM 요청이 template으로 낮아진 원인을 고정 코드로 버전에 보존하되 Prompt·응답·예외 원문 저장을 차단 |
+| V35 | 미시작 Mission 삭제 경계 | 시작·진행 이력이 없는 `CREATED` Mission과 최초 상태 이력만 삭제할 수 있도록 DB Trigger와 runtime 권한을 제한적으로 추가 |
 
 ### V26 결함 통계 Query 인덱스
 
@@ -208,6 +209,16 @@ budget 마지막 잔액을 확인해도 한 transaction만 예약에 성공한�
 Prompt·provider 응답·이미지·내부 예외 메시지는 이 필드나 다른 보고서 필드에
 저장하지 않는다.
 
+### V35 미시작 Mission 삭제 경계
+
+파일:
+`backend/src/main/resources/db/migration/V35__allow_created_mission_deletion.sql`
+
+`CREATED` 상태이고 시작·종료 시각과 진행 이력이 없는 Mission만 삭제할 수 있다.
+Mission 삭제 Trigger가 이 조건을 DB에서 재검증하며, 최초 `CREATED` 상태 이력 외
+다른 상태 이력이 있으면 append-only 보호가 계속 삭제를 거부한다. 시작된 Mission,
+Telemetry, Event, Command 이력은 기존 보존 정책을 유지한다.
+
 시스템 Role `ADMIN`, `MANAGER`, `OPERATOR`와 18개 세부 permission 및
 role-permission 관계는 결정적인 UUID로 seed한다. 실제
 관리자 계정은 password hash와 MFA 등록 절차가 필요하므로 migration에서 만들지 않는다.
@@ -222,7 +233,7 @@ docker compose up --build --detach
 docker compose logs backend
 ```
 
-Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V34가
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V35가
 순서대로 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증

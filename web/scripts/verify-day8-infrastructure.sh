@@ -112,6 +112,9 @@ assert_contains compose.jenkins.yaml \
 assert_contains compose.jenkins.yaml \
   'max-file: "${JENKINS_LOG_MAX_FILES:-3}"' \
   "Jenkins Docker log file rotation is missing"
+assert_contains compose.jenkins.yaml \
+  '/tmp:rw,exec,nosuid,nodev,size=256m,mode=1777' \
+  "Jenkins executable ephemeral tmpfs is required by Git Client askpass"
 assert_not_contains compose.jenkins.yaml \
   '/var/run/docker.sock' \
   "Jenkins must not mount the host Docker socket"
@@ -125,8 +128,8 @@ assert_contains Jenkinsfile \
   ".artifacts/runtime/build-resources.txt" \
   "build-time resource evidence is not collected"
 assert_contains infra/postgres/verify-empty-database.sql \
-  'SELECT COUNT(*) = 34' \
-  "empty database gate must cover Flyway V1 through V34"
+  'SELECT COUNT(*) = 35' \
+  "empty database gate must cover Flyway V1 through V35"
 assert_contains infra/postgres/verify-production-database.sql \
   'Production PostGIS/Flyway/approved-system-seed/runtime-role contract: PASS' \
   "production database audit is missing"

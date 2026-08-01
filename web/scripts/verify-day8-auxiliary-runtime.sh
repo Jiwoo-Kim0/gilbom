@@ -188,6 +188,11 @@ docker exec "$jenkins_id" /bin/sh -ec '
   [ "$DOCKER_TLS_VERIFY" = 1 ]
   [ "$COMPOSE_PARALLEL_LIMIT" = 1 ]
   grep -Fq "<numExecutors>1</numExecutors>" /var/jenkins_home/config.xml
+  probe="$(mktemp /tmp/gilbom-jenkins-exec.XXXXXX)"
+  trap '\''rm -f "$probe"'\'' EXIT HUP INT TERM
+  printf "%s\n" "#!/bin/sh" "exit 0" > "$probe"
+  chmod 0700 "$probe"
+  "$probe"
   docker info >/dev/null
   docker compose version >/dev/null
 ' || fail "Jenkins TLS DinD or single-executor policy is not active"
