@@ -394,6 +394,90 @@ class MissionManagementIntegrationTest {
     }
 
     @Test
+    void deletesOnlyUntouchedCreatedMissionAndWritesAudit() {
+        MissionResponse created = managementService.create(
+                new MissionCreateRequest(
+                        robotId,
+                        areaId,
+                        routeId,
+                        3600,
+                        null),
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID()));
+
+        managementService.delete(
+                created.missionId(),
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID()));
+
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM robot.mission
+                WHERE mission_id = ?
+                """,
+                Integer.class,
+                created.missionId())).isZero();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM robot.mission_status_history
+                WHERE mission_id = ?
+                """,
+                Integer.class,
+                created.missionId())).isZero();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM audit.audit_log
+                WHERE target_id = ?
+                  AND action_type = 'MISSION_DELETED'
+                  AND before_value ->> 'status' = 'CREATED'
+                  AND after_value IS NULL
+                """,
+                Integer.class,
+                created.missionId())).isOne();
+    }
+
+    @Test
+    void rejectsMissionDeleteAfterReadyTransition() {
+        MissionResponse created = managementService.create(
+                new MissionCreateRequest(
+                        robotId,
+                        areaId,
+                        routeId,
+                        3600,
+                        null),
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID()));
+        managementService.update(
+                created.missionId(),
+                new MissionUpdateRequest(
+                        null,
+                        null,
+                        null,
+                        null,
+                        MissionStatus.READY,
+                        null),
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID()));
+
+        assertThatThrownBy(() -> managementService.delete(
+                created.missionId(),
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID())))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(ErrorCode.MISSION_STATE_CONFLICT));
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM robot.mission
+                WHERE mission_id = ?
+                  AND status = 'READY'
+                """,
+                Integer.class,
+                created.missionId())).isOne();
+    }
+
+    @Test
     void returnsAreaTrajectoryAndCurrentPositionForMissionMap() {
         MissionResponse mission = managementService.create(
                 new MissionCreateRequest(

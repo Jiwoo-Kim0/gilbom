@@ -2817,6 +2817,31 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+    delete:
+      tags: [Missions]
+      operationId: deleteMission
+      summary: 시작 전 CREATED Mission 삭제
+      description: |
+        대상 Robot OWNER만 삭제할 수 있습니다. 상태 전이·Telemetry·Event·Command
+        이력이 없는 CREATED Mission과 생성 상태 이력만 삭제하며 READY 이후 상태는
+        이력 보존을 위해 삭제할 수 없습니다.
+      x-required-permission: MISSION_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/MissionId"
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Mission 삭제 완료
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /api/v1/missions/{missionId}/trajectory:
     get:

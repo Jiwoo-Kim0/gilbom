@@ -1,6 +1,7 @@
 import {
   Bot,
   CalendarClock,
+  CheckCircle2,
   ChevronRight,
   CircleGauge,
   ClipboardList,
@@ -12,6 +13,7 @@ import {
   RotateCcw,
   Route,
   Timer,
+  Trash2,
 } from 'lucide-react'
 import {
   useCallback,
@@ -30,14 +32,17 @@ import type { RobotMapItem } from '../robot/robotTypes'
 import { useRobotRealtime } from '../robot/useRobotRealtime'
 import {
   createMission,
+  deleteMission,
   getMission,
   getMissionHistory,
   getMissionRobotOptions,
   getMissions,
   getPatrolAreas,
   getPatrolRoutes,
+  updateMission,
 } from './missionApi'
 import { MissionMap } from './MissionMap'
+import { MissionCommandActions } from './MissionCommandActions'
 import { PatrolAreaSelectionPreview } from './PatrolAreaSelectionPreview'
 import type {
   Mission,
@@ -164,10 +169,15 @@ export function MissionManagePage() {
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [createRoutesLoading, setCreateRoutesLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [missionAction, setMissionAction] = useState<
+    'ready' | 'delete' | null
+  >(null)
+  const [commandRealtimeRevision, setCommandRealtimeRevision] = useState(0)
   const [listError, setListError] = useState<unknown>(null)
   const [detailError, setDetailError] = useState<unknown>(null)
   const [catalogError, setCatalogError] = useState<unknown>(null)
   const [formError, setFormError] = useState<unknown>(null)
+  const [actionError, setActionError] = useState<unknown>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const { user } = useAuthentication()
   const canManage = user?.permissions.includes(MISSION_MANAGE) ?? false
@@ -285,6 +295,7 @@ export function MissionManagePage() {
   }, [])
 
   const refreshFromRealtime = useCallback(() => {
+    setCommandRealtimeRevision((current) => current + 1)
     if (realtimeRefreshTimerRef.current !== null) {
       window.clearTimeout(realtimeRefreshTimerRef.current)
     }
@@ -412,6 +423,7 @@ export function MissionManagePage() {
     setSelectedMission(null)
     setHistory([])
     setDetailError(null)
+    setActionError(null)
     setNotice(null)
   }
 
@@ -514,6 +526,83 @@ export function MissionManagePage() {
       setFormError(error)
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function handleReadyMission() {
+    if (
+      !canManage
+      || selectedMission === null
+      || selectedMission.status !== 'CREATED'
+      || missionAction !== null
+    ) {
+      return
+    }
+
+    const missionId = selectedMission.missionId
+    const missionCode = selectedMission.missionCode
+    setMissionAction('ready')
+    setActionError(null)
+    setNotice(null)
+    try {
+      const updated = await updateMission(missionId, { status: 'READY' })
+      setSelectedMission(updated)
+      setNotice(
+        `${missionCode} 임무가 준비되었습니다. 로봇 제어 화면에서 시작해주세요.`,
+      )
+      requestedListKeyRef.current = null
+      requestedDetailIdRef.current = null
+      await Promise.all([
+        loadMissions(page, appliedFilters),
+        loadMissionDetail(missionId),
+      ])
+    } catch (error) {
+      setActionError(error)
+    } finally {
+      setMissionAction(null)
+    }
+  }
+
+  async function handleDeleteMission() {
+    if (
+      !canManage
+      || selectedMission === null
+      || selectedMission.status !== 'CREATED'
+      || missionAction !== null
+    ) {
+      return
+    }
+
+    const missionId = selectedMission.missionId
+    const missionCode = selectedMission.missionCode
+    const confirmed = window.confirm(
+      `${missionCode} 임무를 삭제할까요? 생성 상태의 임무와 초기 상태 이력이 삭제되며 복구할 수 없습니다.`,
+    )
+    if (!confirmed) {
+      return
+    }
+
+    setMissionAction('delete')
+    setActionError(null)
+    setNotice(null)
+    try {
+      await deleteMission(missionId)
+      requestedListKeyRef.current = null
+      requestedDetailIdRef.current = null
+      setSelectedMissionId(null)
+      setSelectedMission(null)
+      setHistory([])
+      setDetailError(null)
+      setPage(0)
+      await Promise.all([
+        loadMissions(0, appliedFilters),
+        loadCatalogs(),
+      ])
+      setNotice(`${missionCode} 임무를 삭제했습니다.`)
+    } catch (error) {
+      setActionError(error)
+    } finally {
+      setMissionAction(null)
     }
   }
 
@@ -892,6 +981,7 @@ export function MissionManagePage() {
                           className="mission-select-button"
                           type="button"
                           onClick={() => selectMission(mission.missionId)}
+                          disabled={missionAction !== null}
                           aria-label={`${mission.missionCode} 상세 보기`}
                         >
                           <ChevronRight size={17} aria-hidden="true" />
@@ -967,10 +1057,53 @@ export function MissionManagePage() {
                   <h3>{selectedMission.missionCode}</h3>
                   <p>{selectedMission.robotName} · {selectedMission.mqttId}</p>
                 </div>
-                <span className="mission-detail-updated">
-                  갱신 {formatDateTime(selectedMission.updatedAt)}
-                </span>
+                <div className="mission-detail-heading-actions">
+                  <span className="mission-detail-updated">
+                    갱신 {formatDateTime(selectedMission.updatedAt)}
+                  </span>
+                  {canManage && selectedMission.status === 'CREATED' ? (
+                    <div className="mission-detail-action-row">
+                      <button
+                        className="primary-button button-with-icon"
+                        type="button"
+                        onClick={() => void handleReadyMission()}
+                        disabled={missionAction !== null}
+                      >
+                        <CheckCircle2 size={16} aria-hidden="true" />
+                        {missionAction === 'ready' ? '준비 중…' : '준비 완료'}
+                      </button>
+                      <button
+                        className="danger-button button-with-icon"
+                        type="button"
+                        onClick={() => void handleDeleteMission()}
+                        disabled={missionAction !== null}
+                      >
+                        <Trash2 size={16} aria-hidden="true" />
+                        {missionAction === 'delete' ? '삭제 중…' : '삭제'}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
+
+              {actionError ? (
+                <div className="page-alert mission-action-alert" role="alert">
+                  {getApiErrorMessage(actionError)}
+                </div>
+              ) : null}
+
+              {(
+                selectedMission.status === 'READY'
+                || selectedMission.status === 'RUNNING'
+                || selectedMission.status === 'PAUSED'
+              ) ? (
+                <MissionCommandActions
+                  key={`${selectedMission.missionId}-${selectedMission.status}`}
+                  mission={selectedMission}
+                  realtimeRevision={commandRealtimeRevision}
+                  onCommandCreated={refresh}
+                />
+              ) : null}
 
               <div
                 className="mission-progress-card"

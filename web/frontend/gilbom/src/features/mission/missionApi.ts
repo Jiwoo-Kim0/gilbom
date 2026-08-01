@@ -1,20 +1,22 @@
 import {
+  apiFetch,
   apiJson,
   jsonBody,
-} from '../../shared/api/apiClient'
+} from '../../shared/api/apiClient.ts'
 import type {
   Mission,
   MissionCreateInput,
   MissionFilters,
   MissionListResponse,
   MissionMapResponse,
+  MissionUpdateInput,
   MissionStatusHistoryResponse,
   PatrolArea,
   PatrolAreaCreateInput,
   PatrolAreaListResponse,
   PatrolRouteListResponse,
   RobotListResponse,
-} from './missionTypes'
+} from './missionTypes.ts'
 
 const MISSION_BASE_PATH = '/api/v1/missions'
 
@@ -78,6 +80,23 @@ export function createMission(input: MissionCreateInput): Promise<Mission> {
     method: 'POST',
     body: jsonBody(input),
   })
+}
+
+export function updateMission(
+  missionId: string,
+  input: MissionUpdateInput,
+): Promise<Mission> {
+  return apiJson(`${MISSION_BASE_PATH}/${encodeURIComponent(missionId)}`, {
+    method: 'PATCH',
+    body: jsonBody(input),
+  })
+}
+
+export async function deleteMission(missionId: string): Promise<void> {
+  await apiFetch(
+    `${MISSION_BASE_PATH}/${encodeURIComponent(missionId)}`,
+    { method: 'DELETE' },
+  )
 }
 
 export function getMissionRobotOptions(): Promise<RobotListResponse> {

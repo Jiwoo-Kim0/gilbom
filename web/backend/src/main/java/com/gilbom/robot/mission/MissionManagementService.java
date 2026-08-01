@@ -312,6 +312,57 @@ public class MissionManagementService {
         return after;
     }
 
+    @Transactional
+    public void delete(
+            UUID missionId,
+            UUID actorUserId,
+            AuditRequestContext requestContext
+    ) {
+        MissionState current = lockMission(missionId);
+        requireOwner(
+                actorUserId,
+                current.robotId(),
+                ErrorCode.MISSION_NOT_FOUND);
+        if (current.status() != MissionStatus.CREATED) {
+            throw new BusinessException(ErrorCode.MISSION_STATE_CONFLICT);
+        }
+        MissionResponse before = queryService.findMission(
+                actorUserId,
+                missionId);
+
+        try {
+            jdbcTemplate.update(
+                    "DELETE FROM robot.mission_status_history "
+                            + "WHERE mission_id = ?",
+                    missionId);
+            int deleted = jdbcTemplate.update("""
+                    DELETE FROM robot.mission
+                    WHERE mission_id = ?
+                      AND status = 'CREATED'
+                    """,
+                    missionId);
+            if (deleted != 1) {
+                throw new BusinessException(ErrorCode.MISSION_STATE_CONFLICT);
+            }
+        } catch (DataIntegrityViolationException exception) {
+            throw new BusinessException(
+                    ErrorCode.MISSION_STATE_CONFLICT,
+                    exception);
+        }
+
+        auditLogService.appendRequired(new AuditLogRecord(
+                requestContext,
+                actorUserId,
+                AuditActorType.USER,
+                AuditAction.MISSION_DELETED.databaseValue(),
+                AuditTargetType.MISSION,
+                missionId,
+                snapshot(before),
+                null,
+                "관리자 임무 삭제",
+                AuditResult.SUCCESS));
+    }
+
     private MissionState lockMission(UUID missionId) {
         MissionState mission = jdbcTemplate.query("""
                         SELECT

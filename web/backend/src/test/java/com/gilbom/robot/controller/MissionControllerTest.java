@@ -3,10 +3,12 @@ package com.gilbom.robot.controller;
 import static org.hamcrest.Matchers.is;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -177,6 +179,36 @@ class MissionControllerTest {
                         .content("""
                                 {"status":"READY"}
                                 """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")));
+
+        verifyNoInteractions(managementService);
+    }
+
+    @Test
+    void deletesCreatedMissionWithManagePermissionAndCsrf() throws Exception {
+        mockMvc.perform(delete(
+                        "/api/v1/missions/{missionId}",
+                        MISSION_ID)
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_MANAGE))
+                        .with(csrf().asHeader()))
+                .andExpect(status().isNoContent());
+
+        verify(managementService).delete(
+                eq(MISSION_ID),
+                eq(USER_ID),
+                any(AuditRequestContext.class));
+    }
+
+    @Test
+    @Tag("security-acceptance")
+    void rejectsMissionDeleteWithoutCsrf() throws Exception {
+        mockMvc.perform(delete(
+                        "/api/v1/missions/{missionId}",
+                        MISSION_ID)
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_MANAGE)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")));
 

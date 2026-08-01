@@ -111,12 +111,29 @@ test('시간 기반 Mission을 경로 UI 없이 생성하고 진행 정보를 �
           serialNumber: 'TIME-E2E-001',
           operationalStatus: 'ACTIVE',
           connectivityStatus: 'ONLINE',
+          missionStatus: null,
           overallHealthStatus: 'NORMAL',
         }],
         page: 0,
         size: 100,
         totalElements: 1,
         totalPages: 1,
+      })
+      return
+    }
+    if (pathname === '/api/v1/robots/map') {
+      await fulfillJson(route, {
+        robots: [{
+          robotId: ROBOT_ID,
+          mqttId: 'robot-time-e2e',
+          robotName: '시간 계약 로봇',
+          connectivityStatus: 'ONLINE',
+          latitude: 37.005,
+          longitude: 127.005,
+          headingDeg: 45,
+          missionStatus: null,
+          observedAt: '2026-07-30T02:15:00Z',
+        }],
       })
       return
     }

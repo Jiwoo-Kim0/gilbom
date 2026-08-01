@@ -81,6 +81,15 @@ export type MissionCreateInput = {
   scheduledStartAt: string | null
 }
 
+export type MissionUpdateInput = {
+  patrolAreaId?: string
+  patrolRouteId?: string
+  plannedDurationSec?: number
+  scheduledStartAt?: string
+  status?: Extract<MissionStatus, 'READY' | 'CANCELLED' | 'FAILED'>
+  completionReason?: string
+}
+
 export type MissionStatusHistoryItem = {
   historyId: string
   transitionSource: 'MQTT' | 'ADMIN' | 'SYSTEM'

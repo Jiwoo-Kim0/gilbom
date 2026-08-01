@@ -208,7 +208,7 @@ DB trigger도 같은 lock과 판정 함수를 사용해 직접 DML을 방어한�
 | GET, POST | `/api/v1/patrol-areas/{patrolAreaId}/routes` | GET `MISSION_VIEW`, POST `MISSION_MANAGE` | MVP 권한 단위 | POST O | 생성 |
 | GET | `/api/v1/patrol-areas/{patrolAreaId}/routes/{patrolRouteId}` | `MISSION_VIEW` | MVP 권한 단위 |  |  |
 | GET, POST | `/api/v1/missions` | GET `MISSION_VIEW`, POST `MISSION_MANAGE` | GET 배정 로봇, POST 대상 로봇 `OWNER` | POST O | 생성 |
-| GET, PATCH | `/api/v1/missions/{missionId}` | GET `MISSION_VIEW`, PATCH `MISSION_MANAGE` | GET `VIEWER+`, PATCH `OWNER` | PATCH O | 변경 |
+| GET, PATCH, DELETE | `/api/v1/missions/{missionId}` | GET `MISSION_VIEW`, PATCH·DELETE `MISSION_MANAGE` | GET `VIEWER+`, PATCH·DELETE `OWNER` | PATCH·DELETE O | 변경·CREATED 삭제 |
 | GET | `/api/v1/missions/{missionId}/trajectory` | `MISSION_VIEW` | 연결 로봇 `VIEWER+` |  |  |
 | GET | `/api/v1/missions/{missionId}/map` | `MISSION_VIEW` | 연결 로봇 `VIEWER+` |  |  |
 | GET | `/api/v1/missions/{missionId}/history` | `MISSION_VIEW` | 연결 로봇 `VIEWER+` |  |  |
