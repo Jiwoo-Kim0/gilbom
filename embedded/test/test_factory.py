@@ -206,6 +206,23 @@ def test_state_battery_invalid_nulls_percent(factory):
     assert payload["health"]["camera"] == "UNKNOWN"
 
 
+def test_state_battery_valid_rejects_unknown_state(factory):
+    """서버 DTO 는 valid=true 면 state != UNKNOWN 을 요구한다 (§5.5).
+
+    측정값을 믿는다면 등급도 나와야 하고, 못 믿으면 valid=false 다. 여기서 안 막으면
+    MQTT_PAYLOAD_VALIDATION_FAILED 로 조용히 버려진다.
+    """
+    with pytest.raises(ValueError):
+        factory.state(
+            mode="PATROLLING",
+            reason_code="NONE",
+            battery_valid=True,
+            battery_percent=67.4,
+            battery_state="UNKNOWN",
+            health_block=health_ok(),
+        )
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
@@ -499,6 +516,10 @@ def test_incident_without_damage_ratio_omits_attributes(factory):
         {"confidence": 1.4},
         {"bbox_norm": [0.1, 0.2, 0.3]},
         {"bbox_norm": [0.9, 0.2, 0.3, 0.4]},
+        # 서버 DTO 는 x_min < x_max, y_min < y_max 인 강한 부등식을 요구한다.
+        # 폭·높이가 0 인 상자는 MQTT_PAYLOAD_VALIDATION_FAILED 로 조용히 버려진다.
+        {"bbox_norm": [0.3, 0.2, 0.3, 0.4]},
+        {"bbox_norm": [0.1, 0.4, 0.3, 0.4]},
         {"lat": None},
         {"lon": None},
     ],
@@ -773,6 +794,38 @@ def test_command_result_accepted_rejects_completed_at(factory):
             mode="PATROLLING",
             state_reason_code="NONE",
         )
+
+
+def test_command_result_rejects_completed_at_before_received_at(factory):
+    """서버 DTO 는 completed_at >= received_at 도 함께 요구한다 (§13).
+
+    시계가 뒤로 튀면(NTP 스텝) 여기서 안 막힌 result 가 조용히 거부되고,
+    관제 화면의 명령은 영원히 ACCEPTED 에 멈춘다.
+    """
+    with pytest.raises(ValueError):
+        factory.command_result(
+            command_id="cmd-1",
+            status="COMPLETED",
+            received_at="2026-07-26T05:21:00.240Z",
+            completed_at="2026-07-26T05:21:00.130Z",
+            reason_code="OK",
+            mode="PATROLLING",
+            state_reason_code="NONE",
+        )
+
+
+def test_command_result_allows_the_same_instant(factory):
+    """>= 라 같은 시각은 통과한다 — 즉시 끝나는 명령이 여기서 걸리면 안 된다."""
+    payload = factory.command_result(
+        command_id="cmd-1",
+        status="COMPLETED",
+        received_at="2026-07-26T05:21:00.130Z",
+        completed_at="2026-07-26T05:21:00.130Z",
+        reason_code="OK",
+        mode="PATROLLING",
+        state_reason_code="NONE",
+    )
+    assert payload["completed_at"] == payload["received_at"]
 
 
 def test_command_result_ids_differ_for_same_command(factory):

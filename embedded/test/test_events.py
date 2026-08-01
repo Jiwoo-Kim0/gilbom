@@ -102,6 +102,10 @@ class FakeGps:
         return dict(self.reading)
 
 
+#: 이미지 업로드 form 의 robot_id — DB 내부 robot.robot_id UUID 다. mqtt_id 가 아니다.
+ROBOT_UUID = "6f1b6b1e-9c2a-4c1e-9f3a-2b6d5a4c7e10"
+
+
 class FakeUpload:
     """uploader.upload 대역. 호출 인자를 기억하고 정해진 값을 돌려준다."""
 
@@ -109,8 +113,9 @@ class FakeUpload:
         self.image_id = image_id
         self.calls = []
 
-    def __call__(self, image_path, event_id, robot_id):
-        self.calls.append((image_path, event_id, robot_id))
+    def __call__(self, image_path, event_id, robot_uuid, *, captured_at=None):
+        self.calls.append((image_path, event_id, robot_uuid))
+        self.captured_at = captured_at
         return self.image_id
 
 
@@ -172,6 +177,7 @@ def events(client, state, lidar, gps, upload, clock):
         model_name="tbs-braille-yolo",
         model_version="1.0.0",
         upload=upload,
+        upload_robot_uuid=ROBOT_UUID,
         monotonic=clock.monotonic,
         now=clock.now,
     )
@@ -792,6 +798,8 @@ def build_from(config_path, monkeypatch, tmp_path):
 
     for name in ("MQTT_HOST", "MQTT_PASSWORD", "UPLOAD_URL", "UPLOAD_API_KEY"):
         monkeypatch.setenv(name, "x")
+    monkeypatch.setenv("MQTT_ID", ROBOT_ID)
+    monkeypatch.setenv("ROBOT_UUID", ROBOT_UUID)
     monkeypatch.chdir(tmp_path)
     return main.build(config_path=config_path)
 
@@ -1015,7 +1023,10 @@ def test_incident_carries_the_detection_and_the_model(client, events, state, gps
 def test_failed_upload_still_publishes_with_a_null_image_id(
     client, events, upload, tmp_path
 ):
-    """서버 images 엔드포인트가 아직 없어 지금은 항상 이 경로다 (§8.3)."""
+    """업로드가 실패해도 image_id: null 로 incident event 는 그대로 발행한다 (§8.3).
+
+    evidence.image_id 는 UUID 또는 null 이다 — 이미지 때문에 결함 사건을 삼키지 않는다.
+    """
     image = tmp_path / "frame.jpg"
     image.write_bytes(b"jpeg")
     upload.image_id = None
@@ -1025,7 +1036,9 @@ def test_failed_upload_still_publishes_with_a_null_image_id(
     incident = client.incidents()[-1]
     assert incident["evidence"]["image_id"] is None
     # 업로드는 event_id 로 이미지를 묶는다 (계약 §7.2).
-    assert upload.calls == [(image, incident["event_id"], ROBOT_ID)]
+    # form 의 robot_id 는 DB UUID 다 — mqtt_id 를 보내면 서버가 400 을 준다.
+    assert upload.calls == [(image, incident["event_id"], ROBOT_UUID)]
+    assert upload.captured_at == incident["evidence"]["captured_at"]
 
 
 def test_successful_upload_fills_the_image_id(client, events, upload, tmp_path):
@@ -1037,6 +1050,19 @@ def test_successful_upload_fills_the_image_id(client, events, upload, tmp_path):
         client.incidents()[-1]["evidence"]["image_id"]
         == "550e8400-e29b-41d4-a716-446655440000"
     )
+
+
+def test_the_upload_uuid_can_be_filled_in_at_runtime(client, events, upload, tmp_path):
+    """웹이 로봇 등록 뒤에 내려주는 값이라 기동 시점에는 없을 수 있다."""
+    image = tmp_path / "frame.jpg"
+    image.write_bytes(b"jpeg")
+    events.set_upload_robot_uuid(None)
+    report(events, image_path=image)
+    assert upload.calls[-1][2] is None
+
+    events.set_upload_robot_uuid(ROBOT_UUID)
+    report(events, image_path=image)
+    assert upload.calls[-1][2] == ROBOT_UUID
 
 
 def test_no_image_means_no_upload_attempt(client, events, upload):

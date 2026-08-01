@@ -201,7 +201,11 @@ def build(config_path=CONFIG_PATH):
     """설정 로드 → 모듈 조립. 아직 아무 것도 발행하지 않는다.  [F-001]"""
     document = load_document(config_path)
     configure_hardware(document)
-    config = MqttConfig.from_document(document)
+    # ca_cert 같은 상대경로는 config.yaml 이 있는 디렉터리 기준으로 푼다 — systemd 가
+    # WorkingDirectory 없이 띄워도 CA 를 찾는다.
+    config = MqttConfig.from_document(
+        document, base_dir=Path(config_path).resolve().parent
+    )
     client = MqttClient(config)
     state = RobotState(
         health_probes=health_probes(),
@@ -222,6 +226,9 @@ def build(config_path=CONFIG_PATH):
         obstacle_confirm_sec=safety.get("obstacle_confirm_sec", OBSTACLE_CONFIRM_SEC),
         stop_motor=motor.stop,
         sensor_fault_stops_driving=safety.get("sensor_fault_stops_driving", True),
+        # 증거 이미지 업로드 form 의 robot_id — DB 내부 UUID 다. mqtt_id 와 다른 값이라
+        # config 에서 따로 받는다 (config.yaml robot.uuid).
+        upload_robot_uuid=(document.get("robot") or {}).get("uuid"),
         **event_sources(),
     )
     commands = CommandRunner(client, state, events, stop_motor=motor.stop)
@@ -322,8 +329,9 @@ if __name__ == "__main__":
 
 # 이후 티켓에서 이 조립에 더할 것 (지금은 범위 밖)
 #   주행·추론 — drive 스텝 + safety.check() / detect 프레임 추론  [F-002~F-004]
-#   배포  [F-007]
-#     systemd 서비스 등록: 부팅 자동 시작 + Restart=always(비정상 종료 자동 복구)
-#     unit 에 시계 의존을 적는다 — After=/Wants=time-sync.target.
-#     commands 의 expires_at 판정이 NTP 동기를 전제한다 (계약 §17)
-#     unit 파일·설치 안내는 scripts/ 에 작성
+#
+# 배포는 scripts/ 에 있다  [F-007]
+#   orincar.service      systemd unit — Restart=always, After=/Wants=time-sync.target
+#                        (expires_at 판정이 NTP 동기를 전제한다, 계약 §17)
+#   orincar.env.example  실기 주입값 템플릿 — 로봇 등록·Credential 발급 응답에서 채운다
+#   README.md            주입·기동·장애 분류 절차

@@ -52,7 +52,13 @@ def _battery(
         if percent is None:
             raise ValueError("battery: valid=True requires percent")
         block["percent"] = _percent(percent, "battery.percent")
-        block["state"] = _enum(state, BATTERY_STATES, "battery.state")
+        state = _enum(state, BATTERY_STATES, "battery.state")
+        if state == "UNKNOWN":
+            # 서버 DTO 는 valid=true 면 state != UNKNOWN 을 요구한다. 여기서 안 막으면
+            # MQTT_PAYLOAD_VALIDATION_FAILED 로 조용히 버려진다 — 측정값을 믿는다면
+            # 등급도 나와야 하고, 못 믿으면 valid=false 다.
+            raise ValueError("battery: valid=True requires a graded state, not UNKNOWN")
+        block["state"] = state
     else:
         # 측정값을 못 믿으면 퍼센트는 null, 등급은 UNKNOWN. 이전 값 복사 금지.
         _enum(state, BATTERY_STATES, "battery.state")  # 오타는 여기서 걸러낸다
@@ -73,13 +79,19 @@ def _battery(
 
 
 def _bbox(bbox_norm) -> list:
-    """[x_min, y_min, x_max, y_max], 각 값 0.0~1.0."""
+    """[x_min, y_min, x_max, y_max], 각 값 0.0~1.0.
+
+    서버 DTO 는 `x_min < x_max` 이고 `y_min < y_max` 인 강한 부등식을 요구한다 —
+    폭이나 높이가 0 인 상자는 MQTT_PAYLOAD_VALIDATION_FAILED 로 조용히 버려진다.
+    거부는 서버 로그에만 남고 로봇 Outbox 는 PUBACK 을 받아 지워지므로, 여기서
+    먼저 막아야 유실을 알아챌 수 있다.
+    """
     values = list(bbox_norm)
     if len(values) != 4:
         raise ValueError("bbox_norm: [x_min, y_min, x_max, y_max] required")
     x_min, y_min, x_max, y_max = (
         _ratio(v, f"bbox_norm[{i}]") for i, v in enumerate(values)
     )
-    if x_min > x_max or y_min > y_max:
-        raise ValueError(f"bbox_norm: min must not exceed max, got {values}")
+    if x_min >= x_max or y_min >= y_max:
+        raise ValueError(f"bbox_norm: min must be strictly less than max, got {values}")
     return [x_min, y_min, x_max, y_max]

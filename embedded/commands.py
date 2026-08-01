@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import logging
 import queue
+import re
 from collections import deque
 from datetime import datetime, timezone
 
 from comms import TopicKind
 from comms.codec import utc_now
-from comms.contract import SCHEMA_VERSION
+from comms.contract import SCHEMA_VERSION, ZONE_ID_PATTERN
 
 log = logging.getLogger(__name__)
 
@@ -125,6 +126,9 @@ class CommandRunner:
         command_id = command.get("command_id")
         command_type = command.get("command_type")
         if not command_id:
+            # ⚠️ 이 result 는 command_id 가 null 이라 서버 @NotNull 에 걸려
+            #    MQTT_PAYLOAD_VALIDATION_FAILED 로 거부된다. 서버가 모르는 명령이라
+            #    실해는 없고, 발행을 없애면 로봇 쪽에도 흔적이 안 남는다. 알고 두는 것이다.
             return self._reject(None, received_at, REASON_INTERNAL_ERROR)
         # 중복 판정을 검증보다 앞에 둔다 — 거부한 명령이 재전송돼도 조용해야 한다.
         if command_id in self._handled:
@@ -174,11 +178,21 @@ class CommandRunner:
             # 전이표는 SAFE_STOP → PATROLLING 을 허용한다. 명령 하나로 안전 정지를
             # 지나쳐 주행이 재개되면 안 된다 — 해제는 CLEAR_EMERGENCY_STOP 이다.
             return REASON_SAFETY_NOT_CLEARED
+        zone_id = parameters["zone_id"]
+        if not re.match(ZONE_ID_PATTERN, str(zone_id)):
+            # 명령은 거절하지 않는다 — 미션 수행 자체는 막을 이유가 없다. 다만 이 값은
+            # incident.location.zone_id 로 그대로 echo 되고, 서버는 거기에만 패턴을
+            # 걸어 두었다. 벗어나면 이 미션의 결함 event 가 전부 조용히 거부된다.
+            # 첫 결함이 날 때가 아니라 미션 시작 시점에 알아야 손을 쓸 수 있다.
+            log.warning(
+                "zone_id %r does not match the incident contract pattern %s;"
+                " every incident of this mission will be rejected by the server",
+                zone_id,
+                ZONE_ID_PATTERN,
+            )
         # 주행을 먼저 연다 — 여기서 막히면 보관함을 건드리지 않은 채 끝난다.
         self._state.start_patrol()
-        self._state.start_mission(
-            parameters["mission_id"], zone_id=parameters["zone_id"]
-        )
+        self._state.start_mission(parameters["mission_id"], zone_id=zone_id)
         self._events.mission_started()
         return REASON_OK
 

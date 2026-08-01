@@ -602,6 +602,8 @@ def test_the_shipped_config_carries_the_measured_calibration(monkeypatch):
 
     for name in ("MQTT_HOST", "MQTT_PASSWORD", "UPLOAD_URL", "UPLOAD_API_KEY"):
         monkeypatch.setenv(name, "x")
+    monkeypatch.setenv("MQTT_ID", "RBT-001")
+    monkeypatch.setenv("ROBOT_UUID", "6f1b6b1e-9c2a-4c1e-9f3a-2b6d5a4c7e10")
     document = load_document(main.CONFIG_PATH)
 
     # driving_test 에서 실측으로 맞춘 값이라 임의로 바뀌면 안 된다.
