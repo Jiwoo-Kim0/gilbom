@@ -1,0 +1,22 @@
+[Unit]
+Description=Renew the Gilbom TLS certificate and reload Nginx
+Wants=network-online.target
+Requires=docker.service
+After=network-online.target docker.service
+ConditionFileIsExecutable=/usr/local/sbin/gilbom-certificate
+ConditionPathExists=/opt/gilbom/deploy/compose.prod.yaml
+ConditionPathExists=/opt/gilbom/deploy/runtime.env
+ConditionPathExists=/opt/gilbom/deploy/image.env
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0027
+ExecStart=/usr/local/sbin/gilbom-certificate renew
+TimeoutStartSec=20min
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full

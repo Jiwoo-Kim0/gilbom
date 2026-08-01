@@ -6,9 +6,17 @@ set +x
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)"
 COMPOSE_FILE="${COMPOSE_FILE:-$PROJECT_DIR/compose.prod.yaml}"
-ENV_FILE="${ENV_FILE:-$PROJECT_DIR/.env.prod}"
+ENV_FILE="${ENV_FILE:-}"
+RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-}"
+IMAGE_ENV_FILE="${IMAGE_ENV_FILE:-}"
 BACKUP_ROOT="${BACKUP_ROOT:-}"
 QUIESCED=false
+
+if [ -z "$ENV_FILE" ] \
+    && [ -z "$RUNTIME_ENV_FILE" ] \
+    && [ -z "$IMAGE_ENV_FILE" ]; then
+  ENV_FILE="$PROJECT_DIR/.env.prod"
+fi
 
 fail() {
   echo "Production volume backup failed: $1" >&2
@@ -16,10 +24,18 @@ fail() {
 }
 
 compose() {
-  docker compose \
-    --env-file "$ENV_FILE" \
-    -f "$COMPOSE_FILE" \
-    "$@"
+  if [ -n "$ENV_FILE" ]; then
+    docker compose \
+      --env-file "$ENV_FILE" \
+      -f "$COMPOSE_FILE" \
+      "$@"
+  else
+    docker compose \
+      --env-file "$RUNTIME_ENV_FILE" \
+      --env-file "$IMAGE_ENV_FILE" \
+      -f "$COMPOSE_FILE" \
+      "$@"
+  fi
 }
 
 resume_services() {
@@ -35,7 +51,18 @@ resume_services() {
 trap resume_services EXIT HUP INT TERM
 umask 077
 
-[ -f "$ENV_FILE" ] || fail "ENV_FILE does not exist"
+if [ -n "$ENV_FILE" ]; then
+  [ -z "$RUNTIME_ENV_FILE" ] && [ -z "$IMAGE_ENV_FILE" ] \
+    || fail "ENV_FILE cannot be combined with split environment files"
+  [ -f "$ENV_FILE" ] || fail "ENV_FILE does not exist"
+else
+  [ -n "$RUNTIME_ENV_FILE" ] \
+    || fail "RUNTIME_ENV_FILE is required when ENV_FILE is not used"
+  [ -n "$IMAGE_ENV_FILE" ] \
+    || fail "IMAGE_ENV_FILE is required when ENV_FILE is not used"
+  [ -f "$RUNTIME_ENV_FILE" ] || fail "RUNTIME_ENV_FILE does not exist"
+  [ -f "$IMAGE_ENV_FILE" ] || fail "IMAGE_ENV_FILE does not exist"
+fi
 [ -n "$BACKUP_ROOT" ] || fail "BACKUP_ROOT is required"
 case "$BACKUP_ROOT" in
   /*)
@@ -65,6 +92,8 @@ QUIESCED=true
 
 BACKUP_DIR="$bundle" \
 ENV_FILE="$ENV_FILE" \
+RUNTIME_ENV_FILE="$RUNTIME_ENV_FILE" \
+IMAGE_ENV_FILE="$IMAGE_ENV_FILE" \
 COMPOSE_FILE="$COMPOSE_FILE" \
   sh "$SCRIPT_DIR/backup-db.sh"
 

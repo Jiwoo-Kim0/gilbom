@@ -6,14 +6,16 @@ PROJECT_NAME="gilbom-prod-runtime-check-$$"
 CHECK_DIR="$(mktemp -d)"
 SECRET_DIR="$CHECK_DIR/secrets"
 CERTBOT_DIR="$CHECK_DIR/certbot"
-ENV_FILE="$CHECK_DIR/.env.prod"
+RUNTIME_ENV_FILE="$CHECK_DIR/runtime.env"
+IMAGE_ENV_FILE="$CHECK_DIR/image.env"
 COMPOSE_FILE=${COMPOSE_FILE:-compose.prod.yaml}
 STARTED=false
 
 compose() {
   docker compose \
     --project-name "$PROJECT_NAME" \
-    --env-file "$ENV_FILE" \
+    --env-file "$RUNTIME_ENV_FILE" \
+    --env-file "$IMAGE_ENV_FILE" \
     -f "$COMPOSE_FILE" \
     "$@"
 }
@@ -96,7 +98,7 @@ chmod 0444 \
   "$CERTBOT_DIR/nginx/fullchain.pem" \
   "$CERTBOT_DIR/nginx/privkey.pem"
 
-cp .env.prod.example "$ENV_FILE"
+cp .env.prod.example "$RUNTIME_ENV_FILE"
 sed -i \
   -e "s|^COMPOSE_PROJECT_NAME=.*|COMPOSE_PROJECT_NAME=$PROJECT_NAME|" \
   -e 's|^FRONTEND_BIND_ADDRESS=.*|FRONTEND_BIND_ADDRESS=127.0.0.1|' \
@@ -124,7 +126,14 @@ sed -i \
   -e "s|^MFA_TOTP_KEYRING_SECRET_FILE=.*|MFA_TOTP_KEYRING_SECRET_FILE=$SECRET_DIR/gilbom_mfa_totp_keyring|" \
   -e "s|^INITIAL_ADMIN_PASSWORD_SECRET_FILE=.*|INITIAL_ADMIN_PASSWORD_SECRET_FILE=$SECRET_DIR/gilbom_initial_admin_password|" \
   -e "s|^GILBOM_LLM_API_KEY_SECRET_FILE=.*|GILBOM_LLM_API_KEY_SECRET_FILE=$SECRET_DIR/gilbom_llm_api_key|" \
-  "$ENV_FILE"
+  "$RUNTIME_ENV_FILE"
+
+grep -E '^(BACKEND_IMAGE|FRONTEND_IMAGE)=' \
+  "$RUNTIME_ENV_FILE" > "$IMAGE_ENV_FILE"
+sed -i \
+  -e '/^BACKEND_IMAGE=/d' \
+  -e '/^FRONTEND_IMAGE=/d' \
+  "$RUNTIME_ENV_FILE"
 
 STARTED=true
 compose config --quiet
@@ -165,6 +174,31 @@ docker exec "$mqtt_id" /bin/sh -ec '
     [ ! -w "$secret_file" ]
   done
 '
+
+# 빈 volume에 적용된 PostGIS, Flyway V1~V34, 승인된 시스템 seed와
+# runtime DB role의 최소 권한을 실제 PostgreSQL parser/권한으로 검증한다.
+compose exec -T db /bin/sh -ec '
+  export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+  exec psql \
+    --host 127.0.0.1 \
+    --username "$POSTGRES_USER" \
+    --dbname "$POSTGRES_DB" \
+    --no-password \
+    --set "flyway_role=$POSTGRES_FLYWAY_USER" \
+    --set "application_role=$POSTGRES_APP_USER"
+' < infra/postgres/verify-empty-database.sql \
+  || fail "empty database migration contract failed"
+compose exec -T db /bin/sh -ec '
+  export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+  exec psql \
+    --host 127.0.0.1 \
+    --username "$POSTGRES_USER" \
+    --dbname "$POSTGRES_DB" \
+    --no-password \
+    --set "flyway_role=$POSTGRES_FLYWAY_USER" \
+    --set "application_role=$POSTGRES_APP_USER"
+' < infra/postgres/verify-production-database.sql \
+  || fail "production database seed or role contract failed"
 
 credential_checksum_before="$(
   docker exec "$backend_id" \
@@ -215,7 +249,8 @@ docker exec "$frontend_id" \
 # 운영 Runbook의 실제 backup 명령도 같은 임시 production-only stack에서
 # 검증한다. bundle은 CHECK_DIR 아래에만 만들고 종료 시 volume과 함께 제거한다.
 BACKUP_ROOT="$CHECK_DIR/backups" \
-ENV_FILE="$ENV_FILE" \
+RUNTIME_ENV_FILE="$RUNTIME_ENV_FILE" \
+IMAGE_ENV_FILE="$IMAGE_ENV_FILE" \
 COMPOSE_FILE="$COMPOSE_FILE" \
   sh infra/scripts/backup-volumes.sh \
   || fail "production DB/volume backup workflow failed"

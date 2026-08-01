@@ -5,6 +5,9 @@
 정본: `compose.prod.yaml`, `compose.build.yaml`, EC2의 `runtime.env`·`image.env`,
 Commit SHA image archive, `/opt/gilbom/secrets`
 
+Day 8의 Monitoring/Jenkins, EC2 자동 판정, 실제 이미지·PDF·지도 인수 절차는
+`docs/day8-completion-runbook.md`를 함께 따른다.
+
 ## 1. 운영 원칙
 
 - 운영 서버에서는 `compose.prod.yaml`만 사용한다. `compose.smoke.yaml`과
@@ -163,9 +166,13 @@ docker compose \
 
 ### 6.1 최초 인증서 발급
 
-EC2에서 root 소유 경로와 갱신 스크립트를 먼저 준비한다.
+EC2에서 root 소유 경로와 갱신 스크립트를 먼저 준비한다. HTTP-01 challenge는
+Frontend bootstrap Nginx가 제공하므로, 외부 80 포트를 점유한 다른 프로세스가
+없는지 확인한 뒤 운영 Compose를 먼저 기동한다.
 
 ```sh
+sudo ss -ltnp 'sport = :80'
+
 sudo install -d -m 0755 \
   /opt/gilbom/certbot/conf \
   /opt/gilbom/certbot/www
@@ -174,6 +181,18 @@ sudo install -d -m 0750 -o root -g 101 \
 sudo install -o root -g root -m 0755 \
   infra/certbot/certificate.sh \
   /usr/local/sbin/gilbom-certificate
+
+cd /opt/gilbom/deploy
+sudo docker compose \
+  --env-file runtime.env \
+  --env-file image.env \
+  -f compose.prod.yaml \
+  config --quiet
+sudo docker compose \
+  --env-file runtime.env \
+  --env-file image.env \
+  -f compose.prod.yaml \
+  up --detach --no-build --wait
 ```
 
 DNS가 EC2 공인 주소를 가리키고 외부 TCP 80이 열려 있는 상태에서 발급한다.
@@ -196,7 +215,36 @@ sudo /usr/local/sbin/gilbom-certificate renew
 ```
 
 `renew`는 성공한 인증서를 동기화한 뒤 Nginx를 reload한다. systemd Service·Timer는
-EC2에서 root 소유로 생성하고 `renew`를 호출한다.
+저장소의 정본을 EC2에 root 소유로 설치한다. 실제 인증서 발급과 dry run이 성공한
+뒤 Timer를 활성화한다.
+
+```sh
+cd /opt/gilbom/deploy
+sudo install -o root -g root -m 0644 \
+  infra/systemd/gilbom-certificate-renew.service \
+  /etc/systemd/system/gilbom-certificate-renew.service
+sudo install -o root -g root -m 0644 \
+  infra/systemd/gilbom-certificate-renew.timer \
+  /etc/systemd/system/gilbom-certificate-renew.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now gilbom-certificate-renew.timer
+sudo systemctl status gilbom-certificate-renew.timer --no-pager
+sudo systemctl list-timers \
+  gilbom-certificate-renew.timer \
+  --all \
+  --no-pager
+```
+
+Timer의 실제 실행 결과와 log는 다음처럼 확인한다. Secret 값은 출력하지 않는다.
+
+```sh
+sudo systemctl start gilbom-certificate-renew.service
+sudo systemctl status gilbom-certificate-renew.service --no-pager
+sudo journalctl \
+  -u gilbom-certificate-renew.service \
+  --since today \
+  --no-pager
+```
 
 최초 관리자로 로그인해 즉시 비밀번호를 변경하고 MFA 등록을 마친다. 다른 관리자
 계정을 확인한 뒤 bootstrap을 끈다.
@@ -265,7 +313,8 @@ Authorization, cookie, API key, prompt·LLM 응답 원문을 ticket이나 채팅
 ### 9.1 온라인 DB backup
 
 ```sh
-ENV_FILE="$PWD/.env.prod" \
+RUNTIME_ENV_FILE="$PWD/runtime.env" \
+IMAGE_ENV_FILE="$PWD/image.env" \
 BACKUP_DIR=/srv/gilbom-backups/db \
   sh infra/scripts/backup-db.sh
 ```
@@ -275,7 +324,8 @@ custom-format dump를 만든 뒤 `pg_restore --list`와 SHA-256을 확인한다.
 ### 9.2 전체 상태 snapshot
 
 ```sh
-ENV_FILE="$PWD/.env.prod" \
+RUNTIME_ENV_FILE="$PWD/runtime.env" \
+IMAGE_ENV_FILE="$PWD/image.env" \
 BACKUP_ROOT=/srv/gilbom-backups/state \
   sh infra/scripts/backup-volumes.sh
 ```

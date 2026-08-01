@@ -87,5 +87,26 @@ assert_contains compose.prod.yaml \
 assert_contains compose.prod.yaml \
   "image: certbot/certbot:v5.7.0" \
   "production Certbot 5.7.0"
+assert_contains compose.monitoring.yaml \
+  "image: prom/prometheus:v3.13.0" \
+  "Prometheus 3.13.0"
+assert_contains compose.monitoring.yaml \
+  "image: grafana/grafana:13.1.0" \
+  "Grafana 13.1.0"
+assert_contains compose.monitoring.yaml \
+  "image: grafana/loki:3.7.2" \
+  "Loki 3.7.2"
+assert_contains compose.monitoring.yaml \
+  "image: grafana/alloy:v1.18.0" \
+  "Grafana Alloy 1.18.0"
+assert_contains infra/jenkins/Dockerfile \
+  "FROM jenkins/jenkins:2.555.3-lts-jdk21" \
+  "Jenkins LTS 2.555.3"
+assert_contains infra/jenkins/Dockerfile \
+  "FROM docker:29.6.2-cli-alpine3.24 AS docker-cli" \
+  "Jenkins Docker CLI 29.6.2"
+assert_contains compose.jenkins.yaml \
+  "image: docker:29.6.2-dind-alpine3.24" \
+  "Jenkins DinD 29.6.2"
 
 echo "Runtime version pin policy: PASS"

@@ -15,6 +15,12 @@
 | Certbot | 5.7.0 | `compose.prod.yaml` | HTTP-01 인증서 발급·갱신 전용 profile |
 | Java | Amazon Corretto 21.0.12+8 | `backend/Dockerfile`, `.java-version` | Java 21 LTS의 2026년 7월 CPU patch; 운영 단계는 builder에서 생성한 jlink runtime |
 | Gradle | 8.14.3 | Gradle Wrapper | 개발자와 Docker가 동일한 Wrapper 사용 |
+| Jenkins | 2.555.3 LTS, JDK 21 | `infra/jenkins/Dockerfile` | Executor 1개로 제한한 CI controller |
+| Docker CLI / DinD | 29.6.2, Alpine 3.24 | `infra/jenkins/Dockerfile`, `compose.jenkins.yaml` | TLS 전용 단일 builder |
+| Prometheus | 3.13.0 | `compose.monitoring.yaml` | 15일·2GB 중 먼저 도달하는 기준으로 보존 |
+| Grafana | 13.1.0 | `compose.monitoring.yaml` | loopback 관리 화면과 file Secret |
+| Loki | 3.7.2 | `compose.monitoring.yaml` | TSDB v13, 14일 log 보존 |
+| Grafana Alloy | 1.18.0 | `compose.monitoring.yaml` | host metric과 Docker json log 수집 |
 
 ## 운영 규칙
 
@@ -32,6 +38,13 @@
 - Spring Boot 3.5.16은 3.5 계열의 마지막 OSS 릴리스다. 새로운 OSS patch가
   제공되지 않으므로 Boot 4.x 전환은 호환성 테스트를 포함한 별도 migration으로
   관리한다.
+- Jenkins와 관측 스택도 `latest`, major-only tag를 사용하지 않는다. Jenkins는
+  초기화 스크립트로 Executor 1개, Compose build는 `COMPOSE_PARALLEL_LIMIT=1`이며 DinD daemon
+  하나만 둔다. CI가 수집한 `.artifacts/runtime/build-resources.txt`로 build
+  시간대 메모리·root filesystem·Docker storage 사용량을 release마다 확인한다.
+- Prometheus와 Loki는 애플리케이션 Compose와 분리한다. 관리 포트는 기본적으로
+  `127.0.0.1`에만 bind하고, Grafana는 SSH tunnel 또는 승인된 관리 경로로만
+  접근한다.
 
 ## Backend 전체 테스트
 
