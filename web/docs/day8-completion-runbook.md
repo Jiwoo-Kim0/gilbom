@@ -197,18 +197,31 @@ sudo docker compose \
 
 Jenkins custom image archive를 load한 뒤 DinD 고정 image만 pull하고 시작한다.
 Jenkins UI는 Executor 1개, Compose build 동시성 1개이며 TLS DinD만 사용한다.
+첫 전환에서는 `docker-builder` 전용 TLS certificate volume이 새로 생성된다.
+DinD hostname도 같은 이름으로 고정되어 server certificate SAN 검증을 통과한다.
+기존 `jenkins_docker_certs` volume은 자동 삭제하지 말고 새 stack 검증과
+rollback 보존 기간이 끝난 뒤에만 운영자가 정리한다.
 
 ```sh
+# 아래 두 검사가 실패하면 EC2 deploy directory가 이전 revision이므로
+# stack을 변경하지 말고 새 release 파일과 Jenkins image부터 배치한다.
 sudo docker compose \
   --project-name gilbom-jenkins \
   --env-file /opt/jenkins/jenkins.env \
   -f compose.jenkins.yaml \
-  pull docker
+  config --services | grep -Fx docker-builder
+test -x scripts/verify-jenkins-runtime.sh
+
 sudo docker compose \
   --project-name gilbom-jenkins \
   --env-file /opt/jenkins/jenkins.env \
   -f compose.jenkins.yaml \
-  up --detach --no-build --wait --wait-timeout 300
+  pull docker-builder
+sudo docker compose \
+  --project-name gilbom-jenkins \
+  --env-file /opt/jenkins/jenkins.env \
+  -f compose.jenkins.yaml \
+  up --detach --no-build --wait --wait-timeout 300 --remove-orphans
 ```
 
 최초 Jenkins 설정은 운영자 PC에서 SSH tunnel로만 연다.
@@ -232,6 +245,7 @@ cd /opt/gilbom/deploy
 sudo env DOMAIN=i15d101.p.ssafy.io \
   sh scripts/verify-day8-ec2.sh
 
+sudo sh scripts/verify-jenkins-runtime.sh
 sudo sh scripts/verify-day8-auxiliary-runtime.sh
 ```
 
@@ -331,6 +345,7 @@ Cloud Console의 허용 Web Service URL에
 
 - CI 전체 gate와 새 Commit SHA Backend/Frontend image
 - `verify-day8-ec2.sh` PASS
+- `verify-jenkins-runtime.sh` PASS
 - `verify-day8-auxiliary-runtime.sh` PASS
 - `verify-day8-persistence.sh` PASS
 - `verify-day8-signed-image.py`에서 정상·변조·만료 PASS

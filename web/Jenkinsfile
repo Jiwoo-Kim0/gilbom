@@ -227,11 +227,11 @@ pipeline {
 
                             docker run --rm \
                                 --user "$host_uid:$host_gid" \
-                                --add-host docker:host-gateway \
+                                --add-host docker-builder:host-gateway \
                                 --env DOCKER_HOST="$DOCKER_HOST" \
                                 --env DOCKER_TLS_VERIFY=1 \
                                 --env DOCKER_CERT_PATH=/certs/client \
-                                --env TESTCONTAINERS_HOST_OVERRIDE=docker \
+                                --env TESTCONTAINERS_HOST_OVERRIDE=docker-builder \
                                 --env HOME="$test_home" \
                                 --env GRADLE_USER_HOME="$test_home/.gradle" \
                                 --env JAVA_TOOL_OPTIONS=-Duser.home="$test_home" \
@@ -410,7 +410,7 @@ pipeline {
                         # DinD service의 외부 interface와 DNS 이름으로 접근한다.
                         DOCKER_BIND_WORK_ROOT=.artifacts/docker-bind-work \
                             REPORT_SMOKE_FRONTEND_BIND_ADDRESS=0.0.0.0 \
-                            REPORT_SMOKE_PUBLISHED_HOST=docker \
+                            REPORT_SMOKE_PUBLISHED_HOST=docker-builder \
                             REPORT_SMOKE_SKIP_BUILD=true \
                             sh scripts/container-resilience-smoke.sh
                     '''

@@ -9,7 +9,10 @@ USER root
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         ca-certificates \
+        coreutils \
         git \
+        gzip \
+        jq \
         openssl \
         openssh-client \
         python3 \

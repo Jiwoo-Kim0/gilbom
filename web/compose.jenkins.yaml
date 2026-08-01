@@ -1,4 +1,4 @@
-name: ${JENKINS_PROJECT_NAME:-gilbom-jenkins}
+name: gilbom-jenkins
 
 x-logging: &jenkins-logging
   driver: json-file
@@ -7,8 +7,10 @@ x-logging: &jenkins-logging
     max-file: "${JENKINS_LOG_MAX_FILES:-3}"
 
 services:
-  docker:
+  docker-builder:
     image: docker:29.6.2-dind-alpine3.24
+    # DinD가 생성하는 server certificate SAN에 접속 DNS 이름을 포함한다.
+    hostname: docker-builder
     restart: unless-stopped
     privileged: true
     environment:
@@ -16,7 +18,8 @@ services:
       DOCKER_DRIVER: overlay2
       HEALTHCHECK_TCP_PORT: "2376"
     volumes:
-      - jenkins_docker_certs:/certs
+      # 기존 docker service의 TLS 상태와 분리된 전용 certificate volume이다.
+      - jenkins_docker_builder_certs:/certs
       - jenkins_docker_data:/var/lib/docker
       # Remote daemon의 bind mount가 Jenkins와 같은 절대 workspace를 보게 한다.
       - ${JENKINS_HOME_DIR:-/opt/jenkins/home}:/var/jenkins_home
@@ -44,21 +47,23 @@ services:
     image: ${JENKINS_IMAGE:-gilbom-jenkins:2.555.3-docker-29.6.2}
     restart: unless-stopped
     depends_on:
-      docker:
+      docker-builder:
         condition: service_healthy
     environment:
-      DOCKER_HOST: tcp://docker:2376
+      DOCKER_HOST: tcp://docker-builder:2376
       DOCKER_TLS_VERIFY: "1"
       DOCKER_CERT_PATH: /certs/client
       DOCKER_BUILDKIT: "1"
       COMPOSE_PARALLEL_LIMIT: "1"
       JENKINS_OPTS: --httpPort=8080
       JAVA_OPTS: -Xms512m -Xmx1536m
+    extra_hosts:
+      - host.docker.internal:host-gateway
     ports:
-      - "${JENKINS_BIND_ADDRESS:-127.0.0.1}:${JENKINS_HTTP_PORT:-8081}:8080"
+      - "127.0.0.1:8081:8080"
     volumes:
       - ${JENKINS_HOME_DIR:-/opt/jenkins/home}:/var/jenkins_home
-      - jenkins_docker_certs:/certs:ro
+      - jenkins_docker_builder_certs:/certs:ro
     healthcheck:
       test:
         - CMD-SHELL
@@ -86,7 +91,7 @@ services:
     logging: *jenkins-logging
 
 volumes:
-  jenkins_docker_certs:
+  jenkins_docker_builder_certs:
   jenkins_docker_data:
 
 networks:

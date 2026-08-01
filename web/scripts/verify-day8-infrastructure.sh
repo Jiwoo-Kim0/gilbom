@@ -27,6 +27,9 @@ assert_not_contains() {
 }
 
 command -v docker >/dev/null 2>&1 || fail "Docker CLI is required"
+test -x scripts/verify-jenkins-runtime.sh \
+  || fail "focused Jenkins runtime contract is missing or not executable"
+sh -n scripts/verify-jenkins-runtime.sh
 
 monitoring_config="$(mktemp)"
 jenkins_config="$(mktemp)"
@@ -85,6 +88,21 @@ assert_contains compose.monitoring.yaml \
 assert_contains compose.jenkins.yaml \
   'JENKINS_OPTS: --httpPort=8080' \
   "Jenkins HTTP port setting is missing"
+assert_contains compose.jenkins.yaml \
+  'name: gilbom-jenkins' \
+  "Jenkins Compose project name must be fixed"
+assert_not_contains compose.jenkins.yaml \
+  'JENKINS_PROJECT_NAME' \
+  "Jenkins Compose project name must not be configurable"
+assert_contains "$jenkins_config" \
+  'name: gilbom-jenkins' \
+  "rendered Jenkins Compose project name must be gilbom-jenkins"
+assert_not_contains .env.example \
+  'COMPOSE_PROJECT_NAME' \
+  "shared development env must not override Compose file project names"
+assert_not_contains .env.prod.example \
+  'COMPOSE_PROJECT_NAME' \
+  "shared production env must not override Compose file project names"
 assert_contains infra/jenkins/init.groovy.d/01-executor-count.groovy \
   'instance.setNumExecutors(1)' \
   "Jenkins executor count must be initialized to one"
@@ -97,19 +115,34 @@ assert_contains infra/jenkins/init.groovy.d/02-temporary-space-monitor.groovy \
 assert_contains infra/jenkins/Dockerfile \
   '02-temporary-space-monitor.groovy' \
   "Jenkins image must install the temporary-space monitor policy"
+for command_package in coreutils git gzip jq openssh-client zstd
+do
+  assert_contains infra/jenkins/Dockerfile \
+    "$command_package" \
+    "Jenkins image package is missing: $command_package"
+done
 assert_contains compose.jenkins.yaml \
   'COMPOSE_PARALLEL_LIMIT: "1"' \
   "Jenkins Compose concurrency must be one"
 assert_contains compose.jenkins.yaml \
-  'DOCKER_HOST: tcp://docker:2376' \
+  'DOCKER_HOST: tcp://docker-builder:2376' \
   "Jenkins must use the TLS DinD endpoint"
+assert_contains compose.jenkins.yaml \
+  'hostname: docker-builder' \
+  "Docker Builder hostname must match the TLS endpoint certificate SAN"
 assert_contains compose.jenkins.yaml \
   'DOCKER_TLS_VERIFY: "1"' \
   "Jenkins must verify the DinD certificate"
+assert_contains compose.jenkins.yaml \
+  'jenkins_docker_builder_certs:/certs' \
+  "Docker Builder must use a service-specific TLS certificate volume"
+assert_not_contains compose.jenkins.yaml \
+  'jenkins_docker_certs:/certs' \
+  "legacy Docker service certificates must not be reused after the rename"
 [ "$(grep -Fc -- '${JENKINS_HOME_DIR:-/opt/jenkins/home}:/var/jenkins_home' compose.jenkins.yaml)" -eq 2 ] \
   || fail "Jenkins and DinD must share the same absolute workspace path"
 assert_contains Jenkinsfile \
-  '--add-host docker:host-gateway' \
+  '--add-host docker-builder:host-gateway' \
   "DinD test container must resolve the TLS daemon through its host gateway"
 assert_contains Jenkinsfile \
   '--env GRADLE_USER_HOME="$test_home/.gradle"' \
@@ -150,7 +183,7 @@ assert_contains Jenkinsfile \
   'REPORT_SMOKE_FRONTEND_BIND_ADDRESS=0.0.0.0' \
   "Jenkins report smoke must publish the DinD Frontend port on its reachable interface"
 assert_contains Jenkinsfile \
-  'REPORT_SMOKE_PUBLISHED_HOST=docker' \
+  'REPORT_SMOKE_PUBLISHED_HOST=docker-builder' \
   "Jenkins report smoke must connect to the DinD service hostname"
 assert_contains scripts/container-report-smoke.sh \
   'BASE_URL="http://$SMOKE_PUBLISHED_HOST:$frontend_port"' \
@@ -210,8 +243,11 @@ assert_not_contains compose.jenkins.yaml \
   'CI_DOCKER_NETWORK:' \
   "Jenkins must not expose a host Docker network name to nested DinD"
 assert_contains compose.jenkins.yaml \
-  '${JENKINS_BIND_ADDRESS:-127.0.0.1}' \
-  "Jenkins UI must default to loopback"
+  '- "127.0.0.1:8081:8080"' \
+  "Jenkins UI must be fixed to 127.0.0.1:8081"
+assert_contains compose.jenkins.yaml \
+  'host.docker.internal:host-gateway' \
+  "Jenkins host gateway mapping is missing"
 assert_contains compose.jenkins.yaml \
   'mem_limit: ${JENKINS_MEMORY_LIMIT:-2g}' \
   "Jenkins memory ceiling is missing"
@@ -230,6 +266,21 @@ assert_contains compose.jenkins.yaml \
 assert_not_contains compose.jenkins.yaml \
   '/var/run/docker.sock' \
   "Jenkins must not mount the host Docker socket"
+assert_not_contains "$jenkins_config" \
+  '/var/run/docker.sock' \
+  "rendered Jenkins Compose must not mount the host Docker socket"
+assert_contains "$jenkins_config" \
+  'host_ip: 127.0.0.1' \
+  "rendered Jenkins UI must bind only to loopback"
+assert_contains "$jenkins_config" \
+  'published: "8081"' \
+  "rendered Jenkins UI must publish host port 8081"
+assert_contains scripts/verify-jenkins-runtime.sh \
+  'DOCKER_HOST=tcp://docker-builder:2376' \
+  "runtime contract must enforce the Docker Builder TLS endpoint"
+assert_contains scripts/verify-jenkins-runtime.sh \
+  '/var/run/docker.sock' \
+  "runtime contract must inspect Docker socket mounts"
 assert_contains infra/jenkins/jenkins.env.example \
   'JENKINS_HOME_DIR=/opt/jenkins/home' \
   "Jenkins persistent path must be under /opt/jenkins"
@@ -260,7 +311,7 @@ do
   grep -Eq "^  ${service}:$" "$monitoring_config" \
     || fail "rendered monitoring service is missing: $service"
 done
-for service in docker jenkins
+for service in docker-builder jenkins
 do
   grep -Eq "^  ${service}:$" "$jenkins_config" \
     || fail "rendered Jenkins service is missing: $service"

@@ -166,7 +166,7 @@ grep -Fq 'retention_period: 336h' "$loki_config_source" \
   || fail "Loki 14-day retention is not active"
 
 jenkins_id="$(container_id jenkins jenkins)"
-dind_id="$(container_id jenkins docker)"
+dind_id="$(container_id jenkins docker-builder)"
 for id in "$jenkins_id" "$dind_id"
 do
   [ "$(docker inspect --format '{{.State.Health.Status}}' "$id")" = healthy ] \
@@ -175,6 +175,26 @@ done
 assert_limits "$jenkins_id" Jenkins
 assert_limits "$dind_id" DinD
 assert_loopback_binding "$jenkins_id" Jenkins
+[ "$jenkins_id" != "$dind_id" ] \
+  || fail "Jenkins and Docker Builder must be separate containers"
+[ "$(docker inspect --format '{{.Config.Hostname}}' "$dind_id")" = docker-builder ] \
+  || fail "Docker Builder hostname must match its TLS certificate endpoint"
+
+jenkins_mounts="$(
+  docker inspect \
+    --format '{{range .Mounts}}{{println .Source "->" .Destination}}{{end}}' \
+    "$jenkins_id"
+)"
+if printf '%s\n' "$jenkins_mounts" | grep -Fq '/var/run/docker.sock'; then
+  fail "Jenkins must not mount the host Docker socket"
+fi
+
+jenkins_extra_hosts="$(
+  docker inspect --format '{{json .HostConfig.ExtraHosts}}' "$jenkins_id"
+)"
+printf '%s\n' "$jenkins_extra_hosts" \
+  | grep -Fq 'host.docker.internal:host-gateway' \
+  || fail "Jenkins host gateway mapping is not active"
 
 dind_bindings="$(
   docker inspect \
@@ -184,9 +204,13 @@ dind_bindings="$(
 [ -z "$dind_bindings" ] || fail "DinD must not publish a host port"
 
 docker exec "$jenkins_id" /bin/sh -ec '
-  [ "$DOCKER_HOST" = tcp://docker:2376 ]
+  [ "$DOCKER_HOST" = tcp://docker-builder:2376 ]
   [ "$DOCKER_TLS_VERIFY" = 1 ]
   [ "$COMPOSE_PARALLEL_LIMIT" = 1 ]
+  for command_name in git gzip zstd ssh scp sha256sum jq
+  do
+    command -v "$command_name" >/dev/null
+  done
   grep -Fq "<numExecutors>1</numExecutors>" /var/jenkins_home/config.xml
   grep -Fq "<freeSpaceThreshold>64MB</freeSpaceThreshold>" \
     /var/jenkins_home/nodeMonitors.xml

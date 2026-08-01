@@ -58,22 +58,34 @@
 
 - `compose.jenkins.yaml`의 Jenkins 2.555.3 LTS와 TLS DinD 29.6.2
 - Git
+- gzip
 - OpenSSL
+- OpenSSH client(`ssh`, `scp`)
 - Python 3(표준 라이브러리 smoke client)
-- Gitleaks 8.29.0, Trivy 0.70.0, zstd 1.5.7, OpenSSH client
+- SHA-256(`sha256sum`)과 jq
+- Gitleaks 8.29.0, Trivy 0.70.0, zstd 1.5.7
 - Redocly CLI 2.40.0은 고정 digest Docker image로 실행
 - `/opt/jenkins/home` 영속 경로
 
 운영 Jenkins는 초기화 스크립트로 Executor를 1개로 고정하고
-`COMPOSE_PARALLEL_LIMIT=1`을 적용하며 DinD container도 하나만 실행한다.
-Jenkins UI는 기본 `127.0.0.1:8081`, Docker TLS 2376은 host에 publish하지 않는다.
+`COMPOSE_PARALLEL_LIMIT=1`을 적용하며 `docker-builder` DinD container도 하나만
+실행한다. Compose project는 `gilbom-jenkins`로 고정한다. Jenkins UI는
+`127.0.0.1:8081`에만 고정하고 Docker TLS 2376은 host에 publish하지 않는다.
 `Jenkinsfile`은 host Docker socket 개발 환경과 TLS DinD를 모두 지원하지만 운영
 Compose는 host socket을 mount하지 않는다.
+DinD의 hostname도 `docker-builder`로 고정해 자동 발급 server certificate의
+SAN과 Jenkins 접속 DNS 이름을 일치시킨다. TLS 상태는
+`jenkins_docker_builder_certs` 전용 volume으로 분리한다. 기존
+`jenkins_docker_certs` volume은 새 stack이 참조하지 않으며, 운영 검증과
+rollback 보존 기간이 끝난 뒤에만 수동 정리한다.
 
 호스트 Docker의 `gilbom-ci` network는 Jenkins와 DinD service를 연결하는 바깥
 network이며 DinD 내부 daemon에는 존재하지 않는다. DinD가 생성하는 Backend test
-container에는 `docker:host-gateway`를 추가해 같은 network 이름을 중첩 생성하지
-않고 TLS endpoint `tcp://docker:2376`과 Testcontainers의 공개 port에 접근한다.
+container에는 `docker-builder:host-gateway`를 추가해 같은 network 이름을 중첩
+생성하지 않고 TLS endpoint `tcp://docker-builder:2376`과 Testcontainers의 공개
+port에 접근한다. Jenkins container 자체에는
+`host.docker.internal:host-gateway`를 명시해 host 접근 이름도 환경별 DNS 추론에
+의존하지 않는다.
 
 Backend test container는 UID/GID 1000의 non-root로 실행한다. Base image의 기본
 home인 `/`에는 쓸 수 없으므로 `/test-home`을 빌드별 tmpfs로 제공하고
@@ -99,8 +111,8 @@ custom Jenkins image에 설치된 native Gitleaks·Trivy를 우선 사용하고,
 
 최종 보고서·복원력 smoke의 임의 Frontend port는 Jenkins container가 아니라
 DinD service가 소유한다. Pipeline은 이 검증에서만 Frontend를 DinD의 외부
-interface에 bind하고 `docker:<published-port>`로 접속한다. 개발자 host socket
-환경에서는 기존처럼 `127.0.0.1:<published-port>`가 기본값이다.
+interface에 bind하고 `docker-builder:<published-port>`로 접속한다. 개발자 host
+socket 환경에서는 기존처럼 `127.0.0.1:<published-port>`가 기본값이다.
 
 로컬 `mqtt-init`은 root one-shot으로 인증 자산을 만들되 `runtime/`과 `ca/`
 소유권을 bind source의 Jenkins UID/GID로 되돌린다. Broker와 Backend 접근에는
@@ -141,6 +153,11 @@ Credential과 Jenkins Job 설정 권한이 필요하다. 현재 pipeline은 imag
 외부 Registry로 push하지 않으므로 Container Registry Credential은 필요하지
 않다. Registry push나 운영 배포 stage를 추가할 때 별도 Credential ID를
 확정하고 Jenkins credential binding으로 주입해야 한다.
+
+Jenkins stack 기동 뒤 `scripts/verify-jenkins-runtime.sh`는 고정 container 이름을
+직접 inspect해 project/service label, socket mount 부재, TLS 환경, loopback
+`127.0.0.1:8081` 단일 binding, 별도 privileged DinD와 필수 명령 실행 가능 여부를
+검증한다.
 
 ## 의도적으로 남긴 다음 단계
 
