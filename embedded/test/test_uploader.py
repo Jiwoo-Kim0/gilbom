@@ -10,7 +10,10 @@ from comms import uploader
 from comms.uploader import UploadConfig
 
 EVENT_ID = "81fd9bd1-8639-47a2-82fd-9f26281dac68"
-ROBOT_ID = "RBT-001"
+#: form 의 robot_id 는 DB 내부 robot.robot_id UUID 다. mqtt_id("RBT-001")가 아니다 —
+#: 서버가 UUID.fromString() 으로 파싱하므로 mqtt_id 를 보내면 400 이 떨어진다.
+ROBOT_ID = "6f1b6b1e-9c2a-4c1e-9f3a-2b6d5a4c7e10"
+MQTT_ID = "RBT-001"
 IMAGE_ID = "550e8400-e29b-41d4-a716-446655440000"
 
 
@@ -120,6 +123,28 @@ def test_request_carries_api_key_event_id_and_robot_id(
     assert blob == image.read_bytes()
     assert content_type == uploader.IMAGE_CONTENT_TYPE
     assert call["timeout"] == uploader.TIMEOUT_SEC
+
+
+def test_captured_at_is_sent_only_when_given(monkeypatch, image, config, sleeps):
+    """선택 필드다. 서버가 미래 시각을 거부하므로 없는 값을 지어내지 않는다."""
+    post = post_with(monkeypatch, FakeResponse(201, {"image_id": IMAGE_ID}))
+    uploader.upload(image, EVENT_ID, ROBOT_ID, config=config)
+    assert uploader.FIELD_CAPTURED_AT not in post.calls[0]["data"]
+
+    post = post_with(monkeypatch, FakeResponse(201, {"image_id": IMAGE_ID}))
+    uploader.upload(
+        image, EVENT_ID, ROBOT_ID, captured_at="2026-08-01T06:15:35.000Z", config=config
+    )
+    assert post.calls[0]["data"][uploader.FIELD_CAPTURED_AT] == "2026-08-01T06:15:35.000Z"
+
+
+@pytest.mark.parametrize("bad", [MQTT_ID, "", None, "not-a-uuid"])
+def test_a_non_uuid_robot_id_is_not_uploaded(monkeypatch, image, config, sleeps, bad):
+    """서버는 UUID.fromString() 으로 파싱한다 — mqtt_id 를 보내면 400 이고,
+    400 은 재시도 대상이 아니라서 증거 이미지가 조용히 유실된다. 나가기 전에 막는다."""
+    post = post_with(monkeypatch, FakeResponse(201, {"image_id": IMAGE_ID}))
+    assert uploader.upload(image, EVENT_ID, bad, config=config) is None
+    assert post.calls == []
 
 
 # --------------------------------------------------------------------------
@@ -276,6 +301,7 @@ def test_upload_config_rejects_incomplete_section(document):
 
 def test_repo_config_defines_upload_secrets_as_env_placeholders():
     raw = uploader.DEFAULT_CONFIG_PATH.read_text(encoding="utf-8")
-    # API Key 는 파일에 직접 적지 않는다.
-    assert "${env:UPLOAD_API_KEY}" in raw
-    assert "${env:UPLOAD_URL}" in raw
+    # API Key 는 파일에 직접 적지 않는다. `env?:` 인 이유는 발급 경로가 아직 없어서다 —
+    # 이것 때문에 로봇이 못 뜨면 MQTT E2E 자체를 못 한다.
+    assert "${env?:UPLOAD_API_KEY}" in raw
+    assert "${env?:UPLOAD_URL}" in raw

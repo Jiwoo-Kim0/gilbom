@@ -5,6 +5,7 @@
 기준 문서: web/docs/final-mqtt-topic-schema-v2.md §12·§13
 """
 
+import copy
 import queue
 
 import pytest
@@ -269,6 +270,32 @@ def test_start_mission_fills_the_slot_and_starts_patrolling(client, runner, stat
     assert (state.mission_id, state.zone_id) == (MISSION_ID, "A-01")
     assert (state.mode, state.reason_code) == ("PATROLLING", "NONE")
     assert [p["event_type"] for p in client.missions()] == ["MISSION_STARTED"]
+
+
+def test_a_zone_id_outside_the_contract_pattern_warns_but_still_starts(
+    client, runner, state, caplog
+):
+    """서버는 incident.location.zone_id 에만 ^[A-Z]-[0-9]{2}$ 를 건다.
+
+    벗어난 값이 오면 이 미션의 결함 event 가 전부 조용히 거부되므로, 첫 결함이 날
+    때가 아니라 미션 시작 시점에 알려야 한다. 명령 자체는 거절하지 않는다 —
+    순찰을 못 할 이유는 없고, 거절 권한도 로봇에 없다.
+    """
+    # command() 는 모듈 전역 parameters 를 공유한다 — 복사해서 건드린다.
+    payload = copy.deepcopy(command("START_MISSION"))
+    payload["parameters"]["zone_id"] = "seoul-gangnam-3"
+    with caplog.at_level("WARNING"):
+        runner.handle(payload)
+
+    assert statuses(client) == ["ACCEPTED", "COMPLETED"]
+    assert (state.mission_id, state.zone_id) == (MISSION_ID, "seoul-gangnam-3")
+    assert any("seoul-gangnam-3" in r.getMessage() for r in caplog.records)
+
+
+def test_a_valid_zone_id_does_not_warn(client, runner, state, caplog):
+    with caplog.at_level("WARNING"):
+        runner.handle(command("START_MISSION"))
+    assert [r for r in caplog.records if "zone_id" in r.getMessage()] == []
 
 
 def test_telemetry_carries_the_mission_after_start(client, runner, state, clock):

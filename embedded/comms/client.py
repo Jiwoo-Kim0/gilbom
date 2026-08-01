@@ -17,7 +17,7 @@ from paho.mqtt.packettypes import PacketTypes
 from paho.mqtt.properties import Properties
 
 from . import codec
-from .config import MqttConfig
+from .config import CA_SYSTEM, MqttConfig
 from .factory import MessageFactory
 from .outbox import Outbox, OutboxRecord
 from .topics import EVENT_KINDS, PUBLISH_POLICY, SUBSCRIBE_QOS, TopicKind
@@ -423,7 +423,12 @@ def _build_paho_client(config: MqttConfig) -> mqtt.Client:
     if config.username:
         client.username_pw_set(config.username, config.password)
     if config.tls_enabled:
-        client.tls_set(ca_certs=config.ca_cert, tls_version=ssl.PROTOCOL_TLS_CLIENT)
+        # ca_certs=None 이면 paho 가 OS 신뢰 저장소를 쓴다 — Let's Encrypt 운영 브로커는
+        # CA 파일이 필요 없고, 예전 사설 CA 파일을 주면 오히려 검증에 실패한다.
+        client.tls_set(
+            ca_certs=None if config.ca_cert == CA_SYSTEM else config.ca_cert,
+            tls_version=ssl.PROTOCOL_TLS_CLIENT,
+        )
     else:
         log.warning("ca_cert is not set — connecting without TLS (local test only)")
     return client

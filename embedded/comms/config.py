@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 import yaml
 
@@ -13,12 +14,24 @@ class ConfigError(Exception):
     pass
 
 
+#: ca_cert 의 특수값 — CA 파일 대신 OS 신뢰 저장소로 서버 인증서를 검증한다.
+#: 운영 브로커(i15d101.p.ssafy.io:8883)는 Let's Encrypt 인증서라 이걸로 충분하다.
+#: CA 파일 경로는 로컬 사설 CA 브로커를 검증할 때만 필요하다.
+CA_SYSTEM = "system"
+
+
 _PLACEHOLDER = re.compile(r"^\$\{([^}]+)\}$")
 
 
 def _resolve(node, document):
     """`${env:NAME}` 은 환경변수, `${robot.id}` 는 문서 안의 다른 값으로 치환한다.
 
+    `${env?:NAME}` 은 선택 환경변수다 — 없으면 죽지 않고 null 이 된다.
+    `${env?:NAME|기본값}` 은 없을 때 쓸 값을 파일 안에 적어 둔다. 기본값을 코드에
+    숨기지 않기 위한 것이다 — 설정을 읽는 사람이 여기서 다 볼 수 있어야 한다.
+
+    기동에 반드시 있어야 하는 값(브로커 비번)은 `${env:}` 로 둔다. 없으면 즉시
+    죽는 쪽이, 비어 있는 채로 떠서 무한 재접속만 반복하는 것보다 낫다.
     문자열 전체가 placeholder 인 경우만 치환한다 — 부분 치환은 지원하지 않는다.
     """
     if isinstance(node, dict):
@@ -31,6 +44,9 @@ def _resolve(node, document):
     if not match:
         return node
     ref = match.group(1).strip()
+    if ref.startswith("env?:"):
+        name, _, fallback = ref[5:].partition("|")
+        return os.environ.get(name.strip()) or (fallback.strip() or None)
     if ref.startswith("env:"):
         name = ref[4:].strip()
         if name not in os.environ:
@@ -60,6 +76,7 @@ class MqttConfig:
     username: str = None
     password: str = None
     keepalive: int = 30
+    #: 브로커 CA 파일 경로, 또는 "system"(OS 신뢰 저장소 — Let's Encrypt 운영 브로커용).
     ca_cert: str = None
     outbox_path: str = "var/outbox.sqlite3"
     #: MQTT client_id. 기본은 robot_id — 로봇마다 다르므로 그대로 두면 충돌하지 않는다.
@@ -78,7 +95,12 @@ class MqttConfig:
         return bool(self.ca_cert)
 
     @classmethod
-    def from_document(cls, document: dict) -> "MqttConfig":
+    def from_document(cls, document: dict, base_dir=None) -> "MqttConfig":
+        """`base_dir` 는 상대 ca_cert 를 푸는 기준이다 — 보통 config.yaml 이 있는 디렉터리.
+
+        작업 디렉터리 기준으로 풀면 systemd 가 WorkingDirectory 없이 띄웠을 때
+        인증서를 못 찾아 접속이 통째로 실패한다. CA 는 config 옆에 두고 함께 옮긴다.
+        """
         try:
             robot_id = document["robot"]["id"]
             section = dict(document["mqtt"])
@@ -87,12 +109,16 @@ class MqttConfig:
         if not robot_id:
             raise ConfigError("robot.id is required")
 
-        username = section.pop("username", robot_id)
-        # robot.id / username / topic 세그먼트는 갈라지면 안 된다.
-        # 갈라지면 브로커 ACL 과 payload 검증(계약 §3.4)이 동시에 깨진다.
+        # 값을 안 주면 robot.id 를 쓴다. 발급 응답이 username 을 따로 주므로
+        # 항목 자체는 분리해 두고, 같은지만 검사한다.
+        username = section.pop("username", None) or robot_id
+        # mqtt_id / username / topic 세그먼트는 갈라지면 안 된다. 브로커 ACL 이
+        # %u 를 mqtt_id 에 묶어 두었고 서버는 topic 과 payload 의 mqtt_id 를 대조한다 —
+        # 갈라지면 접속은 되는데 발행이 전부 거부되는, 찾기 어려운 상태가 된다.
         if username != robot_id:
             raise ConfigError(
                 f"mqtt.username({username!r}) must equal robot.id({robot_id!r})"
+                " — MQTT_USERNAME and MQTT_ID must carry the same mqtt_id"
             )
         known = {f for f in cls.__dataclass_fields__ if f != "robot_id"}
         unknown = set(section) - known
@@ -110,11 +136,11 @@ class MqttConfig:
         return cls(
             robot_id=robot_id,
             host=section["host"],
-            port=int(section.get("port", 8883)),
+            port=int(section.get("port") or 8883),
             username=username,
             password=section.get("password"),
             keepalive=int(section.get("keepalive", 30)),
-            ca_cert=section.get("ca_cert") or None,
+            ca_cert=_resolve_path(section.get("ca_cert") or None, base_dir),
             outbox_path=section.get("outbox_path") or "var/outbox.sqlite3",
             client_id=section.get("client_id") or robot_id,
             require_tls=bool(section.get("require_tls")),
@@ -122,4 +148,18 @@ class MqttConfig:
 
     @classmethod
     def load(cls, path) -> "MqttConfig":
-        return cls.from_document(load_document(path))
+        return cls.from_document(load_document(path), base_dir=Path(path).resolve().parent)
+
+
+def _resolve_path(value, base_dir):
+    """상대경로를 base_dir 기준으로 푼다. 절대경로·None·"system" 은 그대로 둔다.
+
+    POSIX 절대경로(`/etc/orincar/...`)도 절대경로로 본다. 설정은 Jetson(Linux)
+    기준으로 적히는데 Windows 에서 검증하면 drive 가 없어 상대경로로 오해되고,
+    `C:\\etc\\orincar\\...` 같은 없는 경로가 만들어진다.
+    """
+    if not value or value == CA_SYSTEM or base_dir is None:
+        return value
+    if value.startswith("/") or Path(value).is_absolute():
+        return value
+    return str(Path(base_dir) / value)

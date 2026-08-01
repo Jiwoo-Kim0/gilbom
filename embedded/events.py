@@ -54,6 +54,7 @@ class EventPublisher:
         stop_motor=None,
         sensor_fault_stops_driving: bool = True,
         upload=upload_image,
+        upload_robot_uuid: str = None,
         monotonic=time.monotonic,
         now=utc_now,
     ) -> None:
@@ -70,6 +71,9 @@ class EventPublisher:
         #: 안전 정책이라 기본은 켬이다. 장치 없는 개발 PC 에서 주행 흐름을 흉내 낼 때만 끈다.
         self._sensor_fault_stops_driving = sensor_fault_stops_driving
         self._upload = upload
+        #: 이미지 업로드 form 의 robot_id 에 실리는 DB 내부 UUID (robot.robot_id).
+        #: mqtt_id 가 아니다 — 서버가 UUID 로 파싱하므로 mqtt_id 를 보내면 400 이다.
+        self._upload_robot_uuid = upload_robot_uuid
         self._monotonic = monotonic
         self._now = now
         # 장애물 발행 기록. 확정 여부는 RobotState 가 들고 있다 (§10.2).
@@ -342,6 +346,15 @@ class EventPublisher:
         elif grade == "LOW" and mode == "PATROLLING":
             self._state.pause("LOW_BATTERY")
 
+    def set_upload_robot_uuid(self, robot_uuid) -> None:
+        """DB 내부 robot.robot_id UUID 를 런타임에 채운다.
+
+        웹이 로봇 등록 뒤에 내려주는 값이라 기동 시점에는 없을 수 있다. 받기 전까지
+        이미지 업로드는 건너뛰고(uploader 가 error 로그), 결함 event 는 image_id: null
+        로 그대로 나간다 — 사진이 없다고 결함을 삼키지 않는다.
+        """
+        self._upload_robot_uuid = robot_uuid
+
     # -- events/incident (계약 §8) ----------------------------------------
 
     def report_incident(
@@ -384,8 +397,13 @@ class EventPublisher:
         if image_path is not None:
             # 서버는 (event_id, robot_id) 로 이미지를 event 에 묶는다 (계약 §7.2).
             # event_id 는 factory 가 만들므로 payload 를 만든 뒤에야 업로드할 수 있다.
+            # ⚠️ 여기 넘기는 것은 mqtt_id 가 아니라 DB 내부 robot.robot_id UUID 다.
+            #    서버 ImageUploadController 가 UUID.fromString() 으로 파싱한다.
             payload["evidence"]["image_id"] = self._upload(
-                image_path, payload["event_id"], self._client.messages.robot_id
+                image_path,
+                payload["event_id"],
+                self._upload_robot_uuid,
+                captured_at=payload["evidence"]["captured_at"],
             )
         # 업로드가 실패해 image_id 가 null 이어도 event 발행은 계속한다 (§8.3).
         self._client.publish(TopicKind.EVENT_INCIDENT, payload)
