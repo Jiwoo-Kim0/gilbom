@@ -8,7 +8,7 @@ PROJECT_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 BACKEND_IMAGE="${BACKEND_IMAGE:-gilbom-backend:local}"
 FRONTEND_IMAGE="${FRONTEND_IMAGE:-gilbom-frontend:local}"
 IMAGE_VERIFY_MODE="${IMAGE_VERIFY_MODE:-full}"
-IMAGE_SCANNER_MODE="${IMAGE_SCANNER_MODE:-auto}"
+IMAGE_SCANNER_MODE="${IMAGE_SCANNER_MODE:-required}"
 IMAGE_SECURITY_OUTPUT_DIR="$(
   CDPATH= cd -- "$PROJECT_DIR" \
     && mkdir -p "${IMAGE_SECURITY_OUTPUT_DIR:-.artifacts/image-security}" \
@@ -47,10 +47,10 @@ case "$IMAGE_VERIFY_MODE" in
 esac
 
 case "$IMAGE_SCANNER_MODE" in
-  auto|required|off)
+  required|off)
     ;;
   *)
-    fail "IMAGE_SCANNER_MODE must be auto, required, or off"
+    fail "IMAGE_SCANNER_MODE must be required or off"
     ;;
 esac
 
@@ -280,60 +280,12 @@ probe_and_scan_logs() {
 
 run_security_scanner() {
   [ "$IMAGE_SCANNER_MODE" != off ] || return 0
-  status_file="$IMAGE_SECURITY_OUTPUT_DIR/scanner-status.txt"
-  rm -f \
-    "$status_file" \
-    "$IMAGE_SECURITY_OUTPUT_DIR/backend.sbom.json" \
-    "$IMAGE_SECURITY_OUTPUT_DIR/backend.vulnerabilities.txt" \
-    "$IMAGE_SECURITY_OUTPUT_DIR/backend.critical-fixable.txt" \
-    "$IMAGE_SECURITY_OUTPUT_DIR/frontend.sbom.json" \
-    "$IMAGE_SECURITY_OUTPUT_DIR/frontend.vulnerabilities.txt" \
-    "$IMAGE_SECURITY_OUTPUT_DIR/frontend.critical-fixable.txt"
-  if ! docker scout version >/dev/null 2>&1; then
-    printf 'scanner=unavailable\n' > "$status_file"
-    [ "$IMAGE_SCANNER_MODE" != required ] \
-      || fail "Docker Scout is required but unavailable"
-    echo "Production image verification: Docker Scout unavailable (recorded, not enforced)"
-    return 0
-  fi
-
-  printf 'scanner=docker-scout\n' > "$status_file"
-  for entry in \
-    "backend:$BACKEND_IMAGE" \
-    "frontend:$FRONTEND_IMAGE"
-  do
-    role="${entry%%:*}"
-    image="${entry#*:}"
-    sbom="$IMAGE_SECURITY_OUTPUT_DIR/$role.sbom.json"
-    vulnerabilities="$IMAGE_SECURITY_OUTPUT_DIR/$role.vulnerabilities.txt"
-    critical_fixable="$IMAGE_SECURITY_OUTPUT_DIR/$role.critical-fixable.txt"
-
-    docker scout cves \
-      --format sbom \
-      --output "$sbom" \
-      "local://$image" >/dev/null \
-      || fail "SBOM generation failed for $role"
-    [ -s "$sbom" ] \
-      || fail "SBOM output is empty for $role"
-
-    docker scout cves \
-      --output "$vulnerabilities" \
-      "local://$image" >/dev/null \
-      || fail "vulnerability report generation failed for $role"
-    [ -s "$vulnerabilities" ] \
-      || fail "vulnerability report is empty for $role"
-
-    if ! docker scout cves \
-      --only-severity critical \
-      --only-fixed \
-      --exit-code \
-      --output "$critical_fixable" \
-      "local://$image" >/dev/null; then
-      fail "fixable Critical vulnerability detected in $role image"
-    fi
-    [ -s "$critical_fixable" ] \
-      || fail "Critical vulnerability gate report is empty for $role"
-  done
+  BACKEND_IMAGE="$BACKEND_IMAGE" \
+  FRONTEND_IMAGE="$FRONTEND_IMAGE" \
+  IMAGE_SECURITY_OUTPUT_DIR="$IMAGE_SECURITY_OUTPUT_DIR" \
+  IMAGE_SECURITY_WORK_ROOT="$IMAGE_VERIFY_WORK_ROOT/trivy" \
+    sh "$SCRIPT_DIR/scan-image-security.sh" \
+    || fail "Trivy SBOM/CVE policy rejected an image"
 }
 
 case "$IMAGE_VERIFY_MODE" in

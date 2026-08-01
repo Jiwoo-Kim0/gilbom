@@ -7,6 +7,10 @@ info:
     성공 응답은 공통 envelope 없이 실제 DTO를 직접 반환합니다.
     세부 정책은 docs의 주제별 Markdown 정본을 함께 기준으로 합니다.
 
+servers:
+  - url: /
+    description: 배포 환경의 동일 출처 Frontend gateway
+
 tags:
   - name: Auth
     description: 관리자 서버 세션·CSRF·TOTP 인증
@@ -111,6 +115,8 @@ paths:
                 $ref: "#/components/schemas/CsrfTokenResponse"
         "500":
           $ref: "#/components/responses/InternalServerError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /api/v1/auth/email-availability:
     post:
@@ -5723,7 +5729,8 @@ components:
           type: number
           format: double
           minimum: 0
-          exclusiveMaximum: 360
+          maximum: 360
+          exclusiveMaximum: true
           nullable: true
         moving:
           type: boolean
@@ -5765,6 +5772,7 @@ components:
           items:
             $ref: "#/components/schemas/MissionTrajectoryPoint"
         currentPosition:
+          type: object
           allOf:
             - $ref: "#/components/schemas/MissionMapCurrentPosition"
           nullable: true
@@ -5787,6 +5795,7 @@ components:
           type: string
           enum: [MQTT, ADMIN, SYSTEM]
         beforeStatus:
+          type: string
           allOf:
             - $ref: "#/components/schemas/MissionStatus"
           nullable: true
@@ -7165,9 +7174,13 @@ components:
       oneOf:
         - required: [totpCode]
           not:
+            properties:
+              recoveryCode: {}
             required: [recoveryCode]
         - required: [recoveryCode]
           not:
+            properties:
+              totpCode: {}
             required: [totpCode]
 
     AdminMfaResetRequest:
@@ -7882,6 +7895,7 @@ components:
               maxLength: 500
               nullable: true
             approvedPdf:
+              type: object
               allOf:
                 - $ref: "#/components/schemas/ApprovedPdfInfoResponse"
               nullable: true

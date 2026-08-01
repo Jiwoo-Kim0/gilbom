@@ -67,6 +67,22 @@ pipeline {
             }
         }
 
+        stage('Source security policy') {
+            steps {
+                dir(env.APP_DIR) {
+                    // Secret이 주입되기 전에 Git 전체 이력과 clean workspace를
+                    // 검사한다. OpenAPI와 dependency SBOM/CVE도 같은 fail-closed
+                    // gate에서 검증한다.
+                    sh '''
+                        set -eu
+                        SOURCE_SECURITY_OUTPUT_DIR=.artifacts/source-security \
+                        SECURITY_WORK_ROOT=.artifacts/security-work \
+                            sh scripts/verify-source-security.sh
+                    '''
+                }
+            }
+        }
+
         stage('Prepare ephemeral credentials') {
             steps {
                 dir(env.APP_DIR) {
@@ -145,6 +161,7 @@ pipeline {
                         sh scripts/verify-production-compose.sh
                         sh scripts/verify-certbot-automation.sh
                         sh scripts/verify-day8-infrastructure.sh
+                        sh scripts/verify-security-tooling-policy.sh
                         sh scripts/verify-frontend-csp-source.sh
                         sh -n infra/scripts/*.sh
                         test -s docs/production-deployment-runbook.md
@@ -250,7 +267,7 @@ pipeline {
                         sh scripts/test-verify-production-images.sh
                         IMAGE_VERIFY_WORK_ROOT=.artifacts/image-verify-work \
                             IMAGE_SECURITY_OUTPUT_DIR=.artifacts/image-security \
-                            IMAGE_SCANNER_MODE=auto \
+                            IMAGE_SCANNER_MODE=required \
                             sh scripts/verify-production-images.sh
                         DOCKER_BIND_WORK_ROOT=.artifacts/docker-bind-work \
                             sh scripts/verify-frontend-tls.sh
@@ -407,6 +424,14 @@ pipeline {
             script {
                 if (env.APP_DIR) {
                     dir(env.APP_DIR) {
+                        // 실패한 보안 gate의 redacted 보고서와 정책 요약도
+                        // 원인 분석 증거로 남긴다.
+                        archiveArtifacts(
+                                artifacts: '.artifacts/source-security/**,'
+                                        + '.artifacts/image-security/**',
+                                allowEmptyArchive: true,
+                                fingerprint: true
+                        )
                         // CI DB와 생성된 MQTT 자산은 재사용하지 않아 매번 빈 환경을 검증한다.
                         sh 'docker compose down --volumes --remove-orphans || true'
                     }

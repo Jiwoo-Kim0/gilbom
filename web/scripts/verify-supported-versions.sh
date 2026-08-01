@@ -33,6 +33,9 @@ assert_contains backend/build.gradle \
 assert_contains backend/build.gradle \
   "JavaLanguageVersion.of(21)" \
   "Java toolchain 21"
+assert_contains backend/build.gradle \
+  "runtimeOnly 'org.postgresql:postgresql:42.7.12'" \
+  "PostgreSQL JDBC 42.7.12"
 assert_count backend/Dockerfile \
   "FROM amazoncorretto:21.0.12-alpine3.22 AS builder" \
   1 \
@@ -105,6 +108,24 @@ assert_contains infra/jenkins/Dockerfile \
 assert_contains infra/jenkins/Dockerfile \
   "FROM docker:29.6.2-cli-alpine3.24 AS docker-cli" \
   "Jenkins Docker CLI 29.6.2"
+assert_contains infra/security/tool-versions.env \
+  "GITLEAKS_VERSION=8.29.0" \
+  "Gitleaks 8.29.0"
+assert_contains infra/security/tool-versions.env \
+  "TRIVY_VERSION=0.70.0" \
+  "Trivy 0.70.0"
+assert_contains infra/security/tool-versions.env \
+  "REDOCLY_VERSION=2.40.0" \
+  "Redocly CLI 2.40.0"
+assert_contains infra/security/tool-versions.env \
+  "ZSTD_VERSION=1.5.7" \
+  "zstd 1.5.7"
+assert_contains infra/jenkins/Dockerfile \
+  "ghcr.io/gitleaks/gitleaks:v8.29.0@sha256:71d3ee5990f2176f763b438298453fc37e87b119122045e176ca9d44ff00b08b AS gitleaks" \
+  "Gitleaks immutable image"
+assert_contains infra/jenkins/Dockerfile \
+  "aquasec/trivy:0.70.0@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e AS trivy" \
+  "Trivy immutable image"
 assert_contains compose.jenkins.yaml \
   "image: docker:29.6.2-dind-alpine3.24" \
   "Jenkins DinD 29.6.2"

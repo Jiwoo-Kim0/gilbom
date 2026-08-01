@@ -74,23 +74,22 @@ Backend 전체 테스트에서 검증한다.
 
 ## 4. SBOM·취약점 정책
 
-Docker Scout가 있으면 image별로 다음 artifact를
-`.artifacts/image-security/`에 mode `0600`으로 생성한다.
+Trivy 0.70.0이 image별로 다음 artifact를 `.artifacts/image-security/`에
+mode `0600`으로 생성한다.
 
-- `backend|frontend.sbom.json`: package SBOM
-- `backend|frontend.vulnerabilities.txt`: 발견된 전체 CVE 보고서
-- `backend|frontend.critical-fixable.txt`: 수정 가능한 Critical 차단 결과
-- `scanner-status.txt`: 사용한 scanner 또는 unavailable 상태
+- `backend|frontend.sbom.cdx.json`: CycloneDX package SBOM
+- `backend|frontend.trivy.json`: 발견된 전체 CVE 보고서
+- `policy-summary.json`: Critical·High·예외·만료 판정
+- `scanner-status.txt`: Trivy 고정 버전
 
-초기 배포 차단선은 **수정 가능한 Critical 취약점 1건 이상**이다. 전체 CVE는
-artifact로 보존해 base image와 dependency 갱신 backlog에 사용한다. High 이하를
-근거 없이 즉시 전부 차단하면 upstream fix가 없는 항목까지 배포 불능으로 만들 수
-있으므로, triage와 예외 만료 정책을 확정한 뒤 단계적으로 강화한다.
+Critical은 수정 가능 여부와 관계없이 항상 차단한다. High는
+`infra/security/vulnerability-exceptions.yaml`의 CVE와 image/package 대상이
+정확히 일치하고 담당자·승인 사유·만료일이 유효해야 통과한다. 만료 예외는 현재
+finding이 없어도 차단한다. Medium·Low는 증거에 보존한다.
 
-`IMAGE_SCANNER_MODE=auto`는 Scout가 없는 agent에서 상태를 기록하고 나머지 필수
-검사를 계속한다. 조직 정책상 SBOM이 필수인 release agent는 `required`로 실행해
-scanner 부재 자체도 실패시킨다. `off`는 scanner가 아닌 스크립트 자체 테스트에만
-사용한다.
+CI와 release 후보는 `IMAGE_SCANNER_MODE=required`만 사용한다. `off`는 scanner가
+아닌 image Secret/layer 검증기의 합성 self-test와 이미 CI 증거가 승인된 offline
+운영 host 점검에만 사용한다.
 
 SBOM, archive와 CVE 검사는 build gate에서만 실행되므로 운영 container의 request
 latency나 memory에는 영향을 주지 않는다. CI 시간과 artifact 저장량은 증가한다.

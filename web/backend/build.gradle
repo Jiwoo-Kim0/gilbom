@@ -41,7 +41,8 @@ dependencies {
     implementation 'org.springframework.integration:spring-integration-mqtt'
     implementation 'org.eclipse.paho:org.eclipse.paho.mqttv5.client:1.2.5'
 
-    runtimeOnly 'org.postgresql:postgresql'
+    // CVE gate가 검증한 최소 patched JDBC driver를 명시적으로 고정한다.
+    runtimeOnly 'org.postgresql:postgresql:42.7.12'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'

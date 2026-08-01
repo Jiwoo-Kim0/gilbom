@@ -17,8 +17,10 @@
   redirect, HTTPS 8443 reverse proxy와 무중단 Nginx reload를 검증한다.
 - 통합 image gate는 image history·`docker save` layer와 실제 Secret 파일 값을
   대조하고, 합성 Secret `ENV`와 `.env` layer가 반드시 거부되는지도 자체 테스트한다.
-- Docker Scout가 있는 agent에서는 Backend·Frontend SBOM과 전체 CVE 보고서를
-  artifact로 보존하고 수정 가능한 Critical 취약점을 배포 차단한다.
+- Gitleaks가 임시 Secret 생성 전에 Git 전체 이력과 source workspace를 검사하고,
+  Redocly가 OpenAPI error를 차단하며 Trivy가 dependency CycloneDX SBOM을 남긴다.
+- Trivy가 Backend·Frontend CycloneDX SBOM과 CVE JSON을 artifact로 보존한다.
+  Critical은 항상 차단하고 High는 만료되지 않은 CVE·대상별 승인 예외가 있어야 한다.
 - Compose의 health dependency가 준비된 뒤 프론트 Nginx를 통해 Backend API를
   호출한다. 컨테이너가 단순히 실행 중인지만 확인하지 않는다.
 - 로컬 Mosquitto healthcheck는 TLS chain, Backend 계정 인증과 system topic
@@ -58,7 +60,8 @@
 - Git
 - OpenSSL
 - Python 3(표준 라이브러리 smoke client)
-- Docker Scout 권장. release에서 SBOM을 강제할 agent는 필수
+- Gitleaks 8.29.0, Trivy 0.70.0, zstd 1.5.7, OpenSSH client
+- Redocly CLI 2.40.0은 고정 digest Docker image로 실행
 - `/opt/jenkins/home` 영속 경로
 
 운영 Jenkins는 초기화 스크립트로 Executor를 1개로 고정하고
@@ -88,6 +91,11 @@ Frontend TLS와 최종 보고서·복원력 smoke가 Docker container에 bind하
 같은 절대 경로로 보는 ignored workspace
 `.artifacts/docker-bind-work/`에서만 생성하고 각 검증 종료 시 해당 run
 directory를 삭제한다.
+
+Gitleaks·Redocly·Trivy source gate는 임시 CI Secret을 생성하기 전에 실행한다.
+custom Jenkins image에 설치된 native Gitleaks·Trivy를 우선 사용하고, image
+재빌드 전 agent에서는 `infra/security/tool-versions.env`의 동일 digest container로
+실행한다. 실패한 redacted finding과 정책 요약도 post action에서 artifact로 남긴다.
 
 최종 보고서·복원력 smoke의 임의 Frontend port는 Jenkins container가 아니라
 DinD service가 소유한다. Pipeline은 이 검증에서만 Frontend를 DinD의 외부

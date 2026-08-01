@@ -1,0 +1,33 @@
+title = "Gilbom Gitleaks policy"
+
+[extend]
+useDefault = true
+
+# Generated dependency/build output is outside the source boundary. Runtime
+# Secret stores are deliberately not allowlisted: the workspace gate runs
+# before Jenkins creates ephemeral credentials, so any Secret already present
+# at scan time must block the build.
+[[allowlists]]
+description = "Generated dependency and build output"
+paths = [
+  '''(^|/)\.artifacts/''',
+  '''(^|/)backend/build/''',
+  '''(^|/)frontend/gilbom/(node_modules|dist)/''',
+]
+
+# This class compares and removes PEM boundary marker text. Only those literal
+# Java source lines are excluded from the private-key rule; the rest of the
+# file remains covered by every Gitleaks rule.
+[[rules]]
+id = "private-key"
+
+  [rules.allowlist]
+  description = "PEM boundary string handling, not private-key material"
+  regexTarget = "line"
+  paths = [
+    '''(^|/)backend/src/main/java/com/gilbom/robot/mqtt/strategy/PemSslContextSupport\.java$''',
+  ]
+  regexes = [
+    '''(contains|replace)\("-----BEGIN [A-Z0-9 ]+ PRIVATE KEY-----"''',
+    '''"-----END [A-Z0-9 ]+ PRIVATE KEY-----"''',
+  ]

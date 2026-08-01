@@ -35,29 +35,15 @@ sh scripts/verify-frontend-csp-source.sh
 sh scripts/verify-frontend-tls.sh "gilbom-frontend:$release_sha"
 ```
 
-CI에서 image 검사와 전체 Backend/Frontend 테스트가 성공한 뒤 세 image를
-`docker image save`로 내보낸다. EC2 운영 파일도 같은 revision의 Git archive로
-고정하고 SHA-256 sidecar를 만든다. 파일명과 image tag의 revision이 같아야 한다.
+CI에서 Trivy image 검사와 전체 Backend/Frontend 테스트가 성공한 뒤 세 image와
+같은 revision의 Git source를 zstd archive로 만든다. 파일명과 image tag의
+revision이 같아야 하며 생성 명령이 `SHA256SUMS`를 만든 뒤 즉시 재검증한다.
 
 ```sh
-mkdir -p ".artifacts/release/$release_sha"
-repository_root="$(git rev-parse --show-toplevel)"
-git -C "$repository_root" archive --format=tar "HEAD:web" . \
-  | gzip -n \
-  > ".artifacts/release/$release_sha/gilbom-web-$release_sha.tar.gz"
-
-for image in backend frontend
-do
-  docker image save "gilbom-$image:$release_sha" \
-    | gzip -n > ".artifacts/release/$release_sha/gilbom-$image-$release_sha.tar.gz"
-done
-docker image save gilbom-jenkins:2.555.3-docker-29.6.2 \
-  | gzip -n > ".artifacts/release/$release_sha/gilbom-jenkins-2.555.3-docker-29.6.2.tar.gz"
-
-(
-  cd ".artifacts/release/$release_sha"
-  sha256sum ./*.tar.gz > SHA256SUMS
-)
+BACKEND_IMAGE="gilbom-backend:$release_sha" \
+FRONTEND_IMAGE="gilbom-frontend:$release_sha" \
+JENKINS_IMAGE="gilbom-jenkins:2.555.3-docker-29.6.2" \
+  sh scripts/build-release-artifacts.sh
 ```
 
 ## 2. EC2 운영 경로
@@ -104,18 +90,30 @@ sudo env \
 하나라도 없거나 hash가 다르면 운영 backup은 실패하고 기존 서비스가 다시 기동된다.
 참조되지 않는 orphan JPEG는 복구 가능성을 위해 archive에 함께 보존한다.
 
-MobaXterm으로 source archive, 세 image archive, `SHA256SUMS`를
-`/home/ubuntu/day8-release/`에 올린 뒤 검증한다. 이 임시 경로는 미리 존재하지
-않아도 되며 MobaXterm에서 새 폴더로 만들면 된다.
+최초 한 번 `infra/scripts/promote-release-artifacts.sh`를 운영 host의
+`/usr/local/sbin/gilbom-promote-release-artifacts`에 root 소유 mode `0755`로
+설치하고, 배포 계정 sudoers는 이 명령 하나만 비대화형으로 허용한다. 운영 host
+key fingerprint를 확인한 `known_hosts` 파일로 SSH 전송·원격 SHA-256 검증·root
+승격을 실행한다.
 
 ```sh
-cd /home/ubuntu/day8-release
+KNOWN_HOSTS_FILE="$PWD/infra/known_hosts.production" \
+  sh scripts/transfer-release-artifacts.sh \
+    ".artifacts/release/$release_sha" \
+    ubuntu@production-host
+```
+
+운영 host에서 root 소유로 승격된 불변 release를 다시 확인하고 해제한다.
+
+```sh
+release_dir="/opt/gilbom/artifacts/releases/<40자리 release_sha>"
+cd "$release_dir"
 sha256sum -c SHA256SUMS
 
-source_archive="gilbom-web-<40자리 release_sha>.tar.gz"
+source_archive="gilbom-web-<40자리 release_sha>.tar.zst"
 test -f "$source_archive"
 archive_runtime_state="$(
-  tar -tzf "$source_archive" \
+  zstd -dc "$source_archive" | tar -tf - \
     | grep -E '(^|/)(runtime\.env|image\.env)$|(^|/)secrets/[^/]+$' \
     | grep -Ev '(^|/)secrets/\.gitignore$' \
     || true
@@ -125,12 +123,9 @@ if [ -n "$archive_runtime_state" ]; then
   exit 1
 fi
 
-sudo tar \
-  --extract \
-  --gzip \
-  --file "$source_archive" \
-  --directory /opt/gilbom/deploy \
-  --no-same-owner
+zstd -dc "$source_archive" \
+  | sudo tar --extract --file - \
+      --directory /opt/gilbom/deploy --no-same-owner
 
 cd /opt/gilbom/deploy
 sudo docker compose \
@@ -139,11 +134,11 @@ sudo docker compose \
   -f compose.prod.yaml \
   config --quiet
 
-cd /home/ubuntu/day8-release
-for archive in ./*.tar.gz
+cd "$release_dir"
+for archive in ./*.tar.zst
 do
   [ "$archive" != "./$source_archive" ] || continue
-  gzip -dc "$archive" | sudo docker image load
+  zstd -dc "$archive" | sudo docker image load
 done
 ```
 
