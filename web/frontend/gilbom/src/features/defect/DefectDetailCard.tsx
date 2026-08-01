@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { X } from 'lucide-react'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { DefectEditModal } from './DefectEditModal'
+import {
+  createReport,
+  ReportCreateAttempt,
+} from '../report/reportApi'
 import { useAuthentication } from '../auth/authenticationContext'
 import {
   DEFECT_STATUS_UPDATE,
@@ -34,6 +38,24 @@ import type {
   Resolution,
   WorkflowStatus,
 } from './defectTypes'
+
+/**
+ * 결함이 처음 발견된 **그날 하루**를 보고서 기간으로 쓴다.
+ *
+ * <p>결함의 `firstSeenAt ~ lastSeenAt`을 그대로 쓸 수 없다. 관측이 1회인 결함은 둘이
+ * 같은데 서버가 `from < to`를 강제하기 때문이다. 1초짜리 구간으로 억지로 맞추면
+ * 통계가 전부 0이 되어, 통계를 기간 전체로 두는 취지가 무너진다.
+ *
+ * <p>하루 경계는 보는 사람의 시간대로 자른다. "그날"이 달력상 하루여야 말이 된다.
+ */
+function reportPeriodFor(firstSeenAt: string): { from: string; to: string } {
+  const seen = new Date(firstSeenAt)
+  const from = new Date(seen)
+  from.setHours(0, 0, 0, 0)
+  const to = new Date(from)
+  to.setDate(to.getDate() + 1)
+  return { from: from.toISOString(), to: to.toISOString() }
+}
 
 function formatDateTime(value: string): string {
   return new Date(value).toLocaleString('ko-KR', {
@@ -176,6 +198,10 @@ export function DefectDetailCard({
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [reportError, setReportError] = useState<string | null>(null)
+  // 두 번 눌러도 보고서가 하나만 생기도록 멱등 키를 유지한다.
+  const reportAttemptRef = useRef(new ReportCreateAttempt())
 
   const load = useCallback(() => {
     let cancelled = false
@@ -659,23 +685,52 @@ export function DefectDetailCard({
             )}
 
             {canCreateReport && (
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => {
-                  // 이 결함 한 건짜리 보고서를 만든다. 편집 화면이 defectId를
-                  // filterCriteria에 실어 보내면 서버가 근거를 이 결함으로 고정한다.
-                  const params = new URLSearchParams({
-                    defectId: defect.defectId,
-                    incidentCode: defect.incidentCode,
-                    from: defect.firstSeenAt,
-                    to: defect.lastSeenAt,
-                  })
-                  navigate(`/reports/new?${params}`)
-                }}
-              >
-                리포트 생성
-              </button>
+              <>
+                {reportError !== null && (
+                  <p className="defect-card-error" role="alert">
+                    {reportError}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={generating}
+                  onClick={() => {
+                    // 중간 폼 없이 바로 만든다. 서버가 filterCriteria.defectId로
+                    // 근거를 이 결함에 고정하고, 통계는 그날 하루를 집계한다.
+                    setGenerating(true)
+                    setReportError(null)
+                    const { from, to } = reportPeriodFor(defect.firstSeenAt)
+                    createReport(
+                      {
+                        generationMethod: 'LLM',
+                        reportType: 'PERIODIC',
+                        periodFrom: from,
+                        periodTo: to,
+                        filterCriteria: { defectId: defect.defectId },
+                      },
+                      reportAttemptRef.current,
+                    )
+                      .then((report) => {
+                        navigate(
+                          `/reports/${encodeURIComponent(report.reportId)}`,
+                          { state: { notice: '보고서를 생성했습니다.' } },
+                        )
+                      })
+                      .catch((cause: unknown) => {
+                        setReportError(getApiErrorMessage(cause))
+                        setGenerating(false)
+                      })
+                  }}
+                >
+                  {generating ? '보고서 생성 중…' : '리포트 생성'}
+                </button>
+                {generating && (
+                  <p className="defect-card-coord">
+                    AI가 결함 정보와 사진을 읽고 있습니다. 최대 30초 걸립니다.
+                  </p>
+                )}
+              </>
             )}
           </div>
 

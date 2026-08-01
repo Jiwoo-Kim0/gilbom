@@ -1,7 +1,6 @@
 import {
   ChevronLeft,
   ChevronRight,
-  FilePlus2,
   RefreshCw,
   Search,
 } from 'lucide-react'
@@ -18,7 +17,6 @@ import {
 } from 'react-router'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { useAuthentication } from '../auth/authenticationContext'
-import { REPORT_CREATE } from '../auth/permissions'
 import { listReports } from './reportApi'
 import {
   actorLabel,
@@ -73,7 +71,6 @@ export function ReportListPage() {
     return typeof state?.notice === 'string' ? state.notice : null
   })
   const { user } = useAuthentication()
-  const canCreate = user?.permissions.includes(REPORT_CREATE) ?? false
 
   const load = useCallback(async (
     targetPage: number,
@@ -151,12 +148,6 @@ export function ReportListPage() {
             <RefreshCw size={17} aria-hidden="true" />
             새로고침
           </button>
-          {canCreate ? (
-            <Link className="primary-button button-with-icon" to="/reports/new">
-              <FilePlus2 size={17} aria-hidden="true" />
-              새 보고서
-            </Link>
-          ) : null}
         </div>
       </div>
 

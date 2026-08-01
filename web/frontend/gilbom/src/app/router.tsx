@@ -11,7 +11,6 @@ import {
   ADMIN_SETTINGS_MANAGE,
   AUDIT_LOG_VIEW,
   MISSION_VIEW,
-  REPORT_CREATE,
   REPORT_UPDATE,
   REPORT_VIEW,
   ROBOT_STATUS_VIEW,
@@ -139,16 +138,6 @@ export const router = createBrowserRouter([
         ),
       },
       {
-        path: 'reports/new',
-        element: (
-          <RequirePermission permission={REPORT_VIEW}>
-            <RequirePermission permission={REPORT_CREATE}>
-              <ReportEditorPage mode="create" />
-            </RequirePermission>
-          </RequirePermission>
-        ),
-      },
-      {
         path: 'reports/:reportId',
         element: (
           <RequirePermission permission={REPORT_VIEW}>
@@ -161,7 +150,7 @@ export const router = createBrowserRouter([
         element: (
           <RequirePermission permission={REPORT_VIEW}>
             <RequirePermission permission={REPORT_UPDATE}>
-              <ReportEditorPage mode="edit" />
+              <ReportEditorPage />
             </RequirePermission>
           </RequirePermission>
         ),
