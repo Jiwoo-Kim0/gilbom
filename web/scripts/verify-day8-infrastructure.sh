@@ -146,6 +146,18 @@ assert_contains scripts/container-report-smoke.sh \
 assert_not_contains scripts/container-report-smoke.sh \
   'CHECK_DIR="$(mktemp -d)"' \
   "container report verification must not bind Jenkins-local /tmp paths"
+assert_contains Jenkinsfile \
+  'REPORT_SMOKE_FRONTEND_BIND_ADDRESS=0.0.0.0' \
+  "Jenkins report smoke must publish the DinD Frontend port on its reachable interface"
+assert_contains Jenkinsfile \
+  'REPORT_SMOKE_PUBLISHED_HOST=docker' \
+  "Jenkins report smoke must connect to the DinD service hostname"
+assert_contains scripts/container-report-smoke.sh \
+  'BASE_URL="http://$SMOKE_PUBLISHED_HOST:$frontend_port"' \
+  "container report smoke must use its configured Docker host"
+assert_contains scripts/verify-production-resilience.sh \
+  'BASE_URL="http://$PUBLISHED_HOST:$published_port"' \
+  "resilience smoke must preserve the configured Docker host"
 assert_contains scripts/verify-production-runtime.sh \
   'CHECK_DIR="$(mktemp -d "$DOCKER_BIND_WORK_ROOT/production-runtime.XXXXXX")"' \
   "production runtime bind sources must stay on a Docker-visible filesystem"

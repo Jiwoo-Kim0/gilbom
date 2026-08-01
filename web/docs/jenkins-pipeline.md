@@ -89,6 +89,11 @@ Frontend TLS와 최종 보고서·복원력 smoke가 Docker container에 bind하
 `.artifacts/docker-bind-work/`에서만 생성하고 각 검증 종료 시 해당 run
 directory를 삭제한다.
 
+최종 보고서·복원력 smoke의 임의 Frontend port는 Jenkins container가 아니라
+DinD service가 소유한다. Pipeline은 이 검증에서만 Frontend를 DinD의 외부
+interface에 bind하고 `docker:<published-port>`로 접속한다. 개발자 host socket
+환경에서는 기존처럼 `127.0.0.1:<published-port>`가 기본값이다.
+
 로컬 `mqtt-init`은 root one-shot으로 인증 자산을 만들되 `runtime/`과 `ca/`
 소유권을 bind source의 Jenkins UID/GID로 되돌린다. Broker와 Backend 접근에는
 GID 1883을 유지하므로 runtime 기능을 보존하면서 `deleteDir()`가 workspace를

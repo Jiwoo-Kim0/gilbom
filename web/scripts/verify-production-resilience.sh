@@ -13,6 +13,7 @@ PROJECT_NAME="${RESILIENCE_PROJECT_NAME:?RESILIENCE_PROJECT_NAME is required}"
 ENV_FILE="${RESILIENCE_ENV_FILE:?RESILIENCE_ENV_FILE is required}"
 STATE_FILE="${RESILIENCE_STATE_FILE:?RESILIENCE_STATE_FILE is required}"
 SECRET_DIR="${RESILIENCE_SECRET_DIR:?RESILIENCE_SECRET_DIR is required}"
+PUBLISHED_HOST="${RESILIENCE_PUBLISHED_HOST:-127.0.0.1}"
 WORK_DIR="$(dirname -- "$ENV_FILE")/resilience"
 
 compose() {
@@ -117,7 +118,13 @@ wait_for_automatic_restart() {
 refresh_base_url() {
   binding="$(compose port frontend 8080)"
   [ -n "$binding" ] || fail "Frontend host binding is unavailable"
-  BASE_URL="http://127.0.0.1:${binding##*:}"
+  published_port="${binding##*:}"
+  case "$published_port" in
+    ""|*[!0-9]*)
+      fail "Frontend host binding has an invalid port"
+      ;;
+  esac
+  BASE_URL="http://$PUBLISHED_HOST:$published_port"
 }
 
 verify_report_persistence() {
@@ -226,6 +233,11 @@ unset \
   GILBOM_LLM_API_KEY_SECRET_FILE || true
 
 umask 077
+case "$PUBLISHED_HOST" in
+  ""|*[!A-Za-z0-9._-]*)
+    fail "RESILIENCE_PUBLISHED_HOST must be a hostname or IPv4 address"
+    ;;
+esac
 install -d -m 0700 "$WORK_DIR"
 compose config --quiet \
   || fail "resilience Compose does not resolve"
@@ -432,7 +444,13 @@ llm_mount_source="$(
 binding="$(
   compose_with_env "$NO_LLM_ENV" port frontend 8080
 )"
-BASE_URL="http://127.0.0.1:${binding##*:}"
+published_port="${binding##*:}"
+case "$published_port" in
+  ""|*[!0-9]*)
+    fail "Frontend host binding has an invalid port"
+    ;;
+esac
+BASE_URL="http://$PUBLISHED_HOST:$published_port"
 python3 "$CLIENT" disabled-fallback \
   --base-url "$BASE_URL" \
   --state-file "$STATE_FILE" \

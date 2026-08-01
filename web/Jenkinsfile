@@ -389,7 +389,11 @@ pipeline {
 
                         # 이미 검증·빌드한 운영 image로 보고서 전체 흐름에 이어
                         # PID/DB/MQTT/LLM 장애, 자동 재시작과 volume 영속성을 검증한다.
+                        # 임의 Frontend port는 DinD가 소유하므로 Jenkins container는
+                        # DinD service의 외부 interface와 DNS 이름으로 접근한다.
                         DOCKER_BIND_WORK_ROOT=.artifacts/docker-bind-work \
+                            REPORT_SMOKE_FRONTEND_BIND_ADDRESS=0.0.0.0 \
+                            REPORT_SMOKE_PUBLISHED_HOST=docker \
                             REPORT_SMOKE_SKIP_BUILD=true \
                             sh scripts/container-resilience-smoke.sh
                     '''

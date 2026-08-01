@@ -28,6 +28,8 @@ SECRET_DIR="$CHECK_DIR/secrets"
 CERTBOT_DIR="$CHECK_DIR/certbot"
 ENV_FILE="$CHECK_DIR/.env.smoke"
 STATE_FILE="$CHECK_DIR/report-state.json"
+SMOKE_PUBLISHED_HOST="${REPORT_SMOKE_PUBLISHED_HOST:-127.0.0.1}"
+SMOKE_FRONTEND_BIND_ADDRESS="${REPORT_SMOKE_FRONTEND_BIND_ADDRESS:-127.0.0.1}"
 STARTED=false
 
 compose() {
@@ -105,6 +107,18 @@ wait_for_health() {
   return 1
 }
 
+refresh_base_url() {
+  frontend_binding="$(compose port frontend 8080)"
+  [ -n "$frontend_binding" ] || fail "Frontend host binding is unavailable"
+  frontend_port="${frontend_binding##*:}"
+  case "$frontend_port" in
+    ""|*[!0-9]*)
+      fail "Frontend host binding has an invalid port"
+      ;;
+  esac
+  BASE_URL="http://$SMOKE_PUBLISHED_HOST:$frontend_port"
+}
+
 write_environment() {
   llm_enabled="$1"
   llm_key_file="$2"
@@ -117,7 +131,7 @@ SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE=20s
 GILBOM_HEALTH_READINESS_COMPONENTS=readinessState,db,flywayReadiness,storageReadiness
 TZ=UTC
 
-FRONTEND_BIND_ADDRESS=127.0.0.1
+FRONTEND_BIND_ADDRESS=$SMOKE_FRONTEND_BIND_ADDRESS
 FRONTEND_HTTP_PORT=0
 FRONTEND_HTTPS_PORT=0
 GILBOM_NGINX_TLS_MODE=off
@@ -258,6 +272,22 @@ for command_name in docker openssl python3 sha256sum
 do
   require_command "$command_name"
 done
+case "$SMOKE_PUBLISHED_HOST" in
+  ""|*[!A-Za-z0-9._-]*)
+    fail "REPORT_SMOKE_PUBLISHED_HOST must be a hostname or IPv4 address"
+    ;;
+esac
+case "$SMOKE_FRONTEND_BIND_ADDRESS" in
+  127.0.0.1|0.0.0.0)
+    ;;
+  *)
+    fail "REPORT_SMOKE_FRONTEND_BIND_ADDRESS must be 127.0.0.1 or 0.0.0.0"
+    ;;
+esac
+if [ "$SMOKE_PUBLISHED_HOST" != 127.0.0.1 ] \
+    && [ "$SMOKE_FRONTEND_BIND_ADDRESS" != 0.0.0.0 ]; then
+  fail "a remote report smoke host requires a non-loopback Frontend binding"
+fi
 docker compose version >/dev/null 2>&1 \
   || fail "Docker Compose v2 is unavailable"
 [ -f "$PROD_COMPOSE" ] || fail "compose.prod.yaml is missing"
@@ -365,13 +395,10 @@ compose exec -T db sh -ec '
 ' < "$FIXTURE_SQL" >/dev/null \
   || fail "fixture patrol and defect data could not be inserted"
 
-frontend_binding="$(compose port frontend 8080)"
-[ -n "$frontend_binding" ] || fail "Frontend host binding is unavailable"
-frontend_port="${frontend_binding##*:}"
-base_url="http://127.0.0.1:$frontend_port"
+refresh_base_url
 
 python3 "$CLIENT" full \
-  --base-url "$base_url" \
+  --base-url "$BASE_URL" \
   --state-file "$STATE_FILE" \
   --author-password-file "$SECRET_DIR/gilbom_initial_admin_password" \
   --author-new-password-file "$SECRET_DIR/author_new_password" \
@@ -415,7 +442,7 @@ compose restart backend >/dev/null \
 wait_for_health backend \
   || fail "Backend did not become ready after restart"
 python3 "$CLIENT" persistence \
-  --base-url "$base_url" \
+  --base-url "$BASE_URL" \
   --state-file "$STATE_FILE" \
   || fail "report metadata did not survive Backend restart"
 
@@ -438,6 +465,7 @@ if [ "${REPORT_SMOKE_RESILIENCE:-false}" = true ]; then
   RESILIENCE_ENV_FILE="$ENV_FILE" \
   RESILIENCE_STATE_FILE="$STATE_FILE" \
   RESILIENCE_SECRET_DIR="$SECRET_DIR" \
+  RESILIENCE_PUBLISHED_HOST="$SMOKE_PUBLISHED_HOST" \
     sh "$SCRIPT_DIR/verify-production-resilience.sh" \
     || fail "production resilience workflow failed"
 fi
@@ -464,11 +492,9 @@ if assert_canary_authorized; then
   wait_for_health frontend \
     || fail "GMS canary Frontend did not become ready"
 
-  frontend_binding="$(compose port frontend 8080)"
-  frontend_port="${frontend_binding##*:}"
-  base_url="http://127.0.0.1:$frontend_port"
+  refresh_base_url
   python3 "$CLIENT" canary \
-    --base-url "$base_url" \
+    --base-url "$BASE_URL" \
     --state-file "$STATE_FILE" \
     --model "$GILBOM_LLM_MODEL" \
     --prompt-version report-v1 \
