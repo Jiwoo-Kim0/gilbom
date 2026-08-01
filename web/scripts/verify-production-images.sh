@@ -103,6 +103,9 @@ extract_layer_paths() {
   destination="$2"
   manifest="$CHECK_DIR/manifest.json"
   layers="$CHECK_DIR/layers"
+  layer_blob="$CHECK_DIR/layer-blob"
+  layer_tar="$CHECK_DIR/layer.tar"
+  current_layer_paths="$CHECK_DIR/current-layer-paths"
 
   tar -xOf "$archive" manifest.json > "$manifest"
   sed -n 's/.*"Layers":\[\([^]]*\)\].*/\1/p' "$manifest" \
@@ -117,8 +120,20 @@ extract_layer_paths() {
   : > "$destination"
   while IFS= read -r layer
   do
-    tar -xOf "$archive" "$layer" \
-      | tar -tf - >> "$destination"
+    tar -xOf "$archive" "$layer" > "$layer_blob" \
+      || fail "could not read docker save layer: $layer"
+
+    if tar -tf "$layer_blob" > "$current_layer_paths" 2>/dev/null; then
+      :
+    elif command -v gzip >/dev/null 2>&1 \
+        && gzip -dc "$layer_blob" > "$layer_tar" 2>/dev/null \
+        && tar -tf "$layer_tar" > "$current_layer_paths" 2>/dev/null; then
+      :
+    else
+      fail "could not inspect compressed docker save layer: $layer"
+    fi
+
+    cat "$current_layer_paths" >> "$destination"
   done < "$layers"
 }
 

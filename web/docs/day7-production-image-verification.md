@@ -41,6 +41,8 @@ stdout, 실패 메시지, SBOM, CVE artifact에 출력하지 않고 검사 종�
 Secret이 image 또는 log에 복사되면 즉시 실패한다.
 
 `.env`는 archive의 raw byte 문자열을 찾지 않고 각 layer의 파일 경로를 검사한다.
+Docker Engine storage backend에 따라 `docker save`의 layer blob이 비압축 tar 또는
+gzip tar일 수 있으므로 검증기는 두 형식을 모두 열어 같은 경로 정책을 적용한다.
 Base image와 라이브러리에는 `.envsh`나 dotenv 관련 일반 문자열이 존재할 수 있어
 raw substring 검사는 정상 image도 실패시키기 때문이다. 실제 `.env`,
 `.env.*`, `secrets/` 파일 경로는 허용하지 않는다.
