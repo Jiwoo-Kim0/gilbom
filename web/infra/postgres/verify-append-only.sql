@@ -63,6 +63,7 @@ INSERT INTO report.report_version (
     period_from,
     period_to,
     content,
+    generation_method,
     creator_type
 ) VALUES (
     '90000000-0000-4000-8000-000000000004',
@@ -72,6 +73,7 @@ INSERT INTO report.report_version (
     '2026-01-01T00:00:00Z',
     '2026-01-02T00:00:00Z',
     'Immutable content',
+    'SYSTEM',
     'SYSTEM'
 );
 

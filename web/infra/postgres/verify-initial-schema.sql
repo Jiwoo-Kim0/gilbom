@@ -131,6 +131,28 @@ INSERT INTO robot.robot_credential (
     NOW() + INTERVAL '90 days'
 );
 
+-- Telemetry는 V18부터 (robot_id, boot_id) Boot Session FK를 가지므로
+-- 동일한 부팅 세션을 먼저 생성한다.
+INSERT INTO telemetry.robot_boot_session (
+    boot_id,
+    robot_id,
+    schema_version,
+    session_status,
+    robot_connected_at,
+    first_received_at,
+    last_received_at,
+    last_seen_seq
+) VALUES (
+    '39000000-0000-4000-8000-000000000001',
+    '36000000-0000-4000-8000-000000000001',
+    '2.0',
+    'ONLINE',
+    NOW(),
+    NOW(),
+    NOW(),
+    1
+);
+
 INSERT INTO telemetry.robot_current_state (robot_id)
 VALUES ('36000000-0000-4000-8000-000000000001');
 
@@ -202,6 +224,7 @@ INSERT INTO report.report_version (
     period_to,
     content,
     statistics,
+    generation_method,
     created_by
 ) VALUES (
     '50000000-0000-4000-8000-000000000001',
@@ -212,6 +235,7 @@ INSERT INTO report.report_version (
     '2026-01-02T00:00:00Z',
     'Integration verification content',
     '{"defectCount": 1}'::JSONB,
+    'MANUAL',
     '10000000-0000-4000-8000-000000000001'
 );
 
@@ -324,6 +348,7 @@ SELECT
     (SELECT COUNT(*) FROM auth.authentication_rate_limit WHERE rate_limit_id = '35000000-0000-4000-8000-000000000001') AS rate_limit_count,
     (SELECT COUNT(*) FROM robot.robot WHERE robot_id = '36000000-0000-4000-8000-000000000001') AS robot_count,
     (SELECT COUNT(*) FROM robot.robot_credential WHERE credential_id = '37000000-0000-4000-8000-000000000001') AS credential_count,
+    (SELECT COUNT(*) FROM telemetry.robot_boot_session WHERE boot_id = '39000000-0000-4000-8000-000000000001') AS boot_session_count,
     (SELECT COUNT(*) FROM telemetry.robot_current_state WHERE robot_id = '36000000-0000-4000-8000-000000000001') AS current_state_count,
     (SELECT COUNT(*) FROM telemetry.robot_telemetry WHERE message_id = '38000000-0000-4000-8000-000000000001') AS telemetry_count,
     (SELECT COUNT(*) FROM report.report_version WHERE report_id = '40000000-0000-4000-8000-000000000001') AS report_version_count,
@@ -342,6 +367,8 @@ SELECT
     HAS_TABLE_PRIVILEGE(CURRENT_USER, 'auth.permission', 'UPDATE') AS can_update_permission,
     HAS_TABLE_PRIVILEGE(CURRENT_USER, 'robot.robot_credential', 'UPDATE') AS can_update_credential,
     HAS_TABLE_PRIVILEGE(CURRENT_USER, 'robot.robot_credential', 'DELETE') AS can_delete_credential,
+    HAS_TABLE_PRIVILEGE(CURRENT_USER, 'telemetry.robot_boot_session', 'UPDATE') AS can_update_boot_session,
+    HAS_TABLE_PRIVILEGE(CURRENT_USER, 'telemetry.robot_boot_session', 'DELETE') AS can_delete_boot_session,
     HAS_TABLE_PRIVILEGE(CURRENT_USER, 'telemetry.robot_telemetry', 'UPDATE') AS can_update_telemetry,
     HAS_TABLE_PRIVILEGE(CURRENT_USER, 'telemetry.robot_current_state', 'UPDATE') AS can_update_current_state;
 
@@ -367,6 +394,7 @@ SELECT (
     AND (SELECT COUNT(*) FROM auth.authentication_rate_limit WHERE rate_limit_id = '35000000-0000-4000-8000-000000000001') = 1
     AND (SELECT COUNT(*) FROM robot.robot WHERE robot_id = '36000000-0000-4000-8000-000000000001') = 1
     AND (SELECT COUNT(*) FROM robot.robot_credential WHERE credential_id = '37000000-0000-4000-8000-000000000001') = 1
+    AND (SELECT COUNT(*) FROM telemetry.robot_boot_session WHERE boot_id = '39000000-0000-4000-8000-000000000001') = 1
     AND (SELECT COUNT(*) FROM telemetry.robot_current_state WHERE robot_id = '36000000-0000-4000-8000-000000000001') = 1
     AND (SELECT COUNT(*) FROM telemetry.robot_telemetry WHERE message_id = '38000000-0000-4000-8000-000000000001') = 1
     AND (SELECT COUNT(*) FROM report.report_version WHERE report_id = '40000000-0000-4000-8000-000000000001') = 1
@@ -391,6 +419,8 @@ SELECT (
     AND NOT HAS_TABLE_PRIVILEGE(CURRENT_USER, 'auth.permission', 'UPDATE')
     AND HAS_TABLE_PRIVILEGE(CURRENT_USER, 'robot.robot_credential', 'UPDATE')
     AND NOT HAS_TABLE_PRIVILEGE(CURRENT_USER, 'robot.robot_credential', 'DELETE')
+    AND HAS_TABLE_PRIVILEGE(CURRENT_USER, 'telemetry.robot_boot_session', 'UPDATE')
+    AND NOT HAS_TABLE_PRIVILEGE(CURRENT_USER, 'telemetry.robot_boot_session', 'DELETE')
     AND NOT HAS_TABLE_PRIVILEGE(CURRENT_USER, 'telemetry.robot_telemetry', 'UPDATE')
     AND HAS_TABLE_PRIVILEGE(CURRENT_USER, 'telemetry.robot_current_state', 'UPDATE')
 ) AS runtime_contract_ok

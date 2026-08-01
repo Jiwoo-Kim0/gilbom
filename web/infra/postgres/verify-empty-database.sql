@@ -32,6 +32,7 @@ SELECT (
     AND to_regclass('request_control.idempotency_request') IS NOT NULL
     AND to_regclass('robot.robot') IS NOT NULL
     AND to_regclass('robot.robot_credential') IS NOT NULL
+    AND to_regclass('telemetry.robot_boot_session') IS NOT NULL
     AND to_regclass('telemetry.robot_telemetry') IS NOT NULL
     AND to_regclass('telemetry.robot_current_state') IS NOT NULL
     AND EXISTS (
@@ -232,6 +233,10 @@ SELECT (
     )
     AND HAS_TABLE_PRIVILEGE(:'application_role', 'robot.robot_credential', 'UPDATE')
     AND NOT HAS_TABLE_PRIVILEGE(:'application_role', 'robot.robot_credential', 'DELETE')
+    AND HAS_TABLE_PRIVILEGE(:'application_role', 'telemetry.robot_boot_session', 'SELECT')
+    AND HAS_TABLE_PRIVILEGE(:'application_role', 'telemetry.robot_boot_session', 'INSERT')
+    AND HAS_TABLE_PRIVILEGE(:'application_role', 'telemetry.robot_boot_session', 'UPDATE')
+    AND NOT HAS_TABLE_PRIVILEGE(:'application_role', 'telemetry.robot_boot_session', 'DELETE')
     AND HAS_TABLE_PRIVILEGE(:'application_role', 'telemetry.robot_telemetry', 'SELECT')
     AND HAS_TABLE_PRIVILEGE(:'application_role', 'telemetry.robot_telemetry', 'INSERT')
     AND NOT HAS_TABLE_PRIVILEGE(:'application_role', 'telemetry.robot_telemetry', 'UPDATE')
