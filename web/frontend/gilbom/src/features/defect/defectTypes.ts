@@ -272,6 +272,17 @@ export type DefectFilters = {
   bbox: string
 }
 
+/**
+ * 처음 들어왔을 때 보여줄 상태. 종결된 결함은 조치할 것이 없어 지도와 목록을
+ * 가리기만 한다(시연 데이터 기준 41건 중 25건). 체크박스로 그대로 켤 수 있게
+ * URL에 실어두므로, 감추는 것이 아니라 기본값을 정하는 것이다.
+ */
+export const DEFAULT_WORKFLOW_STATUSES: WorkflowStatus[] = [
+  'NEW',
+  'ACCEPTED',
+  'IN_PROGRESS',
+]
+
 export const EMPTY_DEFECT_FILTERS: DefectFilters = {
   q: '',
   from: '',

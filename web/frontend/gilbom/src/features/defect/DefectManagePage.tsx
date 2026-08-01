@@ -10,6 +10,7 @@ import { useDefectRealtime } from './useDefectRealtime'
 import { useAuthentication } from '../auth/authenticationContext'
 import { DEFECT_MERGE, hasPermission } from '../auth/permissions'
 import {
+  DEFAULT_WORKFLOW_STATUSES,
   DEFECT_TYPE_LABELS,
   EMPTY_DEFECT_FILTERS,
   RISK_LEVEL_LABELS,
@@ -35,7 +36,12 @@ function readFilters(params: URLSearchParams): DefectFilters {
     q: params.get('q') ?? '',
     from: params.get('from') ?? '',
     to: params.get('to') ?? '',
-    workflowStatuses: params.getAll('status') as WorkflowStatus[],
+    // 상태 조건이 없으면 첫 진입이다. 종결된 결함은 조치할 것이 없어 지도와
+    // 목록을 가리기만 하므로 기본으로는 빼둔다. 사용자가 체크를 전부 풀면
+    // writeFilters가 allStatus 표식을 남기고, 그때는 진짜 전체를 보여준다.
+    workflowStatuses: params.has('status')
+      ? (params.getAll('status') as WorkflowStatus[])
+      : (params.has('allStatus') ? [] : DEFAULT_WORKFLOW_STATUSES),
     defectTypes: params.getAll(
       'type',
     ) as DefectFilters['defectTypes'],
@@ -60,6 +66,11 @@ function writeFilters(
   }
   if (filters.to.length > 0) {
     params.set('to', filters.to)
+  }
+  if (filters.workflowStatuses.length === 0) {
+    // "아직 안 고름"과 "전부 풀었음"을 구분한다. 이 표식이 없으면 체크를 전부
+    // 푼 순간 첫 진입으로 오인돼 기본값이 다시 걸리고, 전체 보기가 불가능해진다.
+    params.set('allStatus', '1')
   }
   filters.workflowStatuses.forEach((value) => params.append('status', value))
   filters.defectTypes.forEach((value) => params.append('type', value))
@@ -111,6 +122,7 @@ export function DefectManagePage() {
   const loading = snapshot?.key !== requestKey
   const result = snapshot?.result ?? null
   const error = snapshot?.key === requestKey ? snapshot.error : null
+
 
   useEffect(() => {
     let cancelled = false
