@@ -194,24 +194,37 @@ probe_and_scan_logs() {
     printf '%s\n' "$response_canary"
   } >> "$SECRET_PATTERNS"
 
+  frontend_probe_url=http://127.0.0.1:8080/healthz
+  frontend_probe_tls=false
+  if docker exec "$frontend_container" \
+      grep -Fq "listen 8443 ssl;" /tmp/nginx-conf.d/site.conf; then
+    frontend_probe_url=https://127.0.0.1:8443/api/health
+    frontend_probe_tls=true
+  fi
+
   # 공개 health에 민감 header와 body canary를 보내 request logging leakage를
   # 탐지한다. 4xx 응답은 목적상 정상이며 canary 값은 출력하지 않는다.
-  docker exec "$frontend_container" \
-    wget \
-      --quiet \
-      --spider \
-      --header "Authorization: Bearer $authorization_canary" \
-      http://127.0.0.1:8080/api/health \
+  set -- wget --quiet --spider
+  [ "$frontend_probe_tls" != true ] \
+    || set -- "$@" --no-check-certificate
+  set -- \
+    "$@" \
+    --header "Authorization: Bearer $authorization_canary" \
+    "$frontend_probe_url"
+  docker exec "$frontend_container" "$@" \
       >/dev/null 2>&1 \
     || fail "could not execute Authorization log canary request"
-  docker exec "$frontend_container" \
-    wget \
-      --quiet \
-      --output-document=/dev/null \
-      --header 'Content-Type: application/json' \
-      --post-data \
-      "{\"prompt\":\"$prompt_canary\",\"llmResponse\":\"$response_canary\"}" \
-      http://127.0.0.1:8080/api/health \
+
+  set -- wget --quiet --output-document=/dev/null
+  [ "$frontend_probe_tls" != true ] \
+    || set -- "$@" --no-check-certificate
+  set -- \
+    "$@" \
+    --header 'Content-Type: application/json' \
+    --post-data \
+    "{\"prompt\":\"$prompt_canary\",\"llmResponse\":\"$response_canary\"}" \
+    "$frontend_probe_url"
+  docker exec "$frontend_container" "$@" \
       >/dev/null 2>&1 || true
 
   for entry in \

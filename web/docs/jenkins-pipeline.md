@@ -11,6 +11,10 @@ Registry push와 운영 배포는 의도적으로 포함하지 않았다.
 - Frontend image 빌드는 37개 test, ESLint와 Vite production build를 수행한다.
 - Frontend runtime gate는 UID 101·read-only·capability 0, Node/source/sourcemap과
   Secret 패턴 부재, `/healthz`·`/api`·SSE·cache header를 mock Backend로 검증한다.
+- Backend·Frontend·MQTT init image build는 `compose.build.yaml`에 격리하고,
+  `compose.prod.yaml`에는 `build:`가 다시 들어오지 못하게 contract gate로 막는다.
+- Frontend TLS gate는 인증서가 없는 bootstrap, HTTP-01 webroot, HTTP 308
+  redirect, HTTPS 8443 reverse proxy와 무중단 Nginx reload를 검증한다.
 - 통합 image gate는 image history·`docker save` layer와 실제 Secret 파일 값을
   대조하고, 합성 Secret `ENV`와 `.env` layer가 반드시 거부되는지도 자체 테스트한다.
 - Docker Scout가 있는 agent에서는 Backend·Frontend SBOM과 전체 CVE 보고서를
@@ -36,8 +40,8 @@ Registry push와 운영 배포는 의도적으로 포함하지 않았다.
   Secret 원문이 log에 나타나지 않아야 최종 stage가 통과한다.
 - CI 비밀번호는 매 빌드에서 ignored `secrets/` 파일로 생성하고 container runtime에
   `/run/secrets`로만 mount한다. Jenkins 환경변수·저장소·artifact로 보관하지 않는다.
-- 운영 Compose contract gate는 image build 전에 공개 port가 Frontend/MQTT 두
-  개뿐인지, DB·MQTT health dependency, 4개 network, named volume,
+- 운영 Compose contract gate는 image build 전에 공개 port가 Frontend
+  HTTP·HTTPS/MQTT 세 개뿐인지, DB·MQTT health dependency, 4개 network, named volume,
   resource/log 상한과 `/run/secrets` target을 검증한다.
 - repository policy에서 운영 배포·rollback·backup·Secret 생성 스크립트의
   POSIX shell 구문과 Runbook/담당 범위 동결 문서 존재를 함께 확인한다.

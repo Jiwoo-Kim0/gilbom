@@ -139,15 +139,39 @@ backend_id="$(compose ps -q backend)"
   || fail "application containers are missing"
 
 docker exec "$frontend_id" \
-  wget --quiet --output-document=- \
-  http://127.0.0.1:8080/healthz \
-  | grep -Fxq ok \
+  /usr/local/bin/gilbom-nginx-healthcheck \
   || fail "Frontend health check failed"
-docker exec "$frontend_id" \
-  wget --quiet --output-document=- \
-  http://127.0.0.1:8080/api/health \
-  | grep -Fq '"status":"UP"' \
-  || fail "Frontend-to-Backend health check failed"
+frontend_probe="$(
+  docker exec "$frontend_id" /bin/sh -ec '
+  if grep -Fq "listen 8443 ssl;" /tmp/nginx-conf.d/site.conf; then
+    exec wget \
+      --quiet \
+      --no-check-certificate \
+      --output-document=- \
+      https://127.0.0.1:8443/api/health
+  fi
+  wget \
+    --quiet \
+    --output-document=- \
+    http://127.0.0.1:8080/healthz
+  if wget \
+      --quiet \
+      --spider \
+      http://127.0.0.1:8080/api/health; then
+    echo "HTTP application serving is enabled during certificate bootstrap" >&2
+    exit 1
+  fi
+  '
+)" || fail "Frontend HTTPS/bootstrap policy check failed"
+if docker exec "$frontend_id" \
+    grep -Fq "listen 8443 ssl;" /tmp/nginx-conf.d/site.conf; then
+  printf '%s\n' "$frontend_probe" \
+    | grep -Fq '"status":"UP"' \
+    || fail "Frontend-to-Backend HTTPS health check failed"
+else
+  [ "$frontend_probe" = "bootstrap" ] \
+    || fail "Frontend certificate bootstrap health check failed"
+fi
 
 record_release deployed
 echo "Production deployment: PASS"

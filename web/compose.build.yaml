@@ -1,0 +1,24 @@
+name: ${COMPOSE_PROJECT_NAME:-gilbom}-build
+
+# CI와 개발자가 애플리케이션 image를 만드는 전용 명세다.
+# compose.prod.yaml에는 build 계약을 두지 않아 운영 서버가 소스를 빌드하지 않는다.
+services:
+  backend:
+    image: ${BACKEND_IMAGE:-gilbom-backend:local}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+
+  frontend:
+    image: ${FRONTEND_IMAGE:-gilbom-frontend:local}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_NAVER_MAP_CLIENT_ID: ${VITE_NAVER_MAP_CLIENT_ID:?VITE_NAVER_MAP_CLIENT_ID is required}
+
+  mqtt-init:
+    image: gilbom-mqtt-init:local
+    build:
+      context: ./infra/mosquitto/local
+      dockerfile: Dockerfile.init

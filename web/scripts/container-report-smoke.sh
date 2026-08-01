@@ -13,6 +13,7 @@ CLIENT="$SCRIPT_DIR/container-report-smoke-client.py"
 PROJECT_NAME="gilbom-report-smoke-$(date +%s)-$$"
 CHECK_DIR="$(mktemp -d)"
 SECRET_DIR="$CHECK_DIR/secrets"
+CERTBOT_DIR="$CHECK_DIR/certbot"
 ENV_FILE="$CHECK_DIR/.env.smoke"
 STATE_FILE="$CHECK_DIR/report-state.json"
 STARTED=false
@@ -106,11 +107,23 @@ TZ=UTC
 
 FRONTEND_BIND_ADDRESS=127.0.0.1
 FRONTEND_HTTP_PORT=0
+FRONTEND_HTTPS_PORT=0
+GILBOM_NGINX_TLS_MODE=off
 MQTT_BIND_ADDRESS=127.0.0.1
 MQTT_TLS_PORT=0
 
 BACKEND_IMAGE=${BACKEND_IMAGE:-gilbom-backend:local}
 FRONTEND_IMAGE=${FRONTEND_IMAGE:-gilbom-frontend:local}
+
+CERTBOT_DOMAIN=report-smoke.example.invalid
+CERTBOT_EMAIL=report-smoke@example.invalid
+CERTBOT_CONF_DIR=$CERTBOT_DIR/conf
+CERTBOT_WWW_DIR=$CERTBOT_DIR/www
+NGINX_CERT_DIR=$CERTBOT_DIR/nginx
+NGINX_CERT_GID=101
+CERTBOT_CPUS=0.5
+CERTBOT_MEMORY_LIMIT=256m
+CERTBOT_PIDS_LIMIT=128
 
 POSTGRES_DB=gilbom_report_smoke
 POSTGRES_ADMIN_USER=gilbom_db_admin
@@ -248,6 +261,10 @@ docker compose version >/dev/null 2>&1 \
   || fail "resilience outage mode and real GMS canary cannot run together"
 
 install -d -m 0700 "$SECRET_DIR"
+install -d -m 0755 \
+  "$CERTBOT_DIR/conf" \
+  "$CERTBOT_DIR/www" \
+  "$CERTBOT_DIR/nginx"
 openssl rand -hex -out "$SECRET_DIR/postgres_admin_password" 32
 openssl rand -hex -out "$SECRET_DIR/postgres_flyway_password" 32
 openssl rand -hex -out "$SECRET_DIR/postgres_app_password" 32
@@ -302,7 +319,11 @@ compose config --quiet \
   || fail "production plus smoke Compose does not resolve"
 
 if [ "${REPORT_SMOKE_SKIP_BUILD:-false}" != true ]; then
-  compose build backend frontend \
+  docker compose \
+    --project-name "$PROJECT_NAME-build" \
+    --env-file "$ENV_FILE" \
+    -f "$PROJECT_DIR/compose.build.yaml" \
+    build backend frontend \
     || fail "production image build failed"
 fi
 

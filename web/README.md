@@ -102,15 +102,21 @@ Secret file, then validate and start the production stack:
 
 ```bash
 ENV_FILE=.env.prod sh scripts/verify-production-compose.sh
-docker compose --env-file .env.prod -f compose.prod.yaml up --build -d --wait
+VITE_NAVER_MAP_CLIENT_ID='<public-client-id>' \
+  docker compose --env-file .env.prod -f compose.build.yaml build backend frontend
+docker compose --env-file .env.prod -f compose.prod.yaml up --no-build -d --wait
 IMAGE_SCANNER_MODE=required sh scripts/verify-production-images.sh
+sh scripts/verify-frontend-tls.sh
 sh scripts/container-resilience-smoke.sh
 ```
 
-Only Frontend HTTP and robot-facing MQTT TLS are published. Backend and
+Production Compose never builds application images. Frontend Nginx publishes
+HTTP 80 only for ACME HTTP-01 and HTTPS redirect, and serves the application
+exclusively on HTTPS 443. Robot-facing MQTT publishes TLS 8883. Backend and
 PostgreSQL remain reachable only through their internal Compose networks.
-Terminate public HTTPS at the load balancer or host reverse proxy before
-forwarding to the Frontend container.
+Before the first certificate exists, Frontend exposes only the ACME webroot and
+bootstrap health response; `infra/certbot/certificate.sh issue` installs the
+certificate copy and reloads Nginx into HTTPS mode.
 
 `container-resilience-smoke.sh`는 보고서 전체 smoke를 먼저 실행한 뒤 같은 격리
 stack에서 Backend/Frontend 자동 재시작, DB·MQTT·LLM 장애 복구, Secret 경계와

@@ -74,11 +74,37 @@ compose up \
   || fail "previous Frontend did not become healthy"
 
 frontend_id="$(compose ps -q frontend)"
-docker exec "$frontend_id" \
-  wget --quiet --output-document=- \
-  http://127.0.0.1:8080/api/health \
-  | grep -Fq '"status":"UP"' \
-  || fail "rollback end-to-end health check failed"
+frontend_probe="$(
+  docker exec "$frontend_id" /bin/sh -ec '
+  if grep -Fq "listen 8443 ssl;" /tmp/nginx-conf.d/site.conf; then
+    exec wget \
+      --quiet \
+      --no-check-certificate \
+      --output-document=- \
+      https://127.0.0.1:8443/api/health
+  fi
+  wget \
+    --quiet \
+    --output-document=- \
+    http://127.0.0.1:8080/healthz
+  if wget \
+      --quiet \
+      --spider \
+      http://127.0.0.1:8080/api/health; then
+    echo "HTTP application serving is enabled during certificate bootstrap" >&2
+    exit 1
+  fi
+  '
+)" || fail "rollback HTTPS/bootstrap policy check failed"
+if docker exec "$frontend_id" \
+    grep -Fq "listen 8443 ssl;" /tmp/nginx-conf.d/site.conf; then
+  printf '%s\n' "$frontend_probe" \
+    | grep -Fq '"status":"UP"' \
+    || fail "rollback HTTPS end-to-end health check failed"
+else
+  [ "$frontend_probe" = "bootstrap" ] \
+    || fail "rollback certificate bootstrap health check failed"
+fi
 
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 install -d -m 0700 "$RELEASE_DIR"

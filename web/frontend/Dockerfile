@@ -24,19 +24,30 @@ RUN test -n "$VITE_NAVER_MAP_CLIENT_ID" \
 FROM nginx:1.30.4-alpine AS runtime
 
 COPY --chmod=0444 nginx/nginx.conf /etc/nginx/nginx.conf
-COPY --chmod=0444 nginx/default.conf /etc/nginx/conf.d/default.conf
+COPY --chmod=0444 nginx/upstream.conf /etc/nginx/gilbom/upstream.conf
+COPY --chmod=0444 nginx/server-common.conf /etc/nginx/gilbom/server-common.conf
+COPY --chmod=0444 nginx/app-locations.conf /etc/nginx/gilbom/app-locations.conf
+COPY --chmod=0444 nginx/site-http.conf /etc/nginx/gilbom/site-http.conf
+COPY --chmod=0444 nginx/site-bootstrap.conf /etc/nginx/gilbom/site-bootstrap.conf
+COPY --chmod=0444 nginx/site-https.conf /etc/nginx/gilbom/site-https.conf
+COPY --chmod=0555 nginx/configure-runtime.sh /usr/local/bin/gilbom-nginx-configure
+COPY --chmod=0555 nginx/entrypoint.sh /usr/local/bin/gilbom-nginx-entrypoint
+COPY --chmod=0555 nginx/healthcheck.sh /usr/local/bin/gilbom-nginx-healthcheck
 COPY --from=builder --chown=0:101 /app/dist /usr/share/nginx/html
 RUN find /usr/share/nginx/html -type d -exec chmod 0555 {} + \
     && find /usr/share/nginx/html -type f -exec chmod 0444 {} + \
+    && chmod 0555 /etc/nginx/gilbom \
+    && mkdir -p /tmp/nginx-conf.d \
+    && cp /etc/nginx/gilbom/site-http.conf /tmp/nginx-conf.d/site.conf \
     && nginx -t
 
 USER nginx
 
-EXPOSE 8080
+EXPOSE 8080 8443
 
 STOPSIGNAL SIGQUIT
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --quiet --spider http://127.0.0.1:8080/healthz || exit 1
+    CMD /usr/local/bin/gilbom-nginx-healthcheck
 
-ENTRYPOINT ["nginx", "-g", "daemon off;"]
+ENTRYPOINT ["/usr/local/bin/gilbom-nginx-entrypoint"]

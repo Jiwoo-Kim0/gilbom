@@ -1,22 +1,22 @@
 # Day 7 운영 Compose와 네트워크
 
-기준일: 2026-07-31
+기준일: 2026-08-01
 
 ## 1. 운영 토폴로지
 
 `compose.prod.yaml`을 DB, MQTT, Backend, Frontend를 함께 기동하는 단일 운영
-명세로 사용한다. host에 publish하는 포트는 Frontend HTTP와 로봇용 MQTT TLS
-두 개뿐이다.
+명세로 사용한다. host에 publish하는 포트는 Frontend HTTP·HTTPS와 로봇용 MQTT
+TLS 세 개뿐이다.
 
 ```text
-외부 HTTP/TLS terminator ──> Frontend
-                              │ app (internal)
-                              v
-                            Backend ──> llm-egress ──> 운영 방화벽 ──> 승인 LLM
-                              │ data (internal)
-                   ┌──────────┴──────────┐
-                   v                     v
-             PostgreSQL              Mosquitto <── 로봇 MQTT TLS
+외부 HTTP/HTTPS ──> Frontend Nginx
+                       │ app (internal)
+                       v
+                     Backend ──> llm-egress ──> 운영 방화벽 ──> 승인 LLM
+                       │ data (internal)
+            ┌──────────┴──────────┐
+            v                     v
+      PostgreSQL              Mosquitto <── 로봇 MQTT TLS
 ```
 
 | 네트워크 | 연결 서비스 | 외부 경로 | 역할 |
@@ -36,14 +36,17 @@ group/NAT proxy와 함께 적용한다. 그 통제가 확인되기 전에는
 
 | 서비스 | Container port | Host publish |
 |---|---:|---|
-| Frontend | 8080 | `${FRONTEND_BIND_ADDRESS}:${FRONTEND_HTTP_PORT}` |
+| Frontend HTTP | 8080 | `${FRONTEND_BIND_ADDRESS}:${FRONTEND_HTTP_PORT}` |
+| Frontend HTTPS | 8443 | `${FRONTEND_BIND_ADDRESS}:${FRONTEND_HTTPS_PORT}` |
 | Mosquitto | 8883/TLS | `${MQTT_BIND_ADDRESS}:${MQTT_TLS_PORT}` |
 | Backend | 8080 | 없음 |
 | PostgreSQL | 5432 | 없음 |
 
-Frontend image는 HTTP 8080만 제공한다. 운영 HTTPS는 load balancer 또는 host reverse
-proxy에서 종료한 뒤 Frontend로 전달한다. `application-ec2.yml`의 Secure Session
-cookie가 정상 동작하려면 외부 사용자 경로는 반드시 HTTPS여야 한다.
+Frontend image는 HTTP 8080과 HTTPS 8443을 제공한다. 인증서가 없으면 HTTP-01
+challenge와 bootstrap health만 제공하고, 인증서가 준비되면 HTTP 요청을 HTTPS로
+redirect한다. `application-ec2.yml`의 Secure Session cookie가 정상 동작하려면
+외부 사용자 경로는 반드시 HTTPS여야 한다. 운영 Compose는 TLS mode를 `auto`로
+고정하므로 환경 파일로 HTTP 애플리케이션 serving을 활성화할 수 없다.
 
 Compose dependency는 다음 순서로 고정한다.
 
@@ -119,8 +122,8 @@ cp .env.prod.example .env.prod
 
 ENV_FILE=.env.prod sh scripts/verify-production-compose.sh
 
-docker compose --env-file .env.prod -f compose.prod.yaml build backend frontend
-docker compose --env-file .env.prod -f compose.prod.yaml up -d --wait
+docker compose --env-file .env.prod -f compose.build.yaml build backend frontend
+docker compose --env-file .env.prod -f compose.prod.yaml up -d --no-build --wait
 docker compose --env-file .env.prod -f compose.prod.yaml ps
 ```
 
@@ -158,8 +161,10 @@ Nginx worker는 host CPU 전체를 따라가는 `auto` 대신 2개로 고정했�
 `scripts/verify-production-compose.sh`는 정규화된 Compose를 기준으로 다음 계약을
 검사한다.
 
-- 서비스 5개와 네트워크 4개
-- DB·Backend host port 부재와 공개 port 정확히 2개
+- 기본 서비스 5개와 `certificate` profile의 Certbot, 네트워크 4개
+- DB·Backend host port 부재와 공개 port 정확히 3개
+- 운영 Compose의 `build:` 부재와 CI 전용 `compose.build.yaml`
+- Frontend 8080·8443, ACME webroot·인증서 read-only mount
 - DB/MQTT health → Backend readiness → Frontend 순서
 - internal `app`·`data` network
 - named volume 6개

@@ -3,7 +3,16 @@
 set -eu
 
 COMPOSE_FILE=${COMPOSE_FILE:-compose.prod.yaml}
-ENV_FILE=${ENV_FILE:-.env.prod.example}
+BUILD_COMPOSE_FILE=${BUILD_COMPOSE_FILE:-compose.build.yaml}
+ENV_FILE=${ENV_FILE:-}
+RUNTIME_ENV_FILE=${RUNTIME_ENV_FILE:-}
+IMAGE_ENV_FILE=${IMAGE_ENV_FILE:-}
+
+if [ -z "$ENV_FILE" ] \
+    && [ -z "$RUNTIME_ENV_FILE" ] \
+    && [ -z "$IMAGE_ENV_FILE" ]; then
+  ENV_FILE=.env.prod.example
+fi
 
 fail() {
   echo "Production Compose verification failed: $1" >&2
@@ -37,22 +46,53 @@ if [ "$ENV_FILE" = ".env.prod.example" ]; then
   export VITE_NAVER_MAP_CLIENT_ID="${VITE_NAVER_MAP_CLIENT_ID:-production-compose-check}"
   export MQTT_PUBLIC_BROKER_URI="${MQTT_PUBLIC_BROKER_URI:-ssl://mqtt.example.invalid:8883}"
   export MQTT_TLS_SERVER_NAME="${MQTT_TLS_SERVER_NAME:-mqtt.example.invalid}"
+  export CERTBOT_EMAIL="${CERTBOT_EMAIL:-production-compose@example.invalid}"
 fi
 
 compose() {
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+  if [ -n "$ENV_FILE" ]; then
+    docker compose \
+      --env-file "$ENV_FILE" \
+      -f "$COMPOSE_FILE" \
+      "$@"
+  else
+    [ -n "$RUNTIME_ENV_FILE" ] \
+      || fail "RUNTIME_ENV_FILE is required when ENV_FILE is not used"
+    [ -n "$IMAGE_ENV_FILE" ] \
+      || fail "IMAGE_ENV_FILE is required when ENV_FILE is not used"
+    docker compose \
+      --env-file "$RUNTIME_ENV_FILE" \
+      --env-file "$IMAGE_ENV_FILE" \
+      -f "$COMPOSE_FILE" \
+      "$@"
+  fi
+}
+
+build_compose() {
+  if [ -n "$ENV_FILE" ]; then
+    docker compose \
+      --env-file "$ENV_FILE" \
+      -f "$BUILD_COMPOSE_FILE" \
+      "$@"
+  else
+    docker compose \
+      --env-file "$RUNTIME_ENV_FILE" \
+      --env-file "$IMAGE_ENV_FILE" \
+      -f "$BUILD_COMPOSE_FILE" \
+      "$@"
+  fi
 }
 
 compose config --quiet
-compose config > "$CHECK_DIR/full.yaml"
+compose --profile certificate config --quiet
+compose --profile certificate config > "$CHECK_DIR/full.yaml"
+build_compose config --quiet
+build_compose config > "$CHECK_DIR/build.yaml"
 
 # LLM 비활성 배포는 실제 API key file 없이도 Compose가 해석되어야 한다.
 # /dev/null은 빈 read-only file mount 역할만 하며 image ENV에는 값이 들어가지 않는다.
 GILBOM_LLM_API_KEY_SECRET_FILE=/dev/null \
-  docker compose \
-    --env-file "$ENV_FILE" \
-    -f "$COMPOSE_FILE" \
-    config > "$CHECK_DIR/no-llm-secret.yaml"
+  compose config > "$CHECK_DIR/no-llm-secret.yaml"
 assert_contains "$CHECK_DIR/no-llm-secret.yaml" "file: /dev/null" \
   "disabled LLM deployment must resolve without a real API key file"
 
@@ -73,15 +113,21 @@ extract_service() {
 }
 
 expected_services='backend
+certbot
 db
 frontend
 mosquitto
 mosquitto-config-init'
-actual_services="$(compose config --services | sort)"
+actual_services="$(
+  compose \
+    --profile certificate \
+    config --services \
+    | sort
+)"
 [ "$actual_services" = "$expected_services" ] \
   || fail "service set differs from the production contract"
 
-for service in backend db frontend mosquitto mosquitto-config-init
+for service in backend certbot db frontend mosquitto mosquitto-config-init
 do
   extract_service "$service" > "$CHECK_DIR/$service.yaml"
   [ -s "$CHECK_DIR/$service.yaml" ] \
@@ -94,14 +140,26 @@ assert_not_contains "$CHECK_DIR/db.yaml" "    ports:" \
   "PostgreSQL must not publish a host port"
 assert_not_contains "$CHECK_DIR/mosquitto-config-init.yaml" "    ports:" \
   "Mosquitto init must not publish a host port"
+assert_not_contains "$CHECK_DIR/certbot.yaml" "    ports:" \
+  "Certbot must not publish a host port"
+assert_not_contains "$CHECK_DIR/backend.yaml" "    build:" \
+  "Backend must not build on the production host"
+assert_not_contains "$CHECK_DIR/frontend.yaml" "    build:" \
+  "Frontend must not build on the production host"
+assert_contains "$CHECK_DIR/build.yaml" "build:" \
+  "CI build Compose must declare application build contexts"
 
 published_port_count="$(
   grep -c 'published:' "$CHECK_DIR/full.yaml" || true
 )"
-[ "$published_port_count" -eq 2 ] \
-  || fail "only Frontend HTTP and MQTT TLS may publish ports"
+[ "$published_port_count" -eq 3 ] \
+  || fail "only Frontend HTTP/HTTPS and MQTT TLS may publish ports"
 assert_contains "$CHECK_DIR/frontend.yaml" "target: 8080" \
   "Frontend must publish Nginx port 8080"
+assert_contains "$CHECK_DIR/frontend.yaml" "target: 8443" \
+  "Frontend must publish Nginx TLS port 8443"
+assert_contains "$CHECK_DIR/frontend.yaml" "GILBOM_NGINX_TLS_MODE: auto" \
+  "Production Frontend must not allow HTTP application serving mode"
 assert_contains "$CHECK_DIR/mosquitto.yaml" "target: 8883" \
   "Mosquitto must publish only TLS port 8883"
 assert_contains "$CHECK_DIR/mosquitto.yaml" "MQTT_TLS_SERVER_NAME:" \
@@ -134,6 +192,18 @@ assert_contains "$CHECK_DIR/frontend.yaml" "condition: service_healthy" \
 assert_contains "$CHECK_DIR/mosquitto.yaml" \
   "condition: service_completed_successfully" \
   "Mosquitto must wait for config initialization"
+assert_contains "$CHECK_DIR/certbot.yaml" "certificate" \
+  "Certbot must be isolated behind the certificate profile"
+assert_contains "$CHECK_DIR/certbot.yaml" "image: certbot/certbot:v5.7.0" \
+  "Certbot image must use the validated fixed version"
+assert_contains "$CHECK_DIR/frontend.yaml" "target: /var/www/certbot" \
+  "Frontend must mount the ACME webroot"
+assert_contains "$CHECK_DIR/frontend.yaml" "target: /etc/nginx/certs" \
+  "Frontend must mount the Nginx certificate copy"
+assert_contains "$CHECK_DIR/frontend.yaml" "read_only: true" \
+  "Frontend certificate mounts must be read-only"
+assert_contains "$CHECK_DIR/certbot.yaml" "target: /etc/letsencrypt" \
+  "Certbot must persist its certificate state"
 
 for network in edge app data llm-egress
 do

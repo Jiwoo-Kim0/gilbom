@@ -153,11 +153,14 @@ pipeline {
                     // backend image는 Gradle test, frontend image는 lint와 production build를 포함한다.
                     sh '''
                         set -eu
-                        docker compose build backend frontend mqtt-init
+                        docker compose \
+                            -f compose.build.yaml \
+                            build backend frontend mqtt-init
                         sh scripts/test-verify-production-images.sh
                         IMAGE_SECURITY_OUTPUT_DIR=.artifacts/image-security \
                             IMAGE_SCANNER_MODE=auto \
                             sh scripts/verify-production-images.sh
+                        sh scripts/verify-frontend-tls.sh
                     '''
                     archiveArtifacts(
                             artifacts: '.artifacts/image-security/**',

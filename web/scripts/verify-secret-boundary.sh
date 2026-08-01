@@ -84,7 +84,8 @@ frontend_environment_references="$(
 )"
 if [ -n "$frontend_environment_references" ] \
   && printf '%s\n' "$frontend_environment_references" \
-    | grep -Ev '^import\.meta\.env\.VITE_[A-Z0-9_]+$'; then
+    | grep -Ev \
+      '^import\.meta\.env\.(VITE_[A-Z0-9_]+|DEV|PROD|SSR|MODE|BASE_URL)$'; then
   fail "Frontend source may read only public VITE_* variables"
 fi
 
