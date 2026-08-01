@@ -84,5 +84,8 @@ assert_count compose.prod.yaml \
 assert_contains compose.prod.yaml \
   "image: postgis/postgis:16-3.5" \
   "production PostgreSQL/PostGIS 16-3.5"
+assert_contains compose.prod.yaml \
+  "image: certbot/certbot:v5.7.0" \
+  "production Certbot 5.7.0"
 
 echo "Runtime version pin policy: PASS"

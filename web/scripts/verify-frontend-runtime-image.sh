@@ -42,11 +42,13 @@ exposed_ports="$(docker image inspect \
   --format '{{json .Config.ExposedPorts}}' "$IMAGE_NAME")"
 printf '%s\n' "$exposed_ports" | grep -Fq '"8080/tcp"' \
   || fail "image must expose unprivileged port 8080"
+printf '%s\n' "$exposed_ports" | grep -Fq '"8443/tcp"' \
+  || fail "image must expose unprivileged TLS port 8443"
 
 healthcheck="$(docker image inspect \
   --format '{{json .Config.Healthcheck.Test}}' "$IMAGE_NAME")"
-printf '%s\n' "$healthcheck" | grep -Fq '/healthz' \
-  || fail "image healthcheck must use /healthz"
+printf '%s\n' "$healthcheck" | grep -Fq 'gilbom-nginx-healthcheck' \
+  || fail "image healthcheck must use the TLS-aware Nginx probe"
 
 image_environment="$(docker image inspect \
   --format '{{range .Config.Env}}{{println .}}{{end}}' "$IMAGE_NAME")"

@@ -139,13 +139,21 @@ backend_id="$(compose ps -q backend)"
   || fail "application containers are missing"
 
 docker exec "$frontend_id" \
-  wget --quiet --output-document=- \
-  http://127.0.0.1:8080/healthz \
-  | grep -Fxq ok \
+  /usr/local/bin/gilbom-nginx-healthcheck \
   || fail "Frontend health check failed"
-docker exec "$frontend_id" \
-  wget --quiet --output-document=- \
-  http://127.0.0.1:8080/api/health \
+docker exec "$frontend_id" /bin/sh -ec '
+  if grep -Fq "listen 8443 ssl;" /tmp/nginx-conf.d/site.conf; then
+    exec wget \
+      --quiet \
+      --no-check-certificate \
+      --output-document=- \
+      https://127.0.0.1:8443/api/health
+  fi
+  exec wget \
+    --quiet \
+    --output-document=- \
+    http://127.0.0.1:8080/api/health
+' \
   | grep -Fq '"status":"UP"' \
   || fail "Frontend-to-Backend health check failed"
 
