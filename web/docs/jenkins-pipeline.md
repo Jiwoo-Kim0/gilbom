@@ -94,6 +94,12 @@ directory를 삭제한다.
 GID 1883을 유지하므로 runtime 기능을 보존하면서 `deleteDir()`가 workspace를
 정리할 수 있다.
 
+이 정책을 도입하기 전 실패 빌드가 root-owned 자산을 남기면 새 checkout 자체가
+초기화 스크립트보다 먼저 막힐 수 있다. Pipeline은 checkout 직전과 post cleanup
+직전에 DinD root helper를 실행한다. Helper의 RW bind·`chown` 범위는
+`infra/mosquitto/local/{ca,runtime}` 두 ignored 생성 디렉터리로 제한하며,
+전체 workspace나 저장소 source에는 root 쓰기 권한을 주지 않는다.
+
 Jenkins Git Client는 HTTPS Username/Password Credential을 전달하기 위한 일회성
 `askpass` script를 `java.io.tmpdir`에서 실행한다. Jenkins의 `/tmp`는 container
 종료 시 사라지는 256 MiB tmpfs로 유지하고 `nosuid,nodev`를 적용하되, checkout에

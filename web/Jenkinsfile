@@ -12,6 +12,47 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
+                // 이전 중단 빌드가 checkout 전에 남긴 root-owned 로컬 MQTT 자산만
+                // DinD root helper로 workspace 소유자에게 되돌린다. 저장소 source나
+                // 다른 build 산출물은 이 복구 범위에 포함하지 않는다.
+                sh '''
+                    set -eu
+
+                    workspace_uid="$(id -u)"
+                    workspace_gid="$(id -g)"
+                    for mqtt_local in \
+                        "$WORKSPACE/web/infra/mosquitto/local" \
+                        "$WORKSPACE/infra/mosquitto/local"
+                    do
+                        [ -d "$mqtt_local" ] || continue
+                        docker run --rm \
+                            --user 0:0 \
+                            --network none \
+                            --read-only \
+                            --cap-drop ALL \
+                            --cap-add CHOWN \
+                            --cap-add DAC_OVERRIDE \
+                            --cap-add FOWNER \
+                            --security-opt no-new-privileges:true \
+                            --env WORKSPACE_UID="$workspace_uid" \
+                            --env WORKSPACE_GID="$workspace_gid" \
+                            --volume "$mqtt_local:/mqtt-local" \
+                            --entrypoint /bin/sh \
+                            eclipse-mosquitto:2.1.2-alpine \
+                            -ec '
+                                for target in /mqtt-local/ca /mqtt-local/runtime
+                                do
+                                    [ -d "$target" ] || continue
+                                    [ ! -L "$target" ] || {
+                                        echo "Refusing symlinked MQTT workspace target: $target" >&2
+                                        exit 1
+                                    }
+                                    chown -R "$WORKSPACE_UID:$WORKSPACE_GID" "$target"
+                                    chmod -R u+rwX "$target"
+                                done
+                            '
+                    done
+                '''
                 checkout scm
                 script {
                     // 저장소 root가 common-proj인 경우와 web 자체인 경우를 모두 지원한다.
@@ -366,6 +407,46 @@ pipeline {
                         sh 'docker compose down --volumes --remove-orphans || true'
                     }
                 }
+                // mqtt-init가 자산 생성 도중 실패해도 post deleteDir()가 다시 막히지
+                // 않도록 checkout 전과 같은 제한 범위 복구를 적용한다.
+                sh '''
+                    set -eu
+
+                    workspace_uid="$(id -u)"
+                    workspace_gid="$(id -g)"
+                    for mqtt_local in \
+                        "$WORKSPACE/web/infra/mosquitto/local" \
+                        "$WORKSPACE/infra/mosquitto/local"
+                    do
+                        [ -d "$mqtt_local" ] || continue
+                        docker run --rm \
+                            --user 0:0 \
+                            --network none \
+                            --read-only \
+                            --cap-drop ALL \
+                            --cap-add CHOWN \
+                            --cap-add DAC_OVERRIDE \
+                            --cap-add FOWNER \
+                            --security-opt no-new-privileges:true \
+                            --env WORKSPACE_UID="$workspace_uid" \
+                            --env WORKSPACE_GID="$workspace_gid" \
+                            --volume "$mqtt_local:/mqtt-local" \
+                            --entrypoint /bin/sh \
+                            eclipse-mosquitto:2.1.2-alpine \
+                            -ec '
+                                for target in /mqtt-local/ca /mqtt-local/runtime
+                                do
+                                    [ -d "$target" ] || continue
+                                    [ ! -L "$target" ] || {
+                                        echo "Refusing symlinked MQTT workspace target: $target" >&2
+                                        exit 1
+                                    }
+                                    chown -R "$WORKSPACE_UID:$WORKSPACE_GID" "$target"
+                                    chmod -R u+rwX "$target"
+                                done
+                            '
+                    done
+                '''
             }
         }
         cleanup {

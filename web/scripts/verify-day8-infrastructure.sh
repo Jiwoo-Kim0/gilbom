@@ -152,6 +152,22 @@ assert_contains scripts/verify-production-runtime.sh \
 assert_not_contains scripts/verify-production-runtime.sh \
   'CHECK_DIR="$(mktemp -d)"' \
   "production runtime verification must not bind Jenkins-local /tmp paths"
+[ "$(grep -Fc -- '--volume "$mqtt_local:/mqtt-local"' Jenkinsfile)" -eq 2 ] \
+  || fail "Jenkins must repair stale MQTT bind ownership before checkout and cleanup"
+[ "$(grep -Fc -- 'for target in /mqtt-local/ca /mqtt-local/runtime' Jenkinsfile)" -eq 2 ] \
+  || fail "Jenkins MQTT ownership repair must remain limited to ignored generated assets"
+[ "$(grep -Fc -- 'chown -R "$WORKSPACE_UID:$WORKSPACE_GID" "$target"' Jenkinsfile)" -eq 2 ] \
+  || fail "Jenkins MQTT ownership repair must return assets to the workspace owner"
+assert_not_contains Jenkinsfile \
+  '--volume "$WORKSPACE:/workspace"' \
+  "Jenkins ownership repair must not mount the complete workspace"
+repair_line="$(grep -nF -- '--volume "$mqtt_local:/mqtt-local"' Jenkinsfile \
+  | sed -n '1s/:.*//p')"
+checkout_line="$(grep -nF -- 'checkout scm' Jenkinsfile | sed -n '1s/:.*//p')"
+[ -n "$repair_line" ] \
+  && [ -n "$checkout_line" ] \
+  && [ "$repair_line" -lt "$checkout_line" ] \
+  || fail "stale MQTT ownership must be repaired before checkout"
 assert_contains compose.yaml \
   '-i gilbom-local-broker-health' \
   "local Mosquitto must expose a TLS and authenticated Docker healthcheck"
