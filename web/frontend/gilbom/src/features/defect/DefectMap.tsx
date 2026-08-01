@@ -303,6 +303,7 @@ export function DefectMap({
               defectId={selectedDefectId}
               onClose={() => onSelect(null)}
               onChanged={onChanged}
+              onSelectDefect={onSelect}
             />
           )}
         </div>

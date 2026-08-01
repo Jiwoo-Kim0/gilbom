@@ -142,12 +142,15 @@ interface DefectDetailCardProps {
   onClose: () => void
   /** 상태를 바꾸면 목록·지도를 다시 읽어야 한다. */
   onChanged: () => void
+  /** 병합된 결함에서 대표 결함으로 이동할 때 쓴다. */
+  onSelectDefect: (defectId: string) => void
 }
 
 export function DefectDetailCard({
   defectId,
   onClose,
   onChanged,
+  onSelectDefect,
 }: DefectDetailCardProps) {
   const navigate = useNavigate()
   const { user } = useAuthentication()
@@ -262,9 +265,10 @@ export function DefectDetailCard({
     : []
   // 수정을 막는 사유. null이면 수정할 수 있다. 서버 requireChangeable와 같은 규칙이라
   // 여기서 걸러내면 저장 눌러서 409를 받는 일이 없다.
+  const mergedInto = detail?.mergedIntoDefectId ?? null
   const notEditable: string | null = (() => {
     if (defect === null) return '불러오는 중입니다.'
-    if (detail?.mergedIntoDefectId != null) {
+    if (mergedInto !== null) {
       return '병합된 결함은 대표 결함에서 수정해야 합니다.'
     }
     if (isTerminal(defect.workflowStatus)) {
@@ -518,6 +522,33 @@ export function DefectDetailCard({
                 )}
               </dd>
             </div>
+            {detail !== null && detail.mergedDefectIds.length > 0 && (
+              <div>
+                <dt>병합</dt>
+                <dd>
+                  다른 결함 {detail.mergedDefectIds.length}건을 흡수한 대표 결함
+                  <span className="defect-card-coord">
+                    관측 {defect.observationCount}회는 흡수된 결함까지 합산한
+                    값입니다.
+                  </span>
+                </dd>
+              </div>
+            )}
+            {mergedInto !== null && (
+              <div>
+                <dt>병합</dt>
+                <dd>
+                  다른 결함으로 병합됨
+                  <button
+                    type="button"
+                    className="defect-card-link"
+                    onClick={() => onSelectDefect(mergedInto)}
+                  >
+                    대표 결함 열기
+                  </button>
+                </dd>
+              </div>
+            )}
             <div>
               <dt>처리 상태</dt>
               <dd>

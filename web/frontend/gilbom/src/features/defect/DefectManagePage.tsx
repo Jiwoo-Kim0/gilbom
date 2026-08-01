@@ -4,8 +4,11 @@ import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { DefectFilter } from './DefectFilter'
 import { DefectList } from './DefectList'
 import { DefectMap } from './DefectMap'
+import { DefectMergeModal } from './DefectMergeModal'
 import { getDefects } from './defectApi'
 import { useDefectRealtime } from './useDefectRealtime'
+import { useAuthentication } from '../auth/authenticationContext'
+import { DEFECT_MERGE, hasPermission } from '../auth/permissions'
 import {
   DEFECT_TYPE_LABELS,
   EMPTY_DEFECT_FILTERS,
@@ -82,6 +85,12 @@ export function DefectManagePage() {
 
   const [selectedDefectId, setSelectedDefectId] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
+  const [checkedIds, setCheckedIds] = useState<string[]>([])
+  const [merging, setMerging] = useState(false)
+  const [mergeNotice, setMergeNotice] = useState<string | null>(null)
+
+  const { user } = useAuthentication()
+  const canMerge = hasPermission(user?.permissions ?? [], DEFECT_MERGE)
 
   /**
    * 조회 조건 하나로 요약한 키다. 로딩 여부를 state로 따로 두지 않고 "마지막으로
@@ -138,6 +147,23 @@ export function DefectManagePage() {
   const refresh = useCallback(() => {
     setReloadToken((token) => token + 1)
   }, [])
+
+  const toggleCheck = useCallback((defectId: string) => {
+    setCheckedIds((previous) =>
+      previous.includes(defectId)
+        ? previous.filter((value) => value !== defectId)
+        : [...previous, defectId],
+    )
+  }, [])
+
+  // 페이지·필터가 바뀌면 화면에 없는 결함이 선택으로 남는다. 보이는 것만 유지한다.
+  const visibleIds = result?.content.map((defect) => defect.defectId) ?? []
+  const checkedVisible = checkedIds.filter((defectId) =>
+    visibleIds.includes(defectId),
+  )
+  const checkedDefects = (result?.content ?? []).filter((defect) =>
+    checkedVisible.includes(defect.defectId),
+  )
 
   // 실시간 알림은 "다시 읽어라"만 알려준다. 데이터는 목록·지도가 각자 다시 읽는다.
   const { status: streamStatus, lastEvent } = useDefectRealtime(refresh)
@@ -199,17 +225,72 @@ export function DefectManagePage() {
           onChanged={refresh}
         />
       </div>
+      {canMerge && checkedVisible.length > 0 && (
+        <div className="defect-merge-bar" role="status">
+          <span>{checkedVisible.length}건 선택됨</span>
+          <div className="defect-merge-bar-actions">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => setCheckedIds([])}
+            >
+              선택 해제
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              // 한 건만 고르면 합칠 상대가 없다.
+              disabled={checkedVisible.length < 2}
+              onClick={() => setMerging(true)}
+            >
+              병합
+            </button>
+          </div>
+        </div>
+      )}
+
+      {mergeNotice !== null && (
+        <p className="defect-toast" role="status">
+          {mergeNotice}
+        </p>
+      )}
+
       <DefectList
         page={result}
         loading={loading}
         error={error}
         sort={sort}
         selectedDefectId={selectedDefectId}
+        selectable={canMerge}
+        checkedIds={checkedVisible}
         onSortChange={changeSort}
         onPageChange={changePage}
         onSelect={setSelectedDefectId}
+        onToggleCheck={toggleCheck}
         onRetry={() => setReloadToken((token) => token + 1)}
       />
+
+      {merging && (
+        <DefectMergeModal
+          defects={checkedDefects}
+          onClose={() => setMerging(false)}
+          onMerged={(mergeResult) => {
+            setCheckedIds([])
+            // 흡수된 결함이 열려 있으면 목록에서 사라지므로 상세도 닫는다.
+            if (
+              selectedDefectId !== null
+              && mergeResult.mergedDefectIds.includes(selectedDefectId)
+            ) {
+              setSelectedDefectId(mergeResult.targetDefectId)
+            }
+            setMergeNotice(
+              `${mergeResult.mergedDefectIds.length}건을 병합했습니다. `
+              + `대표 결함의 관측은 ${mergeResult.observationCount}회입니다.`,
+            )
+            refresh()
+          }}
+        />
+      )}
     </section>
   )
 }
