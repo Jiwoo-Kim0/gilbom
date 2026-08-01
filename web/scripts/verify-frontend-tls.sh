@@ -161,6 +161,40 @@ health_body="$(
 [ "$health_body" = ok ] \
   || fail "HTTPS /healthz response changed"
 
+https_headers="$(
+  docker exec "$FRONTEND_CONTAINER" \
+    wget \
+      --server-response \
+      --spider \
+      --no-check-certificate \
+      https://127.0.0.1:8443/healthz 2>&1
+)"
+for required_header in \
+  'Strict-Transport-Security: max-age=31536000' \
+  'X-Content-Type-Options: nosniff' \
+  'X-Frame-Options: DENY' \
+  'Referrer-Policy: no-referrer' \
+  'Permissions-Policy: camera=()' \
+  "Content-Security-Policy: default-src 'self'"
+do
+  printf '%s\n' "$https_headers" \
+    | grep -Fiq "$required_header" \
+    || fail "HTTPS security header is missing: $required_header"
+done
+csp="$(
+  printf '%s\n' "$https_headers" \
+    | sed -n 's/^[[:space:]]*[Cc]ontent-[Ss]ecurity-[Pp]olicy:[[:space:]]*//p' \
+    | tr -d '\r' \
+    | head -n 1
+)"
+printf '%s\n' "$csp" | grep -Fq 'https://nrbe.pstatic.net' \
+  || fail "Naver runtime style JSON host is missing from CSP"
+printf '%s\n' "$csp" | grep -Fq 'https://oapi.map.naver.com' \
+  || fail "Naver Maps SDK host is missing from CSP"
+if printf '%s\n' "$csp" | grep -Fq 'http://'; then
+  fail "CSP permits plaintext HTTP sources"
+fi
+
 api_body="$(
   docker exec "$FRONTEND_CONTAINER" \
     wget \
@@ -176,6 +210,8 @@ docker exec "$FRONTEND_CONTAINER" /bin/sh -ec '
   nginx -T 2>&1 | grep -Fq "listen 8443 ssl;"
   nginx -T 2>&1 | grep -Fq "ssl_protocols TLSv1.2 TLSv1.3;"
   nginx -T 2>&1 | grep -Fq "Strict-Transport-Security"
+  nginx -T 2>&1 | grep -Fq "style-src '\''self'\''"
+  ! nginx -T 2>&1 | grep -Fq "unsafe-inline"
   /usr/local/bin/gilbom-nginx-configure reload
 '
 

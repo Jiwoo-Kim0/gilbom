@@ -1,7 +1,7 @@
 # Jenkins pipeline
 
-`Jenkinsfile`은 Day 2에서 필요한 빌드·테스트·로컬 통합 검증의 초안이다.
-Registry push와 운영 배포는 의도적으로 포함하지 않았다.
+`Jenkinsfile`은 build·test·통합 검증의 정본이다. Registry push와 운영 배포는
+승인 경계로 남겨 pipeline에 포함하지 않았다.
 
 ## 설계 이유
 
@@ -49,12 +49,22 @@ Registry push와 운영 배포는 의도적으로 포함하지 않았다.
 
 ## Jenkins agent prerequisites
 
-- Docker Engine과 Docker Compose v2
+- `compose.jenkins.yaml`의 Jenkins 2.555.3 LTS와 TLS DinD 29.6.2
 - Git
 - OpenSSL
 - Python 3(표준 라이브러리 smoke client)
 - Docker Scout 권장. release에서 SBOM을 강제할 agent는 필수
-- Docker daemon을 사용할 수 있는 전용 Linux agent
+- `/opt/jenkins/home` 영속 경로
+
+운영 Jenkins는 초기화 스크립트로 Executor를 1개로 고정하고
+`COMPOSE_PARALLEL_LIMIT=1`을 적용하며 DinD container도 하나만 실행한다.
+Jenkins UI는 기본 `127.0.0.1:8081`, Docker TLS 2376은 host에 publish하지 않는다.
+`Jenkinsfile`은 host Docker socket 개발 환경과 TLS DinD를 모두 지원하지만 운영
+Compose는 host socket을 mount하지 않는다.
+
+각 build는 `.artifacts/runtime/build-resources.txt`에 메모리, root filesystem,
+Docker storage와 실행 container 사용량을 기록한다. 이 artifact를 보고 15GB
+host에서 Jenkins 2GB, DinD 4GB 상한과 build cache 정리 주기를 조정한다.
 
 실제 GMS canary는 비용·외부 전송·Secret 승인이 필요한 운영 확인이므로 기본
 Jenkins stage에서는 실행하지 않는다. 승인된 별도 canary Job에서만
@@ -71,6 +81,5 @@ Credential과 Jenkins Job 설정 권한이 필요하다. 현재 pipeline은 imag
 ## 의도적으로 남긴 다음 단계
 
 - GitLab webhook 또는 multibranch pipeline 연결
-- Jenkins agent label과 resource 제한 확정
 - Container Registry 주소·Credential 확정 후 push stage 추가
 - 배포 대상과 승인 정책 확정 후 deploy stage 추가

@@ -175,6 +175,31 @@ docker exec "$mqtt_id" /bin/sh -ec '
   done
 '
 
+# 빈 volume에 적용된 PostGIS, Flyway V1~V34, 승인된 시스템 seed와
+# runtime DB role의 최소 권한을 실제 PostgreSQL parser/권한으로 검증한다.
+compose exec -T db /bin/sh -ec '
+  export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+  exec psql \
+    --host 127.0.0.1 \
+    --username "$POSTGRES_USER" \
+    --dbname "$POSTGRES_DB" \
+    --no-password \
+    --set "flyway_role=$POSTGRES_FLYWAY_USER" \
+    --set "application_role=$POSTGRES_APP_USER"
+' < infra/postgres/verify-empty-database.sql \
+  || fail "empty database migration contract failed"
+compose exec -T db /bin/sh -ec '
+  export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+  exec psql \
+    --host 127.0.0.1 \
+    --username "$POSTGRES_USER" \
+    --dbname "$POSTGRES_DB" \
+    --no-password \
+    --set "flyway_role=$POSTGRES_FLYWAY_USER" \
+    --set "application_role=$POSTGRES_APP_USER"
+' < infra/postgres/verify-production-database.sql \
+  || fail "production database seed or role contract failed"
+
 credential_checksum_before="$(
   docker exec "$backend_id" \
     sha256sum /app/config/mqtt/credentials/passwd \

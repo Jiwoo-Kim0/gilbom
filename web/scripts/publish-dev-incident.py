@@ -39,8 +39,6 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-import paho.mqtt.client as mqtt
-
 #: 계약 2.0의 필수 범위. 서버가 @Min(60) @Max(300)으로 검증한다.
 DEFAULT_TTL_SEC = 300
 #: zone_id는 ^[A-Z]-[0-9]{2}$ 여야 하고 patrol_area.area_code와 같아야 한다.
@@ -134,9 +132,18 @@ def incident_payload(arguments, event_id: str, image_id: str | None) -> dict:
     }
 
 
-def upload_image(arguments, event_id: str) -> str:
+def upload_image(arguments, event_id: str) -> tuple[int, str]:
     """POST /api/v1/images. Incident와 같은 event_id를 써야 서버가 연결한다."""
     content = Path(arguments.image).read_bytes()
+    if not content.startswith(b"\xff\xd8") or not content.endswith(b"\xff\xd9"):
+        print("image upload failed: 파일이 JPEG 형식이 아닙니다.", file=sys.stderr)
+        raise SystemExit(2)
+    if len(content) > 512_000:
+        print(
+            f"image upload failed: JPEG가 500KB 상한을 초과합니다 ({len(content)} bytes).",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
     boundary = "----gilbom" + uuid.uuid4().hex
     parts: list[bytes] = []
 
@@ -167,6 +174,7 @@ def upload_image(arguments, event_id: str) -> str:
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
             body = json.loads(response.read())
+            status = response.status
     except urllib.error.HTTPError as error:
         print(
             f"image upload failed: HTTP {error.code} {error.read()[:300]!r}",
@@ -174,8 +182,14 @@ def upload_image(arguments, event_id: str) -> str:
         )
         raise SystemExit(1) from error
     image_id = body.get("imageId")
-    print(f"uploaded image_id={image_id}")
-    return image_id
+    if status not in (200, 201) or not image_id:
+        print(
+            f"image upload failed: unexpected response status={status}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    print(f"uploaded status={status} image_id={image_id}")
+    return status, image_id
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -211,21 +225,51 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--image-api",
                         default="http://localhost:8080/api/v1/images")
     parser.add_argument("--api-key", default=os.getenv("GILBOM_ROBOT_API_KEY"))
+    parser.add_argument(
+        "--api-key-file",
+        type=Path,
+        help="이미지 X-API-Key 파일. 운영 점검에서는 환경변수·명령 인자보다 이 옵션을 사용한다",
+    )
     parser.add_argument("--robot-id", default=os.getenv("GILBOM_ROBOT_ID"),
                         help="이미지 업로드용 robot.robot_id (UUID)")
+    parser.add_argument(
+        "--mqtt-password-file",
+        type=Path,
+        help="MQTT 비밀번호 파일. 운영 점검에서는 MQTT_PASSWORD 환경변수보다 이 옵션을 사용한다",
+    )
+    parser.add_argument(
+        "--verify-image-idempotency",
+        action="store_true",
+        help="같은 event_id로 두 번 업로드해 최초 201, 재업로드 200과 같은 imageId를 검증한다",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     arguments = parse_arguments()
+    try:
+        import paho.mqtt.client as mqtt
+    except ModuleNotFoundError:
+        print(
+            "paho-mqtt가 필요합니다. runbook의 격리 Python 컨테이너 명령을 사용하세요.",
+            file=sys.stderr,
+        )
+        return 2
+    if arguments.api_key_file:
+        arguments.api_key = arguments.api_key_file.read_text().strip()
     if arguments.image and not (arguments.api_key and arguments.robot_id):
-        print("--image를 쓰려면 --api-key와 --robot-id가 필요합니다.",
+        print("--image를 쓰려면 --api-key-file과 --robot-id가 필요합니다.",
               file=sys.stderr)
         return 2
 
-    password = os.getenv("MQTT_PASSWORD")
+    password = (
+        arguments.mqtt_password_file.read_text().strip()
+        if arguments.mqtt_password_file
+        else os.getenv("MQTT_PASSWORD")
+    )
     if not password:
-        print("MQTT_PASSWORD 환경변수가 필요합니다.", file=sys.stderr)
+        print("--mqtt-password-file 또는 MQTT_PASSWORD 환경변수가 필요합니다.",
+              file=sys.stderr)
         return 2
 
     client = mqtt.Client(
@@ -247,9 +291,26 @@ def main() -> int:
     try:
         for index in range(arguments.count):
             event_id = str(uuid.uuid4())
-            image_id = (
-                upload_image(arguments, event_id) if arguments.image else None
-            )
+            image_id = None
+            if arguments.image:
+                first_status, image_id = upload_image(arguments, event_id)
+                if arguments.verify_image_idempotency:
+                    second_status, second_image_id = upload_image(
+                        arguments, event_id
+                    )
+                    if (
+                        first_status != 201
+                        or second_status != 200
+                        or second_image_id != image_id
+                    ):
+                        print(
+                            "image idempotency failed: "
+                            f"first={first_status} second={second_status} "
+                            f"same_image={second_image_id == image_id}",
+                            file=sys.stderr,
+                        )
+                        return 1
+                    print("image-idempotency=PASS")
             arguments.current_lat, arguments.current_lon = spread_position(
                 arguments, index)
             arguments.current_damage_ratio = (
@@ -267,6 +328,11 @@ def main() -> int:
             info.wait_for_publish(timeout=10)
             print(f"published seq={payload['seq']} event_id={event_id} "
                   f"image_id={image_id} zone={payload['location']['zone_id']}")
+            if image_id:
+                print(
+                    "day8-result "
+                    f"event_id={event_id} image_id={image_id}"
+                )
             # seq는 boot_id 안에서 단조 증가해야 한다. 서버가 재전송·역행을 거른다.
             arguments.seq += 1
             if index + 1 < arguments.count:

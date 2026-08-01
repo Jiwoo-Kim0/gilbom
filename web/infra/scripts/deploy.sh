@@ -11,7 +11,9 @@ RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-}"
 IMAGE_ENV_FILE="${IMAGE_ENV_FILE:-}"
 RELEASE_DIR="${RELEASE_DIR:-$PROJECT_DIR/.artifacts/releases}"
 IMAGE_SCANNER_MODE="${IMAGE_SCANNER_MODE:-required}"
+SECRET_SCAN_DIR="${SECRET_SCAN_DIR:-$PROJECT_DIR/secrets}"
 ALLOW_MUTABLE_IMAGE_TAGS="${ALLOW_MUTABLE_IMAGE_TAGS:-false}"
+EXPECTED_GIT_REVISION="${EXPECTED_GIT_REVISION:-}"
 DEPLOY_PULL="${DEPLOY_PULL:-false}"
 CHECK_DIR="$(mktemp -d)"
 
@@ -89,8 +91,27 @@ assert_immutable_application_image() {
       | grep -Eq '@sha256:[0-9a-f]{64}$'; then
     return 0
   fi
+  image_revision="$(
+    printf '%s\n' "$image" \
+      | sed -n 's/^.*:\([0-9a-f]\{40\}\)$/\1/p'
+  )"
+  if [ -n "$image_revision" ]; then
+    expected_revision="$EXPECTED_GIT_REVISION"
+    if [ -z "$expected_revision" ]; then
+      expected_revision="$(
+        git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null \
+          || true
+      )"
+    fi
+    printf '%s\n' "$expected_revision" \
+      | grep -Eq '^[0-9a-f]{40}$' \
+      || fail "EXPECTED_GIT_REVISION is required for an offline Commit SHA image"
+    [ "$image_revision" = "$expected_revision" ] \
+      || fail "$role image tag does not match EXPECTED_GIT_REVISION"
+    return 0
+  fi
   [ "$ALLOW_MUTABLE_IMAGE_TAGS" = true ] \
-    || fail "$role image must be pinned by digest"
+    || fail "$role image must be pinned by digest or a verified full Commit SHA"
   echo "WARNING: $role uses a mutable image reference" >&2
 }
 
@@ -155,6 +176,7 @@ BACKEND_IMAGE="$backend_image" \
 FRONTEND_IMAGE="$frontend_image" \
 IMAGE_SCANNER_MODE="$IMAGE_SCANNER_MODE" \
 IMAGE_VERIFY_MODE=static \
+SECRET_SCAN_DIR="$SECRET_SCAN_DIR" \
   sh "$PROJECT_DIR/scripts/verify-production-images.sh"
 
 # Flyway가 실행된 뒤의 자동 image rollback은 migration 호환성을 보장할 수 없다.

@@ -12,6 +12,7 @@ IMAGE_ENV_FILE="${IMAGE_ENV_FILE:-}"
 RELEASE_DIR="${RELEASE_DIR:-$PROJECT_DIR/.artifacts/releases}"
 PREVIOUS_BACKEND_IMAGE="${PREVIOUS_BACKEND_IMAGE:-}"
 PREVIOUS_FRONTEND_IMAGE="${PREVIOUS_FRONTEND_IMAGE:-}"
+PREVIOUS_GIT_REVISION="${PREVIOUS_GIT_REVISION:-}"
 ROLLBACK_APPROVED="${ROLLBACK_APPROVED:-false}"
 ROLLBACK_PULL="${ROLLBACK_PULL:-false}"
 
@@ -26,12 +27,24 @@ fail() {
   exit 1
 }
 
-require_digest() {
+require_immutable_image() {
   image="$1"
   role="$2"
-  printf '%s\n' "$image" \
-    | grep -Eq '@sha256:[0-9a-f]{64}$' \
-    || fail "$role rollback image must be pinned by digest"
+  if printf '%s\n' "$image" \
+      | grep -Eq '@sha256:[0-9a-f]{64}$'; then
+    return 0
+  fi
+  image_revision="$(
+    printf '%s\n' "$image" \
+      | sed -n 's/^.*:\([0-9a-f]\{40\}\)$/\1/p'
+  )"
+  [ -n "$image_revision" ] \
+    || fail "$role rollback image must be pinned by digest or full Commit SHA"
+  printf '%s\n' "$PREVIOUS_GIT_REVISION" \
+    | grep -Eq '^[0-9a-f]{40}$' \
+    || fail "PREVIOUS_GIT_REVISION is required for offline Commit SHA rollback"
+  [ "$image_revision" = "$PREVIOUS_GIT_REVISION" ] \
+    || fail "$role rollback image tag does not match PREVIOUS_GIT_REVISION"
 }
 
 [ "$ROLLBACK_APPROVED" = true ] \
@@ -52,8 +65,8 @@ fi
   || fail "PREVIOUS_BACKEND_IMAGE is required"
 [ -n "$PREVIOUS_FRONTEND_IMAGE" ] \
   || fail "PREVIOUS_FRONTEND_IMAGE is required"
-require_digest "$PREVIOUS_BACKEND_IMAGE" Backend
-require_digest "$PREVIOUS_FRONTEND_IMAGE" Frontend
+require_immutable_image "$PREVIOUS_BACKEND_IMAGE" Backend
+require_immutable_image "$PREVIOUS_FRONTEND_IMAGE" Frontend
 umask 077
 
 compose() {

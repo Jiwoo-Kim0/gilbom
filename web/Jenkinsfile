@@ -101,6 +101,7 @@ pipeline {
                         sh scripts/verify-secret-boundary.sh
                         sh scripts/verify-production-compose.sh
                         sh scripts/verify-certbot-automation.sh
+                        sh scripts/verify-day8-infrastructure.sh
                         sh -n infra/scripts/*.sh
                         test -s docs/production-deployment-runbook.md
                         test -s docs/day7-completion-freeze.md
@@ -123,26 +124,45 @@ pipeline {
                         set -eu
 
                         project_dir="$(pwd)"
-                        docker_socket_gid="$(
-                            stat -c '%g' /var/run/docker.sock
-                        )"
 
-                        # Docker build 내부에서는 Testcontainers가 DB 테스트를
-                        # 건너뛸 수 있으므로 socket을 연결한 별도 단계에서 전체
-                        # test와 Day 4 acceptance를 실행한다. test task는 skip도
-                        # 실패로 처리한다.
-                        docker run --rm \
-                            --user "$(id -u):$(id -g)" \
-                            --group-add "$docker_socket_gid" \
-                            --add-host host.docker.internal:host-gateway \
-                            --env DOCKER_HOST=unix:///var/run/docker.sock \
-                            --env TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock \
-                            --env TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal \
-                            --volume /var/run/docker.sock:/var/run/docker.sock \
-                            --volume "$project_dir/backend:$project_dir/backend" \
-                            --workdir "$project_dir/backend" \
-                            amazoncorretto:21.0.12-alpine3.22 \
-                            sh ./gradlew test securityAcceptanceTest --no-daemon
+                        # 개발자 host socket과 운영 Jenkins의 TLS DinD를 모두
+                        # 지원한다. 어느 경로든 Testcontainers가 실제 DB를
+                        # 기동하며 test skip은 실패로 처리한다.
+                        if [ -S /var/run/docker.sock ]; then
+                            docker_socket_gid="$(
+                                stat -c '%g' /var/run/docker.sock
+                            )"
+                            docker run --rm \
+                                --user "$(id -u):$(id -g)" \
+                                --group-add "$docker_socket_gid" \
+                                --add-host host.docker.internal:host-gateway \
+                                --env DOCKER_HOST=unix:///var/run/docker.sock \
+                                --env TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock \
+                                --env TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal \
+                                --volume /var/run/docker.sock:/var/run/docker.sock \
+                                --volume "$project_dir/backend:$project_dir/backend" \
+                                --workdir "$project_dir/backend" \
+                                amazoncorretto:21.0.12-alpine3.22 \
+                                sh ./gradlew test securityAcceptanceTest --no-daemon
+                        else
+                            test -n "${DOCKER_HOST:-}"
+                            test "${DOCKER_TLS_VERIFY:-}" = "1"
+                            test -r "${DOCKER_CERT_PATH:-/certs/client}/ca.pem"
+                            ci_network="${CI_DOCKER_NETWORK:-gilbom-ci}"
+
+                            docker run --rm \
+                                --user "$(id -u):$(id -g)" \
+                                --network "$ci_network" \
+                                --env DOCKER_HOST="$DOCKER_HOST" \
+                                --env DOCKER_TLS_VERIFY=1 \
+                                --env DOCKER_CERT_PATH=/certs/client \
+                                --env TESTCONTAINERS_HOST_OVERRIDE=docker \
+                                --volume /certs/client:/certs/client:ro \
+                                --volume "$project_dir/backend:$project_dir/backend" \
+                                --workdir "$project_dir/backend" \
+                                amazoncorretto:21.0.12-alpine3.22 \
+                                sh ./gradlew test securityAcceptanceTest --no-daemon
+                        fi
                     '''
                 }
             }
@@ -211,7 +231,7 @@ pipeline {
                             wget -qO- http://127.0.0.1:8080/robots \
                             | grep -F '<div id="root"></div>'
 
-                        # 빈 DB의 extension, V1~V4, RBAC seed와 runtime 최소 권한을 계약 SQL로 확인한다.
+                        # 빈 DB의 extension, V1~V34, RBAC seed와 runtime 최소 권한을 계약 SQL로 확인한다.
                         docker compose exec -T db sh -ec '
                             export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
                             psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
@@ -252,6 +272,34 @@ pipeline {
                         # 요청 완료와 30초 내 graceful shutdown을 함께 검증한다.
                         sh scripts/verify-backend-graceful-shutdown.sh
                     '''
+                }
+            }
+        }
+
+        stage('Build resource evidence') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        mkdir -p .artifacts/runtime
+                        {
+                            date -u '+captured_at=%Y-%m-%dT%H:%M:%SZ'
+                            echo 'memory'
+                            free -h
+                            echo 'root-filesystem'
+                            df -h /
+                            echo 'docker-storage'
+                            docker system df
+                            echo 'running-container-usage'
+                            docker stats --no-stream \
+                                --format '{{.Name}} cpu={{.CPUPerc}} memory={{.MemUsage}} pids={{.PIDs}}'
+                        } > .artifacts/runtime/build-resources.txt
+                    '''
+                    archiveArtifacts(
+                            artifacts: '.artifacts/runtime/build-resources.txt',
+                            allowEmptyArchive: false,
+                            fingerprint: true
+                    )
                 }
             }
         }

@@ -5,6 +5,9 @@
 정본: `compose.prod.yaml`, `compose.build.yaml`, EC2의 `runtime.env`·`image.env`,
 Commit SHA image archive, `/opt/gilbom/secrets`
 
+Day 8의 Monitoring/Jenkins, EC2 자동 판정, 실제 이미지·PDF·지도 인수 절차는
+`docs/day8-completion-runbook.md`를 함께 따른다.
+
 ## 1. 운영 원칙
 
 - 운영 서버에서는 `compose.prod.yaml`만 사용한다. `compose.smoke.yaml`과

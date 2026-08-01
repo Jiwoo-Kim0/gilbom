@@ -1,0 +1,226 @@
+name: ${MONITORING_PROJECT_NAME:-gilbom-monitoring}
+
+x-logging: &monitoring-logging
+  driver: json-file
+  options:
+    max-size: "${MONITORING_LOG_MAX_SIZE:-10m}"
+    max-file: "${MONITORING_LOG_MAX_FILES:-3}"
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.13.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION_TIME:-15d}
+      - --storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-2GB}
+      - --web.enable-remote-write-receiver
+      - --web.enable-lifecycle
+    ports:
+      - "${MONITORING_BIND_ADDRESS:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./infra/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: "${PROMETHEUS_CPUS:-0.5}"
+    mem_limit: ${PROMETHEUS_MEMORY_LIMIT:-512m}
+    mem_reservation: ${PROMETHEUS_MEMORY_RESERVATION:-128m}
+    pids_limit: ${PROMETHEUS_PIDS_LIMIT:-128}
+    networks:
+      - monitoring
+    logging: *monitoring-logging
+
+  loki:
+    image: grafana/loki:3.7.2
+    restart: unless-stopped
+    command:
+      - -config.file=/etc/loki/loki.yml
+    ports:
+      - "${MONITORING_BIND_ADDRESS:-127.0.0.1}:${LOKI_PORT:-3100}:3100"
+    volumes:
+      - ./infra/monitoring/loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki_data:/loki
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: "${LOKI_CPUS:-0.5}"
+    mem_limit: ${LOKI_MEMORY_LIMIT:-512m}
+    mem_reservation: ${LOKI_MEMORY_RESERVATION:-128m}
+    pids_limit: ${LOKI_PIDS_LIMIT:-128}
+    networks:
+      - monitoring
+    logging: *monitoring-logging
+
+  grafana:
+    image: grafana/grafana:13.1.0
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+      - loki
+    environment:
+      GF_SERVER_HTTP_PORT: "3000"
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-gilbom-admin}
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_PLUGINS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_SECURITY_COOKIE_SECURE: ${GRAFANA_COOKIE_SECURE:-false}
+      GF_SECURITY_COOKIE_SAMESITE: strict
+    ports:
+      - "${MONITORING_BIND_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3001}:3000"
+    volumes:
+      - ./infra/monitoring/grafana/provisioning/datasources/gilbom.yml:/etc/grafana/provisioning/datasources/gilbom.yml:ro
+      - grafana_data:/var/lib/grafana
+    secrets:
+      - grafana_admin_password
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: "${GRAFANA_CPUS:-0.5}"
+    mem_limit: ${GRAFANA_MEMORY_LIMIT:-256m}
+    mem_reservation: ${GRAFANA_MEMORY_RESERVATION:-64m}
+    pids_limit: ${GRAFANA_PIDS_LIMIT:-128}
+    networks:
+      - monitoring
+    logging: *monitoring-logging
+
+  alloy-data-init:
+    image: grafana/alloy:v1.18.0
+    restart: "no"
+    user: "0:0"
+    entrypoint:
+      - /bin/sh
+      - -ec
+    command:
+      - |
+        chown -R 473:473 /var/lib/alloy/data /var/lib/alloy/log-data
+        chmod 0700 /var/lib/alloy/data
+        chmod 0700 /var/lib/alloy/log-data
+    volumes:
+      - alloy_data:/var/lib/alloy/data
+      - alloy_log_data:/var/lib/alloy/log-data
+    network_mode: none
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
+    cpus: "${ALLOY_INIT_CPUS:-0.25}"
+    mem_limit: ${ALLOY_INIT_MEMORY_LIMIT:-64m}
+    pids_limit: ${ALLOY_INIT_PIDS_LIMIT:-32}
+    logging: *monitoring-logging
+
+  alloy:
+    image: grafana/alloy:v1.18.0
+    restart: unless-stopped
+    user: "473:473"
+    command:
+      - run
+      - --disable-reporting
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    depends_on:
+      alloy-data-init:
+        condition: service_completed_successfully
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
+    ports:
+      - "${MONITORING_BIND_ADDRESS:-127.0.0.1}:${ALLOY_PORT:-12345}:12345"
+    volumes:
+      - ./infra/monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - alloy_data:/var/lib/alloy/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: "${ALLOY_CPUS:-0.5}"
+    mem_limit: ${ALLOY_MEMORY_LIMIT:-256m}
+    mem_reservation: ${ALLOY_MEMORY_RESERVATION:-64m}
+    pids_limit: ${ALLOY_PIDS_LIMIT:-128}
+    networks:
+      - monitoring
+    logging: *monitoring-logging
+
+  alloy-logs:
+    image: grafana/alloy:v1.18.0
+    restart: unless-stopped
+    user: "473:473"
+    command:
+      - run
+      - --disable-reporting
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/log-data
+      - /etc/alloy/config.alloy
+    depends_on:
+      alloy-data-init:
+        condition: service_completed_successfully
+      loki:
+        condition: service_started
+    volumes:
+      - ./infra/monitoring/alloy/config-logs.alloy:/etc/alloy/config.alloy:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - alloy_log_data:/var/lib/alloy/log-data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      # 이 프로세스에는 host /proc·/sys·root를 mount하지 않는다.
+      # Docker JSON log 디렉터리의 read-only 순회에만 사용한다.
+      - DAC_READ_SEARCH
+    security_opt:
+      - no-new-privileges:true
+    cpus: "${ALLOY_LOG_CPUS:-0.25}"
+    mem_limit: ${ALLOY_LOG_MEMORY_LIMIT:-128m}
+    mem_reservation: ${ALLOY_LOG_MEMORY_RESERVATION:-32m}
+    pids_limit: ${ALLOY_LOG_PIDS_LIMIT:-96}
+    networks:
+      - monitoring
+    logging: *monitoring-logging
+
+volumes:
+  prometheus_data:
+  loki_data:
+  grafana_data:
+  alloy_data:
+  alloy_log_data:
+
+secrets:
+  grafana_admin_password:
+    file: ${GRAFANA_ADMIN_PASSWORD_SECRET_FILE:?GRAFANA_ADMIN_PASSWORD_SECRET_FILE is required}
+
+networks:
+  monitoring:
+    internal: true

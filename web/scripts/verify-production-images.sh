@@ -53,7 +53,11 @@ collect_secret_patterns() {
 
   # PEM header/footer는 Secret 값이 아니다. 나머지 non-empty line은 모두
   # exact-match pattern으로 사용한다.
-  find "$directory" -type f -size +0c -exec awk '
+  find "$directory" \
+    -type f \
+    ! -name .gitignore \
+    -size +0c \
+    -exec awk '
     length($0) > 0 &&
     $0 !~ /^-----BEGIN [A-Z0-9 ]+-----$/ &&
     $0 !~ /^-----END [A-Z0-9 ]+-----$/ {
