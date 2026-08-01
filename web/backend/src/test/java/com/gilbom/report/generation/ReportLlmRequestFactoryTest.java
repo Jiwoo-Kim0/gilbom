@@ -6,7 +6,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -25,18 +24,14 @@ class ReportLlmRequestFactoryTest {
 
     private static final UUID USER_ID =
             UUID.fromString("7d273071-3ebf-4a0e-96e0-c6d9a623f799");
-    private static final Instant FROM = ReportLlmTestFixtures.FROM;
-    private static final Instant TO = ReportLlmTestFixtures.TO;
 
     @Test
     void readsOneTopImageWhenImagePolicyIsApproved() {
         DefectReportImageService imageService =
                 mock(DefectReportImageService.class);
-        when(imageService.findReportImages(
+        when(imageService.findReportImagesForDefect(
                 USER_ID,
-                FROM,
-                TO,
-                1))
+                ReportLlmTestFixtures.DEFECT_ID))
                 .thenReturn(List.of(image(
                         ReportLlmTestFixtures.DEFECT_ID,
                         "INC-20260715-000001",
@@ -51,11 +46,9 @@ class ReportLlmRequestFactoryTest {
                 USER_ID,
                 prepared());
 
-        verify(imageService).findReportImages(
+        verify(imageService).findReportImagesForDefect(
                 USER_ID,
-                FROM,
-                TO,
-                1);
+                ReportLlmTestFixtures.DEFECT_ID);
         assertThat(request.images()).hasSize(1);
         assertThat(request.images().getFirst().incidentCode())
                 .isEqualTo("INC-20260715-000001");
@@ -65,11 +58,9 @@ class ReportLlmRequestFactoryTest {
     void emptyImageResultKeepsTextOnlyGeneration() {
         DefectReportImageService imageService =
                 mock(DefectReportImageService.class);
-        when(imageService.findReportImages(
+        when(imageService.findReportImagesForDefect(
                 USER_ID,
-                FROM,
-                TO,
-                1))
+                ReportLlmTestFixtures.DEFECT_ID))
                 .thenReturn(List.of());
         ReportLlmRequestFactory factory =
                 new ReportLlmRequestFactory(
@@ -141,11 +132,9 @@ class ReportLlmRequestFactoryTest {
     void mismatchedImageClassificationIsNotSent() {
         DefectReportImageService imageService =
                 mock(DefectReportImageService.class);
-        when(imageService.findReportImages(
+        when(imageService.findReportImagesForDefect(
                 USER_ID,
-                FROM,
-                TO,
-                1))
+                ReportLlmTestFixtures.DEFECT_ID))
                 .thenReturn(List.of(image(
                         ReportLlmTestFixtures.DEFECT_ID,
                         "INC-20260715-000001",

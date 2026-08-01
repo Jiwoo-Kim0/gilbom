@@ -64,11 +64,21 @@ public class ReportGenerationDataService {
                 snapshot.evidence());
         Map<String, Object> evidenceSnapshot =
                 evidenceSnapshot(snapshot.evidenceMetadata());
-        String title = "%s~%s 이상 탐지 보고서".formatted(
-                TITLE_DATE.format(period.from()),
-                TITLE_DATE.format(period.to()));
-        String summary =
-                "선택한 기간의 접근 가능한 순찰·결함 통계를 정리한 보고서입니다.";
+        // 단건 보고서는 결함 코드를 제목에 넣어야 목록에서 구분된다.
+        String incidentCode = criteria.isSingleDefect()
+                ? snapshot.evidence().stream()
+                        .findFirst()
+                        .map(ReportLlmInput.DefectEvidence::incidentCode)
+                        .orElse(null)
+                : null;
+        String title = incidentCode != null
+                ? "%s 결함 보고서".formatted(incidentCode)
+                : "%s~%s 이상 탐지 보고서".formatted(
+                        TITLE_DATE.format(period.from()),
+                        TITLE_DATE.format(period.to()));
+        String summary = incidentCode != null
+                ? "결함 %s 한 건에 대한 보고서입니다.".formatted(incidentCode)
+                : "선택한 기간의 접근 가능한 순찰·결함 통계를 정리한 보고서입니다.";
         return new PreparedCreation(
                 criteria.toSnapshot(),
                 new ReportLlmPipelineRequest(

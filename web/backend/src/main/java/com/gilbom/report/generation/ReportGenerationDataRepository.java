@@ -249,6 +249,10 @@ public class ReportGenerationDataRepository {
                         visible.event_id
                     LIMIT 1
                 ) observation ON TRUE
+                -- 단건 보고서는 근거를 이 결함 하나로 고정한다. 통계 CTE는
+                -- visible_defects를 그대로 쓰므로 기간·구역 현황이 유지된다.
+                WHERE CAST(:defectId AS uuid) IS NULL
+                   OR defect.defect_id = CAST(:defectId AS uuid)
                 ORDER BY
                     CASE defect.risk_level
                         WHEN 'CRITICAL' THEN 4
@@ -405,7 +409,8 @@ public class ReportGenerationDataRepository {
                         .addValue(
                                 "workflowStatuses",
                                 nonEmptyNames(
-                                        criteria.workflowStatuses()));
+                                        criteria.workflowStatuses()))
+                        .addValue("defectId", criteria.defectId());
         return jdbcTemplate.queryForObject(
                 SNAPSHOT_SQL,
                 parameters,

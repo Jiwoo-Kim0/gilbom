@@ -36,6 +36,11 @@ export type ReportFilterCriteria = {
   robotIds?: string[]
   defectTypes?: DefectType[]
   workflowStatuses?: DefectWorkflowStatus[]
+  /**
+   * 지정하면 그 결함 한 건만 근거로 삼는 단건 보고서가 된다.
+   * 통계는 좁히지 않고 기간·구역 전체를 유지한다.
+   */
+  defectId?: string
 }
 
 export type ReportAggregateMetrics = {

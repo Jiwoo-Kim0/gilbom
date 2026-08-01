@@ -599,16 +599,14 @@ export function DefectDetailCard({
                 type="button"
                 className="secondary-button"
                 onClick={() => {
-                  // 보고서 편집 화면은 아직 이 값들을 읽지 않는다. 프리필이
-                  // 붙으면 그대로 쓰이도록 컨텍스트를 함께 넘겨 둔다.
+                  // 이 결함 한 건짜리 보고서를 만든다. 편집 화면이 defectId를
+                  // filterCriteria에 실어 보내면 서버가 근거를 이 결함으로 고정한다.
                   const params = new URLSearchParams({
                     defectId: defect.defectId,
+                    incidentCode: defect.incidentCode,
                     from: defect.firstSeenAt,
                     to: defect.lastSeenAt,
                   })
-                  if (defect.patrolAreaId) {
-                    params.set('patrolAreaId', defect.patrolAreaId)
-                  }
                   navigate(`/reports/new?${params}`)
                 }}
               >
