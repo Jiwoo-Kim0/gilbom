@@ -88,6 +88,10 @@ sh scripts/container-resilience-smoke.sh
 REPORT_SMOKE_SKIP_BUILD=true sh scripts/container-resilience-smoke.sh
 ```
 
+이 진입점은 `DOCKER_BIND_WORK_ROOT`를 보고서 smoke에 그대로 전달한다. 기본
+`.artifacts/docker-bind-work`는 Jenkins와 DinD가 함께 보는 workspace이며,
+원격 daemon 환경에서는 양쪽에서 같은 절대 경로로 보여야 한다.
+
 복원력 검증과 실제 GMS canary는 한 실행에서 함께 허용하지 않는다. 장애 검증은
 외부 network를 차단한 fake key만 사용하며 실제 provider 비용이나 데이터 전송을
 발생시키지 않는다.

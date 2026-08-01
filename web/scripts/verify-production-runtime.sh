@@ -1,9 +1,23 @@
 #!/bin/sh
 
 set -eu
+umask 077
 
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+PROJECT_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 PROJECT_NAME="gilbom-prod-runtime-check-$$"
-CHECK_DIR="$(mktemp -d)"
+DOCKER_BIND_WORK_ROOT="${DOCKER_BIND_WORK_ROOT:-.artifacts/docker-bind-work}"
+case "$DOCKER_BIND_WORK_ROOT" in
+  /*)
+    ;;
+  *)
+    DOCKER_BIND_WORK_ROOT="$PROJECT_DIR/$DOCKER_BIND_WORK_ROOT"
+    ;;
+esac
+mkdir -p "$DOCKER_BIND_WORK_ROOT"
+chmod 0700 "$DOCKER_BIND_WORK_ROOT"
+DOCKER_BIND_WORK_ROOT="$(CDPATH= cd -- "$DOCKER_BIND_WORK_ROOT" && pwd -P)"
+CHECK_DIR="$(mktemp -d "$DOCKER_BIND_WORK_ROOT/production-runtime.XXXXXX")"
 SECRET_DIR="$CHECK_DIR/secrets"
 CERTBOT_DIR="$CHECK_DIR/certbot"
 RUNTIME_ENV_FILE="$CHECK_DIR/runtime.env"
@@ -37,7 +51,6 @@ fail() {
 }
 
 trap cleanup EXIT HUP INT TERM
-umask 077
 install -d -m 0700 "$SECRET_DIR"
 install -d -m 0755 \
   "$CERTBOT_DIR/conf" \

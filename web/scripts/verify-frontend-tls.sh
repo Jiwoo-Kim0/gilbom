@@ -1,6 +1,7 @@
 #!/bin/sh
 
 set -eu
+umask 077
 
 IMAGE_NAME=${1:-gilbom-frontend:local}
 CHECK_PREFIX="gilbom-frontend-tls-check-$$"
@@ -8,8 +9,20 @@ NETWORK_NAME="${CHECK_PREFIX}-network"
 BACKEND_CONTAINER="${CHECK_PREFIX}-backend"
 FRONTEND_CONTAINER="${CHECK_PREFIX}-frontend"
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+PROJECT_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 MOCK_BACKEND_CONFIG="${SCRIPT_DIR}/fixtures/frontend-mock-backend.conf"
-CHECK_DIR="$(mktemp -d)"
+DOCKER_BIND_WORK_ROOT="${DOCKER_BIND_WORK_ROOT:-.artifacts/docker-bind-work}"
+case "$DOCKER_BIND_WORK_ROOT" in
+  /*)
+    ;;
+  *)
+    DOCKER_BIND_WORK_ROOT="$PROJECT_DIR/$DOCKER_BIND_WORK_ROOT"
+    ;;
+esac
+mkdir -p "$DOCKER_BIND_WORK_ROOT"
+chmod 0700 "$DOCKER_BIND_WORK_ROOT"
+DOCKER_BIND_WORK_ROOT="$(CDPATH= cd -- "$DOCKER_BIND_WORK_ROOT" && pwd -P)"
+CHECK_DIR="$(mktemp -d "$DOCKER_BIND_WORK_ROOT/frontend-tls.XXXXXX")"
 CERT_DIR="$CHECK_DIR/certs"
 WEBROOT_DIR="$CHECK_DIR/www"
 TOKEN=gilbom-acme-runtime-check

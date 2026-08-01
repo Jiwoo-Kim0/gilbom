@@ -211,7 +211,8 @@ pipeline {
                             IMAGE_SECURITY_OUTPUT_DIR=.artifacts/image-security \
                             IMAGE_SCANNER_MODE=auto \
                             sh scripts/verify-production-images.sh
-                        sh scripts/verify-frontend-tls.sh
+                        DOCKER_BIND_WORK_ROOT=.artifacts/docker-bind-work \
+                            sh scripts/verify-frontend-tls.sh
                     '''
                     archiveArtifacts(
                             artifacts: '.artifacts/image-security/**',
@@ -347,7 +348,8 @@ pipeline {
 
                         # 이미 검증·빌드한 운영 image로 보고서 전체 흐름에 이어
                         # PID/DB/MQTT/LLM 장애, 자동 재시작과 volume 영속성을 검증한다.
-                        REPORT_SMOKE_SKIP_BUILD=true \
+                        DOCKER_BIND_WORK_ROOT=.artifacts/docker-bind-work \
+                            REPORT_SMOKE_SKIP_BUILD=true \
                             sh scripts/container-resilience-smoke.sh
                     '''
                 }

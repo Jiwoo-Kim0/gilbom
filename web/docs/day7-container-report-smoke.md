@@ -75,6 +75,11 @@ sh scripts/container-report-smoke.sh
 REPORT_SMOKE_SKIP_BUILD=true sh scripts/container-report-smoke.sh
 ```
 
+임시 Secret과 인증서의 bind source는 기본적으로
+`.artifacts/docker-bind-work` 아래에 생성한다. Jenkins의 Docker client와 DinD
+daemon이 공유하는 workspace를 사용하므로 container 전용 `/tmp` 경로 차이로
+bind mount가 실패하지 않는다.
+
 성공 출력에는 Secret, password, CSRF/TOTP, session cookie, 보고서 본문을
 포함하지 않는다. 실패 시에도 고정 오류 코드와 제한된 container log만 사용한다.
 

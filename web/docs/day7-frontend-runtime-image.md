@@ -105,7 +105,10 @@ Frontend를 띄우고 다음을 실제 요청으로 검사한다.
 
 `scripts/verify-frontend-tls.sh`는 자체서명 임시 인증서로 bootstrap 제한,
 HTTP-01 파일 조회, HTTP 308 redirect, HTTPS API proxy, TLS 1.2·1.3와 Nginx
-reload를 별도로 검증한다.
+reload를 별도로 검증한다. 인증서와 ACME fixture는 기본적으로
+`.artifacts/docker-bind-work` 아래에 생성한다. 이 경로는 Jenkins와 TLS DinD
+daemon이 함께 보는 workspace라서 Jenkins container 전용 `/tmp`를 원격
+daemon의 bind source로 잘못 넘기지 않는다.
 
 | 검증 | 결과 |
 |---|---|

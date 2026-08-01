@@ -80,6 +80,12 @@ Image layer 검증의 `docker save` archive와 압축 해제본은 Jenkins의 25
 처리한다. Role별 검사가 끝나면 큰 archive를 즉시 지우고 pipeline 종료 시
 workspace cleanup으로 빈 작업 root까지 제거한다.
 
+Frontend TLS와 최종 보고서·복원력 smoke가 Docker container에 bind하는 임시
+인증서·Secret도 Jenkins container의 `/tmp`에 만들지 않는다. Jenkins와 DinD가
+같은 절대 경로로 보는 ignored workspace
+`.artifacts/docker-bind-work/`에서만 생성하고 각 검증 종료 시 해당 run
+directory를 삭제한다.
+
 Jenkins Git Client는 HTTPS Username/Password Credential을 전달하기 위한 일회성
 `askpass` script를 `java.io.tmpdir`에서 실행한다. Jenkins의 `/tmp`는 container
 종료 시 사라지는 256 MiB tmpfs로 유지하고 `nosuid,nodev`를 적용하되, checkout에

@@ -2,6 +2,7 @@
 
 set -eu
 set +x
+umask 077
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
@@ -11,7 +12,18 @@ RESILIENCE_COMPOSE="$PROJECT_DIR/compose.resilience.yaml"
 FIXTURE_SQL="$SCRIPT_DIR/fixtures/container-report-smoke.sql"
 CLIENT="$SCRIPT_DIR/container-report-smoke-client.py"
 PROJECT_NAME="gilbom-report-smoke-$(date +%s)-$$"
-CHECK_DIR="$(mktemp -d)"
+DOCKER_BIND_WORK_ROOT="${DOCKER_BIND_WORK_ROOT:-.artifacts/docker-bind-work}"
+case "$DOCKER_BIND_WORK_ROOT" in
+  /*)
+    ;;
+  *)
+    DOCKER_BIND_WORK_ROOT="$PROJECT_DIR/$DOCKER_BIND_WORK_ROOT"
+    ;;
+esac
+mkdir -p "$DOCKER_BIND_WORK_ROOT"
+chmod 0700 "$DOCKER_BIND_WORK_ROOT"
+DOCKER_BIND_WORK_ROOT="$(CDPATH= cd -- "$DOCKER_BIND_WORK_ROOT" && pwd -P)"
+CHECK_DIR="$(mktemp -d "$DOCKER_BIND_WORK_ROOT/container-report.XXXXXX")"
 SECRET_DIR="$CHECK_DIR/secrets"
 CERTBOT_DIR="$CHECK_DIR/certbot"
 ENV_FILE="$CHECK_DIR/.env.smoke"
@@ -241,7 +253,6 @@ assert_canary_authorized() {
 }
 
 trap cleanup EXIT HUP INT TERM
-umask 077
 
 for command_name in docker openssl python3 sha256sum
 do

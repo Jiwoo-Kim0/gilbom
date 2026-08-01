@@ -182,6 +182,11 @@ Nginx worker는 host CPU 전체를 따라가는 `auto` 대신 2개로 고정했�
 sh scripts/verify-production-runtime.sh
 ```
 
+runtime acceptance의 임시 Secret과 인증서는 기본적으로
+`.artifacts/docker-bind-work` 아래에 생성한다. 별도 원격 Docker daemon을
+사용할 때는 `DOCKER_BIND_WORK_ROOT`를 client와 daemon이 함께 보는 경로로
+지정해야 한다.
+
 이 acceptance는 DB·MQTT·Backend·Frontend health, API proxy, MQTT TLS handshake,
 실제 Docker `PortBindings` 기준 Backend/DB 비공개 port와 Frontend 선행 시작
 방지, Secret read-only mount와 config init 재실행 시 기존 MQTT credential 보존을

@@ -106,6 +106,8 @@ assert_contains compose.jenkins.yaml \
 assert_contains compose.jenkins.yaml \
   'DOCKER_TLS_VERIFY: "1"' \
   "Jenkins must verify the DinD certificate"
+[ "$(grep -Fc -- '${JENKINS_HOME_DIR:-/opt/jenkins/home}:/var/jenkins_home' compose.jenkins.yaml)" -eq 2 ] \
+  || fail "Jenkins and DinD must share the same absolute workspace path"
 assert_contains Jenkinsfile \
   '--add-host docker:host-gateway' \
   "DinD test container must resolve the TLS daemon through its host gateway"
@@ -127,6 +129,29 @@ assert_contains scripts/verify-production-images.sh \
 assert_not_contains scripts/verify-production-images.sh \
   'CHECK_DIR="$(mktemp -d)"' \
   "image verification must not stage docker save archives in /tmp"
+assert_contains Jenkinsfile \
+  'DOCKER_BIND_WORK_ROOT=.artifacts/docker-bind-work' \
+  "Jenkins Docker bind sources must use its shared workspace filesystem"
+[ "$(grep -Fc -- 'DOCKER_BIND_WORK_ROOT=.artifacts/docker-bind-work' Jenkinsfile)" -eq 2 ] \
+  || fail "Jenkins must isolate both TLS and report smoke bind sources"
+assert_contains scripts/verify-frontend-tls.sh \
+  'CHECK_DIR="$(mktemp -d "$DOCKER_BIND_WORK_ROOT/frontend-tls.XXXXXX")"' \
+  "Frontend TLS bind sources must stay on a Docker-visible filesystem"
+assert_not_contains scripts/verify-frontend-tls.sh \
+  'CHECK_DIR="$(mktemp -d)"' \
+  "Frontend TLS verification must not bind Jenkins-local /tmp paths"
+assert_contains scripts/container-report-smoke.sh \
+  'CHECK_DIR="$(mktemp -d "$DOCKER_BIND_WORK_ROOT/container-report.XXXXXX")"' \
+  "container report bind sources must stay on a Docker-visible filesystem"
+assert_not_contains scripts/container-report-smoke.sh \
+  'CHECK_DIR="$(mktemp -d)"' \
+  "container report verification must not bind Jenkins-local /tmp paths"
+assert_contains scripts/verify-production-runtime.sh \
+  'CHECK_DIR="$(mktemp -d "$DOCKER_BIND_WORK_ROOT/production-runtime.XXXXXX")"' \
+  "production runtime bind sources must stay on a Docker-visible filesystem"
+assert_not_contains scripts/verify-production-runtime.sh \
+  'CHECK_DIR="$(mktemp -d)"' \
+  "production runtime verification must not bind Jenkins-local /tmp paths"
 assert_not_contains Jenkinsfile \
   '--network "$ci_network"' \
   "host Docker networks must not be passed to the nested DinD daemon"
