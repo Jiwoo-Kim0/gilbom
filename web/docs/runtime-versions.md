@@ -11,7 +11,8 @@
 | React Router | 8.3.0 | `package.json`, `package-lock.json` | 사용 중인 BrowserRouter의 보안 수정 기준선 |
 | Node.js | 24.18.0 LTS | `frontend/Dockerfile`, `.nvmrc`, `engines` | 운영 권장 LTS와 Vite 8 지원 범위 충족 |
 | npm | 11.16.0 | `packageManager`, `engines` | Node image에 포함된 lockfile 작성 도구 고정 |
-| Nginx | 1.30.4 Alpine | `frontend/Dockerfile` | UID 101의 정적 bundle·reverse proxy 전용 runtime |
+| Nginx | 1.30.4 Alpine | `frontend/Dockerfile` | UID 101의 정적 bundle·reverse proxy·TLS runtime |
+| Certbot | 5.7.0 | `compose.prod.yaml` | HTTP-01 인증서 발급·갱신 전용 profile |
 | Java | Amazon Corretto 21.0.12+8 | `backend/Dockerfile`, `.java-version` | Java 21 LTS의 2026년 7월 CPU patch; 운영 단계는 builder에서 생성한 jlink runtime |
 | Gradle | 8.14.3 | Gradle Wrapper | 개발자와 Docker가 동일한 Wrapper 사용 |
 

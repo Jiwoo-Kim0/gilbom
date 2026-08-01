@@ -327,14 +327,15 @@ cd web
 cp .env.prod.example .env.prod
 # .env.prod의 공개 주소와 Secret 파일 경로를 운영값으로 수정한다.
 ENV_FILE=.env.prod sh scripts/verify-production-compose.sh
-docker compose --env-file .env.prod -f compose.prod.yaml up --build -d --wait
+docker compose --env-file .env.prod -f compose.build.yaml build backend frontend
+docker compose --env-file .env.prod -f compose.prod.yaml up --no-build -d --wait
 docker compose --env-file .env.prod -f compose.prod.yaml ps
 docker compose --env-file .env.prod -f compose.prod.yaml logs -f mosquitto
 ```
 
 EC2 보안 그룹 인바운드에서 TCP 8883을 테스트 PC와 IoT 기기의 공인 IP에만 허용한다.
-DB와 Backend port는 host에 publish하지 않는다. Frontend 외부 HTTPS는 load
-balancer 또는 host reverse proxy에서 종료한다.
+DB와 Backend port는 host에 publish하지 않는다. Frontend Nginx가 host의
+80·443을 받아 HTTP-01 challenge와 HTTPS 종단을 처리한다.
 
 ## 4. PC에서 TLS 통신 확인
 

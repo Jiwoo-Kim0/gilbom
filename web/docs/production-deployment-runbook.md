@@ -1,15 +1,16 @@
 # 길봄 운영 배포 Runbook
 
-기준일: 2026-07-31
+기준일: 2026-08-01
 
-정본: `compose.prod.yaml`, `.env.prod`, registry image digest, 외부 Secret store
+정본: `compose.prod.yaml`, `compose.build.yaml`, EC2의 `runtime.env`·`image.env`,
+Commit SHA image archive, `/opt/gilbom/secrets`
 
 ## 1. 운영 원칙
 
 - 운영 서버에서는 `compose.prod.yaml`만 사용한다. `compose.smoke.yaml`과
   `compose.resilience.yaml`은 격리된 검증 전용이다.
-- Backend와 Frontend는 tag가 아닌
-  `registry/repository@sha256:<64 hex>`로 고정한다.
+- 운영 Compose에는 `build:`를 두지 않는다. Backend와 Frontend image는 CI가
+  생성한 동일 Commit SHA 산출물을 `docker load`한 뒤 `image.env`로 지정한다.
 - Secret 값은 `.env.prod`, image ARG/ENV, 명령 인자, Git, release manifest에
   넣지 않는다. `.env.prod`에는 host Secret 파일 경로만 둔다.
 - 운영에서 `docker compose down --volumes`와 `docker volume rm`은 금지한다.
@@ -23,10 +24,10 @@
 - 전용 Linux host의 Docker Engine과 Docker Compose v2
 - Git, OpenSSL, SHA-256 도구
 - release gate에서는 Docker Scout 또는 조직이 승인한 동등 scanner
-- Frontend 앞 HTTPS load balancer/reverse proxy
+- 외부 TCP 80·443을 받을 Frontend Nginx와 `/opt/gilbom/certbot` 영속 경로
 - 로봇 source CIDR만 허용하는 MQTT 8883 방화벽
 - `llm-egress`에 적용할 host firewall, security group 또는 egress proxy
-- host 밖의 암호화된 immutable backup 저장소와 Secret manager
+- host 밖의 암호화된 backup 저장소와 root 소유 Secret 파일
 
 운영 host의 시간 동기화와 디스크 여유를 먼저 확인한다. 최소 용량은 현재
 `postgres_data`, `report_pdf_data`, `robot_images`, `mosquitto_data` 사용량의
@@ -98,7 +99,8 @@ chmod 0600 .env.prod
 
 다음을 반드시 운영 값으로 바꾼다.
 
-- `BACKEND_IMAGE`, `FRONTEND_IMAGE`: registry digest reference
+- `BACKEND_IMAGE`, `FRONTEND_IMAGE`: CI가 생성하고 checksum을 검증한 Commit SHA tag
+- `CERTBOT_DOMAIN`, `CERTBOT_EMAIL`, Certbot·Nginx certificate host 경로
 - `MQTT_TLS_SERVER_NAME`: 인증서 SAN과 일치하는 이름
 - `MQTT_PUBLIC_BROKER_URI`: 로봇이 접근할 TLS URI
 - `VITE_NAVER_MAP_CLIENT_ID`: 공개 browser client ID
@@ -114,7 +116,9 @@ LLM을 비활성화하면 `GILBOM_LLM_ENABLED=false`로 두고
 ## 5. 배포 전 게이트
 
 ```sh
-ENV_FILE=.env.prod sh scripts/verify-production-compose.sh
+RUNTIME_ENV_FILE=runtime.env \
+IMAGE_ENV_FILE=image.env \
+  sh scripts/verify-production-compose.sh
 sh scripts/verify-secret-boundary.sh
 
 BACKEND_IMAGE='registry.example/gilbom/backend@sha256:...' \
@@ -144,16 +148,53 @@ Backend 최종 summary에 `failures=0, skipped=0`, Frontend에 실패와 skip 0�
 3. digest 고정과 scanner가 확인된 뒤 배포한다.
 
 ```sh
-ENV_FILE="$PWD/.env.prod" \
-RELEASE_DIR=/var/lib/gilbom/releases \
-IMAGE_SCANNER_MODE=required \
-DEPLOY_PULL=true \
-  sh infra/scripts/deploy.sh
+docker compose \
+  --env-file runtime.env \
+  --env-file image.env \
+  -f compose.prod.yaml \
+  up --detach --no-build --wait
 ```
 
 의존 순서는 PostgreSQL·MQTT health, Backend readiness, Frontend health다.
-`deploy.sh`는 이 순서를 Compose health dependency로 기다리고 Frontend를 통한
-API health까지 확인한다.
+인증서가 아직 없으면 Frontend는 ACME bootstrap 모드로 기동한다. 이 상태에서는
+애플리케이션을 HTTP로 공개하지 않는다.
+
+### 6.1 최초 인증서 발급
+
+EC2에서 root 소유 경로와 갱신 스크립트를 먼저 준비한다.
+
+```sh
+sudo install -d -m 0755 \
+  /opt/gilbom/certbot/conf \
+  /opt/gilbom/certbot/www
+sudo install -d -m 0750 -o root -g 101 \
+  /opt/gilbom/certbot/nginx
+sudo install -o root -g root -m 0755 \
+  infra/certbot/certificate.sh \
+  /usr/local/sbin/gilbom-certificate
+```
+
+DNS가 EC2 공인 주소를 가리키고 외부 TCP 80이 열려 있는 상태에서 발급한다.
+
+```sh
+sudo /usr/local/sbin/gilbom-certificate issue
+curl -fsSI http://i15d101.p.ssafy.io/
+curl -fsS https://i15d101.p.ssafy.io/healthz
+```
+
+스크립트는 Certbot 원본에서 Nginx UID/GID가 읽을 수 있는 최소 인증서 복사본을
+만들고, Nginx 설정을 검증한 뒤 HUP reload한다. Frontend에는 원본
+`/etc/letsencrypt`와 Certbot 계정 상태를 노출하지 않는다.
+
+갱신과 dry run:
+
+```sh
+sudo /usr/local/sbin/gilbom-certificate dry-run
+sudo /usr/local/sbin/gilbom-certificate renew
+```
+
+`renew`는 성공한 인증서를 동기화한 뒤 Nginx를 reload한다. systemd Service·Timer는
+EC2에서 root 소유로 생성하고 `renew`를 호출한다.
 
 최초 관리자로 로그인해 즉시 비밀번호를 변경하고 MFA 등록을 마친다. 다른 관리자
 계정을 확인한 뒤 bootstrap을 끈다.
@@ -182,10 +223,10 @@ docker compose --env-file .env.prod -f compose.prod.yaml exec -T backend \
   wget -qO- http://127.0.0.1:8080/actuator/health/readiness
 
 docker compose --env-file .env.prod -f compose.prod.yaml exec -T frontend \
-  wget -qO- http://127.0.0.1:8080/healthz
+  /usr/local/bin/gilbom-nginx-healthcheck
 
 docker compose --env-file .env.prod -f compose.prod.yaml exec -T frontend \
-  wget -qO- http://127.0.0.1:8080/api/health
+  wget --no-check-certificate -qO- https://127.0.0.1:8443/api/health
 ```
 
 - liveness는 JVM/Spring context 생존만 반영한다.
@@ -194,7 +235,7 @@ docker compose --env-file .env.prod -f compose.prod.yaml exec -T frontend \
 - MQTT는 별도 health detail이며 기본 운영 readiness에는 포함하지 않지만,
   최초 Compose 시작은 Broker health를 기다린다.
 
-HTTP load balancer는 `/healthz`, Backend 진단은 내부 readiness를 사용한다.
+외부 HTTPS는 `/healthz`, Backend 진단은 내부 readiness를 사용한다.
 
 ## 8. 로그 확인
 
@@ -284,7 +325,7 @@ docker compose --env-file /app/gilbom/.env.prod \
    빈 volume에만 복원한다. 기존 volume을 지우는 작업은 별도 승인 대상이다.
 
 ```sh
-project=gilbom-prod
+project=gilbom
 logical=report_pdf_data
 volume="$(
   docker volume ls \
@@ -356,7 +397,7 @@ ID만 있고 RepoDigest가 없는 build는 운영 release로 판정하지 않는
 - Compose 단일 host 배포라 PostgreSQL, MQTT와 Frontend의 다중 host HA가 없다.
 - named volume은 host 장애를 견디지 못하므로 외부 backup이 필수다.
 - Compose network만으로 LLM hostname allowlist를 강제할 수 없다.
-- Frontend TLS termination은 Compose 밖의 load balancer/reverse proxy 책임이다.
+- 단일 EC2의 Frontend Nginx가 TLS를 종료하므로 host 장애에 대한 HTTPS HA가 없다.
 - 운영 Compose는 최초 시작 시 MQTT health를 필수로 기다린다. 실행 후 MQTT
   장애는 웹 readiness와 분리되지만 로봇 기능은 사용할 수 없다.
 - 실제 GMS canary는 운영 Secret과 정책 승인 없이는 실행되지 않는다.

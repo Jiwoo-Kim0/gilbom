@@ -5,6 +5,7 @@ set -eu
 PROJECT_NAME="gilbom-prod-runtime-check-$$"
 CHECK_DIR="$(mktemp -d)"
 SECRET_DIR="$CHECK_DIR/secrets"
+CERTBOT_DIR="$CHECK_DIR/certbot"
 ENV_FILE="$CHECK_DIR/.env.prod"
 COMPOSE_FILE=${COMPOSE_FILE:-compose.prod.yaml}
 STARTED=false
@@ -36,6 +37,10 @@ fail() {
 trap cleanup EXIT HUP INT TERM
 umask 077
 install -d -m 0700 "$SECRET_DIR"
+install -d -m 0755 \
+  "$CERTBOT_DIR/conf" \
+  "$CERTBOT_DIR/www" \
+  "$CERTBOT_DIR/nginx"
 
 openssl rand -hex -out "$SECRET_DIR/postgres_admin_password" 32
 openssl rand -hex -out "$SECRET_DIR/postgres_flyway_password" 32
@@ -81,6 +86,12 @@ sed -i \
   -e "s|^COMPOSE_PROJECT_NAME=.*|COMPOSE_PROJECT_NAME=$PROJECT_NAME|" \
   -e 's|^FRONTEND_BIND_ADDRESS=.*|FRONTEND_BIND_ADDRESS=127.0.0.1|' \
   -e 's|^FRONTEND_HTTP_PORT=.*|FRONTEND_HTTP_PORT=0|' \
+  -e 's|^FRONTEND_HTTPS_PORT=.*|FRONTEND_HTTPS_PORT=0|' \
+  -e 's|^GILBOM_NGINX_TLS_MODE=.*|GILBOM_NGINX_TLS_MODE=off|' \
+  -e 's|^CERTBOT_EMAIL=.*|CERTBOT_EMAIL=runtime-check@example.invalid|' \
+  -e "s|^CERTBOT_CONF_DIR=.*|CERTBOT_CONF_DIR=$CERTBOT_DIR/conf|" \
+  -e "s|^CERTBOT_WWW_DIR=.*|CERTBOT_WWW_DIR=$CERTBOT_DIR/www|" \
+  -e "s|^NGINX_CERT_DIR=.*|NGINX_CERT_DIR=$CERTBOT_DIR/nginx|" \
   -e 's|^MQTT_BIND_ADDRESS=.*|MQTT_BIND_ADDRESS=127.0.0.1|' \
   -e 's|^MQTT_TLS_PORT=.*|MQTT_TLS_PORT=0|' \
   -e 's|^MQTT_TLS_SERVER_NAME=.*|MQTT_TLS_SERVER_NAME=mosquitto|' \

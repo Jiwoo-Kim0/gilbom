@@ -1,6 +1,6 @@
 # Day 7 Frontend 운영 이미지
 
-기준일: 2026-07-31
+기준일: 2026-08-01
 
 ## 1. 결정
 
@@ -22,12 +22,15 @@ E2E 파일을 복사하지 않는다. 정적 파일은 `root:nginx` 소유이며
 ## 2. Non-root와 쓰기 경계
 
 Nginx master와 worker를 모두 image의 `nginx` 사용자, UID/GID `101:101`로
-실행한다. privileged port 80 대신 container port 8080을 사용한다.
+실행한다. privileged port 대신 container HTTP 8080과 HTTPS 8443을 사용한다.
 
 | 경로 | 접근 | 용도 |
 |---|---|---|
 | `/usr/share/nginx/html` | RO | 정적 bundle |
 | `/etc/nginx` | RO | 고정 Nginx 설정 |
+| `/etc/nginx/certs` | RO | Certbot 원본에서 동기화한 Nginx 인증서 |
+| `/var/www/certbot` | RO | HTTP-01 challenge |
+| `/tmp/nginx-conf.d` | RW | bootstrap·HTTP·HTTPS 중 선택된 runtime 설정 |
 | `/tmp/nginx.pid` | RW | master PID |
 | `/tmp/client_temp` | RW | request body 임시 파일 |
 | `/tmp/proxy_temp` | RW | 일반 proxy 임시 파일 |
@@ -44,6 +47,11 @@ Nginx worker는 운영 기본 CPU quota와 SSE 동시 연결을 고려해 2개�
 `GET /healthz`는 Backend와 무관한 Nginx 자체 readiness로 `200 ok`를 반환한다.
 기존 `/health`는 로컬 호환성만 유지하며 Compose와 image healthcheck의 정본은
 `/healthz`다.
+
+운영 `auto` 모드는 인증서가 없으면 HTTP-01 challenge와 bootstrap health만
+노출하고, 인증서가 있으면 8080의 애플리케이션 요청을 HTTPS로 308 redirect한다.
+실제 정적 파일과 API·SSE proxy는 8443에서 제공한다. 로컬 Compose는 `off` 모드로
+기존 HTTP 개발 경로를 유지한다.
 
 | 경로 | 정책 |
 |---|---|
@@ -93,6 +101,10 @@ Frontend를 띄우고 다음을 실제 요청으로 검사한다.
 - index 재검증과 hash asset 장기 캐시
 - 실제 `SIGQUIT` 전달과 10초 안의 정상 종료
 - Node/npm/source/test/sourcemap/Secret 패턴 부재
+
+`scripts/verify-frontend-tls.sh`는 자체서명 임시 인증서로 bootstrap 제한,
+HTTP-01 파일 조회, HTTP 308 redirect, HTTPS API proxy, TLS 1.2·1.3와 Nginx
+reload를 별도로 검증한다.
 
 | 검증 | 결과 |
 |---|---|
