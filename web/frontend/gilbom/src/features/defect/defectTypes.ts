@@ -199,6 +199,8 @@ export type DefectObservation = {
   eventId: string
   defectId: string
   robotId: string
+  /** 표시용 로봇 이름. 로봇 행이 없으면 null이다. */
+  robotName: string | null
   locationValid: boolean
   location: GeoPoint | null
   locationAccuracyM: number | null

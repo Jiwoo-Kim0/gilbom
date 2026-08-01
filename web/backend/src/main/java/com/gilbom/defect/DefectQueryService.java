@@ -301,6 +301,7 @@ public class DefectQueryService {
                     o.event_id,
                     o.defect_id,
                     o.robot_id,
+                    r.robot_name,
                     o.location_valid,
                     ST_X(o.location) AS longitude,
                     ST_Y(o.location) AS latitude,
@@ -321,6 +322,10 @@ public class DefectQueryService {
                     o.is_representative,
                     o.created_at
                 FROM defect.defect_observation o
+                -- 이름은 표시용이라 없어도 관측은 보여야 한다. 로봇 행이 지워졌거나
+                -- 아직 등록되지 않은 관측까지 LEFT JOIN으로 통과시킨다.
+                LEFT JOIN robot.robot r
+                       ON r.robot_id = o.robot_id
                 WHERE
                 """ + observationScope() + """
                 ORDER BY o.created_at DESC, o.event_id ASC
@@ -548,6 +553,7 @@ public class DefectQueryService {
                 resultSet.getObject("event_id", UUID.class),
                 resultSet.getObject("defect_id", UUID.class),
                 resultSet.getObject("robot_id", UUID.class),
+                resultSet.getString("robot_name"),
                 locationValid,
                 locationValid ? geoPoint(resultSet) : null,
                 nullableDouble(resultSet, "location_accuracy_m"),
