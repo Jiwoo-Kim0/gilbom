@@ -69,6 +69,12 @@ network이며 DinD 내부 daemon에는 존재하지 않는다. DinD가 생성하
 container에는 `docker:host-gateway`를 추가해 같은 network 이름을 중첩 생성하지
 않고 TLS endpoint `tcp://docker:2376`과 Testcontainers의 공개 port에 접근한다.
 
+Backend test container는 UID/GID 1000의 non-root로 실행한다. Base image의 기본
+home인 `/`에는 쓸 수 없으므로 `/test-home`을 빌드별 tmpfs로 제공하고
+`HOME`, `GRADLE_USER_HOME`, Gradle project cache와 build directory를 모두 그
+경로로 격리한다. Backend source는 read-only mount를 유지하며 테스트 컨테이너
+종료 시 다운로드·캐시·산출물도 함께 제거된다.
+
 Jenkins Git Client는 HTTPS Username/Password Credential을 전달하기 위한 일회성
 `askpass` script를 `java.io.tmpdir`에서 실행한다. Jenkins의 `/tmp`는 container
 종료 시 사라지는 256 MiB tmpfs로 유지하고 `nosuid,nodev`를 적용하되, checkout에

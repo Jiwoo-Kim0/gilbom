@@ -109,6 +109,15 @@ assert_contains compose.jenkins.yaml \
 assert_contains Jenkinsfile \
   '--add-host docker:host-gateway' \
   "DinD test container must resolve the TLS daemon through its host gateway"
+assert_contains Jenkinsfile \
+  '--env GRADLE_USER_HOME="$test_home/.gradle"' \
+  "Jenkins non-root Backend test must use a writable isolated Gradle home"
+assert_contains Jenkinsfile \
+  '--tmpfs "$test_home:rw,nosuid,nodev,uid=$host_uid,gid=$host_gid,mode=0700"' \
+  "Jenkins non-root Backend test must isolate writable build state"
+assert_contains Jenkinsfile \
+  '--volume "$project_dir/backend:$project_dir/backend:ro"' \
+  "Jenkins Backend source mount must remain read-only"
 assert_not_contains Jenkinsfile \
   '--network "$ci_network"' \
   "host Docker networks must not be passed to the nested DinD daemon"

@@ -127,6 +127,9 @@ pipeline {
                         set -eu
 
                         project_dir="$(pwd)"
+                        host_uid="$(id -u)"
+                        host_gid="$(id -g)"
+                        test_home=/test-home
 
                         # 개발자 host socket과 운영 Jenkins의 TLS DinD를 모두
                         # 지원한다. 어느 경로든 Testcontainers가 실제 DB를
@@ -136,34 +139,58 @@ pipeline {
                                 stat -c '%g' /var/run/docker.sock
                             )"
                             docker run --rm \
-                                --user "$(id -u):$(id -g)" \
+                                --user "$host_uid:$host_gid" \
                                 --group-add "$docker_socket_gid" \
                                 --add-host host.docker.internal:host-gateway \
                                 --env DOCKER_HOST=unix:///var/run/docker.sock \
                                 --env TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock \
                                 --env TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal \
+                                --env HOME="$test_home" \
+                                --env GRADLE_USER_HOME="$test_home/.gradle" \
+                                --env JAVA_TOOL_OPTIONS=-Duser.home="$test_home" \
                                 --volume /var/run/docker.sock:/var/run/docker.sock \
-                                --volume "$project_dir/backend:$project_dir/backend" \
+                                --volume "$project_dir/backend:$project_dir/backend:ro" \
+                                --tmpfs "$test_home:rw,nosuid,nodev,uid=$host_uid,gid=$host_gid,mode=0700" \
                                 --workdir "$project_dir/backend" \
                                 amazoncorretto:21.0.12-alpine3.22 \
-                                sh ./gradlew test securityAcceptanceTest --no-daemon
+                                sh -ec '
+                                    sh ./gradlew \
+                                        --project-cache-dir /test-home/project-cache \
+                                        -PisolatedBuildDirectory=/test-home/build \
+                                        test \
+                                        securityAcceptanceTest \
+                                        --no-daemon \
+                                        --rerun-tasks
+                                '
                         else
                             test -n "${DOCKER_HOST:-}"
                             test "${DOCKER_TLS_VERIFY:-}" = "1"
                             test -r "${DOCKER_CERT_PATH:-/certs/client}/ca.pem"
 
                             docker run --rm \
-                                --user "$(id -u):$(id -g)" \
+                                --user "$host_uid:$host_gid" \
                                 --add-host docker:host-gateway \
                                 --env DOCKER_HOST="$DOCKER_HOST" \
                                 --env DOCKER_TLS_VERIFY=1 \
                                 --env DOCKER_CERT_PATH=/certs/client \
                                 --env TESTCONTAINERS_HOST_OVERRIDE=docker \
+                                --env HOME="$test_home" \
+                                --env GRADLE_USER_HOME="$test_home/.gradle" \
+                                --env JAVA_TOOL_OPTIONS=-Duser.home="$test_home" \
                                 --volume /certs/client:/certs/client:ro \
-                                --volume "$project_dir/backend:$project_dir/backend" \
+                                --volume "$project_dir/backend:$project_dir/backend:ro" \
+                                --tmpfs "$test_home:rw,nosuid,nodev,uid=$host_uid,gid=$host_gid,mode=0700" \
                                 --workdir "$project_dir/backend" \
                                 amazoncorretto:21.0.12-alpine3.22 \
-                                sh ./gradlew test securityAcceptanceTest --no-daemon
+                                sh -ec '
+                                    sh ./gradlew \
+                                        --project-cache-dir /test-home/project-cache \
+                                        -PisolatedBuildDirectory=/test-home/build \
+                                        test \
+                                        securityAcceptanceTest \
+                                        --no-daemon \
+                                        --rerun-tasks
+                                '
                         fi
                     '''
                 }
