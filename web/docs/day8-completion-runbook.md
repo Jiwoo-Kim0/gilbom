@@ -41,7 +41,8 @@ CI에서 image 검사와 전체 Backend/Frontend 테스트가 성공한 뒤 세 
 
 ```sh
 mkdir -p ".artifacts/release/$release_sha"
-git archive --format=tar "HEAD:web" . \
+repository_root="$(git rev-parse --show-toplevel)"
+git -C "$repository_root" archive --format=tar "HEAD:web" . \
   | gzip -n \
   > ".artifacts/release/$release_sha/gilbom-web-$release_sha.tar.gz"
 
