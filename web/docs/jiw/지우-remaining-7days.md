@@ -489,10 +489,14 @@ DB만 백업하고 볼륨을 빼먹으면 **메타데이터는 남고 파일만 
 `storage.robot_image`와 `robot_images` 볼륨은 **항상 같이** 백업·복원해야 한다.
 시연 직전 스냅샷 한 번이면 충분하다.
 
+**스크립트로 만들어 뒀다** (8/1 완료).
+
 ```bash
-docker run --rm -v web_robot_images:/data -v "$PWD":/out alpine \
-  tar czf /out/robot-images-$(date +%F).tar.gz -C /data .
+scripts/backup-defect-images.sh      # 볼륨 tar + DB 덤프 + manifest
 ```
+
+복원은 `scripts/RESTORE.md`. 아카이브 해시 대조와 임시 DB 복원까지 검증했다.
+**시연 직전 한 번 더 뜬다.**
 
 ### 6.4 볼륨은 이미 잡혀 있다
 
