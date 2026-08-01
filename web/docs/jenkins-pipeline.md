@@ -75,6 +75,11 @@ home인 `/`에는 쓸 수 없으므로 `/test-home`을 빌드별 tmpfs로 제공
 경로로 격리한다. Backend source는 read-only mount를 유지하며 테스트 컨테이너
 종료 시 다운로드·캐시·산출물도 함께 제거된다.
 
+Image layer 검증의 `docker save` archive와 압축 해제본은 Jenkins의 256 MiB
+`/tmp`에 두지 않고 workspace의 ignored `.artifacts/image-verify-work/`에서
+처리한다. Role별 검사가 끝나면 큰 archive를 즉시 지우고 pipeline 종료 시
+workspace cleanup으로 빈 작업 root까지 제거한다.
+
 Jenkins Git Client는 HTTPS Username/Password Credential을 전달하기 위한 일회성
 `askpass` script를 `java.io.tmpdir`에서 실행한다. Jenkins의 `/tmp`는 container
 종료 시 사라지는 256 MiB tmpfs로 유지하고 `nosuid,nodev`를 적용하되, checkout에

@@ -207,7 +207,8 @@ pipeline {
                             -f compose.build.yaml \
                             build backend frontend mqtt-init
                         sh scripts/test-verify-production-images.sh
-                        IMAGE_SECURITY_OUTPUT_DIR=.artifacts/image-security \
+                        IMAGE_VERIFY_WORK_ROOT=.artifacts/image-verify-work \
+                            IMAGE_SECURITY_OUTPUT_DIR=.artifacts/image-security \
                             IMAGE_SCANNER_MODE=auto \
                             sh scripts/verify-production-images.sh
                         sh scripts/verify-frontend-tls.sh

@@ -118,6 +118,15 @@ assert_contains Jenkinsfile \
 assert_contains Jenkinsfile \
   '--volume "$project_dir/backend:$project_dir/backend:ro"' \
   "Jenkins Backend source mount must remain read-only"
+assert_contains Jenkinsfile \
+  'IMAGE_VERIFY_WORK_ROOT=.artifacts/image-verify-work' \
+  "Jenkins image verification must not use its bounded /tmp tmpfs"
+assert_contains scripts/verify-production-images.sh \
+  'CHECK_DIR="$(mktemp -d "$IMAGE_VERIFY_WORK_ROOT/run.XXXXXX")"' \
+  "image verification work must stay on the workspace filesystem"
+assert_not_contains scripts/verify-production-images.sh \
+  'CHECK_DIR="$(mktemp -d)"' \
+  "image verification must not stage docker save archives in /tmp"
 assert_not_contains Jenkinsfile \
   '--network "$ci_network"' \
   "host Docker networks must not be passed to the nested DinD daemon"

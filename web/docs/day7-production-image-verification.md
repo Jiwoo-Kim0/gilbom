@@ -47,6 +47,12 @@ Base image와 라이브러리에는 `.envsh`나 dotenv 관련 일반 문자열�
 raw substring 검사는 정상 image도 실패시키기 때문이다. 실제 `.env`,
 `.env.*`, `secrets/` 파일 경로는 허용하지 않는다.
 
+`docker save` archive, 압축 layer blob과 해제된 tar는 동시에 존재할 수 있으므로
+작은 system `/tmp`를 사용하지 않는다. 기본 작업 위치는 Git에서 제외된
+`.artifacts/image-verify-work/`이며 `IMAGE_VERIFY_WORK_ROOT`로 CI workspace 안의
+다른 경로를 지정할 수 있다. 각 image 검사 완료 즉시 archive를 삭제하고 성공·실패
+모두 종료 trap에서 private pattern과 남은 layer 작업 파일을 제거한다.
+
 ## 3. 로그 검사
 
 `logs` mode는 실행 중인 Backend와 Frontend container ID를 받아 다음 요청을

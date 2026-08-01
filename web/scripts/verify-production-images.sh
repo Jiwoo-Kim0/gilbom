@@ -1,6 +1,7 @@
 #!/bin/sh
 
 set -eu
+umask 077
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
@@ -14,8 +15,15 @@ IMAGE_SECURITY_OUTPUT_DIR="$(
     && CDPATH= cd -- "${IMAGE_SECURITY_OUTPUT_DIR:-.artifacts/image-security}" \
     && pwd
 )"
+IMAGE_VERIFY_WORK_ROOT="$(
+  CDPATH= cd -- "$PROJECT_DIR" \
+    && mkdir -p "${IMAGE_VERIFY_WORK_ROOT:-.artifacts/image-verify-work}" \
+    && CDPATH= cd -- "${IMAGE_VERIFY_WORK_ROOT:-.artifacts/image-verify-work}" \
+    && pwd
+)"
+chmod 0700 "$IMAGE_VERIFY_WORK_ROOT"
 SECRET_SCAN_DIR="${SECRET_SCAN_DIR:-$PROJECT_DIR/secrets}"
-CHECK_DIR="$(mktemp -d)"
+CHECK_DIR="$(mktemp -d "$IMAGE_VERIFY_WORK_ROOT/run.XXXXXX")"
 SECRET_PATTERNS="$CHECK_DIR/secret-patterns"
 
 fail() {
@@ -28,7 +36,6 @@ cleanup() {
 }
 
 trap cleanup EXIT HUP INT TERM
-umask 077
 : > "$SECRET_PATTERNS"
 
 case "$IMAGE_VERIFY_MODE" in
@@ -180,6 +187,11 @@ verify_static_image() {
   if grep -Eq '(^|/)secrets?(/|$)' "$layer_paths"; then
     fail "secrets directory exists in a $role runtime layer"
   fi
+
+  rm -f \
+    "$archive" \
+    "$CHECK_DIR/layer-blob" \
+    "$CHECK_DIR/layer.tar"
 }
 
 run_runtime_checks() {
