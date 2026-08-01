@@ -15,7 +15,9 @@
 #   scripts/backup-defect-images.sh              # ./backups 아래에 생성
 #   scripts/backup-defect-images.sh /mnt/backup  # 위치 지정
 #
-# 복원은 RESTORE.md 참고. 스택을 내린 상태에서 해야 한다.
+# 이 파일은 개발용 compose.yaml 전용이다. EC2 운영 backup은 writer를 quiesce하고
+# 전체 영속 volume과 checksum을 함께 보존하는 infra/scripts/backup-volumes.sh를
+# 사용한다. 복원은 RESTORE.md 참고. 스택을 내린 상태에서 해야 한다.
 
 set -euo pipefail
 
@@ -29,6 +31,12 @@ readonly DB_NAME="${POSTGRES_DB:-gilbom}"
 readonly DB_USER="${POSTGRES_ADMIN_USER:-gilbom_db_admin}"
 
 cd "${PROJECT_DIR}"
+
+if [[ -f runtime.env || -f image.env ]]; then
+    echo "!! 운영 split env가 감지됐다." >&2
+    echo "   EC2에서는 infra/scripts/backup-volumes.sh를 사용하라." >&2
+    exit 1
+fi
 
 stamp="$(date +%Y%m%d-%H%M%S)"
 target="${OUTPUT_ROOT}/${stamp}"

@@ -2,6 +2,11 @@
 
 `scripts/backup-defect-images.sh`가 만든 스냅샷을 되돌린다.
 
+> 이 문서는 개발용 `compose.yaml`과 `gilbom_robot_images` volume 전용이다.
+> `/opt/gilbom/deploy` 운영 환경에는 적용하지 않는다. 운영 복원은
+> `infra/scripts/backup-volumes.sh`가 만든 전체 bundle을 대상으로 별도 승인 후
+> 수행한다.
+
 **둘을 항상 같이 복원한다.** 한쪽만 되돌리면 화면이 깨지는데, 그 방식이 눈에 잘 안 띈다.
 
 | 복원한 것 | 증상 |

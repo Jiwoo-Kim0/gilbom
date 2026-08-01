@@ -38,6 +38,10 @@ body {
   background: #f7f6f4;
 }
 
+body.modal-open {
+  overflow: hidden;
+}
+
 button,
 input,
 select,

@@ -31,6 +31,7 @@ sh scripts/verify-production-compose.sh
 sh scripts/verify-secret-boundary.sh
 sh scripts/verify-day8-infrastructure.sh
 sh scripts/verify-supported-versions.sh
+sh scripts/verify-frontend-csp-source.sh
 sh scripts/verify-frontend-tls.sh "gilbom-frontend:$release_sha"
 ```
 
@@ -92,6 +93,11 @@ sudo env \
   BACKUP_ROOT=/opt/gilbom/backups \
   sh infra/scripts/backup-volumes.sh
 ```
+
+출력 bundle의 `robot_images.summary`에는
+`database_image_coverage=PASS`가 있어야 한다. DB가 참조하는 AVAILABLE 이미지가
+하나라도 없거나 hash가 다르면 운영 backup은 실패하고 기존 서비스가 다시 기동된다.
+참조되지 않는 orphan JPEG는 복구 가능성을 위해 archive에 함께 보존한다.
 
 MobaXterm으로 세 image archive와 `SHA256SUMS`를 `/home/ubuntu/day8-release/`에
 올린 뒤 검증하고 load한다.
@@ -237,7 +243,8 @@ sudo docker run --rm --network host \
 ```
 
 출력에 `image-idempotency=PASS`와 `day8-result event_id=... image_id=...`가
-있어야 한다. 운영 화면에서 보고서 한 건을 승인해 PDF가 생성된 상태에서 두 UUID를
+있어야 한다. 방금 생성된 결함 상세 카드의 `리포트 생성`을 눌러 단건 LLM 보고서를
+만든 뒤, 별도 승인 권한 계정으로 검토 요청·승인하여 PDF가 생성된 상태에서 두 UUID를
 다음 gate에 전달한다. 이 gate는 DB `local-disk`/object key/hash, MQTT Incident
 연결, 실제 파일, 승인 PDF와 Backend 재생성 전후 모든 hash, 서명 Secret의 지속성을
 검사한다.
@@ -272,8 +279,9 @@ python .\scripts\verify-day8-signed-image.py
 
 - HTTPS 인증서 경고 없음, 로그인·MFA 성공
 - 새 결함 상세 JPEG와 bbox가 표시되고 새로고침 후에도 다시 표시됨
+- 새 결함 상세 카드에서 생성한 보고서의 근거가 해당 defect 한 건으로 고정됨
 - 승인 보고서 PDF 다운로드 성공
-- 지도 tile, 줌 `+/-`, 우하단 저작권, 마커·팝업·bbox가 정상
+- 결함·로봇 지도 tile, 줌 `+/-`, 우하단 저작권, 마커·방향·팝업·bbox가 정상
 - Console에 `nrbe.pstatic.net/styles/...` CSP 차단이 없음
 - HTTP URL이 HTTPS로 308 Redirect
 
@@ -292,6 +300,6 @@ Cloud Console의 허용 Web Service URL에
 - `verify-day8-auxiliary-runtime.sh` PASS
 - `verify-day8-persistence.sh` PASS
 - `verify-day8-signed-image.py`에서 정상·변조·만료 PASS
-- 위 브라우저 6항목 수동 PASS
+- 위 브라우저 7항목 수동 PASS
 
 셋 중 하나라도 실행 전이거나 SKIPPED면 “구현 완료, 운영 인수 미완료” 상태다.

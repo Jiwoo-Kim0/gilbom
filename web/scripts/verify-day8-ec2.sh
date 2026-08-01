@@ -340,16 +340,19 @@ latest_checksum="$(
 (
   cd "$(dirname "$latest_checksum")"
   sha256sum -c SHA256SUMS
+  grep -Fxq 'database_image_coverage=PASS' robot_images.summary
   for archive in ./*.tar.gz
   do
     tar -tzf "$archive" >/dev/null
   done
+  dump_file="$(find . -maxdepth 1 -type f -name '*.dump' -print)"
+  [ "$(printf '%s\n' "$dump_file" | grep -c .)" -eq 1 ]
   docker run \
     --rm \
     --interactive \
     --entrypoint pg_restore \
     postgis/postgis:16-3.5 \
-    --list < postgres.dump >/dev/null
+    --list < "$dump_file" >/dev/null
 ) || fail "latest backup integrity verification failed"
 
 printf '%s\n' \

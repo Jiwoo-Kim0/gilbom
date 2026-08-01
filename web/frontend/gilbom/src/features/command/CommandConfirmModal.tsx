@@ -10,6 +10,7 @@ import {
   type FormEvent,
   type MouseEvent,
 } from 'react'
+import { lockBodyScroll } from '../../shared/dom/bodyScrollLock'
 import type { Mission } from '../mission/missionTypes'
 import type { RobotDetail } from '../robot/robotTypes'
 import type {
@@ -57,8 +58,7 @@ export function CommandConfirmModal({
   )
 
   useEffect(() => {
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
+    const releaseBodyScroll = lockBodyScroll()
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape' && !submitting) {
@@ -68,7 +68,7 @@ export function CommandConfirmModal({
 
     window.addEventListener('keydown', handleKeyDown)
     return () => {
-      document.body.style.overflow = previousOverflow
+      releaseBodyScroll()
       window.removeEventListener('keydown', handleKeyDown)
     }
   }, [onClose, submitting])

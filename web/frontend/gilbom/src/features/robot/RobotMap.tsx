@@ -13,29 +13,34 @@ const legendItems: { tone: RobotStatus; label: string }[] = [
   { tone: 'offline', label: '오프라인' },
 ]
 
-const statusColor: Record<RobotStatus, string> = {
-  online: '#7a5c0c',
-  warning: '#c0392b',
-  charging: '#b8863b',
-  offline: '#6f6a5e',
-}
-
 // 구미시청 인근 — 로봇 위치 API가 연결되기 전까지 사용하는 기본 뷰포트.
 const DEFAULT_CENTER = { lat: 36.1195, lng: 128.3446 }
 const DEFAULT_ZOOM = 14
 
 const naverMapClientId = import.meta.env.VITE_NAVER_MAP_CLIENT_ID
 
+const HEADING_ARROWS = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'] as const
+
+function headingArrow(headingDeg: number | null): string {
+  if (headingDeg === null || !Number.isFinite(headingDeg)) {
+    return HEADING_ARROWS[0]
+  }
+  const normalized = ((headingDeg % 360) + 360) % 360
+  return HEADING_ARROWS[Math.round(normalized / 45) % HEADING_ARROWS.length]
+}
+
 function createMarkerIcon(
   maps: typeof naver.maps,
   status: RobotStatus,
   headingDeg: number | null,
 ): naver.maps.MarkerIcon {
-  const heading = headingDeg === null || !Number.isFinite(headingDeg)
-    ? 0
-    : headingDeg
+  // Nginx CSP가 style-src 'self'를 유지하므로 Marker HTML에도 style 속성을
+  // 넣지 않는다. 방향은 8방위 문자로 표현하고 정확한 각도는 title에 남긴다.
   return {
-    content: `<span style="display:grid;width:28px;height:28px;border-radius:50%;place-items:center;border:2px solid #fff;box-shadow:0 2px 6px rgba(23,34,28,0.35);color:#fff;background:${statusColor[status]}"><span style="display:block;font-size:14px;line-height:1;transform:rotate(${heading}deg)">↑</span></span>`,
+    content:
+      `<span class="robot-map-marker robot-map-marker-${status}">`
+      + `<span class="robot-map-marker-arrow">${headingArrow(headingDeg)}</span>`
+      + '</span>',
     size: new maps.Size(28, 28),
     anchor: new maps.Point(14, 14),
   }
