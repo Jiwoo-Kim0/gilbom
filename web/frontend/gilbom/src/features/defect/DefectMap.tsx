@@ -23,6 +23,93 @@ const legendItems: { tone: DefectStatusTone; label: string }[] = [
   { tone: 'done', label: '종결' },
 ]
 
+/**
+ * 화면상 이 픽셀 안에 들어오는 마커들을 한 덩어리로 묶는다.
+ * 마커 상자가 34px이므로 그보다 조금 큰 값이라야 겹침이 실제로 사라진다.
+ */
+const CLUSTER_CELL_PX = 44
+
+type MarkerCluster = {
+  key: string
+  lat: number
+  lng: number
+  features: DefectMapFeature[]
+}
+
+/**
+ * 화면 좌표 격자로 마커를 묶는다.
+ *
+ * <p>네이버가 제공하는 MarkerClustering은 SDK 본체가 아니라 별도 스크립트라서,
+ * `script-src`에 새 출처를 열어야 한다. 시연 앞두고 CSP를 건드릴 이유가 없고
+ * 우리가 필요한 동작은 격자 묶기로 충분해서 직접 만들었다.
+ *
+ * <p>격자를 위경도가 아니라 **화면 픽셀**로 나누는 것이 요점이다. 위경도로 나누면
+ * 확대할 때마다 셀 크기를 다시 정해야 하고, 위도에 따라 셀 모양이 찌그러진다.
+ */
+function clusterFeatures(
+  features: DefectMapFeature[],
+  projection: naver.maps.MapSystemProjection,
+  maps: typeof naver.maps,
+): MarkerCluster[] {
+  const cells = new Map<string, MarkerCluster>()
+
+  for (const feature of features) {
+    const [longitude, latitude] = feature.geometry.coordinates
+    const offset = projection.fromCoordToOffset(
+      new maps.LatLng(latitude, longitude),
+    )
+    const key = `${Math.floor(offset.x / CLUSTER_CELL_PX)}:`
+      + `${Math.floor(offset.y / CLUSTER_CELL_PX)}`
+    const cell = cells.get(key)
+    if (cell === undefined) {
+      cells.set(key, { key, lat: latitude, lng: longitude, features: [feature] })
+      continue
+    }
+    cell.features.push(feature)
+  }
+
+  // 묶인 덩어리는 구성원의 평균 위치에 놓는다. 첫 마커 자리에 두면 덩어리가
+  // 한쪽으로 치우쳐 보인다.
+  return [...cells.values()].map((cell) => {
+    if (cell.features.length === 1) {
+      return cell
+    }
+    const count = cell.features.length
+    return {
+      ...cell,
+      lat: cell.features.reduce(
+        (sum, feature) => sum + feature.geometry.coordinates[1], 0) / count,
+      lng: cell.features.reduce(
+        (sum, feature) => sum + feature.geometry.coordinates[0], 0) / count,
+    }
+  })
+}
+
+/**
+ * 묶인 마커의 아이콘. 개수를 숫자로 보여주고, 안에 든 결함 중 가장 급한 상태를
+ * 색으로 쓴다. 처리 중인 결함이 섞여 있는데 종결 색으로 보이면 안 된다.
+ */
+function createClusterIcon(
+  maps: typeof naver.maps,
+  cluster: MarkerCluster,
+): naver.maps.MarkerIcon {
+  const tones = cluster.features.map(
+    (feature) => toneOf(feature.properties.workflowStatus),
+  )
+  const tone: DefectStatusTone = tones.includes('received')
+    ? 'received'
+    : (tones.includes('progress') ? 'progress' : 'done')
+  // style 속성은 CSP(style-src 'self')에 막힌다. 모양은 App.css에만 둔다.
+  return {
+    content:
+      `<div class="defect-cluster defect-cluster-${tone}">`
+      + `<span>${cluster.features.length}</span>`
+      + '</div>',
+    size: new maps.Size(CLUSTER_CELL_PX, CLUSTER_CELL_PX),
+    anchor: new maps.Point(CLUSTER_CELL_PX / 2, CLUSTER_CELL_PX / 2),
+  }
+}
+
 /** App.css의 `.defect-marker-box` 크기와 같아야 앵커가 중심에 맞는다. */
 const MARKER_BOX_SIZE = 34
 
@@ -140,6 +227,8 @@ export function DefectMap({
   const [features, setFeatures] = useState<DefectMapFeature[]>([])
   const [error, setError] = useState<string | null>(null)
   const [scale, setScale] = useState<MapScale | null>(null)
+  // 확대·이동이 끝나면 화면 좌표가 달라져 마커 묶음을 다시 계산해야 한다.
+  const [idleToken, setIdleToken] = useState(0)
   /**
    * 결함 위치로 지도를 한 번 맞췄는지. 기본 뷰포트(구미)와 실제 결함 위치가
    * 다를 수 있어, 처음에는 전체를 조회해 그 범위로 이동한다. 이 전에 뷰포트
@@ -204,6 +293,8 @@ export function DefectMap({
         maps.Event.addListener(map, 'idle', () => {
           // 결함 위치로 맞추기 전의 idle은 무시한다. 기본 뷰포트 기준으로
           // bbox를 걸어버리면 첫 조회 결과를 스스로 지운다.
+          // 묶음은 화면 좌표 기준이라 bbox 재조회와 무관하게 다시 계산해야 한다.
+          setIdleToken((token) => token + 1)
           if (!fittedRef.current) return
           window.clearTimeout(timer)
           timer = window.setTimeout(() => {
@@ -288,8 +379,30 @@ export function DefectMap({
 
     const { maps } = window.naver
     const map = mapRef.current
-    const markers = features.map((feature) => {
-      const [longitude, latitude] = feature.geometry.coordinates
+    // 선택한 결함은 묶음에 숨기지 않는다. 카드를 열어둔 채 지도를 움직였을 때
+    // 그 결함이 사라지면 어디를 보고 있는지 알 수 없다.
+    const selected = features.filter(
+      (feature) => feature.properties.defectId === selectedDefectId,
+    )
+    const clusters = clusterFeatures(
+      features.filter(
+        (feature) => feature.properties.defectId !== selectedDefectId,
+      ),
+      map.getProjection(),
+      maps,
+    )
+
+    const markers = [
+      ...selected.map((feature) => ({
+        key: feature.properties.defectId,
+        lat: feature.geometry.coordinates[1],
+        lng: feature.geometry.coordinates[0],
+        features: [feature],
+      })),
+      ...clusters,
+    ].map((cluster) => {
+      const grouped = cluster.features.length > 1
+      const [feature] = cluster.features
       const {
         defectId,
         incidentCode,
@@ -298,21 +411,30 @@ export function DefectMap({
         workflowStatus,
       } = feature.properties
       const marker = new maps.Marker({
-        position: new maps.LatLng(latitude, longitude),
+        position: new maps.LatLng(cluster.lat, cluster.lng),
         map,
-        icon: createMarkerIcon(
-          maps,
-          toneOf(workflowStatus),
-          defectId === selectedDefectId,
-        ),
-        title:
-          `${incidentCode} · ${DEFECT_TYPE_LABELS[defectType] ?? defectType}`
-          + ` · ${RISK_LEVEL_LABELS[riskLevel] ?? riskLevel}`
-          + ` · ${WORKFLOW_STATUS_LABELS[workflowStatus] ?? workflowStatus}`,
-        zIndex: defectId === selectedDefectId ? 100 : 1,
+        icon: grouped
+          ? createClusterIcon(maps, cluster)
+          : createMarkerIcon(
+              maps,
+              toneOf(workflowStatus),
+              defectId === selectedDefectId,
+            ),
+        title: grouped
+          ? `결함 ${cluster.features.length}건 — 확대하면 나뉩니다`
+          : `${incidentCode} · ${DEFECT_TYPE_LABELS[defectType] ?? defectType}`
+            + ` · ${RISK_LEVEL_LABELS[riskLevel] ?? riskLevel}`
+            + ` · ${WORKFLOW_STATUS_LABELS[workflowStatus] ?? workflowStatus}`,
+        zIndex: defectId === selectedDefectId ? 100 : (grouped ? 50 : 1),
       })
       maps.Event.addListener(marker, 'click', () => {
-        onSelect(defectId)
+        if (!grouped) {
+          onSelect(defectId)
+          return
+        }
+        // 묶음을 클릭하면 그 자리로 확대한다. 두 단계면 대개 나뉜다.
+        map.setCenter(new maps.LatLng(cluster.lat, cluster.lng))
+        map.setZoom(Math.min(map.getZoom() + 2, 21))
       })
       return marker
     })
@@ -322,7 +444,8 @@ export function DefectMap({
       // 마커가 안 보일 때 원인을 좁히기 위한 개발 전용 로그다.
       // features는 있는데 마커가 없다면 좌표나 아이콘을 의심한다.
       console.info(
-        '[DefectMap] 마커 %d개 생성. 첫 좌표=%o',
+        '[DefectMap] 결함 %d건 -> 마커 %d개. 첫 좌표=%o',
+        features.length,
         markers.length,
         first ? first.geometry.coordinates : null,
       )
@@ -331,7 +454,7 @@ export function DefectMap({
     return () => {
       markers.forEach((marker) => marker.setMap(null))
     }
-  }, [features, mapStatus, selectedDefectId, onSelect])
+  }, [features, mapStatus, selectedDefectId, onSelect, idleToken])
 
   const countByTone = useMemo(() => {
     const counts: Record<DefectStatusTone, number> = {

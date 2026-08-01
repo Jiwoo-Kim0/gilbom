@@ -77,6 +77,7 @@ declare namespace naver.maps {
     constructor(element: HTMLElement, options: MapOptions)
     getProjection(): MapSystemProjection
     getBounds(): LatLngBounds
+    getZoom(): number
     setCenter(latlng: LatLng): void
     setZoom(zoom: number): void
     fitBounds(bounds: LatLngBounds): void

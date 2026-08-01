@@ -2548,3 +2548,32 @@ button:disabled {
   stroke: currentcolor;
   stroke-width: 1.5;
 }
+
+/* 묶인 마커. 모양은 여기에만 둔다 — 마커 content는 HTML 문자열이라
+   style 속성을 쓰면 CSP(style-src 'self')가 파싱 단계에서 막는다. */
+.defect-cluster {
+  display: flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgb(23 34 28 / 35%);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.defect-cluster-received {
+  background: #6f6a5e;
+}
+
+.defect-cluster-progress {
+  background: #b8863b;
+}
+
+.defect-cluster-done {
+  background: #7a5c0c;
+}
