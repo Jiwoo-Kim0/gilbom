@@ -363,6 +363,59 @@ AND d.workflow_status <> 'RESOLVED'
 없어진 값이 파싱은 통과하고 근거 대조에서 걸렸는데 이제 파싱에서 막힌다.
 스키마 문서는 읽는 사람이 오해하지 않도록 함께 좁혔다.
 
+### 3.13 마이그레이션 번호는 파일이 아니라 **DB에도** 박힌다 (2026-08-02)
+
+유형 축소를 V35로 만들어 로컬에 적용해 뒀는데, 그 사이 master에 **다른 V35**
+(`allow_created_mission_deletion`)가 들어왔다. 브랜치를 새 master 위로 재적용하면서
+파일을 V36으로 바꾸고 문서도 고쳤는데, **DB의 `flyway_schema_history`는 그대로였다.**
+
+```
+DB 기록:  35 | narrow defect types        <- 어제 적용한 것
+현재 파일: V35 = allow_created_mission_deletion
+          V36 = narrow_defect_types
+```
+
+다음 기동에서 백엔드가 **아예 뜨지 않았다.**
+
+```
+Migration checksum mismatch for migration version 35
+Validate failed: Migrations have failed validation
+```
+
+#### `flyway repair`를 쓰지 않은 이유
+
+repair는 **이력을 파일에 맞춰 덮어쓰기만 한다.** 그러면 실행된 적 없는 master의 V35가
+"적용됨"으로 기록된다. 트리거와 권한이 없는데 있다고 믿는 DB가 되고, 그 거짓말은
+한참 뒤 엉뚱한 곳에서 드러난다.
+
+대신 **어긋난 이력 한 줄만 지웠다.**
+
+```sql
+DELETE FROM flyway_history.flyway_schema_history
+WHERE version = '35' AND description = 'narrow defect types';
+```
+
+그러면 Flyway가 V35·V36을 순서대로 실행한다.
+
+- **V35**: 이 DB에 처음 적용 → 미시작 Mission 삭제 트리거·권한이 실제로 생긴다
+- **V36**: 내용은 이미 반영돼 있어 UPDATE 0건, 제약은 같은 값으로 재생성 → 무해
+
+결함 41건과 이미지 6장을 그대로 두고 이력만 바로잡았다. 손대기 전에 백업을 떴다
+(`scripts/backup-defect-images.sh`). **DB 이력 테이블을 직접 수정하는 작업**이라
+되돌릴 지점이 없으면 안 된다.
+
+#### 교훈
+
+> 마이그레이션 번호를 바꾸면 **파일 · 문서 · 이미 적용된 DB** 셋을 함께 봐야 한다.
+> 나는 앞의 둘만 고치고 DB를 잊었다.
+
+브랜치를 재적용하는 사람이 또 나오면(master force push 여파로 minho·chaeun도 같은
+상황이다) 똑같이 걸린다. 재적용 후 **첫 기동을 반드시 해보고 넘어간다.**
+
+같은 맥락에서 `docs/database-migrations.md` 등록도 빠뜨렸다. 그 문서가 번호의
+기준이라 빠지면 다음 사람이 번호를 또 충돌시킨다. **마이그레이션을 만들면 파일 ·
+목록 문서 · DDL 참고 문서를 한 묶음으로 본다.**
+
 ## 4. 작업 범위 제약 (중요)
 
 **내가 수정할 수 있는 기존 파일은 `com/gilbom/defect/` 밑으로 한정된다.**
