@@ -24,7 +24,13 @@ REPOSITORY_ROOT="$(git -C "$PROJECT_DIR" rev-parse --show-toplevel)"
 PROJECT_RELATIVE="$(git -C "$PROJECT_DIR" rev-parse --show-prefix | sed 's#/$##')"
 [ -n "$PROJECT_RELATIVE" ] || PROJECT_RELATIVE=.
 mkdir -p "$WORK_ROOT/trivy-cache"
-chmod 0700 "$OUTPUT_DIR" "$WORK_ROOT"
+TRIVY_TEMP_DIR="$(mktemp -d "$WORK_ROOT/trivy-tmp.XXXXXX")"
+chmod 0700 "$OUTPUT_DIR" "$WORK_ROOT" "$WORK_ROOT/trivy-cache" "$TRIVY_TEMP_DIR"
+
+cleanup() {
+  rm -r "$TRIVY_TEMP_DIR" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT HUP INT TERM
 
 fail() {
   echo "Source security verification failed: $1" >&2
@@ -120,7 +126,7 @@ run_trivy_fs() {
   esac
 
   if command -v trivy >/dev/null 2>&1; then
-    trivy fs \
+    TMPDIR="$TRIVY_TEMP_DIR" trivy fs \
       --quiet \
       --cache-dir "$WORK_ROOT/trivy-cache" \
       --scanners vuln \
@@ -135,6 +141,7 @@ run_trivy_fs() {
 
   docker run --rm \
     --user "$(id -u):$(id -g)" \
+    --env TMPDIR="$TRIVY_TEMP_DIR" \
     --volume "$PROJECT_DIR:/project:ro" \
     --volume "$WORK_ROOT:$WORK_ROOT" \
     --volume "$OUTPUT_DIR:$OUTPUT_DIR" \

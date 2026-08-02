@@ -16,6 +16,7 @@ for file in \
   scripts/verify-source-security.sh \
   scripts/verify-repository-policy.sh \
   scripts/scan-image-security.sh \
+  scripts/test-scan-image-security.sh \
   scripts/run-frontend-ci-task.sh \
   scripts/test-run-frontend-ci-task.sh \
   scripts/render-vulnerability-report.py \
@@ -74,6 +75,7 @@ sh -n \
   scripts/verify-source-security.sh \
   scripts/verify-repository-policy.sh \
   scripts/scan-image-security.sh \
+  scripts/test-scan-image-security.sh \
   scripts/run-backend-ci-task.sh \
   scripts/run-frontend-ci-task.sh \
   scripts/test-run-frontend-ci-task.sh \

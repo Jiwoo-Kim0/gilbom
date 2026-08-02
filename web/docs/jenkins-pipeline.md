@@ -139,6 +139,12 @@ Gitleaks·Redocly·Trivy source gate는 임시 CI Secret을 생성하기 전에 
 custom Jenkins image에 설치된 native Gitleaks·Trivy를 우선 사용하고, image
 재빌드 전 agent에서는 `infra/security/tool-versions.env`의 동일 digest container로
 실행한다. 실패한 redacted finding과 정책 요약도 post action에서 artifact로 남긴다.
+Trivy의 일반·Java DB는 Backend 전체 Test보다 먼저 내려받아 scanner·network·disk
+문제를 fail-fast 한다. Cache와 OCI 압축 해제용 `TMPDIR`는 모두
+`.artifacts/image-security-work/`에 두어 Jenkins의 256 MiB `/tmp` tmpfs를
+대용량 Java DB가 소진하지 않게 한다. 최종 image scan은 같은 cache의 readiness
+증거가 없으면 시작하지 않는다. 사전 준비는 workspace에 최소 5 GiB가 남았는지도
+검사해 부족하면 대용량 Test 전에 즉시 중단한다.
 
 최종 보고서·복원력 smoke의 임의 Frontend port는 Jenkins container가 아니라
 DinD service가 소유한다. Pipeline은 이 검증에서만 Frontend를 DinD의 외부

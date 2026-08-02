@@ -87,6 +87,12 @@ archive를 Trivy로 검사하고 다음 증거를 만든다.
 - `policy-summary.json`
 - `scanner-status.txt`
 
+Pipeline은 비싼 Test보다 먼저 `scripts/scan-image-security.sh prepare`를 실행해
+일반 취약점 DB와 Java DB를 workspace cache에 준비한다. Trivy cache와
+OCI download·압축 해제용 `TMPDIR`는 `.artifacts/image-security-work/`만 사용하며,
+사전 준비 시 workspace 여유공간 5 GiB를 요구한다. 최종 image scan은 이
+readiness 증거를 필수로 요구한다.
+
 기존 `verify-production-images.sh`의 non-root·layer·Secret·runtime·log 검증은
 유지하고, 선택적 Docker Scout 경로만 이 필수 Trivy 정책으로 교체했다.
 

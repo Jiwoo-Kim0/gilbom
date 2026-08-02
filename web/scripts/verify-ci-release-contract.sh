@@ -30,6 +30,7 @@ for stage in \
   "stage('OpenAPI lint')" \
   "stage('Backend dependency scan')" \
   "stage('Frontend dependency scan')" \
+  "stage('Image scanner readiness')" \
   "stage('Prepare ephemeral credentials')" \
   "stage('Backend full test')" \
   "stage('Backend security acceptance')" \
@@ -60,6 +61,12 @@ done
 assert_contains Jenkinsfile \
   'IMAGE_SCANNER_MODE=required' \
   "release scanner must be required"
+assert_contains Jenkinsfile \
+  'sh scripts/scan-image-security.sh prepare' \
+  "Trivy databases must be prepared before expensive tests"
+assert_contains Jenkinsfile \
+  'TRIVY_REQUIRE_PREPARED=true' \
+  "required image scan must consume fail-fast scanner readiness"
 assert_contains Jenkinsfile \
   'test "$BACKEND_IMAGE" = "gilbom-backend:$RELEASE_SHA"' \
   "Backend build must use the full release SHA"

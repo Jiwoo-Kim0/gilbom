@@ -198,6 +198,19 @@ pipeline {
             }
         }
 
+        stage('Image scanner readiness') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        IMAGE_SECURITY_OUTPUT_DIR=.artifacts/image-security \
+                        IMAGE_SECURITY_WORK_ROOT=.artifacts/image-security-work \
+                            sh scripts/scan-image-security.sh prepare
+                    '''
+                }
+            }
+        }
+
         stage('Prepare ephemeral credentials') {
             steps {
                 dir(env.APP_DIR) {
@@ -554,6 +567,7 @@ pipeline {
                         FRONTEND_IMAGE="$FRONTEND_IMAGE" \
                         IMAGE_SECURITY_OUTPUT_DIR=.artifacts/image-security \
                         IMAGE_SECURITY_WORK_ROOT=.artifacts/image-security-work \
+                        TRIVY_REQUIRE_PREPARED=true \
                             sh scripts/scan-image-security.sh
                         sh scripts/record-ci-result.sh sbom-cve
                     '''

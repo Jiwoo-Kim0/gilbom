@@ -164,6 +164,21 @@ assert_not_contains scripts/verify-production-images.sh \
   'CHECK_DIR="$(mktemp -d)"' \
   "image verification must not stage docker save archives in /tmp"
 assert_contains Jenkinsfile \
+  "stage('Image scanner readiness')" \
+  "Trivy Java database readiness must fail before expensive tests"
+assert_contains scripts/scan-image-security.sh \
+  'TMPDIR="$TRIVY_TEMP_DIR" trivy' \
+  "native Trivy temporary files must stay on the workspace filesystem"
+assert_contains scripts/scan-image-security.sh \
+  '--env TMPDIR="$TRIVY_TEMP_DIR"' \
+  "container Trivy temporary files must stay on the workspace filesystem"
+assert_contains scripts/scan-image-security.sh \
+  '--download-java-db-only' \
+  "Trivy Java database must be prefetched by the fail-fast stage"
+assert_contains scripts/scan-image-security.sh \
+  'TRIVY_MIN_FREE_KB:-5242880' \
+  "Trivy readiness must reserve workspace capacity before downloading databases"
+assert_contains Jenkinsfile \
   'DOCKER_BIND_WORK_ROOT=.artifacts/docker-bind-work' \
   "Jenkins Docker bind sources must use its shared workspace filesystem"
 [ "$(grep -Fc -- 'DOCKER_BIND_WORK_ROOT=.artifacts/docker-bind-work' Jenkinsfile)" -eq 2 ] \
