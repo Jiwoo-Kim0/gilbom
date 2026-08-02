@@ -307,6 +307,62 @@ AND d.workflow_status <> 'RESOLVED'
 | `location.valid == true` | 결함 미생성, `incident_ingestion_issue`에 `INVALID_GPS` |
 | `patrolAreaId != null` | 결함 미생성, `PATROL_AREA_UNRESOLVED` |
 
+### 3.12 결함 유형을 3종으로 좁혔다 (2026-08-01, V36)
+
+제품에서 쓰는 유형이 **파손·설치 이상·기타 이상** 셋으로 정해졌다. 나머지 넷
+(`CONTAMINATED`, `UPLIFTED`, `BLOCKED`, `MISSING_SUSPECTED`)을 뺐다.
+
+#### 임베디드 계약은 바뀌지 않았다
+
+확인해보니 MQTT 페이로드의 `IncidentEventPayload.DefectType`은 **원래 `DAMAGED`
+하나만** 받고 있었다. 로봇이 보내는 값은 그대로다.
+
+바꿔 말하면 `INSTALLATION_INVALID`·`UNKNOWN_ANOMALY`는 **사람이 결함 수정에서
+지정하는 값**이다. 로봇은 파손만 올리고 관리자가 보고 재분류하는 구조다.
+
+> **내가 한 번 잘못 짚었다.** MQTT 문서가 7종을 나열하는 걸 보고 "코드와 어긋나 있다"고
+> 판단했는데, 열어보니 `defect_type: ["DAMAGED"]` / `reserved_defect_type: [나머지]`로
+> **정확히 구분돼 있었다.** B의 문서는 처음부터 맞았다. 목록에 값이 보인다고 계약이
+> 그렇다는 뜻이 아니다 — 그 값이 **어느 필드 아래** 있는지를 봐야 했다.
+> 예약 목록만 2종으로 좁혔다.
+
+#### 기존 행은 지우지 않고 옮겼다
+
+없어지는 유형이 들어 있던 22건을 `UNKNOWN_ANOMALY`로 UPDATE한 뒤 CHECK를 바꿨다.
+지우지 않은 이유는 관측·이미지·이력이 딸려 있어서다. 순서가 중요하다 — 제약을
+먼저 바꾸면 기존 행이 위반이라 마이그레이션이 실패한다.
+
+제약은 세 곳이었다(`pg_constraint`로 확인): `defect.defect`,
+`defect.defect_observation`, `defect.incident_ingestion_issue`.
+
+`defect_status_history`의 before/after JSONB와 감사 로그 스냅샷은 **그대로 뒀다.**
+그 시점에 실제로 그 값이었다는 기록이고, 되짚을 때 필요하다.
+
+#### 통계까지 번졌다 — A 소유 파일 5개
+
+유형은 통계 계약이기도 해서 defect 밖으로 번졌다. 안 고치면 **통계에 존재하지 않는
+유형 4개가 항상 0으로** 뜬다.
+
+| 파일 | 이유 |
+| --- | --- |
+| `statistics/StatisticsDtos.java` | enum 7 → 3 |
+| `StatisticsControllerTest`, `StatisticsQueryServiceTest` | 기대값 |
+| `fixtures/patrol-mission-statistics.sql` | **불가피.** 픽스처가 `BLOCKED` 등을 INSERT해서 V35 이후 제약 위반이 된다 |
+| `PatrolMissionSchemaIntegrationTest` | 위 픽스처의 기대 집계 |
+
+의미는 바꾸지 않았다. 없어지는 유형을 전부 `UNKNOWN_ANOMALY`로 매핑하고 기대값만
+그에 맞췄다. **A에게 알려야 한다.**
+
+#### LLM 검증은 이미 새 계약을 따른다
+
+`docs/report-llm-result.schema.json`은 **읽는 코드가 없는 문서**다. 실제 검증은
+`ReportLlmResultValidator`가 하는데, 유형을 문자열 목록으로 보지 않고
+`StatisticsDtos.DefectType`으로 파싱한 뒤 근거 결함의 값과 대조한다.
+
+그 enum을 줄였으므로 검증은 자동으로 좁아졌고, **오히려 더 엄격해졌다** — 전에는
+없어진 값이 파싱은 통과하고 근거 대조에서 걸렸는데 이제 파싱에서 막힌다.
+스키마 문서는 읽는 사람이 오해하지 않도록 함께 좁혔다.
+
 ## 4. 작업 범위 제약 (중요)
 
 **내가 수정할 수 있는 기존 파일은 `com/gilbom/defect/` 밑으로 한정된다.**

@@ -28,10 +28,6 @@ public final class StatisticsDtos {
 
     public enum DefectType {
         DAMAGED,
-        CONTAMINATED,
-        UPLIFTED,
-        BLOCKED,
-        MISSING_SUSPECTED,
         INSTALLATION_INVALID,
         UNKNOWN_ANOMALY
     }

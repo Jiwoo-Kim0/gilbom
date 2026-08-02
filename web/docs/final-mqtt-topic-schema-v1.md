@@ -1279,8 +1279,7 @@ Incident·Battery·Safety·Mission Event는 다음 필드를 공통으로 사용
       "asset_type": "BRAILLE_BLOCK",
       "block_type": "LINEAR",           # 후보: LINEAR | DOT | UNKNOWN
       "defect_type": "DAMAGED",         # MVP: DAMAGED
-                                            # 예약: CONTAMINATED | UPLIFTED | BLOCKED | MISSING_SUSPECTED
-                                            #       INSTALLATION_INVALID | UNKNOWN_ANOMALY
+                                            # 예약: INSTALLATION_INVALID | UNKNOWN_ANOMALY
       "confidence": 0.87,
       "attributes": {
         "damage_ratio": 0.32
@@ -1319,10 +1318,6 @@ MVP:
     "DAMAGED"
   ],
   "reserved_defect_type": [
-    "CONTAMINATED",
-    "UPLIFTED",
-    "BLOCKED",
-    "MISSING_SUSPECTED",
     "INSTALLATION_INVALID",
     "UNKNOWN_ANOMALY"
   ]

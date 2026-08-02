@@ -829,17 +829,11 @@ class PatrolMissionSchemaIntegrationTest {
                         org.assertj.core.groups.Tuple.tuple(
                                 DefectType.DAMAGED, 1L),
                         org.assertj.core.groups.Tuple.tuple(
-                                DefectType.CONTAMINATED, 1L),
-                        org.assertj.core.groups.Tuple.tuple(
-                                DefectType.UPLIFTED, 1L),
-                        org.assertj.core.groups.Tuple.tuple(
-                                DefectType.BLOCKED, 1L),
-                        org.assertj.core.groups.Tuple.tuple(
-                                DefectType.MISSING_SUSPECTED, 0L),
-                        org.assertj.core.groups.Tuple.tuple(
                                 DefectType.INSTALLATION_INVALID, 0L),
+                        // 유형 축소(V36) 전 CONTAMINATED·UPLIFTED·BLOCKED였던
+                        // 픽스처 3건이 기타 이상으로 합쳐졌다.
                         org.assertj.core.groups.Tuple.tuple(
-                                DefectType.UNKNOWN_ANOMALY, 0L));
+                                DefectType.UNKNOWN_ANOMALY, 3L));
 
         var scoped = statisticsQueryService.findByDefectType(
                 scopedViewerId,
@@ -848,7 +842,7 @@ class PatrolMissionSchemaIntegrationTest {
         assertThat(scoped.totalDefectCount()).isEqualTo(2);
         assertThat(scoped.items())
                 .extracting(item -> item.defectCount())
-                .containsExactly(1L, 0L, 0L, 1L, 0L, 0L, 0L);
+                .containsExactly(1L, 0L, 1L);
 
         var empty = statisticsQueryService.findByDefectType(
                 fixtureAdminId,

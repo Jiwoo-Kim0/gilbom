@@ -46,10 +46,6 @@ public record DefectFilter(
             "REJECTED");
     static final Set<String> DEFECT_TYPES = Set.of(
             "DAMAGED",
-            "CONTAMINATED",
-            "UPLIFTED",
-            "BLOCKED",
-            "MISSING_SUSPECTED",
             "INSTALLATION_INVALID",
             "UNKNOWN_ANOMALY");
     static final Set<String> RISK_LEVELS = Set.of(

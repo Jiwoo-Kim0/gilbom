@@ -378,7 +378,7 @@ events/incident
 | `evidence.bbox_norm` | `bbox_norm` JSONB |
 | `model.name/version` | `model_name`, `model_version` |
 
-MVP 실제 발행 유형은 `DAMAGED` 하나다. `CONTAMINATED`, `UPLIFTED`, `BLOCKED`, `MISSING_SUSPECTED`, `INSTALLATION_INVALID`, `UNKNOWN_ANOMALY`는 DB와 enum에만 예약한다.
+MVP 실제 발행 유형은 `DAMAGED` 하나다. `INSTALLATION_INVALID`, `UNKNOWN_ANOMALY`는 DB와 enum에만 예약하며, 로봇이 아니라 관리자가 결함 수정에서 지정한다.
 
 이 Topic에서 B와 C의 경계는 다음과 같다.
 
