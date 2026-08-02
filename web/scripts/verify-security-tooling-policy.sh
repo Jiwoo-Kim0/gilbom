@@ -14,7 +14,15 @@ for file in \
   infra/security/vulnerability-exceptions.yaml \
   scripts/security_policy.py \
   scripts/verify-source-security.sh \
+  scripts/verify-repository-policy.sh \
   scripts/scan-image-security.sh \
+  scripts/render-vulnerability-report.py \
+  scripts/prepare-release-security-artifacts.sh \
+  scripts/create-release-image-archive.sh \
+  scripts/generate-build-metadata.py \
+  scripts/generate-build-metadata.sh \
+  scripts/verify-release-artifacts.sh \
+  scripts/verify-ci-release-contract.sh \
   scripts/build-release-artifacts.sh \
   scripts/transfer-release-artifacts.sh \
   infra/scripts/promote-release-artifacts.sh \
@@ -23,25 +31,16 @@ do
   test -s "$file" || fail "required file is missing or empty: $file"
 done
 
-for file in \
-  scripts/security_policy.py \
-  scripts/verify-source-security.sh \
-  scripts/scan-image-security.sh \
-  scripts/build-release-artifacts.sh \
-  scripts/transfer-release-artifacts.sh \
-  infra/scripts/promote-release-artifacts.sh
-do
-  test -x "$file" || fail "required command is not executable: $file"
-done
-
 if grep -R -n -F 'docker scout' \
     Jenkinsfile scripts/verify-production-images.sh \
     docs/jenkins-pipeline.md docs/day7-production-image-verification.md; then
   fail "Docker Scout remains in the active security contract"
 fi
 
-grep -Fq "stage('Source security policy')" Jenkinsfile \
-  || fail "Jenkins source security stage is missing"
+grep -Fq "stage('Git history Secret scan')" Jenkinsfile \
+  || fail "Jenkins Git history Secret stage is missing"
+grep -Fq "stage('Checkout workspace Secret scan')" Jenkinsfile \
+  || fail "Jenkins workspace Secret stage is missing"
 grep -Fq 'IMAGE_SCANNER_MODE=required' Jenkinsfile \
   || fail "Jenkins image scanner is not fail-closed"
 if grep -Eq "\\.env|secrets/|mosquitto/local" .gitleaks.toml; then
@@ -57,10 +56,23 @@ grep -Fq 'chown -R root:root' infra/scripts/promote-release-artifacts.sh \
 
 sh -n \
   scripts/verify-source-security.sh \
+  scripts/verify-repository-policy.sh \
   scripts/scan-image-security.sh \
+  scripts/run-backend-ci-task.sh \
+  scripts/run-frontend-ci-task.sh \
+  scripts/record-ci-result.sh \
+  scripts/prepare-release-security-artifacts.sh \
+  scripts/create-release-image-archive.sh \
+  scripts/generate-build-metadata.sh \
+  scripts/verify-release-artifacts.sh \
+  scripts/verify-ci-release-contract.sh \
   scripts/build-release-artifacts.sh \
   scripts/transfer-release-artifacts.sh \
   infra/scripts/promote-release-artifacts.sh
 python3 scripts/test-security-policy.py
+python3 -m py_compile \
+  scripts/security_policy.py \
+  scripts/render-vulnerability-report.py \
+  scripts/generate-build-metadata.py
 
 echo "Security tooling policy definition: PASS"

@@ -27,12 +27,16 @@ keyless 또는 KMS 서명, admission 검증 주체를 확정한 뒤 추가한다
 
 ## 2. Secret과 OpenAPI 정책
 
-`scripts/verify-source-security.sh`는 Jenkins가 임시 Secret을 만들기 전에 실행한다.
+`scripts/verify-source-security.sh`는 Jenkins가 임시 Secret을 만들기 전에 action
+단위로 실행한다.
 
-1. repository root의 모든 commit과 현재 branch 외 refs를 Gitleaks로 검사한다.
-2. 현재 `web` source workspace를 별도로 검사한다.
-3. Redocly `recommended` 규칙으로 `docs/openapi-v1.yaml`을 lint한다.
-4. Trivy filesystem 보고서와 CycloneDX SBOM을 만든다.
+1. `history`: repository root의 모든 commit과 현재 branch 외 refs를 Gitleaks로
+   검사한다.
+2. `workspace`: 현재 `web` checkout을 별도로 검사한다.
+3. `openapi`: Redocly `recommended` 규칙으로 `docs/openapi-v1.yaml`을 lint한다.
+4. `backend-dependencies`, `frontend-dependencies`: 각 dependency Trivy JSON과
+   CycloneDX SBOM을 별도로 만든다.
+5. `dependency-policy`: 두 보고서에 Critical/High/예외 정책을 함께 적용한다.
 
 Gitleaks finding은 baseline 또는 취약점 예외로 무시할 수 없다. 생성 build와
 `.artifacts`만 source 경계 밖이라 path allowlist로 제외한다. ignored `.env`,
@@ -86,6 +90,12 @@ archive를 Trivy로 검사하고 다음 증거를 만든다.
 기존 `verify-production-images.sh`의 non-root·layer·Secret·runtime·log 검증은
 유지하고, 선택적 Docker Scout 경로만 이 필수 Trivy 정책으로 교체했다.
 
+Release 후보에서는 `IMAGE_SCANNER_MODE=required`만 허용한다.
+`scripts/prepare-release-security-artifacts.sh`가 정책을 다시 평가한 다음
+`release/sbom/{backend,frontend}.sbom.json`과
+`release/vulnerabilities/{backend,frontend}.txt`로 정규화한다. 스캐너 상태가
+Trivy가 아니거나 네 파일 중 하나라도 비어 있으면 실패한다.
+
 ## 4. zstd archive와 SSH/root 승격
 
 clean worktree의 현재 40자리 SHA가 release ID다.
@@ -130,11 +140,20 @@ Jenkins가 전송을 자동화하려면 별도 SSH private-key Credential, 검�
 확정되기 전까지 CI는 archive 생성·검사까지만 담당하며 운영 전송은 자동 실행하지
 않는다.
 
+CI의 통합 image archive는 기존 EC2 수동 배치 bundle과 별도 경계다. 모든 test와
+보안 검사가 PASS인 full-SHA Backend·Frontend image만 `release/images.tar.zst`로
+FIFO streaming하고 `images.tar.zst.sha256`을 즉시 확인한다. 이어 provenance를
+`release/build-metadata.json`으로 만들고 `jq empty`로 검사한다.
+
+최종 `release/SHA256SUMS`는 Archive뿐 아니라 metadata, SBOM, 취약점 보고서와
+정책 요약까지 모두 보호한다. Artifact 디렉터리는 symlink·Secret형 파일·실제 CI
+Secret 값·provider token/private-key 패턴을 다시 검사한 뒤에만 보존한다.
+
 ## 5. 실행
 
 ```sh
 sh scripts/verify-security-tooling-policy.sh
-sh scripts/verify-source-security.sh
+sh scripts/verify-source-security.sh all
 
 docker compose -f compose.build.yaml build backend frontend
 IMAGE_SCANNER_MODE=required sh scripts/verify-production-images.sh

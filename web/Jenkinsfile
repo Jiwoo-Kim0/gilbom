@@ -2,7 +2,6 @@ pipeline {
     agent any
 
     options {
-        // 동일 Job의 이전 빌드가 같은 로컬 image tag를 덮어쓰지 않게 한다.
         disableConcurrentBuilds(abortPrevious: true)
         skipDefaultCheckout(true)
         timestamps()
@@ -12,12 +11,8 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                // 이전 중단 빌드가 checkout 전에 남긴 root-owned 로컬 MQTT 자산만
-                // DinD root helper로 workspace 소유자에게 되돌린다. 저장소 source나
-                // 다른 build 산출물은 이 복구 범위에 포함하지 않는다.
                 sh '''
                     set -eu
-
                     workspace_uid="$(id -u)"
                     workspace_gid="$(id -g)"
                     for mqtt_local in \
@@ -55,12 +50,8 @@ pipeline {
                 '''
                 checkout scm
                 script {
-                    // 저장소 root가 common-proj인 경우와 web 자체인 경우를 모두 지원한다.
                     env.APP_DIR = fileExists('web/compose.yaml') ? 'web' : '.'
 
-                    // Release artifact와 image tag의 유일한 기준은 실제 checkout
-                    // commit이다. Jenkins Job이 shallow clone으로 바뀌거나 비정상
-                    // SHA를 반환하면 후속 build 전에 fail closed 한다.
                     def shallowRepository = sh(
                             label: 'Verify full Git checkout',
                             returnStdout: true,
@@ -82,6 +73,10 @@ pipeline {
                     env.RELEASE_SHA = releaseSha
                     env.BACKEND_IMAGE = "gilbom-backend:${releaseSha}"
                     env.FRONTEND_IMAGE = "gilbom-frontend:${releaseSha}"
+                    env.BUILD_STARTED_AT_UTC = sh(
+                            returnStdout: true,
+                            script: "date -u '+%Y-%m-%dT%H:%M:%SZ'"
+                    ).trim()
                     echo "RELEASE_SHA=${env.RELEASE_SHA}"
                     echo "BACKEND_IMAGE=${env.BACKEND_IMAGE}"
                     echo "FRONTEND_IMAGE=${env.FRONTEND_IMAGE}"
@@ -96,17 +91,108 @@ pipeline {
             }
         }
 
-        stage('Source security policy') {
+        // Stage 4: 모든 source 검사는 임시 CI Secret 생성 전에 fail-fast 한다.
+        stage('Repository policy') {
             steps {
                 dir(env.APP_DIR) {
-                    // Secret이 주입되기 전에 Git 전체 이력과 clean workspace를
-                    // 검사한다. OpenAPI와 dependency SBOM/CVE도 같은 fail-closed
-                    // gate에서 검증한다.
                     sh '''
                         set -eu
                         SOURCE_SECURITY_OUTPUT_DIR=.artifacts/source-security \
                         SECURITY_WORK_ROOT=.artifacts/security-work \
-                            sh scripts/verify-source-security.sh
+                            sh scripts/verify-source-security.sh reset
+                        sh scripts/verify-repository-policy.sh
+                    '''
+                }
+            }
+        }
+
+        stage('Git history Secret scan') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        SOURCE_SECURITY_OUTPUT_DIR=.artifacts/source-security \
+                        SECURITY_WORK_ROOT=.artifacts/security-work \
+                            sh scripts/verify-source-security.sh history
+                    '''
+                }
+            }
+        }
+
+        stage('Checkout workspace Secret scan') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        SOURCE_SECURITY_OUTPUT_DIR=.artifacts/source-security \
+                        SECURITY_WORK_ROOT=.artifacts/security-work \
+                            sh scripts/verify-source-security.sh workspace
+                    '''
+                }
+            }
+        }
+
+        stage('Secret boundary') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh 'sh scripts/verify-secret-boundary.sh'
+                }
+            }
+        }
+
+        stage('Supported runtime versions') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh 'sh scripts/verify-supported-versions.sh'
+                }
+            }
+        }
+
+        stage('Production Compose contract') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        docker compose config --quiet
+                        sh scripts/verify-production-compose.sh
+                    '''
+                }
+            }
+        }
+
+        stage('OpenAPI lint') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        SOURCE_SECURITY_OUTPUT_DIR=.artifacts/source-security \
+                        SECURITY_WORK_ROOT=.artifacts/security-work \
+                            sh scripts/verify-source-security.sh openapi
+                    '''
+                }
+            }
+        }
+
+        stage('Backend dependency scan') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        SOURCE_SECURITY_OUTPUT_DIR=.artifacts/source-security \
+                        SECURITY_WORK_ROOT=.artifacts/security-work \
+                            sh scripts/verify-source-security.sh backend-dependencies
+                    '''
+                }
+            }
+        }
+
+        stage('Frontend dependency scan') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        SOURCE_SECURITY_OUTPUT_DIR=.artifacts/source-security \
+                        SECURITY_WORK_ROOT=.artifacts/security-work \
+                            sh scripts/verify-source-security.sh frontend-dependencies
+                        SOURCE_SECURITY_OUTPUT_DIR=.artifacts/source-security \
+                        SECURITY_WORK_ROOT=.artifacts/security-work \
+                            sh scripts/verify-source-security.sh dependency-policy
                     '''
                 }
             }
@@ -115,14 +201,11 @@ pipeline {
         stage('Prepare ephemeral credentials') {
             steps {
                 dir(env.APP_DIR) {
-                    // CI Secret도 environment가 아니라 build별 ignored 파일로 만들고
-                    // Compose가 runtime에 /run/secrets로만 mount한다.
                     sh '''
                         set +x
                         set -eu
                         umask 077
                         mkdir -p secrets
-
                         openssl rand -hex 32 > secrets/postgres_admin_password
                         openssl rand -hex 32 > secrets/postgres_flyway_password
                         openssl rand -hex 32 > secrets/postgres_app_password
@@ -134,18 +217,12 @@ pipeline {
                         printf '1=' > secrets/gilbom_mfa_totp_keyring
                         openssl rand -base64 32 \
                             | tr -d '\\n' >> secrets/gilbom_mfa_totp_keyring
-
-                        # LLM과 초기 관리자는 CI smoke에서 비활성화한다.
                         : > secrets/gilbom_llm_api_key
                         : > secrets/gilbom_initial_admin_password
-                        # Compose file secrets preserve host mode. The 0700 parent
-                        # blocks host traversal and 0444 lets UID 1883 read the
-                        # read-only container mount.
                         chmod 444 secrets/*
                     '''
                 }
                 script {
-                    // 검증은 컨테이너 내부에서 하므로 host port는 임의 포트(0)를 사용해 충돌을 피한다.
                     env.POSTGRES_PORT = '0'
                     env.BACKEND_PORT = '0'
                     env.FRONTEND_PORT = '0'
@@ -154,203 +231,149 @@ pipeline {
             }
         }
 
-        stage('Repository policy') {
+        // Stage 5: 기존 검증을 결과 단위로 분리해 실패 위치와 metadata를 명확히 한다.
+        stage('Backend full test') {
             steps {
                 dir(env.APP_DIR) {
                     sh '''
                         set -eu
-
-                        # 실제 .env, secrets/와 대표적인 개인키/keystore 확장자는
-                        # 추적되면 즉시 실패시킨다. secrets 전체를 ignore하기 위한
-                        # 빈 디렉터리 정책 파일 secrets/.gitignore만 허용한다.
-                        if git ls-files --full-name \
-                            | grep -E '(^|/)\\.env$|(^|/)secrets/|\\.(pem|key|p12|pfx|jks|keystore)$|(^|/)passwd$|(^|/)credentials\\.json$|(^|/)service-account[^/]*\\.json$' \
-                            | grep -Ev '(^|/)secrets/\\.gitignore$'; then
-                            echo 'Tracked secret file candidate detected.' >&2
-                            exit 1
-                        fi
-
-                        # 대표적인 provider token과 PEM 개인키 본문이 일반 소스에 들어오면 CI에서 막는다.
-                        if git grep -IlE -e \
-                            'AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|glpat-[A-Za-z0-9_-]{20,}|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}' \
-                            -- . ':!frontend/gilbom/package-lock.json'; then
-                            echo 'Tracked token candidate detected.' >&2
-                            exit 1
-                        fi
-                        if git grep -IlE -e \
-                            '-----BEGIN( [A-Z0-9]+)? PRIVATE KEY-----' \
-                            -- . ':!backend/src/main/java/com/gilbom/robot/mqtt/strategy/PemSslContextSupport.java'; then
-                            echo 'Tracked private key candidate detected.' >&2
-                            exit 1
-                        fi
-
-                        # 필수 환경 변수가 모두 해석되는지도 image build 전에 확인한다.
-                        docker compose config --quiet
-                        sh scripts/verify-secret-boundary.sh
-                        sh scripts/verify-production-compose.sh
-                        sh scripts/verify-certbot-automation.sh
-                        sh scripts/verify-day8-infrastructure.sh
-                        sh scripts/verify-security-tooling-policy.sh
-                        sh scripts/verify-ci-checkout-contract.sh
-                        sh scripts/verify-frontend-csp-source.sh
-                        sh -n infra/scripts/*.sh
-                        test -s docs/production-deployment-runbook.md
-                        test -s docs/day7-completion-freeze.md
-
-                        # 개발자 선언과 Docker/lockfile의 지원 버전이 어긋나면 빌드하지 않는다.
-                        sh scripts/verify-supported-versions.sh
-
-                        # 통계 path·DTO·권한·오류 코드 정본이 한 변경에서 함께
-                        # 유지되는지 런타임 빌드 전에 확인한다.
-                        sh scripts/verify-statistics-contract.sh
+                        sh scripts/run-backend-ci-task.sh test
+                        sh scripts/record-ci-result.sh backend-test
                     '''
                 }
             }
         }
 
-        stage('Backend full test and Day 4 security acceptance') {
+        stage('Backend security acceptance') {
             steps {
                 dir(env.APP_DIR) {
                     sh '''
                         set -eu
-
-                        project_dir="$(pwd)"
-                        host_uid="$(id -u)"
-                        host_gid="$(id -g)"
-                        test_home=/test-home
-
-                        # 개발자 host socket과 운영 Jenkins의 TLS DinD를 모두
-                        # 지원한다. 어느 경로든 Testcontainers가 실제 DB를
-                        # 기동하며 test skip은 실패로 처리한다.
-                        if [ -S /var/run/docker.sock ]; then
-                            docker_socket_gid="$(
-                                stat -c '%g' /var/run/docker.sock
-                            )"
-                            docker run --rm \
-                                --user "$host_uid:$host_gid" \
-                                --group-add "$docker_socket_gid" \
-                                --add-host host.docker.internal:host-gateway \
-                                --env DOCKER_HOST=unix:///var/run/docker.sock \
-                                --env TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock \
-                                --env TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal \
-                                --env HOME="$test_home" \
-                                --env GRADLE_USER_HOME="$test_home/.gradle" \
-                                --env JAVA_TOOL_OPTIONS=-Duser.home="$test_home" \
-                                --volume /var/run/docker.sock:/var/run/docker.sock \
-                                --volume "$project_dir/backend:$project_dir/backend:ro" \
-                                --tmpfs "$test_home:rw,nosuid,nodev,uid=$host_uid,gid=$host_gid,mode=0700" \
-                                --workdir "$project_dir/backend" \
-                                amazoncorretto:21.0.12-alpine3.22 \
-                                sh -ec '
-                                    sh ./gradlew \
-                                        --project-cache-dir /test-home/project-cache \
-                                        -PisolatedBuildDirectory=/test-home/build \
-                                        test \
-                                        securityAcceptanceTest \
-                                        --no-daemon \
-                                        --rerun-tasks
-                                '
-                        else
-                            test -n "${DOCKER_HOST:-}"
-                            test "${DOCKER_TLS_VERIFY:-}" = "1"
-                            test -r "${DOCKER_CERT_PATH:-/certs/client}/ca.pem"
-
-                            docker run --rm \
-                                --user "$host_uid:$host_gid" \
-                                --add-host docker-builder:host-gateway \
-                                --env DOCKER_HOST="$DOCKER_HOST" \
-                                --env DOCKER_TLS_VERIFY=1 \
-                                --env DOCKER_CERT_PATH=/certs/client \
-                                --env TESTCONTAINERS_HOST_OVERRIDE=docker-builder \
-                                --env HOME="$test_home" \
-                                --env GRADLE_USER_HOME="$test_home/.gradle" \
-                                --env JAVA_TOOL_OPTIONS=-Duser.home="$test_home" \
-                                --volume /certs/client:/certs/client:ro \
-                                --volume "$project_dir/backend:$project_dir/backend:ro" \
-                                --tmpfs "$test_home:rw,nosuid,nodev,uid=$host_uid,gid=$host_gid,mode=0700" \
-                                --workdir "$project_dir/backend" \
-                                amazoncorretto:21.0.12-alpine3.22 \
-                                sh -ec '
-                                    sh ./gradlew \
-                                        --project-cache-dir /test-home/project-cache \
-                                        -PisolatedBuildDirectory=/test-home/build \
-                                        test \
-                                        securityAcceptanceTest \
-                                        --no-daemon \
-                                        --rerun-tasks
-                                '
-                        fi
+                        sh scripts/run-backend-ci-task.sh securityAcceptanceTest
+                        sh scripts/record-ci-result.sh security-acceptance
                     '''
                 }
             }
         }
 
-        stage('Build and test images') {
+        stage('Frontend test') {
             steps {
                 dir(env.APP_DIR) {
-                    // backend image는 Gradle test, frontend image는 lint와 production build를 포함한다.
                     sh '''
                         set -eu
-                        docker compose \
-                            -f compose.build.yaml \
+                        sh scripts/run-frontend-ci-task.sh test
+                        sh scripts/record-ci-result.sh frontend-test
+                    '''
+                }
+            }
+        }
+
+        stage('Frontend lint') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        sh scripts/run-frontend-ci-task.sh lint
+                        sh scripts/record-ci-result.sh frontend-lint
+                    '''
+                }
+            }
+        }
+
+        stage('Frontend production build') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        sh scripts/run-frontend-ci-task.sh build
+                        sh scripts/record-ci-result.sh frontend-production-build
+                    '''
+                }
+            }
+        }
+
+        stage('Build full-SHA images') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        test "$BACKEND_IMAGE" = "gilbom-backend:$RELEASE_SHA"
+                        test "$FRONTEND_IMAGE" = "gilbom-frontend:$RELEASE_SHA"
+                        docker compose -f compose.build.yaml \
                             build backend frontend mqtt-init
                         sh scripts/test-verify-production-images.sh
-                        IMAGE_VERIFY_WORK_ROOT=.artifacts/image-verify-work \
-                            IMAGE_SECURITY_OUTPUT_DIR=.artifacts/image-security \
-                            IMAGE_SCANNER_MODE=required \
-                            sh scripts/verify-production-images.sh
-                        DOCKER_BIND_WORK_ROOT=.artifacts/docker-bind-work \
-                            sh scripts/verify-frontend-tls.sh "$FRONTEND_IMAGE"
+                        sh scripts/record-ci-result.sh sha-image-build
                     '''
-                    archiveArtifacts(
-                            artifacts: '.artifacts/image-security/**',
-                            allowEmptyArchive: false,
-                            fingerprint: true
-                    )
                 }
             }
         }
 
-        stage('Integration smoke test') {
+        stage('Backend runtime image') {
             steps {
                 dir(env.APP_DIR) {
                     sh '''
                         set -eu
+                        sh scripts/verify-backend-runtime-image.sh "$BACKEND_IMAGE"
+                        sh scripts/record-ci-result.sh backend-runtime-image
+                    '''
+                }
+            }
+        }
 
-                        # 단순 container 실행 여부가 아니라 모든 health dependency가 준비될 때까지 기다린다.
+        stage('Frontend runtime image') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        sh scripts/verify-frontend-runtime-image.sh "$FRONTEND_IMAGE"
+                        DOCKER_BIND_WORK_ROOT=.artifacts/docker-bind-work \
+                            sh scripts/verify-frontend-tls.sh "$FRONTEND_IMAGE"
+                        sh scripts/record-ci-result.sh frontend-runtime-image
+                    '''
+                }
+            }
+        }
+
+        stage('Start integration stack') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
                         docker compose up --detach --no-build --wait --wait-timeout 180
+                    '''
+                }
+            }
+        }
 
-                        # 프론트 Nginx -> 백엔드 API 경로를 호출해 실제 서비스 간 연결을 검증한다.
-                        docker compose exec -T frontend \
-                            wget -qO- http://127.0.0.1:8080/healthz \
-                            | grep -Fx 'ok'
-                        docker compose exec -T frontend \
-                            wget -qO- http://127.0.0.1:8080/api/health \
-                            | grep -F '"status":"UP"'
+        stage('Flyway V1-V35') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        docker compose exec -T db sh -ec '
+                            export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+                            psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+                                --no-password --tuples-only --no-align --command "
+                                    SELECT (
+                                        COUNT(*) = 35
+                                        AND MIN(version::INTEGER) = 1
+                                        AND MAX(version::INTEGER) = 35
+                                        AND BOOL_AND(success)
+                                    )::int
+                                    FROM flyway_history.flyway_schema_history;
+                                "
+                        ' | grep -qx 1
+                        sh scripts/record-ci-result.sh flyway-v1-v35
+                    '''
+                }
+            }
+        }
 
-                        # 전체 Actuator health에는 DB contributor가 포함돼 Backend -> DB 연결도 확인된다.
-                        docker compose exec -T frontend \
-                            wget -qO- http://backend:8080/actuator/health \
-                            | grep -F '"status":"UP"'
-
-                        # 실제 CI Secret과 민감 request canary가 Backend/Nginx
-                        # container log에 남지 않았는지 검증한다.
-                        BACKEND_CONTAINER="$(docker compose ps -q backend)" \
-                        FRONTEND_CONTAINER="$(docker compose ps -q frontend)" \
-                        SECRET_SCAN_DIR=secrets \
-                        IMAGE_VERIFY_MODE=logs \
-                            sh scripts/verify-production-images.sh
-
-                        # MQTT/DB를 각각 종료·복구하며 liveness와 readiness의
-                        # 장애 격리 정책을 실제 container에서 검증한다.
-                        sh scripts/verify-backend-health-policy.sh
-
-                        # BrowserRouter deep link가 Nginx fallback을 통해 React 진입점으로 연결돼야 한다.
-                        docker compose exec -T frontend \
-                            wget -qO- http://127.0.0.1:8080/robots \
-                            | grep -F '<div id="root"></div>'
-
-                        # 빈 DB의 extension, V1~V35, RBAC seed와 runtime 최소 권한을 계약 SQL로 확인한다.
+        stage('PostGIS RBAC and Spring Session') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
                         docker compose exec -T db sh -ec '
                             export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
                             psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
@@ -358,8 +381,17 @@ pipeline {
                                 --set "flyway_role=$POSTGRES_FLYWAY_USER" \
                                 --set "application_role=$POSTGRES_APP_USER"
                         ' < infra/postgres/verify-empty-database.sql
+                        sh scripts/record-ci-result.sh postgis-rbac-session
+                    '''
+                }
+            }
+        }
 
-                        # 실제 CSRF 요청이 JDBC Session과 attribute를 DB에 쓰는지 확인한다.
+        stage('CSRF permission and append-only audit') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
                         docker compose exec -T frontend \
                             wget -qO- http://127.0.0.1:8080/api/v1/auth/csrf-token \
                             | grep -Fq '"headerName":"X-CSRF-TOKEN"'
@@ -373,9 +405,7 @@ pipeline {
                                         (SELECT COUNT(*) FROM session_store.spring_session_attributes) >= 1
                                     )::int;
                                 "
-                        ' | grep -qx '1'
-
-                        # Runtime role DML과 audit/report append-only 보호를 실제 권한으로 검증한다.
+                        ' | grep -qx 1
                         docker compose exec -T db sh -ec '
                             export PGPASSWORD="$(cat "$POSTGRES_APP_PASSWORD_FILE")"
                             psql --host 127.0.0.1 --username "$POSTGRES_APP_USER" \
@@ -386,10 +416,49 @@ pipeline {
                             psql --host 127.0.0.1 --username "$POSTGRES_FLYWAY_USER" \
                                 --dbname "$POSTGRES_DB" --no-password
                         ' < infra/postgres/verify-append-only.sql
+                        sh scripts/record-ci-result.sh csrf-permission-audit
+                    '''
+                }
+            }
+        }
 
-                        # DB 응답을 기다리는 실제 요청을 유지한 채 SIGTERM을 보내
-                        # 요청 완료와 30초 내 graceful shutdown을 함께 검증한다.
+        stage('Integration smoke') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        docker compose exec -T frontend \
+                            wget -qO- http://127.0.0.1:8080/healthz \
+                            | grep -Fx ok
+                        docker compose exec -T frontend \
+                            wget -qO- http://127.0.0.1:8080/api/health \
+                            | grep -F '"status":"UP"'
+                        docker compose exec -T frontend \
+                            wget -qO- http://backend:8080/actuator/health \
+                            | grep -F '"status":"UP"'
+                        docker compose exec -T frontend \
+                            wget -qO- http://127.0.0.1:8080/robots \
+                            | grep -F '<div id="root"></div>'
+                        BACKEND_CONTAINER="$(docker compose ps -q backend)" \
+                        FRONTEND_CONTAINER="$(docker compose ps -q frontend)" \
+                        SECRET_SCAN_DIR=secrets \
+                        IMAGE_VERIFY_MODE=logs \
+                        IMAGE_SCANNER_MODE=off \
+                            sh scripts/verify-production-images.sh
+                        sh scripts/record-ci-result.sh container-log-secret
+                        sh scripts/record-ci-result.sh integration-smoke
+                    '''
+                }
+            }
+        }
+
+        stage('Graceful shutdown') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
                         sh scripts/verify-backend-graceful-shutdown.sh
+                        sh scripts/record-ci-result.sh graceful-shutdown
                     '''
                 }
             }
@@ -403,47 +472,128 @@ pipeline {
                         mkdir -p .artifacts/runtime
                         {
                             date -u '+captured_at=%Y-%m-%dT%H:%M:%SZ'
-                            echo 'memory'
+                            echo memory
                             free -h
-                            echo 'root-filesystem'
+                            echo root-filesystem
                             df -h /
-                            echo 'docker-storage'
+                            echo docker-storage
                             docker system df
-                            echo 'running-container-usage'
+                            echo running-container-usage
                             docker stats --no-stream \
                                 --format '{{.Name}} cpu={{.CPUPerc}} memory={{.MemUsage}} pids={{.PIDs}}'
                         } > .artifacts/runtime/build-resources.txt
                     '''
-                    archiveArtifacts(
-                            artifacts: '.artifacts/runtime/build-resources.txt',
-                            allowEmptyArchive: false,
-                            fingerprint: true
-                    )
                 }
             }
         }
 
-        stage('Container report and resilience smoke') {
+        stage('Report LLM fallback and resilience suite') {
             steps {
                 dir(env.APP_DIR) {
                     sh '''
                         set -eu
-
-                        # 앞 단계의 CI stack을 먼저 정리해 agent에서 DB 두 개가
-                        # 동시에 메모리를 점유하지 않게 한다. 보고서 smoke는 별도
-                        # project와 새 named volume을 만들고 종료 시 자체 폐기한다.
                         docker compose down --volumes --remove-orphans
-
-                        # 이미 검증·빌드한 운영 image로 보고서 전체 흐름에 이어
-                        # PID/DB/MQTT/LLM 장애, 자동 재시작과 volume 영속성을 검증한다.
-                        # 임의 Frontend port는 DinD가 소유하므로 Jenkins container는
-                        # DinD service의 외부 interface와 DNS 이름으로 접근한다.
                         DOCKER_BIND_WORK_ROOT=.artifacts/docker-bind-work \
-                            REPORT_SMOKE_FRONTEND_BIND_ADDRESS=0.0.0.0 \
-                            REPORT_SMOKE_PUBLISHED_HOST=docker-builder \
-                            REPORT_SMOKE_SKIP_BUILD=true \
+                        REPORT_SMOKE_FRONTEND_BIND_ADDRESS=0.0.0.0 \
+                        REPORT_SMOKE_PUBLISHED_HOST=docker-builder \
+                        REPORT_SMOKE_SKIP_BUILD=true \
                             sh scripts/container-resilience-smoke.sh
+                        sh scripts/record-ci-result.sh report-llm-fallback
+                        sh scripts/record-ci-result.sh resilience-recovery
+                        sh scripts/record-ci-result.sh volume-persistence
                     '''
+                }
+            }
+        }
+
+        stage('Resilience recovery evidence') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        grep -Fxq PASS .artifacts/ci-results/resilience-recovery.status
+                        echo "DB MQTT Backend recovery evidence: PASS"
+                    '''
+                }
+            }
+        }
+
+        stage('Volume persistence evidence') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        grep -Fxq PASS .artifacts/ci-results/volume-persistence.status
+                        echo "Image and report volume persistence evidence: PASS"
+                    '''
+                }
+            }
+        }
+
+        stage('Image layer history and log Secret scan') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        grep -Fxq PASS .artifacts/ci-results/container-log-secret.status
+                        IMAGE_VERIFY_WORK_ROOT=.artifacts/image-verify-work \
+                        IMAGE_SECURITY_OUTPUT_DIR=.artifacts/image-security \
+                        IMAGE_VERIFY_MODE=static \
+                        IMAGE_SCANNER_MODE=off \
+                            sh scripts/verify-production-images.sh
+                        sh scripts/record-ci-result.sh image-layer-log-secret
+                    '''
+                }
+            }
+        }
+
+        stage('Required image SBOM and CVE scan') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        BACKEND_IMAGE="$BACKEND_IMAGE" \
+                        FRONTEND_IMAGE="$FRONTEND_IMAGE" \
+                        IMAGE_SECURITY_OUTPUT_DIR=.artifacts/image-security \
+                        IMAGE_SECURITY_WORK_ROOT=.artifacts/image-security-work \
+                            sh scripts/scan-image-security.sh
+                        sh scripts/record-ci-result.sh sbom-cve
+                    '''
+                }
+            }
+        }
+
+        // Stages 6-8: 검사를 모두 통과한 full-SHA image만 release/로 승격한다.
+        stage('Prepare release SBOM and vulnerability artifacts') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        IMAGE_SCANNER_MODE=required \
+                            sh scripts/prepare-release-security-artifacts.sh
+                    '''
+                }
+            }
+        }
+
+        stage('Create release image archive') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh 'sh scripts/create-release-image-archive.sh'
+                }
+            }
+        }
+
+        stage('Build metadata and release integrity') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        sh scripts/generate-build-metadata.sh
+                        sh scripts/verify-release-artifacts.sh
+                    '''
+                    archiveArtifacts(
+                            artifacts: 'release/**',
+                            allowEmptyArchive: false,
+                            fingerprint: true
+                    )
                 }
             }
         }
@@ -454,23 +604,19 @@ pipeline {
             script {
                 if (env.APP_DIR) {
                     dir(env.APP_DIR) {
-                        // 실패한 보안 gate의 redacted 보고서와 정책 요약도
-                        // 원인 분석 증거로 남긴다.
                         archiveArtifacts(
                                 artifacts: '.artifacts/source-security/**,'
-                                        + '.artifacts/image-security/**',
+                                        + '.artifacts/image-security/**,'
+                                        + '.artifacts/ci-results/**,'
+                                        + '.artifacts/runtime/**',
                                 allowEmptyArchive: true,
                                 fingerprint: true
                         )
-                        // CI DB와 생성된 MQTT 자산은 재사용하지 않아 매번 빈 환경을 검증한다.
                         sh 'docker compose down --volumes --remove-orphans || true'
                     }
                 }
-                // mqtt-init가 자산 생성 도중 실패해도 post deleteDir()가 다시 막히지
-                // 않도록 checkout 전과 같은 제한 범위 복구를 적용한다.
                 sh '''
                     set -eu
-
                     workspace_uid="$(id -u)"
                     workspace_gid="$(id -g)"
                     for mqtt_local in \

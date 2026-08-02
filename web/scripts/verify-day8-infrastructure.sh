@@ -141,17 +141,17 @@ assert_not_contains compose.jenkins.yaml \
   "legacy Docker service certificates must not be reused after the rename"
 [ "$(grep -Fc -- '${JENKINS_HOME_DIR:-/opt/jenkins/home}:/var/jenkins_home' compose.jenkins.yaml)" -eq 2 ] \
   || fail "Jenkins and DinD must share the same absolute workspace path"
-assert_contains Jenkinsfile \
+assert_contains scripts/run-backend-ci-task.sh \
   '--add-host docker-builder:host-gateway' \
   "DinD test container must resolve the TLS daemon through its host gateway"
-assert_contains Jenkinsfile \
-  '--env GRADLE_USER_HOME="$test_home/.gradle"' \
+assert_contains scripts/run-backend-ci-task.sh \
+  '--env GRADLE_USER_HOME=/ci-home/.gradle' \
   "Jenkins non-root Backend test must use a writable isolated Gradle home"
-assert_contains Jenkinsfile \
-  '--tmpfs "$test_home:rw,nosuid,nodev,uid=$host_uid,gid=$host_gid,mode=0700"' \
+assert_contains scripts/run-backend-ci-task.sh \
+  '--volume "$WORK_ROOT/build:/ci-build"' \
   "Jenkins non-root Backend test must isolate writable build state"
-assert_contains Jenkinsfile \
-  '--volume "$project_dir/backend:$project_dir/backend:ro"' \
+assert_contains scripts/run-backend-ci-task.sh \
+  '--volume "$PROJECT_DIR/backend:/workspace:ro"' \
   "Jenkins Backend source mount must remain read-only"
 assert_contains Jenkinsfile \
   'IMAGE_VERIFY_WORK_ROOT=.artifacts/image-verify-work' \
@@ -287,8 +287,8 @@ assert_contains infra/jenkins/jenkins.env.example \
 assert_contains Jenkinsfile \
   "disableConcurrentBuilds(abortPrevious: true)" \
   "Jenkins job concurrency guard is missing"
-assert_contains Jenkinsfile \
-  "grep -Ev '(^|/)secrets/\\\\.gitignore$'" \
+assert_contains scripts/verify-repository-policy.sh \
+  "grep -Ev '(^|/)secrets/\\.gitignore$'" \
   "Jenkins repository policy must allow only the Secret ignore policy file"
 assert_contains Jenkinsfile \
   ".artifacts/runtime/build-resources.txt" \

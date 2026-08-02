@@ -8,7 +8,8 @@
 - Backend image 빌드는 Gradle test와 `bootJar`를 수행한다.
 - Backend runtime gate는 read-only/non-root 상태에서 허용 volume 쓰기,
   capability 0, JDK·Gradle·Git·source·test artifact 부재를 확인한다.
-- Frontend image 빌드는 37개 test, ESLint와 Vite production build를 수행한다.
+- Frontend 선행 gate는 test, ESLint, Vite production build를 각각 실행하며
+  image build에서도 같은 세 검사를 다시 확인한다.
 - Frontend runtime gate는 UID 101·read-only·capability 0, Node/source/sourcemap과
   Secret 패턴 부재, `/healthz`·`/api`·SSE·cache header를 mock Backend로 검증한다.
 - Backend·Frontend·MQTT init image build는 `compose.build.yaml`에 격리하고,
@@ -17,8 +18,9 @@
   redirect, HTTPS 8443 reverse proxy와 무중단 Nginx reload를 검증한다.
 - 통합 image gate는 image history·`docker save` layer와 실제 Secret 파일 값을
   대조하고, 합성 Secret `ENV`와 `.env` layer가 반드시 거부되는지도 자체 테스트한다.
-- Gitleaks가 임시 Secret 생성 전에 Git 전체 이력과 source workspace를 검사하고,
-  Redocly가 OpenAPI error를 차단하며 Trivy가 dependency CycloneDX SBOM을 남긴다.
+- Gitleaks가 임시 Secret 생성 전에 Git 전체 이력과 source workspace를 서로
+  독립된 gate로 검사한다. 그 뒤 Redocly가 OpenAPI error를 차단하고 Trivy가
+  Backend·Frontend dependency를 별도 스캔해 CycloneDX SBOM을 남긴다.
 - Trivy가 Backend·Frontend CycloneDX SBOM과 CVE JSON을 artifact로 보존한다.
   Critical은 항상 차단하고 High는 만료되지 않은 CVE·대상별 승인 예외가 있어야 한다.
 - Compose의 health dependency가 준비된 뒤 프론트 Nginx를 통해 Backend API를
@@ -109,11 +111,16 @@ port에 접근한다. Jenkins container 자체에는
 `host.docker.internal:host-gateway`를 명시해 host 접근 이름도 환경별 DNS 추론에
 의존하지 않는다.
 
-Backend test container는 UID/GID 1000의 non-root로 실행한다. Base image의 기본
-home인 `/`에는 쓸 수 없으므로 `/test-home`을 빌드별 tmpfs로 제공하고
-`HOME`, `GRADLE_USER_HOME`, Gradle project cache와 build directory를 모두 그
-경로로 격리한다. Backend source는 read-only mount를 유지하며 테스트 컨테이너
-종료 시 다운로드·캐시·산출물도 함께 제거된다.
+Backend test container는 Jenkins UID/GID의 non-root로 실행한다. Source는
+read-only `/workspace`에 두고 HOME, Gradle project cache, isolated build output은
+ignored `.artifacts/backend-ci/`의 서로 다른 writable mount로 격리한다. 전체
+Test와 `securityAcceptanceTest`가 Gradle 다운로드 cache는 공유하지만 각 task의
+XML 결과 경로를 따로 검증하므로 한 gate의 과거 결과가 다른 gate를 통과시키지
+못한다.
+
+Frontend도 source를 read-only `/app`에 두고 `node_modules`, npm cache와 `dist`만
+`.artifacts/frontend-ci/`로 분리한다. `npm ci`를 통과한 뒤 test, lint, production
+build가 독립 stage로 실행되고 build output이 비어 있으면 실패한다.
 
 Image layer 검증의 `docker save` archive와 압축 해제본은 Jenkins의 256 MiB
 `/tmp`에 두지 않고 workspace의 ignored `.artifacts/image-verify-work/`에서
@@ -180,6 +187,48 @@ Jenkins stack 기동 뒤 `scripts/verify-jenkins-runtime.sh`는 고정 container
 직접 inspect해 project/service label, socket mount 부재, TLS 환경, loopback
 `127.0.0.1:8081` 단일 binding, 별도 privileged DinD와 필수 명령 실행 가능 여부를
 검증한다.
+
+## Stage 4-8 release pipeline
+
+빠른 실패 순서는 Repository Policy, Git 전체 이력 Secret, checkout workspace
+Secret, Secret Boundary, Runtime Version, 운영 Compose, OpenAPI, Backend
+dependency, Frontend dependency다. `Prepare ephemeral credentials`는 이 아홉
+gate 뒤에만 실행된다. Source 보안 명령은 action 단위로 나뉘어 Jenkins stage와
+로컬 재현 명령의 경계를 일치시킨다.
+
+기존 검증은 Backend 전체 Test, security acceptance, Frontend test/lint/build,
+full-SHA image build, 두 runtime image, 빈 DB V1~V35, PostGIS·RBAC·Session,
+CSRF·권한·append-only, integration, graceful shutdown, 보고서·LLM fallback,
+장애 복구, volume 영속성, image layer/history/log Secret, 필수 Trivy 순으로
+실행한다. 각 성공은 `.artifacts/ci-results/<gate>.status`에 `PASS`로 남고,
+metadata 생성기는 요구한 18개 결과가 모두 PASS인지 다시 확인한다.
+
+Release 단계는 다음 파일만 `release/`에 만든다.
+
+```text
+release/
+├── sbom/backend.sbom.json
+├── sbom/frontend.sbom.json
+├── vulnerabilities/backend.txt
+├── vulnerabilities/frontend.txt
+├── vulnerabilities/policy-summary.json
+├── images.tar.zst
+├── images.tar.zst.sha256
+├── build-metadata.json
+└── SHA256SUMS
+```
+
+Trivy가 없거나 Critical/미승인 High/만료 예외가 있으면 `release/` 자체를 만들지
+않는다. Archive는 `docker save`를 FIFO로 zstd에 스트리밍해 host Docker socket
+없이 DinD image를 workspace로 내보낸다. Backend와 Frontend tag는 각각
+`gilbom-*:RELEASE_SHA`와 정확히 같아야 하며 `local`, `latest`, 짧은 SHA는 release
+script가 거부한다.
+
+`build-metadata.json`은 full commit SHA, image ID, Dockerfile hash와 base image,
+UTC 시작·종료 시각, Runtime version, 테스트 결과, V1~V35 migration 목록·hash,
+SBOM/취약점/Archive checksum, Jenkins Job/Build를 기록한다. `jq empty` 이후
+`SHA256SUMS`를 생성·즉시 재검증하고, 마지막 Artifact Secret gate까지 통과해야
+Jenkins artifact로 보존된다.
 
 ## 의도적으로 남긴 다음 단계
 

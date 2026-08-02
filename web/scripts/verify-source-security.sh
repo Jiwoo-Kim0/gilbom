@@ -7,6 +7,7 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 . "$PROJECT_DIR/infra/security/tool-versions.env"
 
+ACTION="${1:-all}"
 OUTPUT_DIR="$(
   CDPATH= cd -- "$PROJECT_DIR" \
     && mkdir -p "${SOURCE_SECURITY_OUTPUT_DIR:-.artifacts/source-security}" \
@@ -22,14 +23,12 @@ WORK_ROOT="$(
 REPOSITORY_ROOT="$(git -C "$PROJECT_DIR" rev-parse --show-toplevel)"
 PROJECT_RELATIVE="$(git -C "$PROJECT_DIR" rev-parse --show-prefix | sed 's#/$##')"
 [ -n "$PROJECT_RELATIVE" ] || PROJECT_RELATIVE=.
-chmod 0700 "$OUTPUT_DIR" "$WORK_ROOT"
 mkdir -p "$WORK_ROOT/trivy-cache"
+chmod 0700 "$OUTPUT_DIR" "$WORK_ROOT"
 
-failures=0
-
-record_failure() {
+fail() {
   echo "Source security verification failed: $1" >&2
-  failures=$((failures + 1))
+  exit 1
 }
 
 run_gitleaks_git() {
@@ -111,20 +110,26 @@ run_redocly() {
 }
 
 run_trivy_fs() {
-  format="$1"
-  output="$2"
+  role="$1"
+  format="$2"
+  output="$3"
+  case "$role" in
+    backend) target="$PROJECT_DIR/backend"; container_target=/project/backend ;;
+    frontend) target="$PROJECT_DIR/frontend"; container_target=/project/frontend ;;
+    *) fail "unsupported dependency role: $role" ;;
+  esac
+
   if command -v trivy >/dev/null 2>&1; then
     trivy fs \
       --quiet \
       --cache-dir "$WORK_ROOT/trivy-cache" \
       --scanners vuln \
-      --skip-dirs "$PROJECT_DIR/.artifacts" \
       --skip-dirs "$PROJECT_DIR/backend/build" \
       --skip-dirs "$PROJECT_DIR/frontend/gilbom/node_modules" \
       --skip-dirs "$PROJECT_DIR/frontend/gilbom/dist" \
       --format "$format" \
       --output "$output" \
-      "$PROJECT_DIR"
+      "$target"
     return
   fi
 
@@ -138,64 +143,116 @@ run_trivy_fs() {
     --quiet \
     --cache-dir "$WORK_ROOT/trivy-cache" \
     --scanners vuln \
-    --skip-dirs /project/.artifacts \
     --skip-dirs /project/backend/build \
     --skip-dirs /project/frontend/gilbom/node_modules \
     --skip-dirs /project/frontend/gilbom/dist \
     --format "$format" \
     --output "$output" \
-    /project
+    "$container_target"
 }
 
-rm -f "$OUTPUT_DIR"/*
+reset_reports() {
+  find "$OUTPUT_DIR" -mindepth 1 -maxdepth 1 -type f -delete
+  {
+    printf 'gitleaks=%s\n' "$GITLEAKS_VERSION"
+    printf 'trivy=%s\n' "$TRIVY_VERSION"
+    printf 'redocly=%s\n' "$REDOCLY_VERSION"
+  } > "$OUTPUT_DIR/tool-versions.txt"
+}
 
-run_gitleaks_git
-gitleaks_status=$?
-case "$gitleaks_status" in
-  0) ;;
-  1) record_failure "Gitleaks detected a Secret in Git history" ;;
-  *) record_failure "Gitleaks Git history scan failed (exit $gitleaks_status)" ;;
-esac
+scan_history() {
+  run_gitleaks_git
+  status=$?
+  case "$status" in
+    0) ;;
+    1) fail "Gitleaks detected a Secret in Git history" ;;
+    *) fail "Gitleaks Git history scan failed (exit $status)" ;;
+  esac
+  echo "Git history Secret scan: PASS"
+}
 
-run_gitleaks_directory
-gitleaks_status=$?
-case "$gitleaks_status" in
-  0) ;;
-  1) record_failure "Gitleaks detected a Secret in the source workspace" ;;
-  *) record_failure "Gitleaks workspace scan failed (exit $gitleaks_status)" ;;
-esac
+scan_workspace() {
+  run_gitleaks_directory
+  status=$?
+  case "$status" in
+    0) ;;
+    1) fail "Gitleaks detected a Secret in the checkout workspace" ;;
+    *) fail "Gitleaks workspace scan failed (exit $status)" ;;
+  esac
+  echo "Checkout workspace Secret scan: PASS"
+}
 
-if ! run_redocly > "$OUTPUT_DIR/redocly-lint.txt" 2>&1; then
-  sed -n '1,160p' "$OUTPUT_DIR/redocly-lint.txt" >&2
-  record_failure "Redocly reported an OpenAPI error"
-fi
+lint_openapi() {
+  if ! run_redocly > "$OUTPUT_DIR/redocly-lint.txt" 2>&1; then
+    sed -n '1,160p' "$OUTPUT_DIR/redocly-lint.txt" >&2
+    fail "Redocly reported an OpenAPI error"
+  fi
+  echo "OpenAPI lint: PASS"
+}
 
-run_trivy_fs json "$OUTPUT_DIR/dependencies.trivy.json" \
-  || record_failure "Trivy dependency scan failed"
-run_trivy_fs cyclonedx "$OUTPUT_DIR/dependencies.sbom.cdx.json" \
-  || record_failure "Trivy dependency SBOM generation failed"
+scan_dependencies() {
+  role="$1"
+  run_trivy_fs "$role" json "$OUTPUT_DIR/$role-dependencies.trivy.json" \
+    || fail "Trivy $role dependency scan failed"
+  run_trivy_fs "$role" cyclonedx "$OUTPUT_DIR/$role-dependencies.sbom.cdx.json" \
+    || fail "Trivy $role dependency SBOM generation failed"
+  test -s "$OUTPUT_DIR/$role-dependencies.trivy.json" \
+    || fail "Trivy $role dependency report is empty"
+  test -s "$OUTPUT_DIR/$role-dependencies.sbom.cdx.json" \
+    || fail "Trivy $role dependency SBOM is empty"
+  echo "$role dependency scan: PASS"
+}
 
-if [ -s "$OUTPUT_DIR/dependencies.trivy.json" ]; then
+enforce_dependency_policy() {
+  for role in backend frontend
+  do
+    test -s "$OUTPUT_DIR/$role-dependencies.trivy.json" \
+      || fail "missing $role dependency report"
+  done
   python3 "$SCRIPT_DIR/security_policy.py" \
     --exceptions "$PROJECT_DIR/infra/security/vulnerability-exceptions.yaml" \
-    --report "dependency=$OUTPUT_DIR/dependencies.trivy.json" \
+    --report "dependency=$OUTPUT_DIR/backend-dependencies.trivy.json" \
+    --report "dependency=$OUTPUT_DIR/frontend-dependencies.trivy.json" \
     --output "$OUTPUT_DIR/dependency-policy-summary.json" \
-    || record_failure "dependency vulnerability policy rejected the report"
-else
-  record_failure "Trivy dependency report is empty"
-fi
+    || fail "dependency vulnerability policy rejected a report"
+  echo "Dependency vulnerability policy: PASS"
+}
 
-{
-  printf 'gitleaks=%s\n' "$GITLEAKS_VERSION"
-  printf 'trivy=%s\n' "$TRIVY_VERSION"
-  printf 'redocly=%s\n' "$REDOCLY_VERSION"
-  printf 'failures=%s\n' "$failures"
-} > "$OUTPUT_DIR/tool-status.txt"
-chmod 0600 "$OUTPUT_DIR"/*
+case "$ACTION" in
+  reset)
+    reset_reports
+    ;;
+  history)
+    scan_history
+    ;;
+  workspace)
+    scan_workspace
+    ;;
+  openapi)
+    lint_openapi
+    ;;
+  backend-dependencies)
+    scan_dependencies backend
+    ;;
+  frontend-dependencies)
+    scan_dependencies frontend
+    ;;
+  dependency-policy)
+    enforce_dependency_policy
+    ;;
+  all)
+    reset_reports
+    scan_history
+    scan_workspace
+    lint_openapi
+    scan_dependencies backend
+    scan_dependencies frontend
+    enforce_dependency_policy
+    echo "Source security verification: PASS"
+    ;;
+  *)
+    fail "action must be reset, history, workspace, openapi, backend-dependencies, frontend-dependencies, dependency-policy, or all"
+    ;;
+esac
 
-if [ "$failures" -ne 0 ]; then
-  echo "Source security verification: FAIL ($failures gate(s))" >&2
-  exit 1
-fi
-
-echo "Source security verification: PASS"
+find "$OUTPUT_DIR" -mindepth 1 -maxdepth 1 -type f -exec chmod 0600 {} +

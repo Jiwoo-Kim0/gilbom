@@ -35,6 +35,7 @@ secrets/
 **/.nyc_output/
 **/*.log
 .artifacts/
+release/
 
 # IDE and OS files
 **/.idea/
