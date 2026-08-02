@@ -106,5 +106,8 @@ Jenkins는 `.artifacts/rollback-drill/**`을 fingerprint와 함께 보관한다.
 시나리오가 중간에 실패해도 정리 전에 해당 Project의 `failure-compose.log`,
 `failure-compose-ps.txt`, runner 종료 코드를 먼저 보관한다.
 
-훈련 Project는 증거 생성과 검증이 끝난 후에만 `down --volumes`로 정리한다. 고정된
-project prefix 검증 때문에 운영 Compose Project는 정리 대상이 될 수 없다.
+A와 B는 시나리오 증거를 기록한 뒤 다음 시나리오와 image tag 참조가 겹치지 않도록
+컨테이너와 network만 먼저 정리한다. 이때 세 named Volume이 모두 남아 있는지 다시
+확인한다. 전체 증거 생성과 검증이 끝나면 모든 훈련 Project를 `down --volumes`로
+정리한다. 고정된 project prefix 검증 때문에 운영 Compose Project는 정리 대상이
+될 수 없다.

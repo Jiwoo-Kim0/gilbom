@@ -98,7 +98,9 @@ for marker in \
   'ROLLBACK_BLOCKED_EXPLICIT_COMPATIBILITY_APPROVAL_REQUIRED' \
   'INCOMPATIBLE_PREVIOUS_BACKEND' \
   'stop frontend' \
-  'verify_persistent_data'
+  'verify_persistent_data' \
+  'retire_completed_scenario' \
+  'services-retired-volumes-preserved.status'
 do
   assert_contains scripts/run-production-rollback-drill.sh \
     "$marker" \

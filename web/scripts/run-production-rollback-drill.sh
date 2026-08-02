@@ -535,6 +535,40 @@ write_scenario_logs() {
     logs --no-color --timestamps > "$scenario_dir/compose.log" 2>&1 || true
 }
 
+retire_completed_scenario() {
+  project="$1"
+  backend_image="$2"
+  frontend_image="$3"
+  scenario_dir="$4"
+  volumes_after="$scenario_dir/volumes-after.json"
+  [ -s "$volumes_after" ] \
+    || fail "completed scenario Volume evidence is missing"
+
+  compose_for "$project" "$backend_image" "$frontend_image" \
+    down --remove-orphans
+
+  jq -er '
+    [
+      .database.volume,
+      .robotImages.volume,
+      .reportPdf.volume
+    ][]
+  ' "$volumes_after" | while IFS= read -r preserved_volume
+  do
+    case "$preserved_volume" in
+      "$project"_postgres_data|\
+      "$project"_robot_images|\
+      "$project"_report_pdf_data) ;;
+      *)
+        fail "completed scenario references an unexpected Volume"
+        ;;
+    esac
+    docker volume inspect "$preserved_volume" >/dev/null \
+      || fail "completed scenario Volume was removed during retirement"
+  done
+  printf '%s\n' PASS > "$scenario_dir/services-retired-volumes-preserved.status"
+}
+
 run_scenario_a() {
   scenario=a
   project="$base_project-$scenario"
@@ -604,6 +638,8 @@ run_scenario_a() {
       }
     ' > "$scenario_dir/result.json"
   write_scenario_logs \
+    "$project" "$previous_backend" "$previous_frontend" "$scenario_dir"
+  retire_completed_scenario \
     "$project" "$previous_backend" "$previous_frontend" "$scenario_dir"
   echo "Rollback drill scenario A: PASS"
 }
@@ -736,6 +772,8 @@ run_scenario_b() {
       }
     ' > "$scenario_dir/result.json"
   write_scenario_logs \
+    "$project" "$previous_backend" "$previous_frontend" "$scenario_dir"
+  retire_completed_scenario \
     "$project" "$previous_backend" "$previous_frontend" "$scenario_dir"
   echo "Rollback drill scenario B: PASS"
 }
