@@ -57,6 +57,35 @@ pipeline {
                 script {
                     // 저장소 root가 common-proj인 경우와 web 자체인 경우를 모두 지원한다.
                     env.APP_DIR = fileExists('web/compose.yaml') ? 'web' : '.'
+
+                    // Release artifact와 image tag의 유일한 기준은 실제 checkout
+                    // commit이다. Jenkins Job이 shallow clone으로 바뀌거나 비정상
+                    // SHA를 반환하면 후속 build 전에 fail closed 한다.
+                    def shallowRepository = sh(
+                            label: 'Verify full Git checkout',
+                            returnStdout: true,
+                            script: 'git rev-parse --is-shallow-repository'
+                    ).trim()
+                    echo "git rev-parse --is-shallow-repository: ${shallowRepository}"
+                    if (shallowRepository != 'false') {
+                        error('Full Git checkout is required; shallow repository detected')
+                    }
+
+                    def releaseSha = sh(
+                            label: 'Resolve release commit SHA',
+                            returnStdout: true,
+                            script: 'git rev-parse HEAD'
+                    ).trim()
+                    if (!releaseSha.matches('[0-9a-f]{40}')) {
+                        error("Invalid release SHA: ${releaseSha}")
+                    }
+                    env.RELEASE_SHA = releaseSha
+                    env.BACKEND_IMAGE = "gilbom-backend:${releaseSha}"
+                    env.FRONTEND_IMAGE = "gilbom-frontend:${releaseSha}"
+                    echo "RELEASE_SHA=${env.RELEASE_SHA}"
+                    echo "BACKEND_IMAGE=${env.BACKEND_IMAGE}"
+                    echo "FRONTEND_IMAGE=${env.FRONTEND_IMAGE}"
+
                     env.COMPOSE_PROJECT_NAME = (
                             "gilbom-ci-${env.JOB_NAME}-${env.BUILD_NUMBER}"
                                     .toLowerCase()
@@ -162,6 +191,7 @@ pipeline {
                         sh scripts/verify-certbot-automation.sh
                         sh scripts/verify-day8-infrastructure.sh
                         sh scripts/verify-security-tooling-policy.sh
+                        sh scripts/verify-ci-checkout-contract.sh
                         sh scripts/verify-frontend-csp-source.sh
                         sh -n infra/scripts/*.sh
                         test -s docs/production-deployment-runbook.md
@@ -270,7 +300,7 @@ pipeline {
                             IMAGE_SCANNER_MODE=required \
                             sh scripts/verify-production-images.sh
                         DOCKER_BIND_WORK_ROOT=.artifacts/docker-bind-work \
-                            sh scripts/verify-frontend-tls.sh
+                            sh scripts/verify-frontend-tls.sh "$FRONTEND_IMAGE"
                     '''
                     archiveArtifacts(
                             artifacts: '.artifacts/image-security/**',

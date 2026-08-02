@@ -67,6 +67,28 @@
 - Redocly CLI 2.40.0은 고정 digest Docker image로 실행
 - `/opt/jenkins/home` 영속 경로
 
+## SCM checkout와 release identity
+
+Jenkins Job의 Pipeline SCM은 사설 GitLab 저장소와 Username/Password 형식의
+`gitlab-scm-read` Credential을 사용한다. 이 Credential에는 GitLab
+`read_repository` 권한만 부여하며 Clone의 `Shallow clone` 옵션은 사용하지 않는다.
+Pipeline은 `checkout scm` 직후 `git rev-parse --is-shallow-repository` 결과가
+정확히 `false`인지 확인하므로 Job 설정이 shallow checkout으로 바뀌면 image build
+전에 실패한다.
+
+같은 checkout에서 얻은 `git rev-parse HEAD`가 40자리 소문자 hex인지 검사한 뒤
+다음 build 환경을 만든다.
+
+```text
+RELEASE_SHA=<checked-out 40-character commit SHA>
+BACKEND_IMAGE=gilbom-backend:<RELEASE_SHA>
+FRONTEND_IMAGE=gilbom-frontend:<RELEASE_SHA>
+```
+
+`compose.build.yaml`과 통합용 `compose.yaml`은 이 두 image 변수를 소비한다. 따라서
+빌드한 SHA image와 실제 smoke test가 실행하는 image가 일치하며, 개발자 로컬에서는
+변수를 생략하면 기존 `:local` tag를 계속 사용한다.
+
 운영 Jenkins는 초기화 스크립트로 Executor를 1개로 고정하고
 `COMPOSE_PARALLEL_LIMIT=1`을 적용하며 `docker-builder` DinD container도 하나만
 실행한다. Compose project는 `gilbom-jenkins`로 고정한다. Jenkins UI는

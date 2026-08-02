@@ -111,7 +111,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    image: gilbom-backend:local
+    image: ${BACKEND_IMAGE:-gilbom-backend:local}
     restart: unless-stopped
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local,docker}
@@ -259,7 +259,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_NAVER_MAP_CLIENT_ID: ${VITE_NAVER_MAP_CLIENT_ID:?VITE_NAVER_MAP_CLIENT_ID is required}
-    image: gilbom-frontend:local
+    image: ${FRONTEND_IMAGE:-gilbom-frontend:local}
     restart: unless-stopped
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-3000}:8080"
