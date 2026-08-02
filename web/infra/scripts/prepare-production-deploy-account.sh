@@ -26,7 +26,7 @@ SSHD_DROP_IN=/etc/ssh/sshd_config.d/60-gilbom-production-deploy.conf
 
 for command in \
   getent groupadd useradd usermod install ssh-keygen visudo sshd \
-  sudo runuser passwd docker jq zstd
+  sudo runuser passwd docker flock jq zstd
 do
   command -v "$command" >/dev/null 2>&1 \
     || fail "required command is missing: $command"
@@ -51,6 +51,7 @@ ssh-keygen -l -f "$PUBLIC_KEY_FILE" >/dev/null 2>&1 \
 
 for source in \
   "$SCRIPT_DIR/gilbom-deploy.sh" \
+  "$SCRIPT_DIR/gilbom-approve-migrations.sh" \
   "$SCRIPT_DIR/gilbom-deploy-ssh-command.sh" \
   "$PROJECT_DIR/scripts/verify-production-deploy-account.sh"
 do
@@ -98,13 +99,19 @@ rm -f -- "$authorized_keys_temp"
 install -o root -g root -m 0755 \
   "$SCRIPT_DIR/gilbom-deploy.sh" \
   /usr/local/sbin/gilbom-deploy
+install -o root -g root -m 0750 \
+  "$SCRIPT_DIR/gilbom-approve-migrations.sh" \
+  /usr/local/sbin/gilbom-approve-migrations
 install -o root -g root -m 0755 \
   "$SCRIPT_DIR/gilbom-deploy-ssh-command.sh" \
   /usr/local/sbin/gilbom-deploy-ssh-command
 install -o root -g root -m 0755 \
   "$PROJECT_DIR/scripts/verify-production-deploy-account.sh" \
   /usr/local/sbin/gilbom-verify-production-deploy-account
-install -d -o root -g root -m 0700 /var/lib/gilbom/releases
+install -d -o root -g root -m 0700 \
+  /opt/gilbom/migration-approvals \
+  /var/lib/gilbom/releases \
+  /run/gilbom-deploy
 [ -d /opt/gilbom/deploy ] && [ ! -L /opt/gilbom/deploy ] \
   || fail "/opt/gilbom/deploy is missing or symlinked"
 chown -R root:root /opt/gilbom/deploy

@@ -9,11 +9,14 @@ fail() {
 
 for file in \
   infra/scripts/gilbom-deploy.sh \
+  infra/scripts/gilbom-approve-migrations.sh \
   infra/scripts/gilbom-deploy-ssh-command.sh \
+  infra/scripts/install-production-deploy-entrypoint.sh \
   infra/scripts/prepare-production-deploy-account.sh \
   scripts/verify-production-deploy-account.sh \
   scripts/test-production-deploy-boundary.sh \
-  docs/production-deploy-account.md
+  docs/production-deploy-account.md \
+  docs/production-root-deploy.md
 do
   [ -s "$file" ] || fail "required file is missing or empty: $file"
 done
@@ -37,6 +40,32 @@ grep -Fq '[ "$#" -eq 1 ]' infra/scripts/gilbom-deploy.sh \
 grep -Fq 'COMPOSE_PATH="$DEPLOY_ROOT/compose.prod.yaml"' \
   infra/scripts/gilbom-deploy.sh \
   || fail "production Compose path is not hard-coded"
+grep -Fq 'RUNTIME_ENV_PATH="$DEPLOY_ROOT/runtime.env"' \
+  infra/scripts/gilbom-deploy.sh \
+  || fail "production runtime.env path is not hard-coded"
+grep -Fq 'SECRET_ROOT=/opt/gilbom/secrets' \
+  infra/scripts/gilbom-deploy.sh \
+  || fail "production Secret path is not hard-coded"
+grep -Fq 'flock --nonblock 9' infra/scripts/gilbom-deploy.sh \
+  || fail "production deploy does not use flock"
+grep -Fq 'atomic_line "$CURRENT_SHA_PATH"' \
+  infra/scripts/gilbom-deploy.sh \
+  || fail "current SHA is not atomically recorded"
+current_line="$(
+  grep -nF 'atomic_line "$CURRENT_SHA_PATH"' \
+    infra/scripts/gilbom-deploy.sh | cut -d: -f1 | tail -n 1
+)"
+manifest_line="$(
+  grep -nF 'mv -T -- "$manifest_temp" "$manifest_path"' \
+    infra/scripts/gilbom-deploy.sh | cut -d: -f1
+)"
+[ "$current_line" -gt "$manifest_line" ] \
+  || fail "current SHA must only change after the release manifest"
+if grep -Fq \
+    'NOPASSWD: /usr/local/sbin/gilbom-approve-migrations' \
+    infra/scripts/prepare-production-deploy-account.sh; then
+  fail "deploy account must not be allowed to approve migrations"
+fi
 grep -Fq 'PasswordAuthentication no' \
   infra/scripts/prepare-production-deploy-account.sh \
   || fail "deploy password authentication is not disabled"
@@ -47,6 +76,8 @@ grep -Fq \
   'ID: gilbom-production-deploy' \
   docs/production-deploy-account.md \
   || fail "dedicated Jenkins Credential ID is not documented"
+grep -Fq 'migration-plan.json' docs/production-root-deploy.md \
+  || fail "migration approval workflow is not documented"
 
 sh scripts/test-production-deploy-boundary.sh
 echo "Production deploy contract verification: PASS"

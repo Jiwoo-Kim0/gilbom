@@ -40,11 +40,14 @@ for file in \
   infra/scripts/promote-release-artifacts.sh \
   infra/scripts/promote-ci-release-artifacts.sh \
   infra/scripts/gilbom-deploy.sh \
+  infra/scripts/gilbom-approve-migrations.sh \
   infra/scripts/gilbom-deploy-ssh-command.sh \
+  infra/scripts/install-production-deploy-entrypoint.sh \
   infra/scripts/prepare-production-deploy-account.sh \
   docs/security-tooling-policy.md \
   docs/ci-artifact-promotion.md \
-  docs/production-deploy-account.md
+  docs/production-deploy-account.md \
+  docs/production-root-deploy.md
 do
   test -s "$file" || fail "required file is missing or empty: $file"
 done
@@ -108,7 +111,9 @@ sh -n \
   infra/scripts/promote-release-artifacts.sh \
   infra/scripts/promote-ci-release-artifacts.sh \
   infra/scripts/gilbom-deploy.sh \
+  infra/scripts/gilbom-approve-migrations.sh \
   infra/scripts/gilbom-deploy-ssh-command.sh \
+  infra/scripts/install-production-deploy-entrypoint.sh \
   infra/scripts/prepare-production-deploy-account.sh
 python3 scripts/test-security-policy.py
 python3 -m py_compile \
