@@ -163,6 +163,59 @@ class MockRobotMissionTest(unittest.TestCase):
             sorted(event["seq"] for event in events),
         )
 
+    def test_emergency_stop_clear_then_resume_preserves_mission(self) -> None:
+        mission_id = "MIS-MOCK-E2E-ESTOP"
+        self.robot.handle_command(
+            command(
+                "START_MISSION",
+                {"mission_id": mission_id, "zone_id": "AREA-MOCK-E2E"},
+            )
+        )
+        self.robot.handle_command(
+            command("EMERGENCY_STOP", {"reason": "mock emergency"})
+        )
+
+        self.assertEqual(self.robot.mode, "SAFE_STOP")
+        self.assertEqual(self.robot.mission_id, mission_id)
+        self.assertEqual(self.robot.mission_state, "PAUSED")
+        self.assertEqual(
+            [event["event_type"] for event in self.published_json("/events/mission")],
+            ["MISSION_STARTED", "MISSION_PAUSED"],
+        )
+
+        blocked_resume = command("RESUME_MISSION", {})
+        self.robot.handle_command(blocked_resume)
+        blocked_results = [
+            result
+            for result in self.published_json("/commands/result")
+            if result["command_id"] == blocked_resume["command_id"]
+        ]
+        self.assertEqual(blocked_results[-1]["status"], "REJECTED")
+        self.assertEqual(
+            blocked_results[-1]["reason_code"],
+            "SAFETY_CONDITION_NOT_CLEARED",
+        )
+        self.assertEqual(self.robot.mode, "SAFE_STOP")
+        self.assertEqual(self.robot.mission_state, "PAUSED")
+
+        self.robot.handle_command(
+            command(
+                "CLEAR_EMERGENCY_STOP",
+                {"reason": "mock safety cleared"},
+            )
+        )
+        self.assertEqual(self.robot.mode, "PAUSED")
+        self.assertEqual(self.robot.mission_state, "PAUSED")
+
+        self.robot.handle_command(command("RESUME_MISSION", {}))
+        self.assertEqual(self.robot.mode, "PATROLLING")
+        self.assertEqual(self.robot.mission_id, mission_id)
+        self.assertEqual(self.robot.mission_state, "RUNNING")
+        self.assertEqual(
+            [event["event_type"] for event in self.published_json("/events/mission")],
+            ["MISSION_STARTED", "MISSION_PAUSED", "MISSION_RESUMED"],
+        )
+
     def test_auto_completion_follows_final_non_terminal_telemetry(self) -> None:
         self.robot.args.mission_auto_complete_sec = 3
         mission_id = "MIS-MOCK-E2E-002"
@@ -215,6 +268,108 @@ class MockRobotMissionTest(unittest.TestCase):
             "MOCK_COMMAND_CANCELLED",
         )
         self.assertIsNone(self.robot.mission_id)
+
+    def test_complete_event_keeps_mission_id_and_reports_normal_completion(self) -> None:
+        mission_id = "MIS-MOCK-E2E-004"
+        self.robot.handle_command(
+            command(
+                "START_MISSION",
+                {"mission_id": mission_id, "zone_id": "AREA-MOCK-E2E"},
+            )
+        )
+        self.robot.handle_command(command("COMPLETE_MISSION", {}))
+
+        event = self.published_json("/events/mission")[-1]
+        self.assertEqual(event["event_type"], "MISSION_COMPLETED")
+        self.assertEqual(event["mission_id"], mission_id)
+        self.assertEqual(
+            event["result"]["completion_reason"],
+            "MOCK_COMMAND_COMPLETED",
+        )
+        self.assertIsNone(self.robot.mission_id)
+
+    def test_complete_while_paused_is_rejected_and_keeps_mission(self) -> None:
+        mission_id = "MIS-MOCK-E2E-PAUSED"
+        self.robot.handle_command(
+            command(
+                "START_MISSION",
+                {"mission_id": mission_id, "zone_id": "AREA-MOCK-E2E"},
+            )
+        )
+        self.robot.handle_command(
+            command("PAUSE_MISSION", {"reason": "mock pause"})
+        )
+
+        complete = command("COMPLETE_MISSION", {})
+        self.robot.handle_command(complete)
+
+        results = [
+            result
+            for result in self.published_json("/commands/result")
+            if result["command_id"] == complete["command_id"]
+        ]
+        self.assertEqual(results[-1]["status"], "REJECTED")
+        self.assertEqual(results[-1]["reason_code"], "ALREADY_IN_STATE")
+        self.assertEqual(self.robot.mission_id, mission_id)
+        self.assertEqual(self.robot.mission_state, "PAUSED")
+        self.assertEqual(self.robot.mode, "PAUSED")
+        self.assertNotIn(
+            "MISSION_COMPLETED",
+            [event["event_type"] for event in self.published_json("/events/mission")],
+        )
+
+    def test_complete_while_safe_stopped_is_rejected(self) -> None:
+        mission_id = "MIS-MOCK-E2E-SAFE-STOP"
+        self.robot.handle_command(
+            command(
+                "START_MISSION",
+                {"mission_id": mission_id, "zone_id": "AREA-MOCK-E2E"},
+            )
+        )
+        self.robot.handle_command(
+            command("EMERGENCY_STOP", {"reason": "mock emergency"})
+        )
+
+        complete = command("COMPLETE_MISSION", {})
+        self.robot.handle_command(complete)
+
+        results = [
+            result
+            for result in self.published_json("/commands/result")
+            if result["command_id"] == complete["command_id"]
+        ]
+        self.assertEqual(results[-1]["status"], "REJECTED")
+        self.assertEqual(
+            results[-1]["reason_code"],
+            "SAFETY_CONDITION_NOT_CLEARED",
+        )
+        self.assertEqual(self.robot.mission_id, mission_id)
+        self.assertEqual(self.robot.mission_state, "PAUSED")
+        self.assertEqual(self.robot.mode, "SAFE_STOP")
+
+    def test_cancel_while_safe_stopped_keeps_the_robot_stopped(self) -> None:
+        mission_id = "MIS-MOCK-E2E-CANCEL-SAFE-STOP"
+        self.robot.handle_command(
+            command(
+                "START_MISSION",
+                {"mission_id": mission_id, "zone_id": "AREA-MOCK-E2E"},
+            )
+        )
+        self.robot.handle_command(
+            command("EMERGENCY_STOP", {"reason": "mock emergency"})
+        )
+
+        self.robot.handle_command(
+            command("CANCEL_MISSION", {"reason": "operator cancel"})
+        )
+
+        self.assertIsNone(self.robot.mission_id)
+        self.assertIsNone(self.robot.mission_state)
+        self.assertEqual(self.robot.mode, "SAFE_STOP")
+        self.assertEqual(self.robot.state_reason, "REMOTE_ESTOP")
+        event = self.published_json("/events/mission")[-1]
+        self.assertEqual(event["event_type"], "MISSION_CANCELLED")
+        self.assertEqual(event["mission_id"], mission_id)
 
     def test_periodic_event_payloads_cover_all_event_families(self) -> None:
         safety_events = [self.robot.safety_event_payload() for _ in range(4)]

@@ -224,10 +224,12 @@ features/mission/patrol-area-selection-preview.css
 투영하면 정상 우회도 진행률 역행·정지로 보인다. Embedded가 이미 제공하는
 단조 증가 `elapsed_sec`를 계획시간과 비교하는 것이 현재 업무 의미에 맞다.
 
-### 3.3 계획시간 도달로 자동 완료하지 않는다
+### 3.3 계획시간 도달 시 서버 종료 명령을 처리한다
 
-통신 지연·일시정지·Robot 업무 상태를 서버 시계가 알 수 없다. 계획시간 도달은
-99.99%까지만 표시하고 Robot 완료 Event가 실제 종결을 확정한다.
+서버는 계획시간에 도달한 RUNNING Mission에 `SYSTEM/COMPLETE_MISSION`을
+발행한다. 로봇은 이 명령을 받으면 모터를 정지하고 `MISSION_COMPLETED`를
+발행한 뒤 Mission 보관함을 비운다. Event가 확인되기 전에는 Backend도
+COMPLETED로 속이지 않는다.
 
 ### 3.4 PAUSED 중 증가를 현재 계약으로 유지했다
 

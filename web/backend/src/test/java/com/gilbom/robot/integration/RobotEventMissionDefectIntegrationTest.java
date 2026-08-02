@@ -882,7 +882,7 @@ class RobotEventMissionDefectIntegrationTest {
                         valid,
                         latitude,
                         longitude,
-                        "A-01"),
+                        "똥방구 설사"),
                 new IncidentEventPayload.Incident(
                         IncidentEventPayload.AssetType.BRAILLE_BLOCK,
                         IncidentEventPayload.BlockType.LINEAR,
@@ -1052,7 +1052,7 @@ class RobotEventMissionDefectIntegrationTest {
                     updated_at
                 ) VALUES (
                     ?,
-                    'A-01',
+                    '똥방구 설사',
                     'Event Test Area',
                     ST_GeomFromText(
                         'POLYGON(('

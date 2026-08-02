@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  COMMAND_DEFINITIONS,
   buildCommandRequest,
   getCommandAvailability,
   type CommandPolicyState,
@@ -21,6 +22,7 @@ const ALL_COMMANDS: readonly CommandType[] = [
   'START_MISSION',
   'PAUSE_MISSION',
   'RESUME_MISSION',
+  'COMPLETE_MISSION',
   'CANCEL_MISSION',
   'EMERGENCY_STOP',
   'CLEAR_EMERGENCY_STOP',
@@ -75,6 +77,7 @@ test('Mission 상태별 허용 명령을 구분한다', () => {
   ))
   assert.deepEqual(runningEnabled, [
     'PAUSE_MISSION',
+    'COMPLETE_MISSION',
     'CANCEL_MISSION',
     'EMERGENCY_STOP',
   ])
@@ -90,6 +93,28 @@ test('Mission 상태별 허용 명령을 구분한다', () => {
     'CANCEL_MISSION',
     'EMERGENCY_STOP',
   ])
+})
+
+test('PAUSED 임무는 재개 전 완료할 수 없다', () => {
+  const availability = getCommandAvailability('COMPLETE_MISSION', {
+    ...BASE_STATE,
+    missionStatus: 'PAUSED',
+  })
+
+  assert.equal(availability.enabled, false)
+  assert.match(availability.reason ?? '', /먼저 재개/)
+})
+
+test('완료 확인문은 로봇 정지 전 절차를 과거 완료형으로 오해시키지 않는다', () => {
+  const definition = COMMAND_DEFINITIONS.find((item) => (
+    item.commandType === 'COMPLETE_MISSION'
+  ))
+
+  assert.ok(definition)
+  assert.equal(definition.requiresSafetyConfirmation, true)
+  assert.match(definition.impact, /완료 Event/)
+  assert.match(definition.safetyMessage ?? '', /완료 명령 후/)
+  assert.doesNotMatch(definition.safetyMessage ?? '', /정지했고/)
 })
 
 test('Offline과 동일 명령 처리 중에는 실행을 차단한다', () => {
@@ -108,7 +133,7 @@ test('Offline과 동일 명령 처리 중에는 실행을 차단한다', () => {
   assert.match(pending.reason ?? '', /처리 중/)
 })
 
-test('SAFE_STOP에서는 긴급정지 해제만 허용한다', () => {
+test('SAFE_STOP에서는 임무 취소와 긴급정지 해제만 허용한다', () => {
   const enabled = ALL_COMMANDS.filter((commandType) => (
     getCommandAvailability(commandType, {
       ...BASE_STATE,
@@ -116,10 +141,28 @@ test('SAFE_STOP에서는 긴급정지 해제만 허용한다', () => {
       missionStatus: 'PAUSED',
     }).enabled
   ))
-  assert.deepEqual(enabled, ['CLEAR_EMERGENCY_STOP'])
+  assert.deepEqual(enabled, ['CANCEL_MISSION', 'CLEAR_EMERGENCY_STOP'])
+})
+
+test('활성 임무가 없는 SAFE_STOP에서는 임무 취소를 허용하지 않는다', () => {
+  const availability = getCommandAvailability('CANCEL_MISSION', {
+    ...BASE_STATE,
+    robotMode: 'SAFE_STOP',
+    missionStatus: null,
+    hasMissionTarget: false,
+  })
+
+  assert.equal(availability.enabled, false)
 })
 
 test('START는 Mission 업무 코드와 Area 코드를 사용하고 사유는 정규화한다', () => {
+  assert.deepEqual(
+    buildCommandRequest('COMPLETE_MISSION', READY_MISSION, ''),
+    {
+      commandType: 'COMPLETE_MISSION',
+      parameters: {},
+    },
+  )
   assert.deepEqual(
     buildCommandRequest('START_MISSION', READY_MISSION, ''),
     {

@@ -5,7 +5,7 @@
   - 식별자가 robot_id 다 — 서버는 07-28 rename 이후 mqtt_id 만 받는다
     (FAIL_ON_UNKNOWN_PROPERTIES 라 robot_id 가 있으면 MQTT_PAYLOAD_MALFORMED).
   - event 에 ttl_sec 이 없다 — 서버 DTO 는 @NotNull @Min(60) @Max(300) 필수.
-  - zone_id "ZONE-TEST-01" — 서버 패턴 ^[A-Z]-[0-9]{2}$ 위반으로 거부.
+  - zone_id는 START_MISSION으로 받은 순찰 구역 코드를 해석하지 않고 그대로 사용.
 이 도구는 payload 를 직접 만들지 않고 MessageFactory·MqttClient 를 그대로 쓰므로
 로봇 본체와 같은 계약으로 나간다 — 여기서 통과하면 main.py 도 같은 wire 를 탄다.
 
@@ -53,7 +53,7 @@ for _stream in (sys.stdout, sys.stderr):
 from comms import MessageFactory, MqttClient, MqttConfig, TopicKind, utc_now  # noqa: E402
 
 MISSION_ID = "MIS-SMOKE-001"
-ZONE_ID = "A-01"  # 서버 패턴 ^[A-Z]-[0-9]{2}$ — 벗어나면 incident 가 조용히 거부된다
+ZONE_ID = "DEMO-ZONE-01"
 CONNECT_TIMEOUT_SEC = 10.0
 PUBACK_TIMEOUT_SEC = 10.0
 

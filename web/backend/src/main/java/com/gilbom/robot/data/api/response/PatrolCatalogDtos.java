@@ -79,6 +79,12 @@ public final class PatrolCatalogDtos {
         }
     }
 
+    public record PatrolAreaCodeAvailabilityResponse(
+            String areaCode,
+            boolean available
+    ) {
+    }
+
     public record PatrolAreaResponse(
             UUID patrolAreaId,
             String areaCode,

@@ -44,6 +44,7 @@ import com.gilbom.common.web.RequestBodySizeLimitFilter;
 import com.gilbom.common.web.RequestIdFilter;
 import com.gilbom.robot.api.MissionController;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionCreateRequest;
+import com.gilbom.robot.data.api.response.MissionDtos.MissionListScope;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionListResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionMapCurrentPosition;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionMapResponse;
@@ -224,6 +225,7 @@ class MissionControllerTest {
                 null,
                 null,
                 null,
+                MissionListScope.ALL,
                 null,
                 null,
                 null))
@@ -240,6 +242,34 @@ class MissionControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].status", is("READY")))
                 .andExpect(jsonPath("$.totalElements", is(1)));
+    }
+
+    @Test
+    void passesTerminalMissionScopeToQueryService() throws Exception {
+        when(queryService.findMissions(
+                USER_ID,
+                0,
+                20,
+                null,
+                null,
+                null,
+                MissionListScope.TERMINAL,
+                null,
+                null,
+                null))
+                .thenReturn(new MissionListResponse(
+                        List.of(),
+                        0,
+                        20,
+                        0,
+                        0));
+
+        mockMvc.perform(get("/api/v1/missions")
+                        .queryParam("scope", "TERMINAL")
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_VIEW)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements", is(0)));
     }
 
     @Test

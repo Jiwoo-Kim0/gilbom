@@ -113,6 +113,7 @@ test('Robot 관리에서 최초 Credential 발급과 회전을 수행한다', as
           speedMps: null,
           robotMode: null,
           missionStatus: null,
+          missionAssignable: true,
           overallHealthStatus: 'UNKNOWN',
         }, {
           robotId: ACTIVE_ROBOT_ID,
@@ -128,6 +129,7 @@ test('Robot 관리에서 최초 Credential 발급과 회전을 수행한다', as
           speedMps: 0,
           robotMode: 'IDLE',
           missionStatus: null,
+          missionAssignable: true,
           overallHealthStatus: 'OK',
         }],
         page: 0,

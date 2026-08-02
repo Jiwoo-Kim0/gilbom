@@ -337,7 +337,7 @@ COMMENT ON COLUMN auth.user_robot_assignment.ended_at IS '배정 종료 시각';
 -- robot.patrol_area: 관리자 지도에서 지정한 Polygon과 MQTT zone_id를 연결한다.
 CREATE TABLE robot.patrol_area (
     patrol_area_id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
-    zone_id VARCHAR(10) NOT NULL,
+    zone_id VARCHAR(50) NOT NULL,
     area_name VARCHAR(100) NOT NULL,
     area_geometry GEOMETRY(POLYGON,4326) NOT NULL,
     description TEXT,
@@ -345,12 +345,11 @@ CREATE TABLE robot.patrol_area (
     created_by UUID NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
-    CONSTRAINT uq_patrol_area_zone UNIQUE (zone_id),
-    CONSTRAINT ck_patrol_area_zone CHECK (zone_id ~ '^[A-Z]-[0-9]{2}$')
+    CONSTRAINT uq_patrol_area_zone UNIQUE (zone_id)
 );
 COMMENT ON TABLE robot.patrol_area IS '관리자 지도에서 지정한 Polygon과 MQTT zone_id를 연결한다.';
 COMMENT ON COLUMN robot.patrol_area.patrol_area_id IS '순찰 구역 식별자';
-COMMENT ON COLUMN robot.patrol_area.zone_id IS 'MQTT 구역 코드. 예: A-01';
+COMMENT ON COLUMN robot.patrol_area.zone_id IS 'MQTT에 그대로 전달하는 순찰 구역 업무 코드';
 COMMENT ON COLUMN robot.patrol_area.area_name IS '구역명';
 COMMENT ON COLUMN robot.patrol_area.area_geometry IS '구역 Polygon';
 COMMENT ON COLUMN robot.patrol_area.description IS '구역 설명';
@@ -935,7 +934,7 @@ CREATE TABLE defect.defect (
     resolution_note TEXT,
     location GEOMETRY(POINT,4326) NOT NULL,
     location_accuracy_m REAL,
-    zone_id VARCHAR(10) NOT NULL,
+    zone_id VARCHAR(50) NOT NULL,
     patrol_area_id UUID,
     patrol_route_id UUID,
     location_label VARCHAR(200),
@@ -955,7 +954,6 @@ CREATE TABLE defect.defect (
     CONSTRAINT ck_defect_risk_score CHECK (risk_score IS NULL OR risk_score BETWEEN 0 AND 100),
     CONSTRAINT ck_defect_workflow_status CHECK (workflow_status IN ('NEW','ACCEPTED','IN_PROGRESS','RESOLVED','FALSE_POSITIVE','REJECTED')),
     CONSTRAINT ck_defect_resolution CHECK (resolution IS NULL OR resolution IN ('REPAIRED','CLEANED','DUPLICATE','REINSPECTION_REQUIRED','NOT_APPLICABLE')),
-    CONSTRAINT ck_defect_zone CHECK (zone_id ~ '^[A-Z]-[0-9]{2}$'),
     CONSTRAINT ck_defect_times CHECK (last_seen_at >= first_seen_at),
     CONSTRAINT ck_defect_observation_count CHECK (observation_count >= 1),
     CONSTRAINT ck_defect_confidence CHECK (latest_confidence IS NULL OR latest_confidence BETWEEN 0 AND 1)
@@ -995,7 +993,7 @@ CREATE TABLE defect.defect_observation (
     location_valid BOOLEAN NOT NULL,
     location GEOMETRY(POINT,4326),
     location_accuracy_m REAL,
-    zone_id VARCHAR(10) NOT NULL,
+    zone_id VARCHAR(50) NOT NULL,
     asset_type VARCHAR(30) NOT NULL,
     block_type VARCHAR(20) NOT NULL,
     detected_defect_type VARCHAR(40) NOT NULL,
@@ -1011,7 +1009,6 @@ CREATE TABLE defect.defect_observation (
     model_version VARCHAR(50) NOT NULL,
     is_representative BOOLEAN DEFAULT FALSE NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
-    CONSTRAINT ck_observation_zone CHECK (zone_id ~ '^[A-Z]-[0-9]{2}$'),
     CONSTRAINT ck_observation_asset CHECK (asset_type = 'BRAILLE_BLOCK'),
     CONSTRAINT ck_observation_block CHECK (block_type IN ('LINEAR','DOT','UNKNOWN')),
     CONSTRAINT ck_observation_defect_type CHECK (detected_defect_type IN ('DAMAGED','INSTALLATION_INVALID','UNKNOWN_ANOMALY')),

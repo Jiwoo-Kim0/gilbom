@@ -163,4 +163,4 @@ unit이 `time-sync.target`에 의존하는 이유: `expires_at` 판정과 서버
 | --- | --- |
 | 증거 이미지 업로드 | 로봇용 `X-API-Key` 발급 경로가 없다. `UPLOAD_*`를 비워 두면 업로드만 건너뛰고 나머지는 정상 동작한다 |
 | `detect.model_version` | `0.0.0-stub`. 실제 export 버전으로 교체해야 `incident.model.version` 추적이 의미를 갖는다 |
-| 순찰구역 코드 | 웹의 `area_code`가 `DEMO-ZONE-01` 같은 임의 문자열을 허용하는데 서버는 incident의 `zone_id`에 `^[A-Z]-[0-9]{2}$`만 허용한다. 웹 수정 대기 — 미션 시작 시 로봇이 경고 로그를 남긴다 |
+| 순찰구역 코드 | `START_MISSION`으로 받은 `area_code`를 불투명 문자열로 보관하고 Incident에 그대로 echo한다. 별도 형식 검증은 하지 않는다 |

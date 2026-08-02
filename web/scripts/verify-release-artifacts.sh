@@ -49,8 +49,8 @@ jq -e \
     and .images.backend.name == $backend
     and .images.frontend.name == $frontend
     and (.tests | to_entries | all(.value == "PASS"))
-    and .flyway.latestVersion == "V35"
-    and (.flyway.migrations | length == 35)
+    and .flyway.latestVersion == "V38"
+    and (.flyway.migrations | length == 38)
     and all(
       .flyway.migrations[];
       (.version | type == "number")

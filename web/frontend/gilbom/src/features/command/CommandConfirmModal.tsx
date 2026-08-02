@@ -148,7 +148,8 @@ export function CommandConfirmModal({
           </div>
         </dl>
 
-        {definition.safetyMessage !== null ? (
+        {definition.safetyMessage !== null
+        && !definition.requiresSafetyConfirmation ? (
           <div className={`command-safety-note${danger ? ' danger' : ''}`}>
             <AlertTriangle size={17} aria-hidden="true" />
             <span>{definition.safetyMessage}</span>

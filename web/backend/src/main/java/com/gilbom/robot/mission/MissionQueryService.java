@@ -19,6 +19,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
 import com.gilbom.robot.application.RobotScopeService;
+import com.gilbom.robot.data.api.response.MissionDtos.MissionListScope;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionListResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionMapCurrentPosition;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionMapResponse;
@@ -133,6 +134,7 @@ public class MissionQueryService {
             UUID robotId,
             UUID patrolAreaId,
             UUID patrolRouteId,
+            MissionListScope scope,
             MissionStatus status,
             Instant startedFrom,
             Instant startedTo
@@ -147,6 +149,7 @@ public class MissionQueryService {
                 robotId,
                 patrolAreaId,
                 patrolRouteId,
+                scope,
                 status,
                 startedFrom,
                 startedTo);
@@ -158,6 +161,7 @@ public class MissionQueryService {
                   ON r.robot_id = m.robot_id
                 WHERE
                 """ + RobotScopeService.VISIBLE_ROBOT_PREDICATE
+                        + " AND m.deleted_at IS NULL"
                         + filters,
                 parameters,
                 Long.class);
@@ -166,6 +170,7 @@ public class MissionQueryService {
                 MISSION_SELECT + """
                 WHERE
                 """ + RobotScopeService.VISIBLE_ROBOT_PREDICATE
+                        + " AND m.deleted_at IS NULL"
                         + filters + "\n" + """
                 ORDER BY
                     COALESCE(
@@ -194,6 +199,7 @@ public class MissionQueryService {
         List<MissionResponse> missions = jdbcTemplate.query(
                 MISSION_SELECT + """
                 WHERE m.mission_id = :missionId
+                  AND m.deleted_at IS NULL
                   AND
                 """ + RobotScopeService.VISIBLE_ROBOT_PREDICATE,
                 new MapSqlParameterSource()
@@ -296,6 +302,7 @@ public class MissionQueryService {
                 LEFT JOIN telemetry.robot_current_state state
                   ON state.robot_id = m.robot_id
                 WHERE m.mission_id = :missionId
+                  AND m.deleted_at IS NULL
                   AND
                 """ + RobotScopeService.VISIBLE_ROBOT_PREDICATE,
                 new MapSqlParameterSource()
@@ -375,6 +382,7 @@ public class MissionQueryService {
             UUID robotId,
             UUID patrolAreaId,
             UUID patrolRouteId,
+            MissionListScope scope,
             MissionStatus status,
             Instant startedFrom,
             Instant startedTo
@@ -395,6 +403,16 @@ public class MissionQueryService {
         if (status != null) {
             filters.append(" AND m.status = :status");
             parameters.addValue("status", status.name());
+        } else if (scope != null) {
+            switch (scope) {
+                case ACTIVE -> filters.append(
+                        " AND m.status IN ('CREATED', 'READY', 'RUNNING', 'PAUSED')");
+                case TERMINAL -> filters.append(
+                        " AND m.status IN ('COMPLETED', 'CANCELLED', 'FAILED')");
+                case ALL -> {
+                    // 상태 범위 조건을 추가하지 않는다.
+                }
+            }
         }
         if (startedFrom != null) {
             filters.append(" AND m.started_at >= :startedFrom");

@@ -309,9 +309,8 @@ presence ONLINE 발행 → commands/request 구독 → Outbox 플러시 깨움 �
 | `attributes` | `damage_ratio`가 없으면 블록 자체를 생략한다 |
 | `model.version` | ⚠️ 아직 `0.0.0-stub`. 실제 export 버전으로 교체 필요 |
 
-> ⚠️ 서버는 `zone_id`에 `^[A-Z]-[0-9]{2}$`를 강제한다. 벗어난 값이면 이 미션의
-> incident가 **전부 조용히 거부**된다. 그래서 로봇은 `START_MISSION` 시점에
-> 경고 로그를 남긴다(§4.4). 웹의 `area_code`에는 아직 같은 제약이 없다.
+> `zone_id`는 `patrol_area.area_code`를 해석하지 않고 그대로 전달한다. 서버와 로봇은
+> 코드의 문자 구성에 의미를 부여하거나 별도 형식을 강제하지 않는다.
 
 ### 4.2 events/battery — 등급이 바뀌는 순간
 
@@ -411,12 +410,12 @@ t=3.0  obstacle_confirm_sec 경과 후 '다시 봤더니' 여전히 있음
 | `MISSION_PAUSED` | `PAUSE_MISSION` 명령 | 없음 |
 | `MISSION_RESUMED` | `RESUME_MISSION` 명령 | 없음 |
 | `MISSION_CANCELLED` | `CANCEL_MISSION` 명령 | **있음** |
-| `MISSION_COMPLETED` | ⚠️ **아직 호출자 없음** | **있음** |
+| `MISSION_COMPLETED` | `COMPLETE_MISSION` 명령 또는 자율 순찰 종료 | **있음** |
 | `MISSION_FAILED` | ⚠️ **아직 호출자 없음** | **있음** |
 
-> `mission_completed()`·`mission_failed()`는 구현·테스트돼 있지만 **부르는 코드가
-> 없다.** 자율주행이 스스로 순찰을 끝내는 경로가 아직 안 붙었기 때문이다. 현재는
-> 관리자가 `CANCEL_MISSION`을 눌러야 미션이 끝난다.
+> 관리자 정상 종료는 `COMPLETE_MISSION`, 수행 불가로 취소하는 경우는
+> `CANCEL_MISSION`을 사용한다. 자율주행의 경로 완료도 `MISSION_COMPLETED`를
+> 발행해야 한다.
 
 종료 3종만 집계를 싣고, 실은 뒤 보관함을 비운다.
 
@@ -472,24 +471,26 @@ t=3.0  obstacle_confirm_sec 경과 후 '다시 봤더니' 여전히 있음
 
 `command_id`는 UUID지만 로봇은 **불투명 문자열로만** 다룬다(파싱하지 않는다).
 
-### 5.3 명령 6종
+### 5.3 명령 7종
 
 | command_type | parameters | 서버 TTL | 로봇 동작 |
 | --- | --- | ---: | --- |
 | `START_MISSION` | `mission_id`, `zone_id` | 60s | `PATROLLING` 전이 → 미션 보관 → `MISSION_STARTED` |
 | `PAUSE_MISSION` | `reason` | 30s | `PAUSED/REMOTE_PAUSE` → `MISSION_PAUSED` |
 | `RESUME_MISSION` | 없음 | 30s | `PATROLLING/NONE` → `MISSION_RESUMED` |
+| `COMPLETE_MISSION` | 없음 | 30s | 모터 정지 → `MISSION_COMPLETED`(집계 포함) → `READY` |
 | `CANCEL_MISSION` | `reason` | 30s | `MISSION_CANCELLED`(집계 포함) → `READY` |
-| `EMERGENCY_STOP` | `reason` | **10s** | **모터 정지 먼저** → `SAFE_STOP/REMOTE_ESTOP` |
-| `CLEAR_EMERGENCY_STOP` | `reason` | 30s | 안전 정지 해제 → 미션 상태에 맞는 mode로 복귀 |
+| `EMERGENCY_STOP` | `reason` | **10s** | **모터 정지 먼저** → `SAFE_STOP`; RUNNING Mission은 `PAUSED` + `MISSION_PAUSED` |
+| `CLEAR_EMERGENCY_STOP` | `reason` | 30s | 원격 안전 정지만 해제; 활성 Mission은 `PAUSED`에서 명시적 재개 대기 |
 
-안전 정지를 풀었을 때 **어디로 돌아갈지는 미션이 정한다** (`release_safe_stop`).
-호출자마다 이 판단을 따로 하면 원격 해제와 센서 복구가 서로 다른 mode로 돌아간다.
+긴급정지는 기존 RUNNING Mission을 먼저 `PAUSED`로 바꾼다. 따라서 원격 안전 정지를
+해제해도 자동으로 주행하지 않으며, 별도 `RESUME_MISSION`을 받아야 순찰로 복귀한다.
+장애물·센서 복구처럼 로컬 자동 재개가 허용된 경로는 `release_safe_stop`이 현재 Mission
+상태에 따라 복귀 mode를 결정한다.
 
-| 정지 당시 미션 상태 | 복귀 |
+| 원격 긴급정지 해제 시 Mission | 복귀 |
 | --- | --- |
-| `RUNNING` | `PATROLLING / NONE` |
-| `PAUSED` | `PAUSED / REMOTE_PAUSE` |
+| 활성 Mission | `PAUSED / REMOTE_PAUSE` |
 | 미션 없음 | `READY / NONE` |
 
 `RETURN_TO_CHARGE`·`UPDATE_CONFIG`는 서버 enum에 없고, 로봇도
@@ -591,7 +592,7 @@ ACCEPTED (completed_at: null)  →  COMPLETED (completed_at 있음)
 소켓보다 바퀴가 먼저다.
 
 ```text
-[모터 정지] → [SAFE_STOP 전이] → ACCEPTED → COMPLETED
+[모터 정지] → [SAFE_STOP 전이] → [필요 시 MISSION_PAUSED] → ACCEPTED → COMPLETED
 ```
 
 검증에서 떨어진 명령은 **1건만** 나간다 (`REJECTED` 또는 `EXPIRED`).
@@ -649,7 +650,7 @@ Outbox는 `sent`로 지워진다. `ingest/receipt`가 MVP 미사용이라 이 �
 - `bbox_norm`의 폭·높이가 0
 - `battery.valid=true`인데 `state=UNKNOWN`
 - `completed_at < received_at`
-- `zone_id` 패턴 이탈 → **경고만** (명령은 거절하지 않음)
+- `zone_id`는 형식 검증 없이 `START_MISSION` 값을 그대로 보존
 
 ### 7.4 재접속
 

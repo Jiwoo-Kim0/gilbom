@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.gilbom.audit.AuditRequestContext;
 import com.gilbom.auth.AuthenticatedUserIdResolver;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionCreateRequest;
+import com.gilbom.robot.data.api.response.MissionDtos.MissionListScope;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionListResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionMapResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionResponse;
@@ -64,6 +65,7 @@ public class MissionController {
             @RequestParam(required = false) UUID robotId,
             @RequestParam(required = false) UUID patrolAreaId,
             @RequestParam(required = false) UUID patrolRouteId,
+            @RequestParam(defaultValue = "ALL") MissionListScope scope,
             @RequestParam(required = false) MissionStatus status,
             @RequestParam(required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
@@ -80,6 +82,7 @@ public class MissionController {
                 robotId,
                 patrolAreaId,
                 patrolRouteId,
+                scope,
                 status,
                 startedFrom,
                 startedTo);

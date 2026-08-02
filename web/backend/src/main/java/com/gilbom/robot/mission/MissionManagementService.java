@@ -55,6 +55,11 @@ public class MissionManagementService {
             MissionStatus.CANCELLED,
             MissionStatus.FAILED
     );
+    private static final Set<MissionStatus> SOFT_DELETABLE_STATUSES = Set.of(
+            MissionStatus.COMPLETED,
+            MissionStatus.CANCELLED,
+            MissionStatus.FAILED
+    );
     private static final String OWNER_SCOPE = """
             (
             """ + RobotScopeService.SYSTEM_ADMIN_SCOPE + """
@@ -323,26 +328,55 @@ public class MissionManagementService {
                 actorUserId,
                 current.robotId(),
                 ErrorCode.MISSION_NOT_FOUND);
-        if (current.status() != MissionStatus.CREATED) {
+        if (current.status() != MissionStatus.CREATED
+                && !SOFT_DELETABLE_STATUSES.contains(current.status())) {
             throw new BusinessException(ErrorCode.MISSION_STATE_CONFLICT);
         }
         MissionResponse before = queryService.findMission(
                 actorUserId,
                 missionId);
+        OffsetDateTime deletedAt = utc(clock.instant());
 
         try {
-            jdbcTemplate.update(
-                    "DELETE FROM robot.mission_status_history "
-                            + "WHERE mission_id = ?",
-                    missionId);
-            int deleted = jdbcTemplate.update("""
-                    DELETE FROM robot.mission
-                    WHERE mission_id = ?
-                      AND status = 'CREATED'
-                    """,
-                    missionId);
-            if (deleted != 1) {
-                throw new BusinessException(ErrorCode.MISSION_STATE_CONFLICT);
+            if (current.status() == MissionStatus.CREATED) {
+                jdbcTemplate.update(
+                        "DELETE FROM robot.mission_status_history "
+                                + "WHERE mission_id = ?",
+                        missionId);
+                int deleted = jdbcTemplate.update("""
+                        DELETE FROM robot.mission
+                        WHERE mission_id = ?
+                          AND status = 'CREATED'
+                        """,
+                        missionId);
+                if (deleted != 1) {
+                    throw new BusinessException(
+                            ErrorCode.MISSION_STATE_CONFLICT);
+                }
+            } else {
+                int deleted = jdbcTemplate.update("""
+                        UPDATE robot.mission
+                        SET deleted_at = ?,
+                            deleted_by = ?,
+                            updated_by = ?,
+                            updated_at = GREATEST(updated_at, ?)
+                        WHERE mission_id = ?
+                          AND deleted_at IS NULL
+                          AND status IN (
+                              'COMPLETED',
+                              'CANCELLED',
+                              'FAILED'
+                          )
+                        """,
+                        deletedAt,
+                        actorUserId,
+                        actorUserId,
+                        deletedAt,
+                        missionId);
+                if (deleted != 1) {
+                    throw new BusinessException(
+                            ErrorCode.MISSION_STATE_CONFLICT);
+                }
             }
         } catch (DataIntegrityViolationException exception) {
             throw new BusinessException(
@@ -372,6 +406,7 @@ public class MissionManagementService {
                             status
                         FROM robot.mission
                         WHERE mission_id = ?
+                          AND deleted_at IS NULL
                         FOR UPDATE
                         """,
                 resultSet -> resultSet.next()

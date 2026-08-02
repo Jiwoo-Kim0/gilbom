@@ -1,9 +1,10 @@
 import {
+  CheckCircle2,
   Pause,
   Play,
   RotateCcw,
   ShieldCheck,
-  Square,
+  XCircle,
 } from 'lucide-react'
 import {
   useCallback,
@@ -45,6 +46,7 @@ type MissionCommandType = Extract<
   | 'START_MISSION'
   | 'PAUSE_MISSION'
   | 'RESUME_MISSION'
+  | 'COMPLETE_MISSION'
   | 'CANCEL_MISSION'
 >
 
@@ -52,6 +54,7 @@ const MISSION_COMMAND_TYPES: readonly MissionCommandType[] = [
   'START_MISSION',
   'PAUSE_MISSION',
   'RESUME_MISSION',
+  'COMPLETE_MISSION',
   'CANCEL_MISSION',
 ]
 
@@ -59,7 +62,8 @@ const commandIcons = {
   START_MISSION: Play,
   PAUSE_MISSION: Pause,
   RESUME_MISSION: RotateCcw,
-  CANCEL_MISSION: Square,
+  COMPLETE_MISSION: CheckCircle2,
+  CANCEL_MISSION: XCircle,
 } as const
 
 function isMissionCommandType(

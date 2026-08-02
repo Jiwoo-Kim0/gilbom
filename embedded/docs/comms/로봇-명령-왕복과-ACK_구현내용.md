@@ -57,10 +57,15 @@ REST→DB→TLS Broker→Mock→Result→DB→SSE→React를 통과했다. Broke
 | `START_MISSION` | O | O | `mission_id`, `zone_id` |
 | `PAUSE_MISSION` | O | O | `reason` |
 | `RESUME_MISSION` | O | O | 없음 또는 계약 기본값 |
+| `COMPLETE_MISSION` | O | O | 없음(정상 완료) |
 | `CANCEL_MISSION` | O | O | `reason` |
 | `EMERGENCY_STOP` | O | O | `reason` |
-| `CLEAR_EMERGENCY_STOP` | O | O | 없음 |
+| `CLEAR_EMERGENCY_STOP` | O | O | `reason` |
 | `RETURN_TO_CHARGE` | X | X | 현재 범위 제외 |
+
+실행 중 긴급정지는 Mission ID를 보존하고 `MISSION_PAUSED`를 발행한다. 긴급정지
+해제는 활성 Mission을 `PAUSED`에 두며, 관리자가 별도 `RESUME_MISSION`을 실행해야
+`MISSION_RESUMED`와 함께 주행을 재개한다.
 
 ### 1.2 REST
 

@@ -18,6 +18,7 @@ public record RobotListItemResponse(
         Double speedMps,
         String robotMode,
         String missionStatus,
+        boolean missionAssignable,
         String overallHealthStatus
 ) {
 }

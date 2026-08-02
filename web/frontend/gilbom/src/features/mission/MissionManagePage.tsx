@@ -28,7 +28,10 @@ import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { useAuthentication } from '../auth/authenticationContext'
 import { MISSION_MANAGE } from '../auth/permissions'
 import { getRobotMap } from '../robot/robotApi'
-import type { RobotMapItem } from '../robot/robotTypes'
+import type {
+  RobotMapItem,
+  RobotRealtimeEvent,
+} from '../robot/robotTypes'
 import { useRobotRealtime } from '../robot/useRobotRealtime'
 import {
   createMission,
@@ -43,6 +46,10 @@ import {
 } from './missionApi'
 import { MissionMap } from './MissionMap'
 import { MissionCommandActions } from './MissionCommandActions'
+import {
+  isMissionDeletable,
+  isRobotMissionAssignable,
+} from './missionEligibility'
 import { PatrolAreaSelectionPreview } from './PatrolAreaSelectionPreview'
 import type {
   Mission,
@@ -60,6 +67,7 @@ const PAGE_SIZE = 20
 const emptyFilters: MissionFilters = {
   robotId: '',
   patrolAreaId: '',
+  scope: 'ACTIVE',
   status: '',
   startedFrom: '',
   startedTo: '',
@@ -76,6 +84,32 @@ const statusPresentation: Record<
   COMPLETED: { label: '완료', tone: 'completed' },
   CANCELLED: { label: '취소', tone: 'cancelled' },
   FAILED: { label: '실패', tone: 'failed' },
+}
+
+const activeMissionStatuses: ReadonlySet<MissionStatus> = new Set([
+  'CREATED',
+  'READY',
+  'RUNNING',
+  'PAUSED',
+])
+
+const terminalMissionStatuses: ReadonlySet<MissionStatus> = new Set([
+  'COMPLETED',
+  'CANCELLED',
+  'FAILED',
+])
+
+function isStatusInScope(
+  status: MissionStatus,
+  scope: MissionFilters['scope'],
+): boolean {
+  if (scope === 'ACTIVE') {
+    return activeMissionStatuses.has(status)
+  }
+  if (scope === 'TERMINAL') {
+    return terminalMissionStatuses.has(status)
+  }
+  return true
 }
 
 function formatDateTime(value: string | null): string {
@@ -187,9 +221,7 @@ export function MissionManagePage() {
     [areas],
   )
   const activeRobots = useMemo(
-    () => robots.filter((robot) => (
-      robot.operationalStatus === 'ACTIVE' && robot.missionStatus === null
-    )),
+    () => robots.filter(isRobotMissionAssignable),
     [robots],
   )
   const selectedCreateArea = useMemo(
@@ -294,7 +326,7 @@ export function MissionManagePage() {
     }
   }, [])
 
-  const refreshFromRealtime = useCallback(() => {
+  const refreshFromRealtime = useCallback((event?: RobotRealtimeEvent) => {
     setCommandRealtimeRevision((current) => current + 1)
     if (realtimeRefreshTimerRef.current !== null) {
       window.clearTimeout(realtimeRefreshTimerRef.current)
@@ -309,11 +341,22 @@ export function MissionManagePage() {
       if (createExpanded && createRobotId.length > 0) {
         void loadRobotPositions()
       }
+      if (
+        createExpanded
+        && (
+          event === undefined
+          || event.eventType === 'ROBOT_STATE_UPDATED'
+          || event.eventType === 'COMMAND_STATUS_CHANGED'
+        )
+      ) {
+        void loadCatalogs()
+      }
     }, 250)
   }, [
     appliedFilters,
     createExpanded,
     createRobotId,
+    loadCatalogs,
     loadMissionDetail,
     loadMissions,
     loadRobotPositions,
@@ -461,6 +504,7 @@ export function MissionManagePage() {
   function refresh() {
     requestedListKeyRef.current = null
     void loadMissions(page, appliedFilters)
+    void loadCatalogs()
     if (selectedMissionId !== null) {
       requestedDetailIdRef.current = null
       void loadMissionDetail(selectedMissionId)
@@ -533,7 +577,7 @@ export function MissionManagePage() {
     if (
       !canManage
       || selectedMission === null
-      || selectedMission.status !== 'CREATED'
+      || !isMissionDeletable(selectedMission.status)
       || missionAction !== null
     ) {
       return
@@ -666,7 +710,13 @@ export function MissionManagePage() {
         <details
           className="content-card mission-create-card"
           open={createExpanded}
-          onToggle={(event) => setCreateExpanded(event.currentTarget.open)}
+          onToggle={(event) => {
+            const nextOpen = event.currentTarget.open
+            setCreateExpanded(nextOpen)
+            if (nextOpen) {
+              void loadCatalogs()
+            }
+          }}
         >
           <summary>
             <Plus size={17} aria-hidden="true" />
@@ -706,7 +756,8 @@ export function MissionManagePage() {
                 ))}
               </select>
               <small>
-                ACTIVE 상태이며 현재 임무가 없는 Robot만 표시됩니다.
+                ACTIVE 상태이며 CREATED·READY·RUNNING·PAUSED 임무가 없는
+                Robot만 표시됩니다. 완료·취소·실패 후에는 다시 선택할 수 있습니다.
                 Credential은 Robot 관리에서 발급·회전합니다.
               </small>
             </label>
@@ -837,8 +888,24 @@ export function MissionManagePage() {
             ))}
           </select>
         </label>
+        <label className="admin-form-field" htmlFor="mission-filter-scope">
+          목록 범위
+          <select
+            id="mission-filter-scope"
+            value={draftFilters.scope}
+            onChange={(event) => setDraftFilters((current) => ({
+              ...current,
+              scope: event.target.value as MissionFilters['scope'],
+              status: '',
+            }))}
+          >
+            <option value="ACTIVE">진행 중·대기 임무</option>
+            <option value="TERMINAL">종료된 임무</option>
+            <option value="ALL">전체 임무</option>
+          </select>
+        </label>
         <label className="admin-form-field" htmlFor="mission-filter-status">
-          상태
+          상세 상태
           <select
             id="mission-filter-status"
             value={draftFilters.status}
@@ -847,12 +914,17 @@ export function MissionManagePage() {
               status: event.target.value as MissionFilters['status'],
             }))}
           >
-            <option value="">전체 상태</option>
-            {Object.entries(statusPresentation).map(([status, presentation]) => (
-              <option key={status} value={status}>
-                {presentation.label}
-              </option>
-            ))}
+            <option value="">범위 내 전체 상태</option>
+            {Object.entries(statusPresentation)
+              .filter(([status]) => isStatusInScope(
+                status as MissionStatus,
+                draftFilters.scope,
+              ))
+              .map(([status, presentation]) => (
+                <option key={status} value={status}>
+                  {presentation.label}
+                </option>
+              ))}
           </select>
         </label>
         <label className="admin-form-field" htmlFor="mission-filter-from">
@@ -1061,7 +1133,7 @@ export function MissionManagePage() {
                   <span className="mission-detail-updated">
                     갱신 {formatDateTime(selectedMission.updatedAt)}
                   </span>
-                  {canManage && selectedMission.status === 'CREATED' ? (
+                  {canManage && isMissionDeletable(selectedMission.status) ? (
                     <div className="mission-detail-action-row">
                       <button
                         className="primary-button button-with-icon"

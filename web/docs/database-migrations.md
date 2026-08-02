@@ -60,7 +60,13 @@
 | V33 | LLM 호출 quota·credit ledger | 사용자별 UTC 일일 호출 수와 전체 일일 credit을 원자적으로 예약하고 token·안전 실패 코드만 기록해 다중 인스턴스의 rate·budget 우회를 차단 |
 | V34 | 보고서 LLM fallback 사유 | LLM 요청이 template으로 낮아진 원인을 고정 코드로 버전에 보존하되 Prompt·응답·예외 원문 저장을 차단 |
 | V35 | 미시작 Mission 삭제 경계 | 시작·진행 이력이 없는 `CREATED` Mission과 최초 상태 이력만 삭제할 수 있도록 DB Trigger와 runtime 권한을 제한적으로 추가 |
+<<<<<<< HEAD
 | V36 | 결함 유형 3종 축소 | 제품에서 쓰는 유형을 `DAMAGED`·`INSTALLATION_INVALID`·`UNKNOWN_ANOMALY`로 좁히고, 없어지는 4종이 들어 있던 행을 기타 이상으로 옮긴 뒤 CHECK 3개를 교체 |
+=======
+| V36 | 결함 유형 3종 축소 | 기존 결함과 관측의 제거 대상 유형을 `UNKNOWN_ANOMALY`로 보정하고 DB CHECK를 `DAMAGED`, `INSTALLATION_INVALID`, `UNKNOWN_ANOMALY`로 제한 |
+| V37 | `zone_id` 형식 제약 해제 | Incident·결함의 `zone_id`를 Patrol Area 업무 코드의 불투명 복사본으로 취급하고 `A-01` 정규식 제약을 제거하며 길이를 `VARCHAR(50)`으로 통일 |
+| V38 | 종료 Mission 논리 삭제·정상 종료 명령 | COMPLETED·CANCELLED·FAILED Mission은 실행 증거를 보존한 채 목록에서 숨기고, `COMPLETE_MISSION`을 명령 제약에 추가 |
+>>>>>>> 29d42bfec11d1d2b0c6a291d5c11ccafba542634
 
 ### V26 결함 통계 Query 인덱스
 
@@ -220,9 +226,6 @@ Mission 삭제 Trigger가 이 조건을 DB에서 재검증하며, 최초 `CREATE
 다른 상태 이력이 있으면 append-only 보호가 계속 삭제를 거부한다. 시작된 Mission,
 Telemetry, Event, Command 이력은 기존 보존 정책을 유지한다.
 
-시스템 Role `ADMIN`, `MANAGER`, `OPERATOR`와 18개 세부 permission 및
-role-permission 관계는 결정적인 UUID로 seed한다. 실제
-관리자 계정은 password hash와 MFA 등록 절차가 필요하므로 migration에서 만들지 않는다.
 
 ### V36 결함 유형 3종 축소
 
@@ -250,6 +253,33 @@ role-permission 관계는 결정적인 UUID로 seed한다. 실제
 MQTT 계약(`IncidentEventPayload.DefectType`)은 원래 `DAMAGED`만 받으므로 로봇 쪽
 변경은 없다. 나머지 두 종은 관리자가 결함 수정에서 지정한다.
 
+### V37 `zone_id` 형식 제약 해제
+
+파일:
+`backend/src/main/resources/db/migration/V37__relax_zone_id_format.sql`
+
+`defect.defect`, `defect.defect_observation`, `defect.incident_ingestion_issue`의
+`zone_id`는 `robot.patrol_area.area_code`를 해석하지 않고 보존하는 값이다. 기존
+`^[A-Z]-[0-9]{2}$` CHECK를 제거하고 원본 `area_code`와 같은 `VARCHAR(50)`으로
+확장한다. Patrol Area 자체의 `area_code` UNIQUE 제약과 UUID 관계 키는 그대로
+유지한다.
+
+### V38 종료 Mission 논리 삭제
+
+파일:
+`backend/src/main/resources/db/migration/V38__soft_delete_terminal_missions.sql`
+
+`robot.mission`에 `deleted_at`, `deleted_by`를 추가한다. 실행 전 `CREATED` Mission은
+V35의 제한된 물리 삭제를 유지하고, `COMPLETED`, `CANCELLED`, `FAILED`는 관련
+Telemetry·Event·Command·상태 이력을 삭제하지 않은 채 일반 조회와 통계에서 제외한다.
+`READY`, `RUNNING`, `PAUSED`는 먼저 종료해야 삭제할 수 있다.
+`robot.robot_command.command_type`에는 정상 완료용 `COMPLETE_MISSION`을
+추가해 취소용 `CANCEL_MISSION`과 상태 전이 의미를 분리한다.
+
+시스템 Role `ADMIN`, `MANAGER`, `OPERATOR`와 18개 세부 permission 및
+role-permission 관계는 결정적인 UUID로 seed한다. 실제
+관리자 계정은 password hash와 MFA 등록 절차가 필요하므로 migration에서 만들지 않는다.
+
 ## 로컬 최초 실행
 
 `.env.example`을 `.env`로 복사하고 bootstrap, Flyway, runtime 계정에 서로 다른
@@ -260,7 +290,7 @@ docker compose up --build --detach
 docker compose logs backend
 ```
 
-Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V36이
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V38이
 순서대로 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증

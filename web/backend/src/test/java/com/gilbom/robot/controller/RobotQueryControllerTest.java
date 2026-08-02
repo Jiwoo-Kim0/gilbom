@@ -45,6 +45,7 @@ import com.gilbom.common.web.RequestIdFilter;
 import com.gilbom.robot.api.PatrolCatalogController;
 import com.gilbom.robot.api.RobotQueryController;
 import com.gilbom.robot.application.RobotQueryService;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaCodeAvailabilityResponse;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaListResponse;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaResponse;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolRouteListResponse;
@@ -139,6 +140,7 @@ class RobotQueryControllerTest {
                                 0.8,
                                 "PATROLLING",
                                 "RUNNING",
+                                false,
                                 "OK")),
                         0,
                         20,
@@ -153,6 +155,7 @@ class RobotQueryControllerTest {
                 .andExpect(jsonPath("$.content[0].robotId", is(ROBOT_ID.toString())))
                 .andExpect(jsonPath("$.content[0].mqttId", is("RBT-001")))
                 .andExpect(jsonPath("$.content[0].connectivityStatus", is("ONLINE")))
+                .andExpect(jsonPath("$.content[0].missionAssignable", is(false)))
                 .andExpect(jsonPath("$.page", is(0)))
                 .andExpect(jsonPath("$.totalElements", is(1)));
     }
@@ -219,6 +222,55 @@ class RobotQueryControllerTest {
                 .andExpect(jsonPath("$.areas[0].areaCode", is("A-11")))
                 .andExpect(jsonPath("$.areas[0].boundary.type",
                         is("Polygon")));
+    }
+
+    @Test
+    void checksPatrolAreaCodeAvailabilityWithMissionManage()
+            throws Exception {
+        when(patrolCatalogQueryService.checkAreaCodeAvailability(
+                " 똥방구 설사 "))
+                .thenReturn(new PatrolAreaCodeAvailabilityResponse(
+                        "똥방구 설사",
+                        false));
+
+        mockMvc.perform(get("/api/v1/patrol-areas/code-availability")
+                        .param("areaCode", " 똥방구 설사 ")
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_MANAGE)))
+                .andExpect(status().isOk())
+                .andExpect(header().string(
+                        "Cache-Control",
+                        "no-store"))
+                .andExpect(jsonPath("$.areaCode", is("똥방구 설사")))
+                .andExpect(jsonPath("$.available", is(false)));
+    }
+
+    @Test
+    void patrolAreaCodeAvailabilityRequiresMissionManage()
+            throws Exception {
+        mockMvc.perform(get("/api/v1/patrol-areas/code-availability")
+                        .param("areaCode", "똥방구 설사")
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_VIEW)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")));
+
+        verifyNoInteractions(patrolCatalogQueryService);
+    }
+
+    @Test
+    void rejectsBlankPatrolAreaCodeAvailabilityQuery()
+            throws Exception {
+        mockMvc.perform(get("/api/v1/patrol-areas/code-availability")
+                        .param("areaCode", " ")
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_MANAGE)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath(
+                        "$.code",
+                        is("COMMON_VALIDATION_FAILED")));
+
+        verifyNoInteractions(patrolCatalogQueryService);
     }
 
     @Test

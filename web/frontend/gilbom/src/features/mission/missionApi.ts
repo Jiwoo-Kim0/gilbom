@@ -12,6 +12,7 @@ import type {
   MissionUpdateInput,
   MissionStatusHistoryResponse,
   PatrolArea,
+  PatrolAreaCodeAvailability,
   PatrolAreaCreateInput,
   PatrolAreaListResponse,
   PatrolRouteListResponse,
@@ -38,6 +39,7 @@ export function getMissions(
   const query = new URLSearchParams({
     page: String(page),
     size: String(size),
+    scope: filters.scope,
   })
 
   if (filters.robotId.length > 0) {
@@ -105,6 +107,13 @@ export function getMissionRobotOptions(): Promise<RobotListResponse> {
 
 export function getPatrolAreas(): Promise<PatrolAreaListResponse> {
   return apiJson('/api/v1/patrol-areas')
+}
+
+export function checkPatrolAreaCodeAvailability(
+  areaCode: string,
+): Promise<PatrolAreaCodeAvailability> {
+  const query = new URLSearchParams({ areaCode })
+  return apiJson(`/api/v1/patrol-areas/code-availability?${query}`)
 }
 
 export function createPatrolArea(

@@ -28,6 +28,12 @@ public final class MissionDtos {
         FAILED
     }
 
+    public enum MissionListScope {
+        ACTIVE,
+        TERMINAL,
+        ALL
+    }
+
     public record MissionCreateRequest(
             @NotNull UUID robotId,
             @NotNull UUID patrolAreaId,

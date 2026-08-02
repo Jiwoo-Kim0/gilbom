@@ -3,6 +3,7 @@ package com.gilbom.robot.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doThrow;
@@ -56,6 +57,8 @@ import com.gilbom.robot.data.mqtt.v2.outbound.CommandRequestPayload;
 import com.gilbom.robot.mqtt.client.MqttV2Publisher;
 import com.gilbom.robot.mqtt.config.MqttInboundFreshnessProperties;
 import com.gilbom.robot.mqtt.parser.MqttInboundFreshnessGuard;
+import com.gilbom.robot.mission.MissionCompletionCommandCreationService;
+import com.gilbom.robot.mission.MissionCompletionCommandDispatcher;
 import com.gilbom.robot.realtime.RobotRealtimeEventListener;
 import com.gilbom.robot.realtime.RobotSseService;
 
@@ -112,6 +115,9 @@ class RobotCommandLifecycleIntegrationTest {
 
     @Autowired
     private RobotCommandQueryService queryService;
+
+    @Autowired
+    private MissionCompletionCommandDispatcher completionCommandDispatcher;
 
     @MockitoBean
     private MqttV2Publisher mqttPublisher;
@@ -380,6 +386,142 @@ class RobotCommandLifecycleIntegrationTest {
                 command.commandId());
         assertThat(stored.get("mission_id")).isEqualTo(missionId);
         assertThat(stored.get("patrol_area_id")).isNotNull();
+    }
+
+    @Test
+    void linksCompleteCommandToTheRunningMission() {
+        UUID missionId = createPausedMission();
+        jdbcTemplate.update("""
+                UPDATE robot.mission
+                SET status = 'RUNNING',
+                    updated_at = NOW()
+                WHERE mission_id = ?
+                """,
+                missionId);
+
+        RobotCommandResponse command = create(
+                new RobotCommandCreateRequest(
+                        CommandRequestPayload.CommandType.COMPLETE_MISSION,
+                        new RobotCommandCreateRequest.Parameters(
+                                null,
+                                null,
+                                null)),
+                UUID.randomUUID(),
+                UUID.randomUUID());
+
+        Map<String, Object> stored = jdbcTemplate.queryForMap("""
+                SELECT mission_id, patrol_area_id, command_type
+                FROM robot.robot_command
+                WHERE command_id = ?
+                """,
+                command.commandId());
+        assertThat(stored.get("mission_id")).isEqualTo(missionId);
+        assertThat(stored.get("patrol_area_id")).isNotNull();
+        assertThat(stored.get("command_type")).isEqualTo("COMPLETE_MISSION");
+    }
+
+    @Test
+    void rejectsCompleteCommandForPausedMission() {
+        createPausedMission();
+
+        assertThatThrownBy(() -> create(
+                new RobotCommandCreateRequest(
+                        CommandRequestPayload.CommandType.COMPLETE_MISSION,
+                        new RobotCommandCreateRequest.Parameters(
+                                null,
+                                null,
+                                null)),
+                UUID.randomUUID(),
+                UUID.randomUUID()))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> {
+                            assertThat(exception.errorCode())
+                                    .isEqualTo(
+                                            ErrorCode.MISSION_STATE_CONFLICT);
+                            assertThat(exception.getMessage())
+                                    .contains("PAUSED")
+                                    .contains("먼저 재개");
+                        });
+    }
+
+    @Test
+    void plannedEndDispatchesSystemCompleteCommandWithoutFakingMissionStatus() {
+        UUID dueMissionId = createPausedMission();
+        Instant detectedAt = Instant.now();
+        jdbcTemplate.update("""
+                UPDATE robot.mission
+                SET status = 'RUNNING',
+                    started_at = ?
+                WHERE mission_id = ?
+                """,
+                java.time.OffsetDateTime.ofInstant(
+                        detectedAt.minusSeconds(3601),
+                        java.time.ZoneOffset.UTC),
+                dueMissionId);
+
+        assertThat(completionCommandDispatcher.dispatchDueMissions(detectedAt))
+                .isOne();
+        verify(mqttPublisher).publishCommand(
+                eq(mqttId),
+                argThat(payload ->
+                        payload.commandType()
+                                == CommandRequestPayload.CommandType
+                                        .COMPLETE_MISSION
+                                && payload.requestedBy().actorType()
+                                == CommandRequestPayload.ActorType.SYSTEM
+                                && payload.parameters().missionId() == null
+                                && payload.parameters().reason() == null));
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT
+                    command_type,
+                    command_status,
+                    requested_by_type,
+                    mission_id
+                FROM robot.robot_command
+                WHERE mission_id = ?
+                  AND command_type = 'COMPLETE_MISSION'
+                  AND requested_by_type = 'SYSTEM'
+                """,
+                dueMissionId))
+                .containsEntry("command_type", "COMPLETE_MISSION")
+                .containsEntry("command_status", "SENT")
+                .containsEntry("requested_by_type", "SYSTEM")
+                .containsEntry("mission_id", dueMissionId);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT status
+                FROM robot.mission
+                WHERE mission_id = ?
+                """,
+                String.class,
+                dueMissionId)).isEqualTo("RUNNING");
+        assertThat(completionCommandDispatcher.dispatchDueMissions(detectedAt))
+                .isZero();
+
+        jdbcTemplate.update("""
+                UPDATE robot.mission
+                SET status = 'COMPLETED',
+                    ended_at = ?,
+                    progress_percent = 100,
+                    completion_reason = 'ROUTE_COMPLETED'
+                WHERE mission_id = ?
+                """,
+                java.time.OffsetDateTime.ofInstant(
+                        detectedAt,
+                        java.time.ZoneOffset.UTC),
+                dueMissionId);
+        UUID pausedMissionId = createPausedMission();
+        jdbcTemplate.update("""
+                UPDATE robot.mission
+                SET started_at = ?
+                WHERE mission_id = ?
+                """,
+                java.time.OffsetDateTime.ofInstant(
+                        detectedAt.minusSeconds(7200),
+                        java.time.ZoneOffset.UTC),
+                pausedMissionId);
+        assertThat(completionCommandDispatcher.dispatchDueMissions(detectedAt))
+                .isZero();
     }
 
     @Test
@@ -702,6 +844,8 @@ class RobotCommandLifecycleIntegrationTest {
             RobotCommandQueryService.class,
             RobotCommandResultIngestionService.class,
             RobotCommandTimeoutService.class,
+            MissionCompletionCommandCreationService.class,
+            MissionCompletionCommandDispatcher.class,
             RobotRealtimeEventListener.class
     })
     static class TestApplication {

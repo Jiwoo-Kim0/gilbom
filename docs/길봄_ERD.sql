@@ -215,7 +215,7 @@ CREATE TABLE auth_user_robot_assignment (
 
 CREATE TABLE robot_patrol_area (
     patrol_area_id VARCHAR(36)  NOT NULL COMMENT 'PK 순찰 구역 식별자',
-    zone_id        VARCHAR(10)  NOT NULL COMMENT 'UQ MQTT 구역 코드 (A-01)',
+    zone_id        VARCHAR(50)  NOT NULL COMMENT 'UQ 순찰 구역 업무 코드',
     area_name      VARCHAR(100) NOT NULL COMMENT '구역명',
     area_geometry  VARCHAR(255) NOT NULL COMMENT '[PostGIS] GEOMETRY(POLYGON,4326) 구역 Polygon',
     description    TEXT         NULL     COMMENT '구역 설명',
@@ -566,7 +566,7 @@ CREATE TABLE defect_defect (
     resolution_note       TEXT         NULL     COMMENT '처리 결과 설명',
     location              VARCHAR(255) NOT NULL COMMENT '[PostGIS] GEOMETRY(POINT,4326) 대표 위치',
     location_accuracy_m   FLOAT        NULL     COMMENT '대표 위치 오차',
-    zone_id               VARCHAR(10)  NOT NULL COMMENT '구역 코드',
+    zone_id               VARCHAR(50)  NOT NULL COMMENT '구역 코드',
     patrol_area_id        VARCHAR(36)  NULL     COMMENT 'FK 매핑된 순찰 구역',
     patrol_route_id       VARCHAR(36)  NULL     COMMENT 'FK 매핑된 순찰 경로',
     location_label        VARCHAR(200) NULL     COMMENT '관리자 표시 위치명',
@@ -591,7 +591,7 @@ CREATE TABLE defect_defect_observation (
     location_valid       BOOLEAN      NOT NULL COMMENT '위치 유효 여부',
     location             VARCHAR(255) NULL     COMMENT '[PostGIS] GEOMETRY(POINT,4326) 첫 탐지 위치',
     location_accuracy_m  FLOAT        NULL     COMMENT 'GPS 오차',
-    zone_id              VARCHAR(10)  NOT NULL COMMENT '구역 코드',
+    zone_id              VARCHAR(50)  NOT NULL COMMENT '구역 코드',
     asset_type           VARCHAR(30)  NOT NULL COMMENT 'BRAILLE_BLOCK',
     block_type           VARCHAR(20)  NOT NULL COMMENT 'LINEAR/DOT/UNKNOWN',
     detected_defect_type VARCHAR(40)  NOT NULL COMMENT 'AI가 보낸 결함 유형',

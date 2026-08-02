@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaCodeAvailabilityResponse;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaListResponse;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaResponse;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolRouteListResponse;
@@ -73,6 +74,25 @@ public class PatrolCatalogQueryService {
                 """,
                 (resultSet, rowNumber) -> mapArea(resultSet));
         return new PatrolAreaListResponse(areas);
+    }
+
+    @Transactional(readOnly = true)
+    public PatrolAreaCodeAvailabilityResponse checkAreaCodeAvailability(
+            String areaCode
+    ) {
+        String normalizedAreaCode = areaCode.trim();
+        Boolean exists = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM robot.patrol_area
+                    WHERE area_code = ?
+                )
+                """,
+                Boolean.class,
+                normalizedAreaCode);
+        return new PatrolAreaCodeAvailabilityResponse(
+                normalizedAreaCode,
+                !Boolean.TRUE.equals(exists));
     }
 
     @Transactional(readOnly = true)

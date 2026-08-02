@@ -47,7 +47,7 @@ public record IncidentEventPayload(
             @NotNull Boolean valid,
             @DecimalMin("-90.0") @DecimalMax("90.0") Double lat,
             @DecimalMin("-180.0") @DecimalMax("180.0") Double lon,
-            @Pattern(regexp = "^[A-Z]-[0-9]{2}$") String zoneId
+            String zoneId
     ) {
 
         @AssertTrue(message = "location valid flag and coordinates are inconsistent")

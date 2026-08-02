@@ -79,11 +79,51 @@ public class RobotQueryService {
                     state.jetson_temp_c,
                     state.speed_mps,
                     state.robot_mode,
-                    state.mission_status,
+                    CASE
+                        WHEN managed_mission.status IS NULL
+                            THEN state.mission_status
+                        WHEN managed_mission.deleted_at IS NULL
+                            THEN managed_mission.status
+                        ELSE NULL
+                    END AS mission_status,
+                    NOT EXISTS (
+                        SELECT 1
+                        FROM robot.mission active_mission
+                        WHERE active_mission.robot_id = r.robot_id
+                          AND active_mission.deleted_at IS NULL
+                          AND active_mission.status IN (
+                              'CREATED',
+                              'READY',
+                              'RUNNING',
+                              'PAUSED'
+                          )
+                    ) AS mission_assignable,
                     state.overall_health_status
                 FROM robot.robot r
                 JOIN telemetry.robot_current_state state
                   ON state.robot_id = r.robot_id
+                LEFT JOIN LATERAL (
+                    SELECT
+                        mission.status,
+                        mission.deleted_at
+                    FROM robot.mission mission
+                    WHERE mission.robot_id = r.robot_id
+                    ORDER BY
+                        CASE
+                            WHEN mission.deleted_at IS NULL
+                              AND mission.status IN (
+                                  'CREATED',
+                                  'READY',
+                                  'RUNNING',
+                                  'PAUSED'
+                              ) THEN 0
+                            WHEN mission.deleted_at IS NULL THEN 1
+                            ELSE 2
+                        END,
+                        mission.updated_at DESC,
+                        mission.mission_id DESC
+                    LIMIT 1
+                ) managed_mission ON TRUE
                 WHERE
                 """ + RobotScopeService.VISIBLE_ROBOT_PREDICATE
                         + searchPredicate + """
@@ -106,6 +146,7 @@ public class RobotQueryService {
                         nullableDouble(resultSet, "speed_mps"),
                         resultSet.getString("robot_mode"),
                         resultSet.getString("mission_status"),
+                        resultSet.getBoolean("mission_assignable"),
                         resultSet.getString("overall_health_status")));
 
         long totalElements = total == null ? 0 : total;
@@ -167,11 +208,39 @@ public class RobotQueryService {
                     ST_Y(state.position) AS latitude,
                     ST_X(state.position) AS longitude,
                     state.heading_deg,
-                    state.mission_status,
+                    CASE
+                        WHEN managed_mission.status IS NULL
+                            THEN state.mission_status
+                        WHEN managed_mission.deleted_at IS NULL
+                            THEN managed_mission.status
+                        ELSE NULL
+                    END AS mission_status,
                     state.telemetry_sampled_at
                 FROM robot.robot r
                 JOIN telemetry.robot_current_state state
                   ON state.robot_id = r.robot_id
+                LEFT JOIN LATERAL (
+                    SELECT
+                        mission.status,
+                        mission.deleted_at
+                    FROM robot.mission mission
+                    WHERE mission.robot_id = r.robot_id
+                    ORDER BY
+                        CASE
+                            WHEN mission.deleted_at IS NULL
+                              AND mission.status IN (
+                                  'CREATED',
+                                  'READY',
+                                  'RUNNING',
+                                  'PAUSED'
+                              ) THEN 0
+                            WHEN mission.deleted_at IS NULL THEN 1
+                            ELSE 2
+                        END,
+                        mission.updated_at DESC,
+                        mission.mission_id DESC
+                    LIMIT 1
+                ) managed_mission ON TRUE
                 WHERE state.position_valid = TRUE
                   AND state.position IS NOT NULL
                   AND
@@ -208,7 +277,13 @@ public class RobotQueryService {
                     state.last_received_at,
                     state.robot_mode,
                     state.state_reason_code,
-                    state.mission_status,
+                    CASE
+                        WHEN managed_mission.status IS NULL
+                            THEN state.mission_status
+                        WHEN managed_mission.deleted_at IS NULL
+                            THEN managed_mission.status
+                        ELSE NULL
+                    END AS mission_status,
                     state.battery_percent,
                     state.battery_state,
                     state.charging,
@@ -239,6 +314,28 @@ public class RobotQueryService {
                 FROM robot.robot r
                 JOIN telemetry.robot_current_state state
                   ON state.robot_id = r.robot_id
+                LEFT JOIN LATERAL (
+                    SELECT
+                        mission.status,
+                        mission.deleted_at
+                    FROM robot.mission mission
+                    WHERE mission.robot_id = r.robot_id
+                    ORDER BY
+                        CASE
+                            WHEN mission.deleted_at IS NULL
+                              AND mission.status IN (
+                                  'CREATED',
+                                  'READY',
+                                  'RUNNING',
+                                  'PAUSED'
+                              ) THEN 0
+                            WHEN mission.deleted_at IS NULL THEN 1
+                            ELSE 2
+                        END,
+                        mission.updated_at DESC,
+                        mission.mission_id DESC
+                    LIMIT 1
+                ) managed_mission ON TRUE
                 WHERE r.robot_id = :robotId
                   AND
                 """ + RobotScopeService.VISIBLE_ROBOT_PREDICATE,

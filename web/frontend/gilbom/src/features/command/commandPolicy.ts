@@ -60,9 +60,18 @@ export const COMMAND_DEFINITIONS: readonly CommandDefinition[] = [
     safetyMessage: '로봇 주변과 예정 경로에 장애물이 없는지 확인했습니다.',
   },
   {
+    commandType: 'COMPLETE_MISSION',
+    label: '임무 완료',
+    impact: '로봇에 완료 명령을 보내고, 안전 정지 후 완료 Event가 수신되면 COMPLETED로 확정합니다.',
+    tone: 'default',
+    requiresReason: false,
+    requiresSafetyConfirmation: true,
+    safetyMessage: '로봇 주변에 위험 요소가 없고 완료 명령 후 안전하게 정지하는 절차를 확인했습니다.',
+  },
+  {
     commandType: 'CANCEL_MISSION',
-    label: '임무 종료',
-    impact: '현재 임무를 취소하고 종료 상태로 전환합니다.',
+    label: '임무 취소',
+    impact: '수행할 수 없는 현재 임무를 취소(CANCELLED)합니다.',
     tone: 'default',
     requiresReason: true,
     requiresSafetyConfirmation: false,
@@ -124,9 +133,20 @@ export function getCommandAvailability(
 
   const safeStopped = state.robotMode === 'SAFE_STOP'
   if (safeStopped) {
-    return commandType === 'CLEAR_EMERGENCY_STOP'
-      ? enabled()
-      : disabled('긴급정지를 해제한 뒤 실행할 수 있습니다.')
+    if (commandType === 'CLEAR_EMERGENCY_STOP') {
+      return enabled()
+    }
+    if (
+      commandType === 'CANCEL_MISSION'
+      && (
+        state.missionStatus === 'READY'
+        || state.missionStatus === 'RUNNING'
+        || state.missionStatus === 'PAUSED'
+      )
+    ) {
+      return enabled()
+    }
+    return disabled('긴급정지를 해제한 뒤 실행할 수 있습니다.')
   }
   if (commandType === 'CLEAR_EMERGENCY_STOP') {
     return disabled('로봇이 SAFE_STOP 상태가 아닙니다.')
@@ -148,6 +168,10 @@ export function getCommandAvailability(
       return state.missionStatus === 'PAUSED'
         ? enabled()
         : disabled('PAUSED 임무에서만 재개할 수 있습니다.')
+    case 'COMPLETE_MISSION':
+      return state.missionStatus === 'RUNNING'
+        ? enabled()
+        : disabled('RUNNING 임무만 완료할 수 있습니다. 일시정지 상태라면 먼저 재개해주세요.')
     case 'CANCEL_MISSION':
       return (
         state.missionStatus === 'READY'
@@ -155,7 +179,7 @@ export function getCommandAvailability(
         || state.missionStatus === 'PAUSED'
       )
         ? enabled()
-        : disabled('READY·RUNNING·PAUSED 임무만 종료할 수 있습니다.')
+        : disabled('READY·RUNNING·PAUSED 임무만 취소할 수 있습니다.')
     case 'EMERGENCY_STOP':
       return (
         state.missionStatus === 'RUNNING'
@@ -184,6 +208,7 @@ export function buildCommandRequest(
         },
       }
     case 'RESUME_MISSION':
+    case 'COMPLETE_MISSION':
       return {
         commandType,
         parameters: {},

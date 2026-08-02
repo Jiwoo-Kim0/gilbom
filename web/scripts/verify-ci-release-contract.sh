@@ -41,7 +41,7 @@ for stage in \
   "stage('Build full-SHA images')" \
   "stage('Backend runtime image')" \
   "stage('Frontend runtime image')" \
-  "stage('Flyway V1-V35')" \
+  "stage('Flyway V1-V38')" \
   "stage('PostGIS RBAC and Spring Session')" \
   "stage('CSRF permission and append-only audit')" \
   "stage('Integration smoke')" \

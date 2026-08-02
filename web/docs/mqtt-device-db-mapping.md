@@ -488,7 +488,8 @@ QoS 1 / Retain 절대 금지
 | `START_MISSION` | O | 60초 | `mission_id`, `zone_id` 저장 후 순찰 세션 시작 |
 | `PAUSE_MISSION` | O | 30초 | 안전 정지 후 일시중지 |
 | `RESUME_MISSION` | O | 30초 | 안전 조건 확인 후 재개 |
-| `CANCEL_MISSION` | O | 30초 | 현재 임무 종료 |
+| `COMPLETE_MISSION` | O | 30초 | 현재 임무를 정상 완료 |
+| `CANCEL_MISSION` | O | 30초 | 현재 임무 취소 |
 | `EMERGENCY_STOP` | O | 10초 | 즉시 구동 정지 |
 | `CLEAR_EMERGENCY_STOP` | O | 30초 | 안전 조건 확인 후 해제 |
 | `RETURN_TO_CHARGE` | 2차 | - | 충전소 복귀 |

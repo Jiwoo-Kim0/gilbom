@@ -32,7 +32,7 @@ V12 migration(`V12__create_defect_schema.sql`)으로 실제 반영한 부분을 
 | `workflow_status` | `NEW → ACCEPTED → IN_PROGRESS → RESOLVED`, 또는 `FALSE_POSITIVE`/`REJECTED`. 관리자 REST 처리로만 전이된다 |
 | `resolution` | `RESOLVED` 등으로 종결할 때의 처리 결과. `REPAIRED`, `CLEANED`, `DUPLICATE`, `REINSPECTION_REQUIRED`, `NOT_APPLICABLE` |
 | `location` | 대표 위치(`GEOMETRY(POINT,4326)`). 개별 관측 위치가 아니라 결함의 대표 좌표 |
-| `zone_id` | `A-01` 형식 구역 코드. 정규식 `^[A-Z]-[0-9]{2}$`로 형식만 검증한다. 구역 실체는 `patrol_area_id` FK가 담당하므로 `zone_id`에는 FK를 걸지 않는다 |
+| `zone_id` | `patrol_area.area_code`에서 전달된 불투명 구역 코드. 서버는 문자열 형식을 해석하지 않으며 구역 실체는 `patrol_area_id` FK가 담당한다 |
 | `observation_count` | 이 결함으로 병합된 관측 수 캐시. 최소 1 |
 | `merged_into_defect_id` | 다른 결함에 흡수 병합된 경우의 대표 결함. 자기 자신을 가리킬 수 없다 |
 

@@ -88,6 +88,7 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
   let routeRequested = false
   let createPayload: Record<string, unknown> | null = null
   let missionCreatePayload: Record<string, unknown> | null = null
+  const areaCodeAvailabilityRequests: string[] = []
 
   await page.addInitScript((coordinates) => {
     type FakeMapInteractionOptions = {
@@ -291,6 +292,7 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
           operationalStatus: 'ACTIVE',
           connectivityStatus: 'ONLINE',
           missionStatus: null,
+          missionAssignable: true,
           overallHealthStatus: 'NORMAL',
         }, {
           robotId: BUSY_ROBOT_ID,
@@ -300,6 +302,7 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
           operationalStatus: 'ACTIVE',
           connectivityStatus: 'ONLINE',
           missionStatus: 'RUNNING',
+          missionAssignable: false,
           overallHealthStatus: 'NORMAL',
         }],
         page: 0,
@@ -322,6 +325,20 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
           missionStatus: null,
           observedAt: '2026-07-30T12:00:00Z',
         }],
+      })
+      return
+    }
+    if (
+      pathname === '/api/v1/patrol-areas/code-availability'
+      && request.method() === 'GET'
+    ) {
+      const requestedAreaCode = new URL(request.url())
+        .searchParams.get('areaCode') ?? ''
+      const normalizedAreaCode = requestedAreaCode.trim()
+      areaCodeAvailabilityRequests.push(normalizedAreaCode)
+      await fulfillJson(route, {
+        areaCode: normalizedAreaCode,
+        available: normalizedAreaCode !== '똥방구 설사',
       })
       return
     }
@@ -494,9 +511,33 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
     fitBoundsCallCount: 0,
   })
 
-  await page.locator('#patrol-area-code').fill('DEMO-ZONE-01')
+  const areaCodeInput = page.locator('#patrol-area-code')
+  const createAreaButton = page.getByRole('button', {
+    name: '순찰 구역 등록',
+  })
+  await areaCodeInput.fill('똥방구 설사')
+  await page.getByRole('button', { name: '중복 확인' }).click()
+  await expect(
+    page.getByRole('alert').filter({
+      hasText: '이미 등록된 구역 코드입니다.',
+    }),
+  ).toBeVisible()
+  await expect(areaCodeInput).toHaveAttribute('aria-invalid', 'true')
+  await expect(createAreaButton).toBeDisabled()
+
+  await areaCodeInput.fill('DEMO-ZONE-01')
+  await expect(
+    page.getByText('이미 등록된 구역 코드입니다.'),
+  ).toHaveCount(0)
+  await page.getByRole('button', { name: '중복 확인' }).click()
+  await expect(
+    page.getByRole('status').filter({
+      hasText: '사용 가능한 구역 코드입니다.',
+    }),
+  ).toBeVisible()
+  await expect(createAreaButton).toBeEnabled()
   await page.locator('#patrol-area-name').fill('시연 순찰 구역')
-  await page.getByRole('button', { name: '순찰 구역 등록' }).click()
+  await createAreaButton.click()
 
   await expect(
     page.getByRole('status').filter({
@@ -515,6 +556,10 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
     },
     lifecycleStatus: 'ACTIVE',
   })
+  expect(areaCodeAvailabilityRequests).toEqual([
+    '똥방구 설사',
+    'DEMO-ZONE-01',
+  ])
 
   const registeredAreaRow = page.getByRole('row').filter({
     hasText: '시연 순찰 구역',
