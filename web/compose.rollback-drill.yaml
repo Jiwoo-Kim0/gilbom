@@ -58,9 +58,7 @@ services:
         condition: service_started
     read_only: true
     tmpfs:
-      - /var/cache/nginx:rw,noexec,nosuid,nodev,size=8m
-      - /var/run:rw,noexec,nosuid,nodev,size=8m
-      - /tmp:rw,noexec,nosuid,nodev,size=8m
+      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777
     cap_drop:
       - ALL
     security_opt:

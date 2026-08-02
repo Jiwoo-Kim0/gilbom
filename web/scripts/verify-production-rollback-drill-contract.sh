@@ -64,6 +64,15 @@ assert_contains compose.rollback-drill.yaml \
 assert_contains compose.rollback-drill.yaml \
   'internal: true' \
   "drill data network is not internal"
+assert_contains test/rollback-drill/frontend/Dockerfile \
+  'USER 101:101' \
+  "drill Frontend does not run as the fixed nginx UID"
+assert_contains test/rollback-drill/frontend/Dockerfile \
+  'ENTRYPOINT ["nginx"]' \
+  "drill Frontend still depends on the root image entrypoint"
+if grep -Eq '^user[[:space:]]' test/rollback-drill/frontend/nginx.conf; then
+  fail "non-root drill Frontend must not request a runtime UID transition"
+fi
 for volume in postgres_data robot_images report_pdf_data
 do
   assert_contains compose.rollback-drill.yaml \

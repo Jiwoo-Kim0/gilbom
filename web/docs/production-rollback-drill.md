@@ -83,6 +83,7 @@ Job은 실행 전에 다음을 fail-closed로 확인한다.
 - `/var/run/docker.sock` 미존재
 - 운영 SSH Credential 환경변수 미주입
 - 운영 host·domain 호출 코드 미존재
+- Frontend는 고정 비root UID 101로 실행하며 모든 capability를 제거
 
 ## 결과 확인
 
