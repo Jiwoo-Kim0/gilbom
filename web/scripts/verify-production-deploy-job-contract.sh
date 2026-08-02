@@ -107,6 +107,15 @@ assert_contains infra/scripts/gilbom-deploy.sh \
 assert_contains infra/scripts/gilbom-record-deploy-approval.sh \
   'source: "jenkins-production-deploy-approval"' \
   "Jenkins migration approval provenance is missing"
+assert_contains Jenkinsfile.deploy \
+  "approvedBy = approver['APPROVED_BY']" \
+  "Jenkins Map approval result is not reduced to the authenticated user ID"
+assert_contains infra/scripts/gilbom-record-deploy-approval.sh \
+  'explode | all(. >= 32 and . != 127)' \
+  "Unicode approver identity validation is missing"
+assert_contains infra/scripts/gilbom-deploy.sh \
+  'explode | all(. >= 32 and . != 127)' \
+  "root deploy does not revalidate Unicode approver identity safely"
 assert_contains scripts/run-production-deploy-remote.sh \
   'sudo --non-interactive /usr/local/sbin/gilbom-deploy $release_sha' \
   "remote Job does not invoke the fixed root deployment command"

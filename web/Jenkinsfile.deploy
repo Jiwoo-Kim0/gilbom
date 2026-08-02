@@ -117,7 +117,17 @@ pipeline {
                                 submitter: env.PRODUCTION_DEPLOY_APPROVERS,
                                 submitterParameter: 'APPROVED_BY'
                         )
-                        env.DEPLOY_APPROVED_BY = approver.toString()
+                        def approvedBy = approver
+                        if (approver instanceof Map) {
+                            approvedBy = approver['APPROVED_BY']
+                        }
+                        if (
+                                approvedBy == null
+                                        || approvedBy.toString().trim().isEmpty()
+                        ) {
+                            error('Jenkins did not return an approver identity')
+                        }
+                        env.DEPLOY_APPROVED_BY = approvedBy.toString()
                         env.DEPLOY_APPROVED_AT_UTC = sh(
                                 returnStdout: true,
                                 script: "date -u '+%Y-%m-%dT%H:%M:%SZ'"

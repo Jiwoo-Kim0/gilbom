@@ -510,7 +510,7 @@ jq -e \
     and .migrationPlanSha256 == $migration_plan_sha256
     and (.approvedBy | type == "string")
     and (.approvedBy | length >= 1 and length <= 64)
-    and (.approvedBy | test("^[^\\u0000-\\u001f\\u007f]+$"))
+    and (.approvedBy | explode | all(. >= 32 and . != 127))
     and (.approvedAtUtc | test(
       "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
     ))
@@ -537,7 +537,7 @@ if [ "$pending_migration_count" -gt 0 ]; then
       and .migrationPlanSha256 == $plan_sha256
       and (.approvedBy | type == "string")
       and (.approvedBy | length >= 1 and length <= 64)
-      and (.approvedBy | test("^[^\\u0000-\\u001f\\u007f]+$"))
+      and (.approvedBy | explode | all(. >= 32 and . != 127))
       and (.approvedAtUtc | test(
         "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
       ))

@@ -91,7 +91,7 @@ jq -e \
     and (keys | sort == ["approvedAtUtc", "approvedBy"])
     and (.approvedBy | type == "string")
     and (.approvedBy | length >= 1 and length <= 64)
-    and (.approvedBy | test("^[^\\u0000-\\u001f\\u007f]+$"))
+    and (.approvedBy | explode | all(. >= 32 and . != 127))
     and (.approvedAtUtc | test(
       "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
     ))

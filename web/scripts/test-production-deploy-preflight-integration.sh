@@ -237,7 +237,7 @@ jq -e \
 
 approved_at_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 jq -n \
-  --arg approved_by "김채운" \
+  --arg approved_by "CHAEUN KIM" \
   --arg approved_at_utc "$approved_at_utc" \
   '{
     approvedBy: $approved_by,
@@ -261,7 +261,7 @@ jq -e \
   --arg release_sha "$release_sha" \
   '
     .releaseSha == $release_sha
-    and .approvedBy == "김채운"
+    and .approvedBy == "CHAEUN KIM"
     and (.preflightSha256 | test("^[0-9a-f]{64}$"))
   ' /tmp/deploy-approval.json >/dev/null \
   || fail "deployment approval evidence is invalid"
@@ -269,7 +269,7 @@ jq -e \
   --arg release_sha "$release_sha" \
   '
     .releaseSha == $release_sha
-    and .approvedBy == "김채운"
+    and .approvedBy == "CHAEUN KIM"
     and .source == "jenkins-production-deploy-approval"
   ' "/opt/gilbom/migration-approvals/$release_sha.json" >/dev/null \
   || fail "forward migration approval was not generated"
@@ -290,7 +290,7 @@ jq -e \
   --arg release_sha "$release_sha" \
   '
     .releaseSha == $release_sha
-    and .approval.approvedBy == "김채운"
+    and .approval.approvedBy == "CHAEUN KIM"
     and .flyway.beforeVersion == 35
     and .flyway.afterVersion == 36
     and .health.backendReadiness == "PASS"
