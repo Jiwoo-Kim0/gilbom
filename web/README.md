@@ -25,6 +25,7 @@
 - [Day 7 container report smoke](./docs/day7-container-report-smoke.md)
 - [Day 7 resilience and persistence verification](./docs/day7-resilience-verification.md)
 - [Production deployment Runbook](./docs/production-deployment-runbook.md)
+- [Stage 10 production deploy account](./docs/production-deploy-account.md)
 - [Day 7 completion and scoped feature freeze](./docs/day7-completion-freeze.md)
 - [OpenAPI v1](./docs/openapi-v1.yaml)
 

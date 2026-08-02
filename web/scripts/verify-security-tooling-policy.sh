@@ -34,10 +34,17 @@ for file in \
   scripts/test-ci-artifact-ssh-paths.sh \
   scripts/test-promote-ci-release-artifacts.sh \
   scripts/verify-ci-artifact-transfer-contract.sh \
+  scripts/verify-production-deploy-contract.sh \
+  scripts/test-production-deploy-boundary.sh \
+  scripts/verify-production-deploy-account.sh \
   infra/scripts/promote-release-artifacts.sh \
   infra/scripts/promote-ci-release-artifacts.sh \
+  infra/scripts/gilbom-deploy.sh \
+  infra/scripts/gilbom-deploy-ssh-command.sh \
+  infra/scripts/prepare-production-deploy-account.sh \
   docs/security-tooling-policy.md \
-  docs/ci-artifact-promotion.md
+  docs/ci-artifact-promotion.md \
+  docs/production-deploy-account.md
 do
   test -s "$file" || fail "required file is missing or empty: $file"
 done
@@ -95,8 +102,14 @@ sh -n \
   scripts/test-ci-artifact-ssh-paths.sh \
   scripts/test-promote-ci-release-artifacts.sh \
   scripts/verify-ci-artifact-transfer-contract.sh \
+  scripts/verify-production-deploy-contract.sh \
+  scripts/test-production-deploy-boundary.sh \
+  scripts/verify-production-deploy-account.sh \
   infra/scripts/promote-release-artifacts.sh \
-  infra/scripts/promote-ci-release-artifacts.sh
+  infra/scripts/promote-ci-release-artifacts.sh \
+  infra/scripts/gilbom-deploy.sh \
+  infra/scripts/gilbom-deploy-ssh-command.sh \
+  infra/scripts/prepare-production-deploy-account.sh
 python3 scripts/test-security-policy.py
 python3 -m py_compile \
   scripts/security_policy.py \
