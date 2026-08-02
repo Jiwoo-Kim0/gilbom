@@ -19,8 +19,8 @@ fail() {
 [ "$#" -eq 0 ] \
   || fail "this installer accepts no arguments"
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-PROJECT_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+PROJECT_DIR="$(CDPATH='' cd -- "$SCRIPT_DIR/../.." && pwd)"
 
 for source in \
   "$SCRIPT_DIR/gilbom-deploy.sh" \
@@ -42,6 +42,7 @@ visudo -cf /etc/sudoers >/dev/null \
 
 install -d -o root -g root -m 0700 \
   /opt/gilbom/migration-approvals \
+  /opt/gilbom/rollback-approvals \
   /var/lib/gilbom/releases \
   /run/gilbom-deploy
 install -o root -g root -m 0755 \

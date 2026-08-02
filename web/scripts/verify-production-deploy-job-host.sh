@@ -17,6 +17,9 @@ for file in \
   /usr/local/sbin/gilbom-deploy-preflight \
   /usr/local/sbin/gilbom-record-deploy-approval \
   /usr/local/sbin/gilbom-release-manifest \
+  /usr/local/sbin/gilbom-rollback-preflight \
+  /usr/local/sbin/gilbom-record-rollback-approval \
+  /usr/local/sbin/gilbom-rollback-manifest \
   /usr/local/sbin/gilbom-deploy \
   /usr/local/sbin/gilbom-verify-production-deploy-job-host
 do
@@ -27,11 +30,13 @@ do
 done
 [ "$(stat -c '%U:%G:%a' /opt/gilbom/deploy-approvals)" = root:root:700 ] \
   || fail "deployment approval directory ownership or mode is invalid"
+[ "$(stat -c '%U:%G:%a' /opt/gilbom/rollback-approvals)" = root:root:700 ] \
+  || fail "rollback approval directory ownership or mode is invalid"
 [ "$(stat -c '%U:%G:%a' /etc/sudoers.d/gilbom-production-deploy-job)" \
     = root:root:440 ] \
   || fail "deploy Job sudoers ownership or mode is invalid"
 grep -Fq \
-  '/usr/local/sbin/gilbom-deploy-preflight, /usr/local/sbin/gilbom-record-deploy-approval, /usr/local/sbin/gilbom-release-manifest' \
+  '/usr/local/sbin/gilbom-deploy-preflight, /usr/local/sbin/gilbom-record-deploy-approval, /usr/local/sbin/gilbom-release-manifest, /usr/local/sbin/gilbom-rollback-preflight, /usr/local/sbin/gilbom-record-rollback-approval, /usr/local/sbin/gilbom-rollback-manifest' \
   /etc/sudoers.d/gilbom-production-deploy-job \
   || fail "deploy Job sudo command allowlist is invalid"
 grep -Fxq \
@@ -68,6 +73,15 @@ if runuser -u deploy -- \
       0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
       >/dev/null 2>&1; then
   fail "deploy account can record its own deployment approval"
+fi
+
+if runuser -u deploy -- \
+    sudo --non-interactive \
+      /usr/local/sbin/gilbom-record-rollback-approval \
+      0123456789abcdef0123456789abcdef01234567 \
+      0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+      >/dev/null 2>&1; then
+  fail "deploy account can record its own rollback approval"
 fi
 
 echo "Production deploy Job host verification: PASS"

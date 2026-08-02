@@ -23,6 +23,7 @@ sudo --non-interactive /usr/local/sbin/gilbom-deploy <40자리-full-sha>
 | Secret root | `/opt/gilbom/secrets` |
 | Migration 승인 | `/opt/gilbom/migration-approvals/<release-sha>.json` |
 | Jenkins 배포 승인 | `/opt/gilbom/deploy-approvals/<release-sha>.json` |
+| Jenkins Rollback 승인 | `/opt/gilbom/rollback-approvals/<failed-release-sha>.json` |
 | DB·Volume backup | `/opt/gilbom/backups` |
 | Release 상태·Manifest | `/var/lib/gilbom/releases` |
 | 동시 실행 lock | `/run/gilbom-deploy/deploy.lock` |
@@ -107,9 +108,14 @@ Image ID 검증은 Docker 저장소 모드에 따라 의미가 달라질 수 있
 digest를 비교한다. Release Manifest의 `images.*.id`에는 이 portable config
 ID를, `images.*.engineId`에는 EC2 Docker가 노출한 로컬 engine ID를 기록한다.
 
-실패 후 migration이 이미 적용됐을 수 있으므로 자동 image rollback은 하지 않는다.
-`current.sha`는 성공 전까지 바뀌지 않으며, backup과 `previous.sha`, container
-log를 근거로 별도 rollback 호환성 승인을 수행한다.
+`image.env` 전환 뒤 실패하면 root 배포기는 배포 직전과 실패 직후 Flyway version을
+다시 비교한다. 변화가 없을 때만 이전 image를 자동 복원하고 Backend readiness,
+Frontend health와 내부 HTTPS smoke 뒤 `rollback-manifest.json`을 기록한다.
+Flyway가 변했거나 재조회할 수 없으면 Frontend만 중지하고 신규 Backend·DB,
+Artifact, backup과 container log를 보존한
+`manual-recovery-required.json`을 기록한다. 이 경우 별도 Jenkins 호환성 승인
+없이는 이전 image를 실행하지 않는다. 어느 분기에서도 migration undo나 backup
+DB 자동 복원을 수행하지 않는다.
 
 ## 운영 증거
 

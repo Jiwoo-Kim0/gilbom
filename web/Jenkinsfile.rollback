@@ -1,0 +1,271 @@
+pipeline {
+    agent any
+
+    parameters {
+        string(
+                name: 'FAILED_RELEASE_SHA',
+                defaultValue: '',
+                description: 'manual-recovery-required가 기록된 실패 Release의 40자리 SHA'
+        )
+    }
+
+    environment {
+        PRODUCTION_DEPLOY_HOST = 'host.docker.internal'
+        PRODUCTION_DEPLOY_SSH_PORT = '22'
+        PRODUCTION_BASE_URL = 'https://i15d101.p.ssafy.io'
+        PRODUCTION_ROLLBACK_APPROVERS = '김채운'
+    }
+
+    options {
+        disableConcurrentBuilds(abortPrevious: false)
+        skipDefaultCheckout(true)
+        timestamps()
+        timeout(time: 45, unit: 'MINUTES')
+    }
+
+    stages {
+        stage('Checkout trusted rollback code') {
+            steps {
+                deleteDir()
+                checkout scm
+                script {
+                    env.APP_DIR = fileExists('web/Jenkinsfile.rollback')
+                            ? 'web' : '.'
+                }
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        printf '%s\n' "$FAILED_RELEASE_SHA" \
+                            | grep -Eq '^[0-9a-f]{40}$'
+                        test "$(git rev-parse --is-shallow-repository)" = false
+                        git cat-file -e "$FAILED_RELEASE_SHA^{commit}"
+                        git merge-base --is-ancestor \
+                            "$FAILED_RELEASE_SHA" origin/master
+                        mkdir -p .artifacts/rollback
+                    '''
+                }
+            }
+        }
+
+        stage('Collect contained failure evidence') {
+            steps {
+                dir(env.APP_DIR) {
+                    withCredentials([
+                        sshUserPrivateKey(
+                                credentialsId: 'gilbom-artifact-upload-ssh',
+                                keyFileVariable: 'ARTIFACT_SSH_IDENTITY',
+                                usernameVariable: 'ARTIFACT_SSH_USER'
+                        ),
+                        file(
+                                credentialsId: 'gilbom-artifact-known-hosts',
+                                variable: 'ARTIFACT_KNOWN_HOSTS'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
+                            KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                            SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                            SSH_PORT="$PRODUCTION_DEPLOY_SSH_PORT" \
+                                sh scripts/run-production-rollback-preflight-remote.sh \
+                                    "$FAILED_RELEASE_SHA" \
+                                    "$ARTIFACT_SSH_USER@$PRODUCTION_DEPLOY_HOST" \
+                                    > .artifacts/rollback/preflight.json
+                            sh scripts/render-production-rollback-approval.sh \
+                                .artifacts/rollback/preflight.json \
+                                > .artifacts/rollback/approval-summary.txt
+                            sha256sum .artifacts/rollback/preflight.json \
+                                | awk '{print $1}' \
+                                > .artifacts/rollback/preflight.sha256
+                        '''
+                    }
+                    script {
+                        env.ROLLBACK_TARGET_SHA = sh(
+                                returnStdout: true,
+                                script: '''
+                                    jq -r '.rollbackTargetSha' \
+                                        .artifacts/rollback/preflight.json
+                                '''
+                        ).trim()
+                    }
+                }
+            }
+        }
+
+        stage('Approve previous Backend compatibility') {
+            steps {
+                dir(env.APP_DIR) {
+                    script {
+                        def approver = input(
+                                id: 'ProductionRollbackCompatibilityApproval',
+                                message: readFile(
+                                        '.artifacts/rollback/'
+                                                + 'approval-summary.txt'
+                                ),
+                                ok: 'Approve compatible rollback',
+                                submitter: env.PRODUCTION_ROLLBACK_APPROVERS,
+                                submitterParameter: 'APPROVED_BY'
+                        )
+                        def approvedBy = approver
+                        if (approver instanceof Map) {
+                            approvedBy = approver['APPROVED_BY']
+                        }
+                        if (
+                                approvedBy == null
+                                        || approvedBy.toString().trim().isEmpty()
+                        ) {
+                            error('Jenkins did not return an approver identity')
+                        }
+                        env.ROLLBACK_APPROVED_BY = approvedBy.toString()
+                        env.ROLLBACK_APPROVED_AT_UTC = sh(
+                                returnStdout: true,
+                                script: "date -u '+%Y-%m-%dT%H:%M:%SZ'"
+                        ).trim()
+                    }
+                }
+            }
+        }
+
+        stage('Record exact rollback approval') {
+            steps {
+                dir(env.APP_DIR) {
+                    withCredentials([
+                        sshUserPrivateKey(
+                                credentialsId: 'gilbom-artifact-upload-ssh',
+                                keyFileVariable: 'ARTIFACT_SSH_IDENTITY',
+                                usernameVariable: 'ARTIFACT_SSH_USER'
+                        ),
+                        file(
+                                credentialsId: 'gilbom-artifact-known-hosts',
+                                variable: 'ARTIFACT_KNOWN_HOSTS'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
+                            jq -n \
+                                --arg approvedBy "$ROLLBACK_APPROVED_BY" \
+                                --arg approvedAtUtc \
+                                    "$ROLLBACK_APPROVED_AT_UTC" \
+                                '{
+                                  approvedBy: $approvedBy,
+                                  approvedAtUtc: $approvedAtUtc
+                                }' > .artifacts/rollback/approval-input.json
+                            preflight_sha256="$(
+                                cat .artifacts/rollback/preflight.sha256
+                            )"
+                            KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                            SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                            SSH_PORT="$PRODUCTION_DEPLOY_SSH_PORT" \
+                                sh scripts/record-production-rollback-approval-remote.sh \
+                                    "$FAILED_RELEASE_SHA" \
+                                    "$preflight_sha256" \
+                                    .artifacts/rollback/approval-input.json \
+                                    "$ARTIFACT_SSH_USER@$PRODUCTION_DEPLOY_HOST" \
+                                    > .artifacts/rollback/approval-record.json
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Run previous SHA through fixed root deployer') {
+            steps {
+                dir(env.APP_DIR) {
+                    withCredentials([
+                        sshUserPrivateKey(
+                                credentialsId: 'gilbom-production-deploy',
+                                keyFileVariable: 'DEPLOY_SSH_IDENTITY',
+                                usernameVariable: 'DEPLOY_SSH_USER'
+                        ),
+                        file(
+                                credentialsId: 'gilbom-artifact-known-hosts',
+                                variable: 'DEPLOY_KNOWN_HOSTS'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
+                            test "$DEPLOY_SSH_USER" = deploy
+                            KNOWN_HOSTS_FILE="$DEPLOY_KNOWN_HOSTS" \
+                            SSH_IDENTITY_FILE="$DEPLOY_SSH_IDENTITY" \
+                            SSH_PORT="$PRODUCTION_DEPLOY_SSH_PORT" \
+                                sh scripts/run-production-deploy-remote.sh \
+                                    "$ROLLBACK_TARGET_SHA" \
+                                    "$DEPLOY_SSH_USER@$PRODUCTION_DEPLOY_HOST"
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('External HTTPS smoke after rollback') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        python3 scripts/verify-external-https-smoke.py \
+                            "$PRODUCTION_BASE_URL" \
+                            .artifacts/rollback/external-https-smoke.json
+                    '''
+                }
+            }
+        }
+
+        stage('Collect and verify rollback manifest') {
+            steps {
+                dir(env.APP_DIR) {
+                    withCredentials([
+                        sshUserPrivateKey(
+                                credentialsId: 'gilbom-artifact-upload-ssh',
+                                keyFileVariable: 'ARTIFACT_SSH_IDENTITY',
+                                usernameVariable: 'ARTIFACT_SSH_USER'
+                        ),
+                        file(
+                                credentialsId: 'gilbom-artifact-known-hosts',
+                                variable: 'ARTIFACT_KNOWN_HOSTS'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
+                            KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                            SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                            SSH_PORT="$PRODUCTION_DEPLOY_SSH_PORT" \
+                                sh scripts/fetch-production-rollback-manifest.sh \
+                                    "$FAILED_RELEASE_SHA" \
+                                    "$ARTIFACT_SSH_USER@$PRODUCTION_DEPLOY_HOST" \
+                                    > .artifacts/rollback/rollback-manifest.json
+                            sh scripts/verify-production-rollback-evidence.sh \
+                                .artifacts/rollback/preflight.json \
+                                .artifacts/rollback/approval-record.json \
+                                .artifacts/rollback/rollback-manifest.json \
+                                .artifacts/rollback/external-https-smoke.json
+                        '''
+                    }
+                    archiveArtifacts(
+                            artifacts: '.artifacts/rollback/**',
+                            allowEmptyArchive: false,
+                            fingerprint: true
+                    )
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                if (env.APP_DIR) {
+                    dir(env.APP_DIR) {
+                        archiveArtifacts(
+                                artifacts: '.artifacts/rollback/**',
+                                allowEmptyArchive: true,
+                                fingerprint: true
+                        )
+                    }
+                }
+            }
+        }
+    }
+}

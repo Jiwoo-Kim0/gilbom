@@ -66,6 +66,7 @@ done
   || fail "migration approval command ownership or mode is invalid"
 for root_directory in \
   /opt/gilbom/migration-approvals \
+  /opt/gilbom/rollback-approvals \
   /var/lib/gilbom/releases \
   /run/gilbom-deploy
 do

@@ -9,27 +9,32 @@ fail() {
 
 [ "${GILBOM_CONTAINER_TEST:-}" = 1 ] \
   || fail "GILBOM_CONTAINER_TEST=1 is required"
-[ -f /.dockerenv ] \
-  || fail "this destructive fixture must run only inside a container"
+if [ ! -f /.dockerenv ]; then
+  [ "${GILBOM_USERNS_TEST:-}" = 1 ] \
+    && grep -Eq '^[^ ]+ /opt tmpfs ' /proc/mounts \
+    || fail \
+      "this destructive fixture requires a container or isolated /opt tmpfs"
+fi
 [ "$(id -u)" -eq 0 ] \
   || fail "container fixture must run as root"
 
-PROJECT_DIR=/workspace
+PROJECT_DIR="${GILBOM_TEST_PROJECT_DIR:-/workspace}"
 release_sha=2222222222222222222222222222222222222222
 current_sha=1111111111111111111111111111111111111111
 artifact_dir="/opt/gilbom/artifacts/$release_sha"
 release_record_dir="/var/lib/gilbom/releases/$release_sha"
-fake_bin=/fixture-bin
-fake_image_save=/fixture-image-save
+fake_bin=/opt/gilbom/fixture-bin
+fake_image_save=/opt/gilbom/fixture-image-save
 
 rm -rf -- \
-  /opt/gilbom /var/lib/gilbom/releases "$fake_bin" "$fake_image_save"
+  /opt/gilbom /var/lib/gilbom/releases
 install -d -o root -g root -m 0700 \
   /opt/gilbom/artifacts \
   /opt/gilbom/backups \
   /opt/gilbom/deploy \
   /opt/gilbom/deploy-approvals \
   /opt/gilbom/migration-approvals \
+  /opt/gilbom/rollback-approvals \
   /opt/gilbom/secrets \
   /var/lib/gilbom/releases \
   /run/gilbom-deploy \
@@ -130,8 +135,13 @@ jq -n \
 chown -R root:root /opt/gilbom /var/lib/gilbom/releases
 # Artifact upload root is intentionally root:<upload-group>:0710. The
 # immutable per-SHA destination remains entirely root:root and read-only.
-chown root:1000 /opt/gilbom/artifacts
-chmod 0710 /opt/gilbom/artifacts
+if [ "${GILBOM_USERNS_TEST:-}" = 1 ]; then
+  chown root:root /opt/gilbom/artifacts
+  chmod 0700 /opt/gilbom/artifacts
+else
+  chown root:1000 /opt/gilbom/artifacts
+  chmod 0710 /opt/gilbom/artifacts
+fi
 find "$artifact_dir" -type d -exec chmod 0550 {} +
 find "$artifact_dir" -type f -exec chmod 0440 {} +
 
@@ -163,7 +173,7 @@ jq -n \
   printf '%s\n' 'case "$command_line" in'
   printf '%s\n' '  *" config --quiet") exit 0 ;;'
   printf '%s\n' \
-    '  *" up --detach --no-build") printf "36\\n" > /tmp/flyway-version; exit 0 ;;'
+    '  *" up --detach --no-build") printf "36\\n" > /opt/gilbom/fixture-flyway-version; exit 0 ;;'
   printf '%s\n' '  *" ps -q db") printf "fixture-db\\n"; exit 0 ;;'
   printf '%s\n' \
     '  *" ps -q backend") printf "fixture-backend\\n"; exit 0 ;;'
@@ -172,8 +182,8 @@ jq -n \
   printf '%s\n' \
     '  *" ps -q mosquitto") printf "fixture-mosquitto\\n"; exit 0 ;;'
   printf '%s\n' '  *"MAX(version::integer)"*)'
-  printf '%s\n' '    if [ -f /tmp/flyway-version ]; then'
-  printf '%s\n' '      cat /tmp/flyway-version'
+  printf '%s\n' '    if [ -f /opt/gilbom/fixture-flyway-version ]; then'
+  printf '%s\n' '      cat /opt/gilbom/fixture-flyway-version'
   printf '%s\n' '    else'
   printf '%s\n' '      printf "35\\n"'
   printf '%s\n' '    fi'
@@ -183,7 +193,7 @@ jq -n \
   printf '%s\n' '  *"version::integer, script"*)'
   printf '%s\n' '    maximum=35'
   printf '%s\n' \
-    '    [ ! -f /tmp/flyway-version ] || maximum="$(cat /tmp/flyway-version)"'
+    '    [ ! -f /opt/gilbom/fixture-flyway-version ] || maximum="$(cat /opt/gilbom/fixture-flyway-version)"'
   printf '%s\n' '    version=1'
   printf '%s\n' '    while [ "$version" -le "$maximum" ]; do'
   printf '%s\n' \
@@ -209,7 +219,7 @@ jq -n \
     '    printf "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\\n"; exit 0 ;;'
   printf '%s\n' '  "image save gilbom-backend:"*" gilbom-frontend:"*)'
   printf '%s\n' \
-    '    exec tar -cf - -C /fixture-image-save manifest.json ;;'
+    '    exec tar -cf - -C /opt/gilbom/fixture-image-save manifest.json ;;'
   printf '%s\n' '  "inspect --format {{.State.Health.Status}} fixture-db")'
   printf '%s\n' '    printf "healthy\\n"; exit 0 ;;'
   printf '%s\n' '  "inspect --format {{.State.Status}} fixture-"*)'
@@ -245,7 +255,7 @@ install -o root -g root -m 0755 "$fake_bin/docker" /usr/local/sbin/docker
 install -o root -g root -m 0755 "$fake_bin/zstd" /usr/local/sbin/zstd
 
 sh "$PROJECT_DIR/infra/scripts/gilbom-deploy-preflight.sh" \
-  "$release_sha" > /tmp/deploy-preflight.json
+  "$release_sha" > /var/tmp/deploy-preflight.json
 jq -e \
   --arg release_sha "$release_sha" \
   --arg current_sha "$current_sha" \
@@ -259,7 +269,7 @@ jq -e \
     and .flyway.pendingMigrations[0].file == "V36__fixture_36.sql"
     and .flyway.compatibility
       == "COMPATIBLE_FORWARD_MIGRATION_REQUIRES_APPROVAL"
-  ' /tmp/deploy-preflight.json >/dev/null \
+  ' /var/tmp/deploy-preflight.json >/dev/null \
   || fail "preflight evidence is incomplete or incorrect"
 
 approved_at_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -269,28 +279,28 @@ jq -n \
   '{
     approvedBy: $approved_by,
     approvedAtUtc: $approved_at_utc
-  }' > /tmp/deploy-approval-input.json
+  }' > /var/tmp/deploy-approval-input.json
 
 bad_digest="$(printf 'd%.0s' $(seq 1 64))"
 if sh "$PROJECT_DIR/infra/scripts/gilbom-record-deploy-approval.sh" \
     "$release_sha" "$bad_digest" \
-    < /tmp/deploy-approval-input.json >/dev/null 2>&1; then
+    < /var/tmp/deploy-approval-input.json >/dev/null 2>&1; then
   fail "approval accepted a preflight digest that was not displayed"
 fi
 [ ! -e "/opt/gilbom/deploy-approvals/$release_sha.json" ] \
   || fail "bad digest created a deployment approval"
 
-preflight_digest="$(sha256sum /tmp/deploy-preflight.json | awk '{print $1}')"
+preflight_digest="$(sha256sum /var/tmp/deploy-preflight.json | awk '{print $1}')"
 sh "$PROJECT_DIR/infra/scripts/gilbom-record-deploy-approval.sh" \
   "$release_sha" "$preflight_digest" \
-  < /tmp/deploy-approval-input.json > /tmp/deploy-approval.json
+  < /var/tmp/deploy-approval-input.json > /var/tmp/deploy-approval.json
 jq -e \
   --arg release_sha "$release_sha" \
   '
     .releaseSha == $release_sha
     and .approvedBy == "CHAEUN KIM"
     and (.preflightSha256 | test("^[0-9a-f]{64}$"))
-  ' /tmp/deploy-approval.json >/dev/null \
+  ' /var/tmp/deploy-approval.json >/dev/null \
   || fail "deployment approval evidence is invalid"
 jq -e \
   --arg release_sha "$release_sha" \
@@ -304,26 +314,26 @@ jq -e \
     = root:root:440 ] \
   || fail "deployment approval ownership or mode is invalid"
 
-cp /tmp/deploy-preflight.json /tmp/original-deploy-preflight.json
-cp /tmp/deploy-approval.json /tmp/original-deploy-approval.json
+cp /var/tmp/deploy-preflight.json /var/tmp/original-deploy-preflight.json
+cp /var/tmp/deploy-approval.json /var/tmp/original-deploy-approval.json
 sh "$PROJECT_DIR/infra/scripts/gilbom-deploy-preflight.sh" \
-  "$release_sha" > /tmp/retry-deploy-preflight.json
+  "$release_sha" > /var/tmp/retry-deploy-preflight.json
 cmp -s \
-  /tmp/original-deploy-preflight.json \
-  /tmp/retry-deploy-preflight.json \
+  /var/tmp/original-deploy-preflight.json \
+  /var/tmp/retry-deploy-preflight.json \
   || fail "technical retry did not preserve the immutable approved preflight"
 sh "$PROJECT_DIR/infra/scripts/gilbom-record-deploy-approval.sh" \
   "$release_sha" "$preflight_digest" \
-  < /tmp/deploy-approval-input.json > /tmp/retry-deploy-approval.json
+  < /var/tmp/deploy-approval-input.json > /var/tmp/retry-deploy-approval.json
 cmp -s \
-  /tmp/original-deploy-approval.json \
-  /tmp/retry-deploy-approval.json \
+  /var/tmp/original-deploy-approval.json \
+  /var/tmp/retry-deploy-approval.json \
   || fail "technical retry did not reuse the immutable deployment approval"
 
 sh "$PROJECT_DIR/infra/scripts/gilbom-deploy.sh" "$release_sha" \
-  > /tmp/deploy-output.txt
+  > /var/tmp/deploy-output.txt
 grep -Fq "Production deploy boundary: PASS ($release_sha)" \
-  /tmp/deploy-output.txt \
+  /var/tmp/deploy-output.txt \
   || fail "root deployment did not report PASS"
 [ "$(cat /var/lib/gilbom/releases/current.sha)" = "$release_sha" ] \
   || fail "successful deployment did not update current.sha"

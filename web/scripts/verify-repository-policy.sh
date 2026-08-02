@@ -34,6 +34,7 @@ sh scripts/verify-ci-release-contract.sh
 sh scripts/verify-ci-artifact-transfer-contract.sh
 sh scripts/verify-production-deploy-contract.sh
 sh scripts/verify-production-deploy-job-contract.sh
+sh scripts/verify-production-rollback-contract.sh
 sh scripts/test-run-frontend-ci-task.sh
 sh scripts/test-scan-image-security.sh
 sh scripts/verify-frontend-csp-source.sh

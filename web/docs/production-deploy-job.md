@@ -33,9 +33,13 @@ sudo sh \
 | `/usr/local/sbin/gilbom-deploy-preflight` | Artifact와 현재 운영·Flyway 상태를 승인용 JSON으로 고정 |
 | `/usr/local/sbin/gilbom-record-deploy-approval` | Jenkins 승인자와 시간을 exact preflight hash에 결속 |
 | `/usr/local/sbin/gilbom-release-manifest` | 지정한 SHA의 Manifest만 읽어 Jenkins로 반환 |
+| `/usr/local/sbin/gilbom-rollback-preflight` | 격리된 실패 상태와 Flyway를 Rollback 승인용 JSON으로 고정 |
+| `/usr/local/sbin/gilbom-record-rollback-approval` | 이전 Backend 호환 승인을 exact 실패 상태에 결속 |
+| `/usr/local/sbin/gilbom-rollback-manifest` | Rollback 또는 수동 복구 Manifest 반환 |
 | `/usr/local/sbin/gilbom-deploy` | 승인 검증 후 실제 root 배포 |
 
-Artifact 운영 계정 `ubuntu`에는 앞의 세 helper만 별도 sudo allowlist로 허용한다.
+Artifact 운영 계정 `ubuntu`에는 읽기·승인 기록 helper만 별도 sudo allowlist로
+허용한다.
 `deploy` 계정의 Stage 10 sudoers는 계속 아래 한 줄뿐이다.
 
 ```text
@@ -141,3 +145,7 @@ release-manifest.json
 ```
 
 Secret 값, SSH private key와 Jenkins 임시 Credential 경로는 보관하지 않는다.
+
+조건부 Rollback Job과 배포 실패 분기는
+[Stage 13 conditional production rollback](./production-conditional-rollback.md)에
+정리한다.

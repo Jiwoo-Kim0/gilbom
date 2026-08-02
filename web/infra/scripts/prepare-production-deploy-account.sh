@@ -14,8 +14,8 @@ fail() {
 [ "$#" -eq 1 ] \
   || fail "usage: $0 JENKINS_DEPLOY_PUBLIC_KEY_FILE"
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-PROJECT_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+PROJECT_DIR="$(CDPATH='' cd -- "$SCRIPT_DIR/../.." && pwd)"
 PUBLIC_KEY_FILE="$1"
 DEPLOY_USER=deploy
 DEPLOY_GROUP=deploy
@@ -110,6 +110,7 @@ install -o root -g root -m 0755 \
   /usr/local/sbin/gilbom-verify-production-deploy-account
 install -d -o root -g root -m 0700 \
   /opt/gilbom/migration-approvals \
+  /opt/gilbom/rollback-approvals \
   /var/lib/gilbom/releases \
   /run/gilbom-deploy
 [ -d /opt/gilbom/deploy ] && [ ! -L /opt/gilbom/deploy ] \

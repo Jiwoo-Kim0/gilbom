@@ -16,6 +16,7 @@ BACKUP_ROOT=/opt/gilbom/backups
 BACKUP_SCRIPT="$DEPLOY_ROOT/infra/scripts/backup-volumes.sh"
 MIGRATION_APPROVAL_ROOT=/opt/gilbom/migration-approvals
 DEPLOY_APPROVAL_ROOT=/opt/gilbom/deploy-approvals
+ROLLBACK_APPROVAL_ROOT=/opt/gilbom/rollback-approvals
 RELEASE_RECORD_ROOT=/var/lib/gilbom/releases
 CURRENT_SHA_PATH="$RELEASE_RECORD_ROOT/current.sha"
 PREVIOUS_SHA_PATH="$RELEASE_RECORD_ROOT/previous.sha"
@@ -24,8 +25,34 @@ LOCK_PATH="$LOCK_ROOT/deploy.lock"
 HEALTH_TIMEOUT_SECONDS=240
 SAFE_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
+rollback_armed=false
+approved_rollback_armed=false
+handling_deploy_failure=false
+
 fail() {
-  echo "Production deploy boundary failed: $1" >&2
+  reason="$1"
+  echo "Production deploy boundary failed: $reason" >&2
+  if [ "$approved_rollback_armed" = true ] \
+      && [ "$handling_deploy_failure" = false ]; then
+    handling_deploy_failure=true
+    if handle_approved_rollback_failure "$reason"; then
+      :
+    else
+      echo \
+        "Approved rollback failure containment could not complete cleanly" \
+        >&2
+    fi
+  elif [ "$rollback_armed" = true ] \
+      && [ "$handling_deploy_failure" = false ]; then
+    handling_deploy_failure=true
+    if handle_deployment_failure "$reason"; then
+      :
+    else
+      echo \
+        "Production deploy failure containment could not complete cleanly" \
+        >&2
+    fi
+  fi
   exit 1
 }
 
@@ -43,7 +70,7 @@ for variable in \
   PROJECT_DIR EXPECTED_GIT_REVISION BACKEND_IMAGE FRONTEND_IMAGE \
   DEPLOY_PULL ALLOW_MUTABLE_IMAGE_TAGS SECRET_SCAN_DIR BACKUP_DIR \
   BACKUP_ROOT MIGRATION_APPROVAL_ROOT RELEASE_RECORD_ROOT \
-  DEPLOY_APPROVAL_ROOT \
+  DEPLOY_APPROVAL_ROOT ROLLBACK_APPROVAL_ROOT \
   COMPOSE_PROJECT_NAME DOCKER_HOST DOCKER_CONTEXT
 do
   value="$(printenv "$variable" 2>/dev/null || true)"
@@ -151,6 +178,7 @@ assert_root_directory "$SECRET_ROOT"
 assert_root_directory "$BACKUP_ROOT"
 assert_root_directory "$MIGRATION_APPROVAL_ROOT"
 assert_root_directory "$DEPLOY_APPROVAL_ROOT"
+assert_root_directory "$ROLLBACK_APPROVAL_ROOT"
 assert_root_directory "$RELEASE_RECORD_ROOT"
 assert_root_secure_tree "$DEPLOY_ROOT"
 assert_root_secure_tree "$SECRET_ROOT"
@@ -343,6 +371,578 @@ compose() {
     "$@"
 }
 
+image_env_sha() {
+  backend_sha="$(
+    sed -n 's/^BACKEND_IMAGE=gilbom-backend:\([0-9a-f]\{40\}\)$/\1/p' \
+      "$IMAGE_ENV_PATH"
+  )"
+  frontend_sha="$(
+    sed -n 's/^FRONTEND_IMAGE=gilbom-frontend:\([0-9a-f]\{40\}\)$/\1/p' \
+      "$IMAGE_ENV_PATH"
+  )"
+  [ -n "$backend_sha" ] && [ "$backend_sha" = "$frontend_sha" ] \
+    || return 1
+  printf '%s\n' "$backend_sha"
+}
+
+query_flyway_version() {
+  compose exec -T db sh -ec '
+    export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+    exec psql \
+      --host 127.0.0.1 \
+      --username "$POSTGRES_USER" \
+      --dbname "$POSTGRES_DB" \
+      --no-password \
+      --tuples-only \
+      --no-align \
+      --quiet \
+      --set ON_ERROR_STOP=1 \
+      --command "
+        SELECT COALESCE(MAX(version::integer), 0)
+        FROM flyway_history.flyway_schema_history
+        WHERE success;
+      "
+  ' | tr -d '[:space:]'
+}
+
+wait_healthy() {
+  service="$1"
+  deadline="$(( $(date +%s) + HEALTH_TIMEOUT_SECONDS ))"
+  while [ "$(date +%s)" -lt "$deadline" ]
+  do
+    container_id="$(compose ps -q "$service")"
+    if [ -n "$container_id" ]; then
+      state="$(docker inspect --format '{{.State.Status}}' "$container_id")"
+      health="$(docker inspect \
+        --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
+        "$container_id")"
+      [ "$state" = running ] && [ "$health" = healthy ] \
+        && return 0
+      case "$state:$health" in
+        exited:*|dead:*|*:unhealthy) return 1 ;;
+      esac
+    fi
+    sleep 5
+  done
+  return 1
+}
+
+write_image_env() {
+  target_sha="$1"
+  target_temp="$(mktemp "$DEPLOY_ROOT/.image.env.rollback.XXXXXX")" \
+    || return 1
+  {
+    printf 'BACKEND_IMAGE=gilbom-backend:%s\n' "$target_sha"
+    printf 'FRONTEND_IMAGE=gilbom-frontend:%s\n' "$target_sha"
+  } > "$target_temp" || {
+    rm -f -- "$target_temp"
+    return 1
+  }
+  chown root:root "$target_temp" \
+    && chmod 0600 "$target_temp" \
+    && mv -T -- "$target_temp" "$IMAGE_ENV_PATH"
+}
+
+capture_failure_logs() {
+  destination="$release_record_dir/deploy-failure-logs.txt"
+  [ ! -e "$destination" ] || return 0
+  temporary="$(mktemp "$release_record_dir/.deploy-failure-logs.XXXXXX")" \
+    || return 1
+  if compose logs --no-color --timestamps db mosquitto backend frontend \
+      > "$temporary" 2>&1; then
+    :
+  else
+    printf '%s\n' \
+      'Container logs could not be collected completely.' >> "$temporary"
+  fi
+  chown root:root "$temporary" \
+    && chmod 0400 "$temporary" \
+    && mv -T -- "$temporary" "$destination"
+}
+
+ensure_rollback_images() {
+  target_sha="$1"
+  target_backend="gilbom-backend:$target_sha"
+  target_frontend="gilbom-frontend:$target_sha"
+  target_artifact="$ARTIFACT_ROOT/$target_sha"
+  [ -d "$target_artifact" ] && [ ! -L "$target_artifact" ] \
+    || return 1
+  [ -z "$(find "$target_artifact" -type l -print -quit)" ] \
+    || return 1
+  [ -z "$(
+    find "$target_artifact" \( ! -user root -o ! -group root \) \
+      -print -quit
+  )" ] || return 1
+  [ -z "$(find "$target_artifact" -perm /0222 -print -quit)" ] \
+    || return 1
+  for relative_path in \
+    SHA256SUMS images.tar.zst images.tar.zst.sha256 build-metadata.json
+  do
+    [ -f "$target_artifact/$relative_path" ] \
+      && [ ! -L "$target_artifact/$relative_path" ] \
+      && [ -s "$target_artifact/$relative_path" ] \
+      || return 1
+  done
+  (
+    cd "$target_artifact"
+    sha256sum -c SHA256SUMS >/dev/null
+    sha256sum -c images.tar.zst.sha256 >/dev/null
+  ) || return 1
+  jq -e \
+    --arg target_sha "$target_sha" \
+    --arg target_backend "$target_backend" \
+    --arg target_frontend "$target_frontend" \
+    '
+      .releaseSha == $target_sha
+      and .images.backend.name == $target_backend
+      and .images.frontend.name == $target_frontend
+      and (.images.backend.id | test("^sha256:[0-9a-f]{64}$"))
+      and (.images.frontend.id | test("^sha256:[0-9a-f]{64}$"))
+    ' "$target_artifact/build-metadata.json" >/dev/null \
+    || return 1
+  if ! docker image inspect "$target_backend" >/dev/null 2>&1 \
+      || ! docker image inspect "$target_frontend" >/dev/null 2>&1; then
+    zstd --quiet --test "$target_artifact/images.tar.zst" \
+      || return 1
+    bash -o pipefail -c \
+      'zstd --quiet -dc "$1" | docker load' \
+      gilbom-rollback-load "$target_artifact/images.tar.zst" \
+      >/dev/null \
+      || return 1
+  fi
+  docker image inspect "$target_backend" >/dev/null 2>&1 \
+    && docker image inspect "$target_frontend" >/dev/null 2>&1 \
+    || return 1
+
+  rollback_loaded_manifest="$work_dir/rollback-loaded-images.json"
+  bash -o pipefail -c \
+    'docker image save "$1" "$2" | tar -xOf - manifest.json' \
+    gilbom-rollback-images "$target_backend" "$target_frontend" \
+    > "$rollback_loaded_manifest" \
+    || return 1
+  for role in backend frontend
+  do
+    case "$role" in
+      backend) target_image="$target_backend" ;;
+      frontend) target_image="$target_frontend" ;;
+    esac
+    config_path="$(
+      jq -er \
+        --arg image "$target_image" \
+        '
+          [
+            .[]
+            | select(
+                (.RepoTags | type == "array")
+                and (.RepoTags | index($image) != null)
+              )
+            | .Config
+          ]
+          | if length == 1 then .[0] else error("ambiguous image tag") end
+        ' "$rollback_loaded_manifest"
+    )" || return 1
+    printf '%s\n' "$config_path" \
+      | grep -Eq \
+          '^(blobs/sha256/[0-9a-f]{64}|[0-9a-f]{64}[.]json)$' \
+      || return 1
+    config_name="$(basename -- "$config_path")"
+    loaded_id="sha256:${config_name%.json}"
+    expected_id="$(
+      jq -r ".images.$role.id" "$target_artifact/build-metadata.json"
+    )"
+    [ "$loaded_id" = "$expected_id" ] || return 1
+  done
+}
+
+verify_rollback_https_smoke() {
+  frontend_id="$1"
+  response="$(
+    docker exec "$frontend_id" /bin/sh -ec '
+      grep -Fq "listen 8443 ssl;" /tmp/nginx-conf.d/site.conf
+      exec wget \
+        --quiet \
+        --no-check-certificate \
+        --output-document=- \
+        https://127.0.0.1:8443/api/health
+    '
+  )" || return 1
+  printf '%s\n' "$response" \
+    | jq -e '.status == "UP"' >/dev/null
+}
+
+record_manual_recovery() {
+  failure_reason="$1"
+  flyway_after="$2"
+  containment="$3"
+  manifest="$release_record_dir/manual-recovery-required.json"
+  [ ! -e "$manifest" ] || return 0
+  case "$flyway_after" in
+    ''|*[!0-9]*) flyway_after_json=null ;;
+    *) flyway_after_json="$flyway_after" ;;
+  esac
+  recorded_at_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  temporary="$(mktemp "$release_record_dir/.manual-recovery.XXXXXX")" \
+    || return 1
+  jq -n -S \
+    --arg failed_release_sha "$release_sha" \
+    --arg rollback_target_sha "$current_sha" \
+    --arg recorded_at_utc "$recorded_at_utc" \
+    --arg failure_reason "$failure_reason" \
+    --argjson flyway_before "$current_version" \
+    --argjson flyway_after "$flyway_after_json" \
+    --arg containment "$containment" \
+    --arg artifact_directory "$artifact_dir" \
+    --arg backup_bundle "$backup_bundle" \
+    --arg logs "$release_record_dir/deploy-failure-logs.txt" \
+    '
+      {
+        schemaVersion: 1,
+        status: "MANUAL_RECOVERY_REQUIRED",
+        failedReleaseSha: $failed_release_sha,
+        rollbackTargetSha: $rollback_target_sha,
+        recordedAtUtc: $recorded_at_utc,
+        failureReason: $failure_reason,
+        flyway: {
+          beforeVersion: $flyway_before,
+          afterVersion: $flyway_after,
+          changed: (
+            $flyway_after == null or $flyway_after != $flyway_before
+          )
+        },
+        automaticRollbackAllowed: false,
+        previousBackendCompatibility: "UNCONFIRMED",
+        containment: $containment,
+        services: {
+          frontend: "STOPPED",
+          backend: "PRESERVED",
+          database: "PRESERVED"
+        },
+        preserved: {
+          artifactDirectory: $artifact_directory,
+          backupBundle: $backup_bundle,
+          containerLogs: $logs
+        },
+        databaseRecovery: {
+          migrationUndoPerformed: false,
+          backupRestorePerformed: false
+        },
+        operatorAction:
+          "Review logs and schema compatibility, then use the gilbom-rollback Jenkins Job."
+      }
+    ' > "$temporary" \
+    || return 1
+  chown root:root "$temporary" \
+    && chmod 0440 "$temporary" \
+    && mv -T -- "$temporary" "$manifest" \
+    || return 1
+  echo "Manual recovery evidence: $manifest" >&2
+  echo \
+    "Operator action required: approve compatibility in gilbom-rollback" \
+    >&2
+}
+
+record_automatic_rollback() {
+  failure_reason="$1"
+  flyway_after="$2"
+  manifest="$release_record_dir/rollback-manifest.json"
+  [ ! -e "$manifest" ] || return 1
+  rolled_back_at_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  temporary="$(mktemp "$release_record_dir/.rollback-manifest.XXXXXX")" \
+    || return 1
+  jq -n -S \
+    --arg failed_release_sha "$release_sha" \
+    --arg rollback_target_sha "$current_sha" \
+    --arg rolled_back_at_utc "$rolled_back_at_utc" \
+    --arg failure_reason "$failure_reason" \
+    --argjson flyway_before "$current_version" \
+    --argjson flyway_after "$flyway_after" \
+    --arg artifact_directory "$artifact_dir" \
+    --arg backup_bundle "$backup_bundle" \
+    '
+      {
+        schemaVersion: 1,
+        status: "AUTOMATIC_ROLLBACK_SUCCEEDED",
+        failedReleaseSha: $failed_release_sha,
+        rollbackTargetSha: $rollback_target_sha,
+        rolledBackAtUtc: $rolled_back_at_utc,
+        trigger: {
+          failureReason: $failure_reason,
+          flywayBeforeVersion: $flyway_before,
+          flywayAfterFailureVersion: $flyway_after
+        },
+        decision: "AUTO_ALLOWED_NO_FLYWAY_CHANGE",
+        artifactDirectory: $artifact_directory,
+        backupBundle: $backup_bundle,
+        health: {
+          backendReadiness: "PASS",
+          frontend: "PASS",
+          internalHttps: "PASS"
+        },
+        databaseRecovery: {
+          migrationUndoPerformed: false,
+          backupRestorePerformed: false
+        }
+      }
+    ' > "$temporary" \
+    || return 1
+  chown root:root "$temporary" \
+    && chmod 0440 "$temporary" \
+    && mv -T -- "$temporary" "$manifest" \
+    || return 1
+  echo "Automatic production rollback: PASS ($current_sha)" >&2
+  echo "Rollback manifest: $manifest" >&2
+}
+
+automatic_rollback_without_migration() {
+  failure_reason="$1"
+  flyway_after="$2"
+  compose stop frontend >/dev/null 2>&1 || true
+  ensure_rollback_images "$current_sha" || return 1
+  write_image_env "$current_sha" || return 1
+  compose config --quiet || return 1
+  compose up --detach --no-build --no-deps backend || return 1
+  wait_healthy backend || return 1
+  backend_id="$(compose ps -q backend)"
+  backend_readiness="$(
+    docker exec "$backend_id" \
+      wget --quiet --output-document=- \
+        http://127.0.0.1:8080/actuator/health/readiness
+  )" || return 1
+  printf '%s\n' "$backend_readiness" \
+    | jq -e '.status == "UP"' >/dev/null \
+    || return 1
+  compose up --detach --no-build --no-deps frontend || return 1
+  wait_healthy frontend || return 1
+  frontend_id="$(compose ps -q frontend)"
+  docker exec "$frontend_id" /usr/local/bin/gilbom-nginx-healthcheck \
+    || return 1
+  verify_rollback_https_smoke "$frontend_id" || return 1
+  atomic_line "$CURRENT_SHA_PATH" "$current_sha" 0440
+  atomic_line "$PREVIOUS_SHA_PATH" "$current_sha" 0440
+  record_automatic_rollback "$failure_reason" "$flyway_after"
+}
+
+handle_deployment_failure() {
+  failure_reason="$1"
+  rollback_armed=false
+  flyway_after_failure=""
+  if queried_version="$(query_flyway_version 2>/dev/null)" \
+      && printf '%s\n' "$queried_version" \
+        | grep -Eq '^(0|[1-9][0-9]*)$'; then
+    flyway_after_failure="$queried_version"
+  fi
+  capture_failure_logs || true
+
+  if [ -n "$flyway_after_failure" ] \
+      && [ "$flyway_after_failure" = "$current_version" ]; then
+    if automatic_rollback_without_migration \
+        "$failure_reason" "$flyway_after_failure"; then
+      return 0
+    fi
+    compose stop frontend >/dev/null 2>&1 || true
+    record_manual_recovery \
+      "$failure_reason; automatic rollback failed" \
+      "$flyway_after_failure" \
+      "AUTOMATIC_ROLLBACK_FAILED"
+    return 1
+  fi
+
+  compose stop frontend >/dev/null 2>&1 || true
+  record_manual_recovery \
+    "$failure_reason" \
+    "$flyway_after_failure" \
+    "FLYWAY_CHANGED_OR_UNAVAILABLE"
+}
+
+perform_approved_manual_rollback() {
+  failed_record_dir="$RELEASE_RECORD_ROOT/$failed_release_sha"
+  rollback_manifest="$failed_record_dir/approved-rollback-manifest.json"
+  [ ! -e "$rollback_manifest" ] \
+    || fail "immutable approved rollback manifest already exists"
+
+  if recovery_backup_output="$(
+    ENV_FILE='' \
+    RUNTIME_ENV_FILE="$RUNTIME_ENV_PATH" \
+    IMAGE_ENV_FILE="$IMAGE_ENV_PATH" \
+    COMPOSE_FILE="$COMPOSE_PATH" \
+    BACKUP_ROOT="$BACKUP_ROOT" \
+      sh "$BACKUP_SCRIPT"
+  )"; then
+    printf '%s\n' "$recovery_backup_output"
+  else
+    fail "pre-rollback production DB and volume backup failed"
+  fi
+  recovery_backup_bundle="$(
+    printf '%s\n' "$recovery_backup_output" \
+      | sed -n 's/^Backup bundle: //p' \
+      | tail -n 1
+  )"
+  case "$recovery_backup_bundle" in
+    "$BACKUP_ROOT"/*) ;;
+    *) fail "rollback backup did not report a fixed-root bundle" ;;
+  esac
+  [ -d "$recovery_backup_bundle" ] \
+    && [ ! -L "$recovery_backup_bundle" ] \
+    && [ -s "$recovery_backup_bundle/SHA256SUMS" ] \
+    || fail "rollback backup bundle is missing or unsafe"
+  (
+    cd "$recovery_backup_bundle"
+    sha256sum -c SHA256SUMS
+  ) || fail "rollback backup bundle checksum verification failed"
+
+  approved_rollback_armed=true
+  compose stop frontend \
+    || fail "could not stop Frontend before approved rollback"
+  write_image_env "$release_sha" \
+    || fail "could not restore approved rollback image.env"
+  compose config --quiet \
+    || fail "approved rollback Compose configuration is invalid"
+  compose up --detach --no-build --no-deps backend \
+    || fail "approved previous Backend start failed"
+  wait_healthy backend \
+    || fail "approved previous Backend did not become healthy"
+  rollback_backend_id="$(compose ps -q backend)"
+  rollback_backend_readiness="$(
+    docker exec "$rollback_backend_id" \
+      wget --quiet --output-document=- \
+        http://127.0.0.1:8080/actuator/health/readiness
+  )" || fail "approved previous Backend readiness endpoint failed"
+  printf '%s\n' "$rollback_backend_readiness" \
+    | jq -e '.status == "UP"' >/dev/null \
+    || fail "approved previous Backend readiness is not UP"
+
+  compose up --detach --no-build --no-deps frontend \
+    || fail "approved previous Frontend start failed"
+  wait_healthy frontend \
+    || fail "approved previous Frontend did not become healthy"
+  rollback_frontend_id="$(compose ps -q frontend)"
+  docker exec \
+    "$rollback_frontend_id" /usr/local/bin/gilbom-nginx-healthcheck \
+    || fail "approved previous Frontend health check failed"
+  verify_rollback_https_smoke "$rollback_frontend_id" \
+    || fail "approved rollback internal HTTPS smoke failed"
+
+  rollback_flyway_after="$(query_flyway_version)" \
+    || fail "could not query Flyway after approved rollback"
+  [ "$rollback_flyway_after" = "$current_version" ] \
+    || fail "approved image rollback unexpectedly changed Flyway"
+
+  rolled_back_at_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  temporary="$(mktemp "$failed_record_dir/.approved-rollback.XXXXXX")"
+  jq -n -S \
+    --arg failed_release_sha "$failed_release_sha" \
+    --arg rollback_target_sha "$release_sha" \
+    --arg rolled_back_at_utc "$rolled_back_at_utc" \
+    --argjson flyway_version "$current_version" \
+    --arg backup_bundle "$recovery_backup_bundle" \
+    --slurpfile approval "$rollback_approval_file" \
+    '
+      {
+        schemaVersion: 1,
+        status: "MANUALLY_APPROVED_ROLLBACK_SUCCEEDED",
+        failedReleaseSha: $failed_release_sha,
+        rollbackTargetSha: $rollback_target_sha,
+        rolledBackAtUtc: $rolled_back_at_utc,
+        decision: "APPROVED_PREVIOUS_BACKEND_COMPATIBLE",
+        approval: $approval[0],
+        flyway: {
+          beforeRollbackVersion: $flyway_version,
+          afterRollbackVersion: $flyway_version
+        },
+        backupBundle: $backup_bundle,
+        health: {
+          backendReadiness: "PASS",
+          frontend: "PASS",
+          internalHttps: "PASS"
+        },
+        databaseRecovery: {
+          migrationUndoPerformed: false,
+          backupRestorePerformed: false
+        }
+      }
+    ' > "$temporary"
+  chown root:root "$temporary"
+  chmod 0440 "$temporary"
+  mv -T -- "$temporary" "$rollback_manifest"
+  atomic_line "$CURRENT_SHA_PATH" "$release_sha" 0440
+  approved_rollback_armed=false
+
+  echo "Approved rollback manifest: $rollback_manifest"
+  echo "Production approved rollback: PASS ($release_sha)"
+  echo "Database migrations were not reverted."
+}
+
+handle_approved_rollback_failure() {
+  failure_reason="$1"
+  approved_rollback_armed=false
+  failed_record_dir="$RELEASE_RECORD_ROOT/$failed_release_sha"
+  compose stop frontend >/dev/null 2>&1 || true
+  logs="$failed_record_dir/approved-rollback-failure-logs.txt"
+  if [ ! -e "$logs" ]; then
+    temporary="$(mktemp "$failed_record_dir/.approved-rollback-logs.XXXXXX")" \
+      || return 1
+    compose logs --no-color --timestamps db mosquitto backend frontend \
+      > "$temporary" 2>&1 || true
+    chown root:root "$temporary" \
+      && chmod 0400 "$temporary" \
+      && mv -T -- "$temporary" "$logs" \
+      || return 1
+  fi
+  flyway_after_rollback_failure=""
+  if queried_version="$(query_flyway_version 2>/dev/null)" \
+      && printf '%s\n' "$queried_version" \
+        | grep -Eq '^(0|[1-9][0-9]*)$'; then
+    flyway_after_rollback_failure="$queried_version"
+  fi
+  case "$flyway_after_rollback_failure" in
+    ''|*[!0-9]*) flyway_after_json=null ;;
+    *) flyway_after_json="$flyway_after_rollback_failure" ;;
+  esac
+  manifest="$failed_record_dir/approved-rollback-failure.json"
+  [ ! -e "$manifest" ] || return 0
+  recorded_at_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  temporary="$(mktemp "$failed_record_dir/.approved-rollback-failure.XXXXXX")" \
+    || return 1
+  jq -n -S \
+    --arg failed_release_sha "$failed_release_sha" \
+    --arg rollback_target_sha "$release_sha" \
+    --arg recorded_at_utc "$recorded_at_utc" \
+    --arg failure_reason "$failure_reason" \
+    --argjson flyway_before "$current_version" \
+    --argjson flyway_after "$flyway_after_json" \
+    --arg logs "$logs" \
+    '
+      {
+        schemaVersion: 1,
+        status: "APPROVED_ROLLBACK_FAILED_MANUAL_RECOVERY_REQUIRED",
+        failedReleaseSha: $failed_release_sha,
+        rollbackTargetSha: $rollback_target_sha,
+        recordedAtUtc: $recorded_at_utc,
+        failureReason: $failure_reason,
+        flyway: {
+          beforeRollbackVersion: $flyway_before,
+          afterRollbackFailureVersion: $flyway_after
+        },
+        services: {
+          frontend: "STOPPED",
+          backend: "PRESERVED",
+          database: "PRESERVED"
+        },
+        containerLogs: $logs,
+        databaseRecovery: {
+          migrationUndoPerformed: false,
+          backupRestorePerformed: false
+        }
+      }
+    ' > "$temporary" \
+    || return 1
+  chown root:root "$temporary" \
+    && chmod 0440 "$temporary" \
+    && mv -T -- "$temporary" "$manifest" \
+    || return 1
+  echo "Approved rollback failed; Frontend remains stopped: $manifest" >&2
+}
+
 compose config --quiet \
   || fail "fixed production Compose configuration is invalid"
 
@@ -370,8 +970,29 @@ else
 fi
 printf '%s\n' "$current_sha" | grep -Eq '^[0-9a-f]{40}$' \
   || fail "current production SHA is invalid"
-[ "$current_sha" != "$release_sha" ] \
-  || fail "requested release is already current"
+active_image_sha="$(image_env_sha)" \
+  || fail "fixed image.env does not identify one active full-SHA release"
+recovery_mode=false
+failed_release_sha=""
+manual_recovery_file=""
+rollback_approval_file=""
+if [ "$current_sha" = "$release_sha" ]; then
+  if [ "$active_image_sha" != "$release_sha" ]; then
+    failed_release_sha="$active_image_sha"
+    manual_recovery_file="$(
+      printf '%s/%s/manual-recovery-required.json' \
+        "$RELEASE_RECORD_ROOT" "$failed_release_sha"
+    )"
+    rollback_approval_file="$ROLLBACK_APPROVAL_ROOT/$failed_release_sha.json"
+    for file in "$manual_recovery_file" "$rollback_approval_file"
+    do
+      assert_root_file "$file"
+    done
+    recovery_mode=true
+  else
+    fail "requested release is already current"
+  fi
+fi
 
 db_id="$(compose ps -q db)"
 [ -n "$db_id" ] \
@@ -380,29 +1001,65 @@ db_id="$(compose ps -q db)"
   || fail "production PostgreSQL is not healthy before deployment"
 
 # 13. 운영 Flyway history에서 현재 version과 적용 script 목록을 조회한다.
-current_version="$(
-  compose exec -T db sh -ec '
-    export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
-    exec psql \
-      --host 127.0.0.1 \
-      --username "$POSTGRES_USER" \
-      --dbname "$POSTGRES_DB" \
-      --no-password \
-      --tuples-only \
-      --no-align \
-      --quiet \
-      --set ON_ERROR_STOP=1 \
-      --command "
-        SELECT COALESCE(MAX(version::integer), 0)
-        FROM flyway_history.flyway_schema_history
-        WHERE success;
-      "
-  ' | tr -d '[:space:]'
-)" || fail "could not query the current Flyway version"
+current_version="$(query_flyway_version)" \
+  || fail "could not query the current Flyway version"
 printf '%s\n' "$current_version" | grep -Eq '^(0|[1-9][0-9]*)$' \
   || fail "current Flyway version is not a non-negative integer"
-[ "$current_version" -le "$latest_version" ] \
-  || fail "database Flyway version is newer than the requested release"
+if [ "$recovery_mode" = false ]; then
+  [ "$current_version" -le "$latest_version" ] \
+    || fail "database Flyway version is newer than the requested release"
+else
+  manual_recovery_sha256="$(
+    sha256sum "$manual_recovery_file" | awk '{print $1}'
+  )"
+  jq -e \
+    --arg failed_release_sha "$failed_release_sha" \
+    --arg rollback_target_sha "$release_sha" \
+    --argjson current_version "$current_version" \
+    '
+      .schemaVersion == 1
+      and .status == "MANUAL_RECOVERY_REQUIRED"
+      and .failedReleaseSha == $failed_release_sha
+      and .rollbackTargetSha == $rollback_target_sha
+      and .flyway.changed == true
+      and .flyway.afterVersion == $current_version
+      and .automaticRollbackAllowed == false
+      and .previousBackendCompatibility == "UNCONFIRMED"
+      and .databaseRecovery.migrationUndoPerformed == false
+      and .databaseRecovery.backupRestorePerformed == false
+    ' "$manual_recovery_file" >/dev/null \
+    || fail "manual recovery evidence is invalid or stale"
+  rollback_preflight="$(
+    printf '%s/%s/rollback-preflight.json' \
+      "$RELEASE_RECORD_ROOT" "$failed_release_sha"
+  )"
+  rollback_preflight_sha256="$(
+    sha256sum "$rollback_preflight" | awk '{print $1}'
+  )" || fail "rollback preflight is missing"
+  assert_root_file "$rollback_preflight"
+  jq -e \
+    --arg failed_release_sha "$failed_release_sha" \
+    --arg rollback_target_sha "$release_sha" \
+    --arg manual_recovery_sha256 "$manual_recovery_sha256" \
+    --arg rollback_preflight_sha256 "$rollback_preflight_sha256" \
+    --argjson current_version "$current_version" \
+    '
+      .schemaVersion == 1
+      and .failedReleaseSha == $failed_release_sha
+      and .rollbackTargetSha == $rollback_target_sha
+      and .manualRecoverySha256 == $manual_recovery_sha256
+      and .rollbackPreflightSha256 == $rollback_preflight_sha256
+      and .flywayCurrentVersion == $current_version
+      and .compatibility == "APPROVED_PREVIOUS_BACKEND_COMPATIBLE"
+      and (.approvedBy | type == "string")
+      and (.approvedBy | length >= 1 and length <= 64)
+      and (.approvedBy | explode | all(. >= 32 and . != 127))
+      and (.approvedAtUtc | test(
+        "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+      ))
+    ' "$rollback_approval_file" >/dev/null \
+    || fail "manual rollback approval is invalid or stale"
+fi
 
 failed_migrations="$(
   compose exec -T db sh -ec '
@@ -449,13 +1106,29 @@ compose exec -T db sh -ec '
   || fail "could not query applied Flyway migrations"
 
 expected_current_migrations="$work_dir/expected-current-migrations.txt"
-jq -r --argjson current_version "$current_version" '
-  .flyway.migrations[]
-  | select(.version <= $current_version)
-  | "\(.version)|\(.file)"
-' "$metadata" > "$expected_current_migrations"
-cmp -s "$database_migrations" "$expected_current_migrations" \
-  || fail "database Flyway history differs from release metadata"
+if [ "$recovery_mode" = false ]; then
+  jq -r --argjson current_version "$current_version" '
+    .flyway.migrations[]
+    | select(.version <= $current_version)
+    | "\(.version)|\(.file)"
+  ' "$metadata" > "$expected_current_migrations"
+  cmp -s "$database_migrations" "$expected_current_migrations" \
+    || fail "database Flyway history differs from release metadata"
+else
+  jq -r '
+    .flyway.migrations[]
+    | "\(.version)|\(.file)"
+  ' "$metadata" > "$expected_current_migrations"
+  awk -F '|' -v maximum="$latest_version" \
+    '$1 <= maximum { print }' \
+    "$database_migrations" > "$work_dir/rollback-database-prefix.txt"
+  cmp -s \
+    "$work_dir/rollback-database-prefix.txt" \
+    "$expected_current_migrations" \
+    || fail "current database is not a compatible extension of rollback metadata"
+  perform_approved_manual_rollback
+  exit 0
+fi
 
 # 14. 현재 DB보다 높은 migration만 deterministic JSON plan으로 기록한다.
 release_record_dir="$RELEASE_RECORD_ROOT/$release_sha"
@@ -596,7 +1269,7 @@ fi
 
 # 16. 기존 production stack을 기준으로 DB와 모든 영속 Volume을 backup한다.
 if backup_output="$(
-  ENV_FILE= \
+  ENV_FILE='' \
   RUNTIME_ENV_FILE="$RUNTIME_ENV_PATH" \
   IMAGE_ENV_FILE="$IMAGE_ENV_PATH" \
   COMPOSE_FILE="$COMPOSE_PATH" \
@@ -625,6 +1298,14 @@ esac
   sha256sum -c SHA256SUMS
 ) || fail "backup bundle checksum verification failed"
 
+# 승인·backup 동안 운영 DB 상태가 바뀌지 않았는지 전환 직전에 다시 고정한다.
+# 실패 handler는 이 값과 실패 직후 조회값을 비교한다.
+flyway_before_transition="$(query_flyway_version)" \
+  || fail "could not query Flyway immediately before image transition"
+[ "$flyway_before_transition" = "$current_version" ] \
+  || fail "Flyway changed before the approved image transition"
+current_version="$flyway_before_transition"
+
 # 17. 승인 때 고정한 current.sha를 previous.sha로 원자 기록한다. 기존 설치의
 # bootstrap state도 이 시점에만 생성한다.
 if [ "$current_sha_bootstrap" = true ]; then
@@ -635,6 +1316,9 @@ fi
 atomic_line "$PREVIOUS_SHA_PATH" "$current_sha" 0440
 
 # 18. 새 full-SHA image.env를 같은 filesystem에서 원자 교체한다.
+# 이 지점부터 실패하면 배포 직전/실패 직후 Flyway를 비교하여 A 또는 C
+# 정책을 반드시 실행한다.
+rollback_armed=true
 image_env_temp="$(mktemp "$DEPLOY_ROOT/.image.env.XXXXXX")"
 {
   printf 'BACKEND_IMAGE=%s\n' "$backend_image"
@@ -650,28 +1334,6 @@ compose config --quiet \
   || fail "updated fixed production Compose configuration is invalid"
 compose up --detach --no-build \
   || fail "production Compose update failed"
-
-wait_healthy() {
-  service="$1"
-  deadline="$(( $(date +%s) + HEALTH_TIMEOUT_SECONDS ))"
-  while [ "$(date +%s)" -lt "$deadline" ]
-  do
-    container_id="$(compose ps -q "$service")"
-    if [ -n "$container_id" ]; then
-      state="$(docker inspect --format '{{.State.Status}}' "$container_id")"
-      health="$(docker inspect \
-        --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
-        "$container_id")"
-      [ "$state" = running ] && [ "$health" = healthy ] \
-        && return 0
-      case "$state:$health" in
-        exited:*|dead:*|*:unhealthy) return 1 ;;
-      esac
-    fi
-    sleep 5
-  done
-  return 1
-}
 
 # 20. Backend container health와 readiness endpoint를 각각 확인한다.
 wait_healthy backend \
@@ -716,25 +1378,8 @@ printf '%s\n' "$mqtt_health" \
   || fail "Backend MQTT health is not UP"
 
 # 24. 적용 뒤 Flyway version과 전체 script 목록을 다시 metadata와 대조한다.
-applied_version="$(
-  compose exec -T db sh -ec '
-    export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
-    exec psql \
-      --host 127.0.0.1 \
-      --username "$POSTGRES_USER" \
-      --dbname "$POSTGRES_DB" \
-      --no-password \
-      --tuples-only \
-      --no-align \
-      --quiet \
-      --set ON_ERROR_STOP=1 \
-      --command "
-        SELECT COALESCE(MAX(version::integer), 0)
-        FROM flyway_history.flyway_schema_history
-        WHERE success;
-      "
-  ' | tr -d '[:space:]'
-)" || fail "could not query the applied Flyway version"
+applied_version="$(query_flyway_version)" \
+  || fail "could not query the applied Flyway version"
 [ "$applied_version" = "$latest_version" ] \
   || fail "applied Flyway version differs from release metadata"
 
@@ -845,6 +1490,7 @@ mv -T -- "$manifest_temp" "$manifest_path"
 
 # 26. 모든 검증과 manifest 기록이 끝난 성공 경로에서만 current.sha를 바꾼다.
 atomic_line "$CURRENT_SHA_PATH" "$release_sha" 0440
+rollback_armed=false
 
 echo "Production release manifest: $manifest_path"
 echo "Production deploy boundary: PASS ($release_sha)"
