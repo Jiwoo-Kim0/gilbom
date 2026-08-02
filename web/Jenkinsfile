@@ -388,7 +388,7 @@ pipeline {
             }
         }
 
-        stage('Flyway V1-V35') {
+        stage('Flyway V1-V37') {
             steps {
                 dir(env.APP_DIR) {
                     sh '''
@@ -398,15 +398,15 @@ pipeline {
                             psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
                                 --no-password --tuples-only --no-align --command "
                                     SELECT (
-                                        COUNT(*) = 35
+                                        COUNT(*) = 37
                                         AND MIN(version::INTEGER) = 1
-                                        AND MAX(version::INTEGER) = 35
+                                        AND MAX(version::INTEGER) = 37
                                         AND BOOL_AND(success)
                                     )::int
                                     FROM flyway_history.flyway_schema_history;
                                 "
                         ' | grep -qx 1
-                        sh scripts/record-ci-result.sh flyway-v1-v35
+                        sh scripts/record-ci-result.sh flyway-v1-v37
                     '''
                 }
             }

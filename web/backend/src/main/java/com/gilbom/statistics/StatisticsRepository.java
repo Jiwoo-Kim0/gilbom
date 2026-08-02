@@ -87,6 +87,7 @@ public class StatisticsRepository {
                   ON r.robot_id = mission.robot_id
                 WHERE
             """ + RobotScopeService.VISIBLE_ROBOT_PREDICATE + """
+                  AND mission.deleted_at IS NULL
                   AND mission.started_at >= :from
                   AND mission.started_at < :to
                   AND (
@@ -262,6 +263,7 @@ public class StatisticsRepository {
                   ON r.robot_id = mission.robot_id
                 WHERE
             """ + RobotScopeService.VISIBLE_ROBOT_PREDICATE + """
+                  AND mission.deleted_at IS NULL
                   AND mission.started_at >= :from
                   AND mission.started_at < :to
             ),

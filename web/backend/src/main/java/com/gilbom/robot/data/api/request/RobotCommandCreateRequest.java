@@ -24,7 +24,7 @@ public record RobotCommandCreateRequest(
                     hasText(parameters.missionId())
                             && hasText(parameters.zoneId())
                             && parameters.reason() == null;
-            case RESUME_MISSION ->
+            case RESUME_MISSION, COMPLETE_MISSION ->
                     parameters.missionId() == null
                             && parameters.zoneId() == null
                             && parameters.reason() == null;

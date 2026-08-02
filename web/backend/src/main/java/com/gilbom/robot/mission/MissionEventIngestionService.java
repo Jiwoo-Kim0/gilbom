@@ -85,6 +85,7 @@ public class MissionEventIngestionService {
                         FROM robot.mission
                         WHERE mission_id = ?
                           AND robot_id = ?
+                          AND deleted_at IS NULL
                         FOR UPDATE
                         """,
                 resultSet -> resultSet.next()

@@ -165,6 +165,7 @@ public class TelemetryIngestionService {
                         FROM robot.mission
                         WHERE mission_code = ?
                           AND robot_id = ?
+                          AND deleted_at IS NULL
                         """,
                 resultSet -> resultSet.next()
                         ? resultSet.getObject("mission_id", UUID.class)

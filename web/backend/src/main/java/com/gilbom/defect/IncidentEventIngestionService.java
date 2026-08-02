@@ -233,6 +233,7 @@ public class IncidentEventIngestionService
                             JOIN robot.patrol_area a
                               ON a.patrol_area_id = m.patrol_area_id
                             WHERE m.mission_id = ?
+                              AND m.deleted_at IS NULL
                             """,
                     resultSet -> resultSet.next()
                             ? new IncidentContext(

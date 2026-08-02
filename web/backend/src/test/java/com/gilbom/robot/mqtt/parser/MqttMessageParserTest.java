@@ -67,7 +67,7 @@ class MqttMessageParserTest {
                   },
                   "parameters": {
                     "mission_id": "MIS-20260726-001",
-                    "zone_id": "A-01"
+                    "zone_id": "똥방구 설사"
                   }
                 }
                 """;
@@ -82,6 +82,8 @@ class MqttMessageParserTest {
         CommandRequestPayload command = (CommandRequestPayload) parsed.payload();
         assertThat(command.parameters().missionId())
                 .isEqualTo("MIS-20260726-001");
+        assertThat(command.parameters().zoneId())
+                .isEqualTo("똥방구 설사");
     }
 
     @Test

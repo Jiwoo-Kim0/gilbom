@@ -220,12 +220,19 @@ public class RobotCommandCreationService {
             case START_MISSION -> resolveStartMissionTarget(robotId, request);
             case PAUSE_MISSION -> resolveActiveMissionTarget(
                     robotId,
+                    request.commandType(),
                     Set.of("RUNNING"));
             case RESUME_MISSION -> resolveActiveMissionTarget(
                     robotId,
+                    request.commandType(),
                     Set.of("PAUSED"));
+            case COMPLETE_MISSION -> resolveActiveMissionTarget(
+                    robotId,
+                    request.commandType(),
+                    Set.of("RUNNING"));
             case CANCEL_MISSION -> resolveActiveMissionTarget(
                     robotId,
+                    request.commandType(),
                     Set.of("READY", "RUNNING", "PAUSED"));
             case EMERGENCY_STOP, CLEAR_EMERGENCY_STOP -> null;
         };
@@ -245,6 +252,7 @@ public class RobotCommandCreationService {
                           ON a.patrol_area_id = m.patrol_area_id
                         WHERE m.mission_code = ?
                           AND m.robot_id = ?
+                          AND m.deleted_at IS NULL
                           AND m.status IN ('CREATED', 'READY')
                         """,
                 resultSet -> resultSet.next()
@@ -272,6 +280,7 @@ public class RobotCommandCreationService {
 
     private MissionCommandTarget resolveActiveMissionTarget(
             UUID robotId,
+            CommandRequestPayload.CommandType commandType,
             Set<String> allowedStatuses
     ) {
         String statusPlaceholders = String.join(
@@ -293,6 +302,7 @@ public class RobotCommandCreationService {
                         JOIN robot.patrol_area a
                           ON a.patrol_area_id = m.patrol_area_id
                         WHERE m.robot_id = ?
+                          AND m.deleted_at IS NULL
                           AND m.status IN (%s)
                         ORDER BY m.updated_at DESC, m.mission_id
                         LIMIT 1
@@ -309,9 +319,51 @@ public class RobotCommandCreationService {
                         : null,
                 arguments);
         if (target == null) {
+            String currentStatus = jdbcTemplate.query("""
+                            SELECT status
+                            FROM robot.mission
+                            WHERE robot_id = ?
+                              AND deleted_at IS NULL
+                              AND status IN (
+                                  'CREATED',
+                                  'READY',
+                                  'RUNNING',
+                                  'PAUSED'
+                              )
+                            ORDER BY updated_at DESC, mission_id
+                            LIMIT 1
+                            """,
+                    resultSet -> resultSet.next()
+                            ? resultSet.getString("status")
+                            : null,
+                    robotId);
+            if (currentStatus != null) {
+                throw new BusinessException(
+                        ErrorCode.MISSION_STATE_CONFLICT,
+                        missionStateConflictMessage(
+                                commandType,
+                                currentStatus));
+            }
             throw new BusinessException(ErrorCode.MISSION_NOT_FOUND);
         }
         return target;
+    }
+
+    private static String missionStateConflictMessage(
+            CommandRequestPayload.CommandType commandType,
+            String currentStatus
+    ) {
+        return switch (commandType) {
+            case PAUSE_MISSION -> "현재 임무는 " + currentStatus
+                    + " 상태입니다. RUNNING 임무만 일시정지할 수 있습니다.";
+            case RESUME_MISSION -> "현재 임무는 " + currentStatus
+                    + " 상태입니다. PAUSED 임무만 재개할 수 있습니다.";
+            case COMPLETE_MISSION -> "현재 임무는 " + currentStatus
+                    + " 상태입니다. PAUSED 상태라면 먼저 재개한 뒤 완료해주세요.";
+            case CANCEL_MISSION -> "현재 임무는 " + currentStatus
+                    + " 상태입니다. READY·RUNNING·PAUSED 임무만 취소할 수 있습니다.";
+            default -> ErrorCode.MISSION_STATE_CONFLICT.defaultMessage();
+        };
     }
 
     private RobotCommandRecord replayOrReject(
@@ -429,6 +481,7 @@ public class RobotCommandCreationService {
             case EMERGENCY_STOP -> Duration.ofSeconds(10);
             case PAUSE_MISSION,
                     RESUME_MISSION,
+                    COMPLETE_MISSION,
                     CANCEL_MISSION,
                     CLEAR_EMERGENCY_STOP -> Duration.ofSeconds(30);
             case START_MISSION -> Duration.ofSeconds(60);

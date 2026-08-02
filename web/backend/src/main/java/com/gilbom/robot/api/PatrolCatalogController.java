@@ -3,6 +3,7 @@ package com.gilbom.robot.api;
 import java.net.URI;
 import java.util.UUID;
 
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -12,10 +13,12 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.gilbom.audit.AuditRequestContext;
 import com.gilbom.auth.AuthenticatedUserIdResolver;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaCodeAvailabilityResponse;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaCreateRequest;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaListResponse;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaResponse;
@@ -30,6 +33,8 @@ import com.gilbom.robot.mission.PatrolRouteManagementService;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 @RestController
 @RequestMapping("/api/v1/patrol-areas")
@@ -74,6 +79,20 @@ public class PatrolCatalogController {
     @PreAuthorize("hasAuthority('MISSION_VIEW')")
     public PatrolAreaListResponse findAreas() {
         return queryService.findAreas();
+    }
+
+    @GetMapping("/code-availability")
+    @PreAuthorize("hasAuthority('MISSION_MANAGE')")
+    public ResponseEntity<PatrolAreaCodeAvailabilityResponse>
+            checkAreaCodeAvailability(
+                    @RequestParam
+                    @NotBlank
+                    @Size(max = 50)
+                    String areaCode
+            ) {
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(queryService.checkAreaCodeAvailability(areaCode));
     }
 
     @GetMapping("/{patrolAreaId}")

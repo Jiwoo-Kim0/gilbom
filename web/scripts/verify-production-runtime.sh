@@ -188,7 +188,7 @@ docker exec "$mqtt_id" /bin/sh -ec '
   done
 '
 
-# 빈 volume에 적용된 PostGIS, Flyway V1~V35, 승인된 시스템 seed와
+# 빈 volume에 적용된 PostGIS, Flyway V1~V37, 승인된 시스템 seed와
 # runtime DB role의 최소 권한을 실제 PostgreSQL parser/권한으로 검증한다.
 compose exec -T db /bin/sh -ec '
   export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"

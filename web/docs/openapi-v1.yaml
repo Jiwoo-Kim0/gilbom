@@ -2283,6 +2283,8 @@ paths:
         명령과 감사 로그를 먼저 같은 트랜잭션에 저장한 다음 MQTT로 발행합니다.
         발행 성공은 SENT, Broker 전달 실패는 PUBLISH_FAILED로 응답합니다.
         같은 사용자와 Idempotency-Key의 동일 요청은 기존 commandId를 반환하고 다시 발행하지 않습니다.
+        Mission 명령의 현재 상태가 명령 전제조건과 다르면 MISSION_STATE_CONFLICT를 반환합니다.
+        COMPLETE_MISSION은 RUNNING에서만 허용하며 PAUSED에서는 재개 후 다시 요청해야 합니다.
       x-required-permission: ROBOT_COMMAND_EXECUTE
       security:
         - serverSession: []
@@ -2439,6 +2441,38 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PatrolAreaListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/patrol-areas/code-availability:
+    get:
+      tags: [Missions]
+      operationId: checkPatrolAreaCodeAvailability
+      summary: 순찰 구역 코드 중복 조회
+      description: 입력값 앞뒤 공백을 제거한 뒤 현재 등록된 areaCode와 정확히 비교한다.
+      x-required-permission: MISSION_MANAGE
+      security:
+        - serverSession: []
+      parameters:
+        - name: areaCode
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 50
+          example: 똥방구 설사
+      responses:
+        "200":
+          description: 정규화된 코드와 사용 가능 여부
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatrolAreaCodeAvailabilityResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -2688,6 +2722,16 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: scope
+          in: query
+          description: |
+            Mission 목록 범위. ACTIVE는 CREATED·READY·RUNNING·PAUSED,
+            TERMINAL은 COMPLETED·CANCELLED·FAILED를 조회합니다.
+            status가 있으면 상세 상태 조건이 우선합니다.
+          schema:
+            type: string
+            enum: [ACTIVE, TERMINAL, ALL]
+            default: ALL
         - name: status
           in: query
           schema:
@@ -2826,11 +2870,12 @@ paths:
     delete:
       tags: [Missions]
       operationId: deleteMission
-      summary: 시작 전 CREATED Mission 삭제
+      summary: CREATED 또는 종료 Mission 삭제
       description: |
-        대상 Robot OWNER만 삭제할 수 있습니다. 상태 전이·Telemetry·Event·Command
-        이력이 없는 CREATED Mission과 생성 상태 이력만 삭제하며 READY 이후 상태는
-        이력 보존을 위해 삭제할 수 없습니다.
+        대상 Robot OWNER만 삭제할 수 있습니다. 이력이 없는 CREATED Mission은
+        초기 상태 이력과 함께 물리 삭제합니다. COMPLETED·CANCELLED·FAILED Mission은
+        Telemetry·Event·Command·상태 이력을 보존한 채 목록에서 논리 삭제합니다.
+        READY·RUNNING·PAUSED Mission은 먼저 종료해야 합니다.
       x-required-permission: MISSION_MANAGE
       security:
         - serverSession: []
@@ -4623,6 +4668,7 @@ components:
         - serialNumber
         - operationalStatus
         - connectivityStatus
+        - missionAssignable
         - overallHealthStatus
       additionalProperties: false
       properties:
@@ -4667,6 +4713,12 @@ components:
         missionStatus:
           type: string
           nullable: true
+        missionAssignable:
+          type: boolean
+          description: |
+            DB에 CREATED·READY·RUNNING·PAUSED Mission이 없어 새 Mission을
+            배정할 수 있으면 true입니다. 로봇이 마지막으로 보고한 missionStatus와
+            별도로 서버 Mission 정본에서 계산합니다.
         overallHealthStatus:
           type: string
           enum: [OK, WARNING, CRITICAL, UNKNOWN]
@@ -5266,6 +5318,18 @@ components:
         updatedAt:
           type: string
           format: date-time
+
+    PatrolAreaCodeAvailabilityResponse:
+      type: object
+      required: [areaCode, available]
+      additionalProperties: false
+      properties:
+        areaCode:
+          type: string
+          description: 앞뒤 공백을 제거한 순찰 구역 업무 코드
+        available:
+          type: boolean
+          description: 등록된 동일 areaCode가 없으면 true
 
     PatrolAreaUpdateRequest:
       type: object
@@ -6239,7 +6303,7 @@ components:
           minimum: 0.0
         zoneId:
           type: string
-          pattern: "^[A-Z]-[0-9]{2}$"
+          description: 순찰 구역의 업무 코드를 해석하지 않고 그대로 사용합니다.
         locationLabel:
           type: string
           maxLength: 200
@@ -6769,6 +6833,7 @@ components:
         - START_MISSION
         - PAUSE_MISSION
         - RESUME_MISSION
+        - COMPLETE_MISSION
         - CANCEL_MISSION
         - EMERGENCY_STOP
         - CLEAR_EMERGENCY_STOP
@@ -6813,7 +6878,7 @@ components:
           $ref: "#/components/schemas/RobotCommandParameters"
       description: |
         START_MISSION은 missionId와 zoneId가 필수입니다.
-        RESUME_MISSION은 빈 parameters 객체를 사용합니다.
+        RESUME_MISSION과 COMPLETE_MISSION은 빈 parameters 객체를 사용합니다.
         나머지 명령은 reason이 필수입니다.
 
     RobotCommandResponse:

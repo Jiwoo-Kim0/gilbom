@@ -254,6 +254,47 @@ class RobotQueryScopeIntegrationTest {
                         && event.observedAt().equals(sampledAt)));
     }
 
+    @Test
+    void prefersManagedMissionStatusOverStaleTelemetryAndHidesArchivedStatus() {
+        UUID missionId = createCompletedMission(ASSIGNED_ROBOT_ID);
+        jdbcTemplate.update("""
+                UPDATE telemetry.robot_current_state
+                SET mission_status = 'RUNNING'
+                WHERE robot_id = ?
+                """,
+                ASSIGNED_ROBOT_ID);
+
+        assertThat(queryService.findRobots(
+                VIEWER_USER_ID,
+                0,
+                100,
+                null).content().getFirst().missionStatus())
+                .isEqualTo("COMPLETED");
+        assertThat(queryService.findMapRobots(VIEWER_USER_ID)
+                .robots().getFirst().missionStatus())
+                .isEqualTo("COMPLETED");
+        assertThat(queryService.findRobot(
+                VIEWER_USER_ID,
+                ASSIGNED_ROBOT_ID).missionStatus())
+                .isEqualTo("COMPLETED");
+
+        jdbcTemplate.update("""
+                UPDATE robot.mission
+                SET deleted_at = NOW(),
+                    deleted_by = ?,
+                    updated_by = ?,
+                    updated_at = NOW()
+                WHERE mission_id = ?
+                """,
+                ADMIN_USER_ID,
+                ADMIN_USER_ID,
+                missionId);
+
+        assertThat(queryService.findRobot(
+                VIEWER_USER_ID,
+                ASSIGNED_ROBOT_ID).missionStatus()).isNull();
+    }
+
     private void createUser(UUID userId, String suffix) {
         jdbcTemplate.update("""
                 INSERT INTO auth.admin_user (
@@ -408,6 +449,107 @@ class RobotQueryScopeIntegrationTest {
                 userId,
                 robotId,
                 ADMIN_USER_ID);
+    }
+
+    private UUID createCompletedMission(UUID robotId) {
+        UUID areaId = UUID.randomUUID();
+        UUID routeId = UUID.randomUUID();
+        UUID missionId = UUID.randomUUID();
+        jdbcTemplate.update("""
+                INSERT INTO robot.patrol_area (
+                    patrol_area_id,
+                    area_code,
+                    area_name,
+                    boundary,
+                    lifecycle_status,
+                    created_by,
+                    updated_by
+                ) VALUES (
+                    ?,
+                    ?,
+                    'Query Area',
+                    ST_MakeEnvelope(127, 37, 127.01, 37.01, 4326),
+                    'ACTIVE',
+                    ?,
+                    ?
+                )
+                """,
+                areaId,
+                "QUERY-" + areaId.toString().substring(0, 8),
+                ADMIN_USER_ID,
+                ADMIN_USER_ID);
+        jdbcTemplate.update("""
+                INSERT INTO robot.patrol_route (
+                    patrol_route_id,
+                    patrol_area_id,
+                    route_code,
+                    route_name,
+                    route_version,
+                    route_geometry,
+                    lifecycle_status,
+                    created_by,
+                    updated_by
+                ) VALUES (
+                    ?,
+                    ?,
+                    ?,
+                    'Query Route',
+                    1,
+                    ST_GeomFromText(
+                        'LINESTRING(127.001 37.001,127.009 37.009)',
+                        4326
+                    ),
+                    'ACTIVE',
+                    ?,
+                    ?
+                )
+                """,
+                routeId,
+                areaId,
+                "QUERY-ROUTE-" + routeId.toString().substring(0, 8),
+                ADMIN_USER_ID,
+                ADMIN_USER_ID);
+        jdbcTemplate.update("""
+                INSERT INTO robot.mission (
+                    mission_id,
+                    mission_code,
+                    robot_id,
+                    patrol_area_id,
+                    patrol_route_id,
+                    status,
+                    started_at,
+                    ended_at,
+                    progress_percent,
+                    completion_reason,
+                    created_by,
+                    updated_by,
+                    created_at,
+                    updated_at
+                ) VALUES (
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    'COMPLETED',
+                    NOW() - INTERVAL '1 hour',
+                    NOW(),
+                    100,
+                    'PLANNED_DURATION_ELAPSED',
+                    ?,
+                    ?,
+                    NOW() - INTERVAL '2 hours',
+                    NOW()
+                )
+                """,
+                missionId,
+                "MIS-" + missionId,
+                robotId,
+                areaId,
+                routeId,
+                ADMIN_USER_ID,
+                ADMIN_USER_ID);
+        return missionId;
     }
 
     @SpringBootConfiguration

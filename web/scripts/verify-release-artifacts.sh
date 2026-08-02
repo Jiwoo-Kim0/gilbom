@@ -49,7 +49,7 @@ jq -e \
     and .images.backend.name == $backend
     and .images.frontend.name == $frontend
     and (.tests | to_entries | all(.value == "PASS"))
-    and .flyway.latestVersion == "V35"
+    and .flyway.latestVersion == "V37"
     and .artifacts.images.path == "images.tar.zst"
   ' "$RELEASE_DIR/build-metadata.json" >/dev/null \
   || fail "build metadata contract is invalid"

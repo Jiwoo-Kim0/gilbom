@@ -31,11 +31,13 @@ import com.gilbom.auth.session.AuthenticationSessionConfiguration;
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionCreateRequest;
+import com.gilbom.robot.data.api.response.MissionDtos.MissionListScope;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionMapResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionStatus;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionUpdateRequest;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaCreateRequest;
+import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaCodeAvailabilityResponse;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaLifecycleStatus;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaResponse;
 import com.gilbom.robot.data.api.response.PatrolCatalogDtos.PatrolAreaStatusChangeRequest;
@@ -246,6 +248,7 @@ class MissionManagementIntegrationTest {
                 robotId,
                 areaId,
                 routeId,
+                MissionListScope.ALL,
                 MissionStatus.READY,
                 null,
                 null).content())
@@ -475,6 +478,113 @@ class MissionManagementIntegrationTest {
                 """,
                 Integer.class,
                 created.missionId())).isOne();
+    }
+
+    @Test
+    void softDeletesCompletedMissionButPreservesExecutionHistory() {
+        MissionResponse running = createRunningMission(
+                60,
+                Instant.parse("2026-08-02T03:00:00Z"));
+        jdbcTemplate.update("""
+                UPDATE robot.mission
+                SET status = 'COMPLETED',
+                    ended_at = started_at + INTERVAL '60 seconds',
+                    progress_percent = 100,
+                    completion_reason = 'ROUTE_COMPLETED',
+                    result_duration_sec = 60
+                WHERE mission_id = ?
+                """,
+                running.missionId());
+        jdbcTemplate.update("""
+                INSERT INTO robot.mission_status_history (
+                    mission_id,
+                    transition_source,
+                    before_status,
+                    after_status,
+                    transition_reason,
+                    occurred_at,
+                    received_at
+                )
+                SELECT
+                    mission_id,
+                    'SYSTEM',
+                    'RUNNING',
+                    'COMPLETED',
+                    'ROUTE_COMPLETED',
+                    ended_at,
+                    ended_at
+                FROM robot.mission
+                WHERE mission_id = ?
+                """,
+                running.missionId());
+
+        assertThat(queryService.findMissions(
+                OWNER_ID,
+                0,
+                20,
+                robotId,
+                areaId,
+                routeId,
+                MissionListScope.TERMINAL,
+                null,
+                null,
+                null).content())
+                .extracting(MissionResponse::missionId)
+                .contains(running.missionId());
+        assertThat(queryService.findMissions(
+                OWNER_ID,
+                0,
+                20,
+                robotId,
+                areaId,
+                routeId,
+                MissionListScope.ACTIVE,
+                null,
+                null,
+                null).content())
+                .extracting(MissionResponse::missionId)
+                .doesNotContain(running.missionId());
+
+        managementService.delete(
+                running.missionId(),
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID()));
+
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM robot.mission
+                WHERE mission_id = ?
+                  AND status = 'COMPLETED'
+                  AND deleted_at IS NOT NULL
+                  AND deleted_by = ?
+                """,
+                Integer.class,
+                running.missionId(),
+                OWNER_ID)).isOne();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM robot.mission_status_history
+                WHERE mission_id = ?
+                """,
+                Integer.class,
+                running.missionId())).isGreaterThanOrEqualTo(3);
+        assertThatThrownBy(() -> queryService.findMission(
+                OWNER_ID,
+                running.missionId()))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(ErrorCode.MISSION_NOT_FOUND));
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM audit.audit_log
+                WHERE target_id = ?
+                  AND action_type = 'MISSION_DELETED'
+                  AND before_value ->> 'status' = 'COMPLETED'
+                  AND after_value IS NULL
+                """,
+                Integer.class,
+                running.missionId())).isOne();
     }
 
     @Test
@@ -785,6 +895,43 @@ class MissionManagementIntegrationTest {
                         exception -> assertThat(exception.errorCode())
                                 .isEqualTo(
                                         ErrorCode.PATROL_AREA_GEOMETRY_INVALID));
+    }
+
+    @Test
+    void checksOpaquePatrolAreaCodeAvailability() throws Exception {
+        String areaCode = "똥방구 설사";
+
+        PatrolAreaCodeAvailabilityResponse before =
+                patrolCatalogQueryService.checkAreaCodeAvailability(
+                        " " + areaCode + " ");
+        assertThat(before.areaCode()).isEqualTo(areaCode);
+        assertThat(before.available()).isTrue();
+
+        patrolAreaManagementService.create(
+                new PatrolAreaCreateRequest(
+                        areaCode,
+                        "한글 공백 코드 구역",
+                        objectMapper.readTree("""
+                                {
+                                  "type": "Polygon",
+                                  "coordinates": [
+                                    [
+                                      [127.00, 37.00],
+                                      [127.02, 37.00],
+                                      [127.02, 37.02],
+                                      [127.00, 37.00]
+                                    ]
+                                  ]
+                                }
+                                """),
+                        null),
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID()));
+
+        PatrolAreaCodeAvailabilityResponse after =
+                patrolCatalogQueryService.checkAreaCodeAvailability(areaCode);
+        assertThat(after.areaCode()).isEqualTo(areaCode);
+        assertThat(after.available()).isFalse();
     }
 
     @Test
@@ -1358,6 +1505,64 @@ class MissionManagementIntegrationTest {
                 userCode,
                 userCode,
                 userCode.toLowerCase() + "@example.test");
+    }
+
+    private MissionResponse createRunningMission(
+            int plannedDurationSec,
+            Instant startedAt
+    ) {
+        MissionResponse created = managementService.create(
+                new MissionCreateRequest(
+                        robotId,
+                        areaId,
+                        routeId,
+                        plannedDurationSec,
+                        null),
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID()));
+        managementService.update(
+                created.missionId(),
+                new MissionUpdateRequest(
+                        null,
+                        null,
+                        null,
+                        null,
+                        MissionStatus.READY,
+                        null),
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID()));
+        jdbcTemplate.update("""
+                UPDATE robot.mission
+                SET status = 'RUNNING',
+                    started_at = ?,
+                    updated_at = GREATEST(updated_at, ?)
+                WHERE mission_id = ?
+                """,
+                java.time.OffsetDateTime.ofInstant(
+                        startedAt,
+                        java.time.ZoneOffset.UTC),
+                java.time.OffsetDateTime.ofInstant(
+                        startedAt,
+                        java.time.ZoneOffset.UTC),
+                created.missionId());
+        jdbcTemplate.update("""
+                INSERT INTO robot.mission_status_history (
+                    mission_id,
+                    transition_source,
+                    before_status,
+                    after_status,
+                    occurred_at,
+                    received_at
+                ) VALUES (?, 'SYSTEM', 'READY', 'RUNNING', ?, ?)
+                """,
+                created.missionId(),
+                java.time.OffsetDateTime.ofInstant(
+                        startedAt,
+                        java.time.ZoneOffset.UTC),
+                java.time.OffsetDateTime.ofInstant(
+                        startedAt,
+                        java.time.ZoneOffset.UTC));
+        return queryService.findMission(OWNER_ID, created.missionId());
     }
 
     @SpringBootConfiguration

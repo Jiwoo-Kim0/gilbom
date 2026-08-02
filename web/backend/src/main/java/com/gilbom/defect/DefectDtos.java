@@ -14,7 +14,6 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 /**
@@ -284,7 +283,6 @@ public final class DefectDtos {
             @DecimalMin("0.0")
             Double locationAccuracyM,
 
-            @Pattern(regexp = "^[A-Z]-[0-9]{2}$")
             String zoneId,
 
             @Size(max = 200)
