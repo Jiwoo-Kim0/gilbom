@@ -271,8 +271,46 @@ pipeline {
             script {
                 if (env.APP_DIR) {
                     dir(env.APP_DIR) {
+                        script {
+                            env.CICD_BUILD_RESULT = currentBuild.currentResult ? currentBuild.currentResult : 'NOT_BUILT'
+                        }
+                        sh '''
+                            set -eu
+                            python3 scripts/generate-cicd-notification.py \
+                                --pipeline deploy \
+                                --result "$CICD_BUILD_RESULT"
+                        '''
+                        script {
+                            try {
+                                withCredentials([
+                                    string(
+                                            credentialsId: 'gilbom-mattermost-webhook',
+                                            variable: 'MATTERMOST_WEBHOOK_URL'
+                                    )
+                                ]) {
+                                    sh '''
+                                        set +x
+                                        python3 \
+                                            scripts/send-mattermost-notification.py \
+                                            .artifacts/cicd-notification/mattermost-payload.json
+                                    '''
+                                }
+                                writeFile(
+                                        file: '.artifacts/cicd-notification/delivery.status',
+                                        text: 'PASS\n'
+                                )
+                            } catch (Exception ignored) {
+                                echo 'Mattermost notification skipped: configure '
+                                        + 'gilbom-mattermost-webhook or check delivery'
+                                writeFile(
+                                        file: '.artifacts/cicd-notification/delivery.status',
+                                        text: 'SKIPPED\n'
+                                )
+                            }
+                        }
                         archiveArtifacts(
-                                artifacts: '.artifacts/deploy/**',
+                                artifacts: '.artifacts/deploy/**,'
+                                        + '.artifacts/cicd-notification/**',
                                 allowEmptyArchive: true,
                                 fingerprint: true
                         )

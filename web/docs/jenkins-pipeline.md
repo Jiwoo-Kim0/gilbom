@@ -254,8 +254,15 @@ SHA는 양쪽 manifest와 실제 내용이 완전히 같을 때만 재사용한�
 EC2 설치와 Jenkins Credential ID는
 [`ci-artifact-promotion.md`](ci-artifact-promotion.md)에 고정한다.
 
-## 의도적으로 남긴 다음 단계
+## Stage 15 SCM Polling과 결과 알림
 
-- GitLab webhook 또는 multibranch pipeline 연결
-- Container Registry 주소·Credential 확정 후 push stage 추가
-- 승격된 Artifact를 사용하는 production deploy stage 추가
+`Jenkinsfile`은 `pollSCM('H/5 * * * *')`로 `gilbom-ci`의 SCM 변경만 감지한다.
+운영 배포·조건부 Rollback·격리 Rollback 훈련 Job에는 Trigger가 없으며,
+배포와 Rollback은 full SHA parameter와 Jenkins 인증 사용자 승인을 계속 요구한다.
+
+네 Pipeline은 결과 요약, 첫 미완료 gate, 재현 명령, 인증된 Jenkins console과
+Artifact 링크를 만들고 `gilbom-mattermost-webhook` Secret Text Credential로
+Mattermost에 전송한다. 성공 CI의 마지막 gate는 Jenkins console을 Gitleaks와
+exact ephemeral Secret 대조로 검사한다. 설정, 최소 읽기 권한과 9~14단계 최종
+증거 결합 절차는 [`stage15-cicd-operations.md`](stage15-cicd-operations.md)를
+따른다.

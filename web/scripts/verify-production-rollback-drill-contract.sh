@@ -48,7 +48,7 @@ assert_contains Jenkinsfile.rollback-drill \
   "Jenkins drill evidence is not archived"
 
 if grep -Eq \
-    'withCredentials|credentialsId|sshUserPrivateKey|i15d101[.]p[.]ssafy[.]io' \
+    'gilbom-(artifact-upload-ssh|production-deploy|artifact-known-hosts)|sshUserPrivateKey|i15d101[.]p[.]ssafy[.]io' \
     Jenkinsfile.rollback-drill; then
   fail "rollback drill Jenkins Job references production access"
 fi

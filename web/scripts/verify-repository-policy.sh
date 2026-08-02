@@ -36,6 +36,7 @@ sh scripts/verify-production-deploy-contract.sh
 sh scripts/verify-production-deploy-job-contract.sh
 sh scripts/verify-production-rollback-contract.sh
 sh scripts/verify-production-rollback-drill-contract.sh
+sh scripts/verify-stage15-cicd-operations-contract.sh
 sh scripts/test-run-frontend-ci-task.sh
 sh scripts/test-scan-image-security.sh
 sh scripts/verify-frontend-csp-source.sh
