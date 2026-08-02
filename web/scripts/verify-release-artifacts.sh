@@ -49,7 +49,14 @@ jq -e \
     and .images.backend.name == $backend
     and .images.frontend.name == $frontend
     and (.tests | to_entries | all(.value == "PASS"))
-    and .flyway.latestVersion == "V37"
+    and .flyway.latestVersion == "V38"
+    and (.flyway.migrations | length == 38)
+    and all(
+      .flyway.migrations[];
+      (.version | type == "number")
+      and (.file | test("^V[1-9][0-9]*__[A-Za-z0-9_]+[.]sql$"))
+      and (.sha256 | test("^[0-9a-f]{64}$"))
+    )
     and .artifacts.images.path == "images.tar.zst"
   ' "$RELEASE_DIR/build-metadata.json" >/dev/null \
   || fail "build metadata contract is invalid"

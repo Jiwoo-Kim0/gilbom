@@ -61,6 +61,18 @@ do
   [ "$(stat -c '%U:%G:%a' "$root_file")" = root:root:755 ] \
     || fail "root command ownership or mode is invalid: $root_file"
 done
+[ "$(stat -c '%U:%G:%a' /usr/local/sbin/gilbom-approve-migrations)" \
+    = root:root:750 ] \
+  || fail "migration approval command ownership or mode is invalid"
+for root_directory in \
+  /opt/gilbom/migration-approvals \
+  /opt/gilbom/rollback-approvals \
+  /var/lib/gilbom/releases \
+  /run/gilbom-deploy
+do
+  [ "$(stat -c '%U:%G:%a' "$root_directory")" = root:root:700 ] \
+    || fail "root deployment directory ownership or mode is invalid: $root_directory"
+done
 [ "$(stat -c '%U:%G:%a' /etc/sudoers.d/gilbom-production-deploy)" \
     = root:root:440 ] \
   || fail "deploy sudoers ownership or mode is invalid"

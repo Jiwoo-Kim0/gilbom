@@ -512,7 +512,7 @@ def test_incident_without_damage_ratio_omits_attributes(factory):
     "kwargs",
     [
         {"block_type": "STRIPE"},
-        {"defect_type": "CONTAMINATED"},  # 예약 값 — MVP 는 발행하지 않는다
+        {"defect_type": "UNKNOWN_ANOMALY"},  # 예약 값 — MVP 는 발행하지 않는다
         {"confidence": 1.4},
         {"bbox_norm": [0.1, 0.2, 0.3]},
         {"bbox_norm": [0.9, 0.2, 0.3, 0.4]},

@@ -116,3 +116,6 @@ Production deploy account verification: PASS
 
 Stage 10은 계정과 권한 경계를 준비하는 단계다. Jenkins production deploy
 stage 연결과 실제 SHA 배포 승인은 별도 변경으로 진행한다.
+
+Stage 11 root 진입점 설치·migration 승인·release manifest 계약은
+[production-root-deploy.md](production-root-deploy.md)를 따른다.

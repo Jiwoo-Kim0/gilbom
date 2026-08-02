@@ -1,6 +1,12 @@
 pipeline {
     agent any
 
+    // Stage 15: source 변경 감지는 CI Job에만 둔다. 운영 배포·Rollback은
+    // full SHA 입력과 인증 사용자 승인 없이는 시작되지 않는다.
+    triggers {
+        pollSCM('H/5 * * * *')
+    }
+
     options {
         disableConcurrentBuilds(abortPrevious: true)
         skipDefaultCheckout(true)
@@ -88,6 +94,9 @@ pipeline {
                                     .take(63)
                     )
                 }
+                dir(env.APP_DIR) {
+                    sh 'sh scripts/record-ci-result.sh checkout-full'
+                }
             }
         }
 
@@ -101,6 +110,7 @@ pipeline {
                         SECURITY_WORK_ROOT=.artifacts/security-work \
                             sh scripts/verify-source-security.sh reset
                         sh scripts/verify-repository-policy.sh
+                        sh scripts/record-ci-result.sh repository-policy
                     '''
                 }
             }
@@ -113,6 +123,7 @@ pipeline {
                         SOURCE_SECURITY_OUTPUT_DIR=.artifacts/source-security \
                         SECURITY_WORK_ROOT=.artifacts/security-work \
                             sh scripts/verify-source-security.sh history
+                        sh scripts/record-ci-result.sh git-history-secret
                     '''
                 }
             }
@@ -125,6 +136,7 @@ pipeline {
                         SOURCE_SECURITY_OUTPUT_DIR=.artifacts/source-security \
                         SECURITY_WORK_ROOT=.artifacts/security-work \
                             sh scripts/verify-source-security.sh workspace
+                        sh scripts/record-ci-result.sh workspace-secret
                     '''
                 }
             }
@@ -133,7 +145,11 @@ pipeline {
         stage('Secret boundary') {
             steps {
                 dir(env.APP_DIR) {
-                    sh 'sh scripts/verify-secret-boundary.sh'
+                    sh '''
+                        set -eu
+                        sh scripts/verify-secret-boundary.sh
+                        sh scripts/record-ci-result.sh secret-boundary
+                    '''
                 }
             }
         }
@@ -141,7 +157,11 @@ pipeline {
         stage('Supported runtime versions') {
             steps {
                 dir(env.APP_DIR) {
-                    sh 'sh scripts/verify-supported-versions.sh'
+                    sh '''
+                        set -eu
+                        sh scripts/verify-supported-versions.sh
+                        sh scripts/record-ci-result.sh supported-runtime
+                    '''
                 }
             }
         }
@@ -153,6 +173,7 @@ pipeline {
                         set -eu
                         docker compose config --quiet
                         sh scripts/verify-production-compose.sh
+                        sh scripts/record-ci-result.sh production-compose
                     '''
                 }
             }
@@ -165,6 +186,7 @@ pipeline {
                         SOURCE_SECURITY_OUTPUT_DIR=.artifacts/source-security \
                         SECURITY_WORK_ROOT=.artifacts/security-work \
                             sh scripts/verify-source-security.sh openapi
+                        sh scripts/record-ci-result.sh openapi-lint
                     '''
                 }
             }
@@ -177,6 +199,7 @@ pipeline {
                         SOURCE_SECURITY_OUTPUT_DIR=.artifacts/source-security \
                         SECURITY_WORK_ROOT=.artifacts/security-work \
                             sh scripts/verify-source-security.sh backend-dependencies
+                        sh scripts/record-ci-result.sh backend-dependency-scan
                     '''
                 }
             }
@@ -193,6 +216,7 @@ pipeline {
                         SOURCE_SECURITY_OUTPUT_DIR=.artifacts/source-security \
                         SECURITY_WORK_ROOT=.artifacts/security-work \
                             sh scripts/verify-source-security.sh dependency-policy
+                        sh scripts/record-ci-result.sh frontend-dependency-scan
                     '''
                 }
             }
@@ -206,6 +230,7 @@ pipeline {
                         IMAGE_SECURITY_OUTPUT_DIR=.artifacts/image-security \
                         IMAGE_SECURITY_WORK_ROOT=.artifacts/image-security-work \
                             sh scripts/scan-image-security.sh prepare
+                        sh scripts/record-ci-result.sh image-scanner-readiness
                     '''
                 }
             }
@@ -235,6 +260,7 @@ pipeline {
                             SSH_PORT="$artifact_port" \
                                 sh scripts/verify-ci-artifact-remote-readiness.sh \
                                     "$ARTIFACT_SSH_USER@$artifact_host"
+                            sh scripts/record-ci-result.sh artifact-transfer-readiness
                         '''
                     }
                 }
@@ -383,12 +409,13 @@ pipeline {
                     sh '''
                         set -eu
                         docker compose up --detach --no-build --wait --wait-timeout 180
+                        sh scripts/record-ci-result.sh integration-stack-start
                     '''
                 }
             }
         }
 
-        stage('Flyway V1-V37') {
+        stage('Flyway V1-V38') {
             steps {
                 dir(env.APP_DIR) {
                     sh '''
@@ -398,15 +425,15 @@ pipeline {
                             psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
                                 --no-password --tuples-only --no-align --command "
                                     SELECT (
-                                        COUNT(*) = 37
+                                        COUNT(*) = 38
                                         AND MIN(version::INTEGER) = 1
-                                        AND MAX(version::INTEGER) = 37
+                                        AND MAX(version::INTEGER) = 38
                                         AND BOOL_AND(success)
                                     )::int
                                     FROM flyway_history.flyway_schema_history;
                                 "
                         ' | grep -qx 1
-                        sh scripts/record-ci-result.sh flyway-v1-v37
+                        sh scripts/record-ci-result.sh flyway-v1-v38
                     '''
                 }
             }
@@ -525,6 +552,7 @@ pipeline {
                             docker stats --no-stream \
                                 --format '{{.Name}} cpu={{.CPUPerc}} memory={{.MemUsage}} pids={{.PIDs}}'
                         } > .artifacts/runtime/build-resources.txt
+                        sh scripts/record-ci-result.sh build-resource-evidence
                     '''
                 }
             }
@@ -612,6 +640,7 @@ pipeline {
                     sh '''
                         IMAGE_SCANNER_MODE=required \
                             sh scripts/prepare-release-security-artifacts.sh
+                        sh scripts/record-ci-result.sh release-security-artifacts
                     '''
                 }
             }
@@ -620,7 +649,11 @@ pipeline {
         stage('Create release image archive') {
             steps {
                 dir(env.APP_DIR) {
-                    sh 'sh scripts/create-release-image-archive.sh'
+                    sh '''
+                        set -eu
+                        sh scripts/create-release-image-archive.sh
+                        sh scripts/record-ci-result.sh release-image-archive
+                    '''
                 }
             }
         }
@@ -632,6 +665,7 @@ pipeline {
                         set -eu
                         sh scripts/generate-build-metadata.sh
                         sh scripts/verify-release-artifacts.sh
+                        sh scripts/record-ci-result.sh artifact-checksum
                     '''
                     archiveArtifacts(
                             artifacts: 'release/**',
@@ -670,6 +704,7 @@ pipeline {
                                 sh scripts/upload-ci-release-artifacts.sh \
                                     release \
                                     "$ARTIFACT_SSH_USER@$artifact_host"
+                            sh scripts/record-ci-result.sh artifact-upload
                         '''
                     }
                 }
@@ -710,8 +745,23 @@ pipeline {
                                 sh scripts/promote-ci-release-artifacts-remote.sh \
                                     "$RELEASE_SHA" \
                                     "$ARTIFACT_SSH_USER@$artifact_host"
+                            sh scripts/record-ci-result.sh artifact-promotion
                         '''
                     }
+                }
+            }
+        }
+
+        stage('Jenkins console Secret scan') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        SECRET_SCAN_DIR=secrets \
+                        JENKINS_LOG_SECURITY_OUTPUT_DIR=.artifacts/jenkins-log-security \
+                            sh scripts/verify-jenkins-console-secret.sh
+                        sh scripts/record-ci-result.sh jenkins-log-secret
+                    '''
                 }
             }
         }
@@ -722,11 +772,57 @@ pipeline {
             script {
                 if (env.APP_DIR) {
                     dir(env.APP_DIR) {
+                        script {
+                            env.CICD_BUILD_RESULT = currentBuild.currentResult ? currentBuild.currentResult : 'NOT_BUILT'
+                        }
+                        sh '''
+                            set -eu
+                            python3 scripts/generate-cicd-notification.py \
+                                --pipeline ci \
+                                --result "$CICD_BUILD_RESULT"
+                        '''
+                        script {
+                            try {
+                                withCredentials([
+                                    string(
+                                            credentialsId: 'gilbom-mattermost-webhook',
+                                            variable: 'MATTERMOST_WEBHOOK_URL'
+                                    )
+                                ]) {
+                                    sh '''
+                                        set +x
+                                        python3 \
+                                            scripts/send-mattermost-notification.py \
+                                            .artifacts/cicd-notification/mattermost-payload.json
+                                    '''
+                                }
+                                writeFile(
+                                        file: '.artifacts/cicd-notification/delivery.status',
+                                        text: 'PASS\n'
+                                )
+                            } catch (Exception ignored) {
+                                echo 'Mattermost notification skipped: configure '
+                                        + 'gilbom-mattermost-webhook or check delivery'
+                                writeFile(
+                                        file: '.artifacts/cicd-notification/delivery.status',
+                                        text: 'SKIPPED\n'
+                                )
+                            }
+                        }
+                        sh '''
+                            set -eu
+                            SECRET_SCAN_DIR=secrets \
+                            JENKINS_LOG_SECURITY_OUTPUT_DIR=.artifacts/jenkins-log-security \
+                                sh scripts/verify-jenkins-console-secret.sh
+                            sh scripts/record-ci-result.sh jenkins-log-secret
+                        '''
                         archiveArtifacts(
                                 artifacts: '.artifacts/source-security/**,'
                                         + '.artifacts/image-security/**,'
                                         + '.artifacts/ci-results/**,'
-                                        + '.artifacts/runtime/**',
+                                        + '.artifacts/runtime/**,'
+                                        + '.artifacts/jenkins-log-security/**,'
+                                        + '.artifacts/cicd-notification/**',
                                 allowEmptyArchive: true,
                                 fingerprint: true
                         )

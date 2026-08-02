@@ -9,6 +9,8 @@ Day 8의 Monitoring/Jenkins, EC2 자동 판정, 실제 이미지·PDF·지도 �
 `docs/day8-completion-runbook.md`를 함께 따른다.
 Stage 9의 불변 Artifact를 Jenkins에서 배포하기 전 전용 계정과 제한 sudo 경계는
 `docs/production-deploy-account.md`를 따른다.
+Stage 11의 고정 root 진입점, migration 승인과 release manifest 계약은
+`docs/production-root-deploy.md`를 따른다.
 
 ## 1. 운영 원칙
 

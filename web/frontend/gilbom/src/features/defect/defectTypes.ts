@@ -26,10 +26,6 @@ export type RiskLevel = (typeof RISK_LEVELS)[number]
 /** 서버 `DefectFilter.DEFECT_TYPES`와 같아야 한다. */
 export const DEFECT_TYPES = [
   'DAMAGED',
-  'CONTAMINATED',
-  'UPLIFTED',
-  'BLOCKED',
-  'MISSING_SUSPECTED',
   'INSTALLATION_INVALID',
   'UNKNOWN_ANOMALY',
 ] as const
@@ -96,10 +92,6 @@ export const RISK_LEVEL_LABELS: Record<RiskLevel, string> = {
 
 export const DEFECT_TYPE_LABELS: Record<DefectType, string> = {
   DAMAGED: '파손',
-  CONTAMINATED: '오염',
-  UPLIFTED: '융기',
-  BLOCKED: '시설물 침범',
-  MISSING_SUSPECTED: '유실 의심',
   INSTALLATION_INVALID: '설치 이상',
   UNKNOWN_ANOMALY: '기타 이상',
 }

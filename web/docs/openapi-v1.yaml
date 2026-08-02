@@ -3079,17 +3079,9 @@ paths:
                 totalDefectCount: 4
                 items:
                   - defectType: DAMAGED
-                    defectCount: 1
-                  - defectType: CONTAMINATED
-                    defectCount: 1
-                  - defectType: UPLIFTED
-                    defectCount: 1
-                  - defectType: BLOCKED
-                    defectCount: 1
-                  - defectType: MISSING_SUSPECTED
-                    defectCount: 0
+                    defectCount: 3
                   - defectType: INSTALLATION_INVALID
-                    defectCount: 0
+                    defectCount: 1
                   - defectType: UNKNOWN_ANOMALY
                     defectCount: 0
         "400":
@@ -5918,10 +5910,6 @@ components:
       description: 결함 유형. 통계 응답의 items는 아래 enum 순서를 유지합니다.
       enum:
         - DAMAGED
-        - CONTAMINATED
-        - UPLIFTED
-        - BLOCKED
-        - MISSING_SUSPECTED
         - INSTALLATION_INVALID
         - UNKNOWN_ANOMALY
 

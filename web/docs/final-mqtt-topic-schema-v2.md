@@ -786,10 +786,6 @@ tbs/v2/robots/{mqtt_id}/events/incident
     "DAMAGED"
   ],
   "reserved_defect_type": [
-    "CONTAMINATED",
-    "UPLIFTED",
-    "BLOCKED",
-    "MISSING_SUSPECTED",
     "INSTALLATION_INVALID",
     "UNKNOWN_ANOMALY"
   ]

@@ -7,6 +7,8 @@ PROJECT_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 DEPLOY_SCRIPT="$PROJECT_DIR/infra/scripts/gilbom-deploy.sh"
 SSH_COMMAND="$PROJECT_DIR/infra/scripts/gilbom-deploy-ssh-command.sh"
 PREPARE_SCRIPT="$PROJECT_DIR/infra/scripts/prepare-production-deploy-account.sh"
+APPROVE_SCRIPT="$PROJECT_DIR/infra/scripts/gilbom-approve-migrations.sh"
+INSTALL_SCRIPT="$PROJECT_DIR/infra/scripts/install-production-deploy-entrypoint.sh"
 VERIFY_SCRIPT="$PROJECT_DIR/scripts/verify-production-deploy-account.sh"
 
 fail() {
@@ -18,12 +20,20 @@ for file in \
   "$DEPLOY_SCRIPT" \
   "$SSH_COMMAND" \
   "$PREPARE_SCRIPT" \
+  "$APPROVE_SCRIPT" \
+  "$INSTALL_SCRIPT" \
   "$VERIFY_SCRIPT"
 do
   [ -s "$file" ] || fail "required file is missing or empty: $file"
 done
 
-sh -n "$DEPLOY_SCRIPT" "$SSH_COMMAND" "$PREPARE_SCRIPT" "$VERIFY_SCRIPT"
+sh -n \
+  "$DEPLOY_SCRIPT" \
+  "$SSH_COMMAND" \
+  "$PREPARE_SCRIPT" \
+  "$APPROVE_SCRIPT" \
+  "$INSTALL_SCRIPT" \
+  "$VERIFY_SCRIPT"
 
 invalid_output="$(sh "$DEPLOY_SCRIPT" invalid 2>&1 || true)"
 printf '%s\n' "$invalid_output" \
@@ -70,6 +80,45 @@ grep -Fq 'DEPLOY_ROOT=/opt/gilbom/deploy' "$DEPLOY_SCRIPT" \
   || fail "deployment root is not fixed"
 grep -Fq 'COMPOSE_PATH="$DEPLOY_ROOT/compose.prod.yaml"' "$DEPLOY_SCRIPT" \
   || fail "production Compose path is not fixed"
+grep -Fq 'SECRET_ROOT=/opt/gilbom/secrets' "$DEPLOY_SCRIPT" \
+  || fail "production Secret root is not fixed"
+grep -Fq 'BACKUP_ROOT=/opt/gilbom/backups' "$DEPLOY_SCRIPT" \
+  || fail "production backup root is not fixed"
+grep -Fq 'flock --nonblock 9' "$DEPLOY_SCRIPT" \
+  || fail "flock deployment serialization is missing"
+grep -Fq 'zstd --quiet --test' "$DEPLOY_SCRIPT" \
+  || fail "zstd archive preflight is missing"
+grep -Fq "'zstd --quiet -dc \"\$1\" | docker load'" "$DEPLOY_SCRIPT" \
+  || fail "streaming zstd to docker load is missing"
+grep -Fq 'migration-plan.json' "$DEPLOY_SCRIPT" \
+  || fail "migration plan evidence is missing"
+grep -Fq 'migration approval does not match the exact pending plan' \
+  "$DEPLOY_SCRIPT" \
+  || fail "exact migration approval verification is missing"
+grep -Fq 'Jenkins deployment approval is invalid or stale' \
+  "$DEPLOY_SCRIPT" \
+  || fail "exact Jenkins deployment approval verification is missing"
+grep -Fq 'sh "$BACKUP_SCRIPT"' "$DEPLOY_SCRIPT" \
+  || fail "fixed production backup invocation is missing"
+grep -Fq 'atomic_line "$PREVIOUS_SHA_PATH"' "$DEPLOY_SCRIPT" \
+  || fail "previous SHA atomic recording is missing"
+grep -Fq 'compose up --detach --no-build' "$DEPLOY_SCRIPT" \
+  || fail "offline production Compose update is missing"
+for evidence in \
+  'Backend readiness is not UP' \
+  'Frontend health check failed' \
+  'Frontend-to-Backend smoke response is not UP' \
+  'Backend MQTT health is not UP' \
+  'release-manifest.json' \
+  'approval: $deploy_approval[0]' \
+  'atomic_line "$CURRENT_SHA_PATH"'
+do
+  grep -Fq "$evidence" "$DEPLOY_SCRIPT" \
+    || fail "required deployment evidence is missing: $evidence"
+done
+if grep -Eq '(^|[[:space:]])sh[[:space:]]+"\$DEPLOY_SCRIPT"' "$DEPLOY_SCRIPT"; then
+  fail "root entrypoint must not delegate to the environment-configurable deploy.sh"
+fi
 grep -Fq "printf 'Defaults:deploy !setenv" "$PREPARE_SCRIPT" \
   || fail "sudo environment override protection is missing"
 grep -Fq \
@@ -88,5 +137,9 @@ grep -Fq "printf 'Match all" "$PREPARE_SCRIPT" \
   || fail "SSH Match block reset is missing"
 grep -Fq 'chown -R root:root /opt/gilbom/deploy' "$PREPARE_SCRIPT" \
   || fail "fixed deployment root is not protected from deploy"
+grep -Fq '/usr/local/sbin/gilbom-approve-migrations' "$PREPARE_SCRIPT" \
+  || fail "root-only migration approval command is not installed"
+grep -Fq 'install -o root -g root -m 0750' "$INSTALL_SCRIPT" \
+  || fail "migration approval command is not root-only"
 
 echo "Production deploy boundary self-test: PASS"

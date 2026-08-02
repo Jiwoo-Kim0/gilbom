@@ -237,7 +237,7 @@ Grafana도 같은 방식으로 `3001:127.0.0.1:3001` tunnel을 사용한다.
 ## 6. EC2 자동 게이트
 
 다음 두 명령이 모두 PASS해야 한다. 첫 스크립트는 경로·Swap·image 고정·resource
-상한·Secret file·전체 health·PostGIS·Flyway V1~V37·시스템 seed·MQTT·인증서
+상한·Secret file·전체 health·PostGIS·Flyway V1~V38·시스템 seed·MQTT·인증서
 Timer·실제 HTTPS 보안 헤더·HTTP redirect·오류 은닉·backup 무결성을 확인한다.
 
 ```sh

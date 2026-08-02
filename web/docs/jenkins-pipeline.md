@@ -205,7 +205,7 @@ gate 뒤에만 실행된다. Source 보안 명령은 action 단위로 나뉘어 
 로컬 재현 명령의 경계를 일치시킨다.
 
 기존 검증은 Backend 전체 Test, security acceptance, Frontend test/lint/build,
-full-SHA image build, 두 runtime image, 빈 DB V1~V37, PostGIS·RBAC·Session,
+full-SHA image build, 두 runtime image, 빈 DB V1~V38, PostGIS·RBAC·Session,
 CSRF·권한·append-only, integration, graceful shutdown, 보고서·LLM fallback,
 장애 복구, volume 영속성, image layer/history/log Secret, 필수 Trivy 순으로
 실행한다. 각 성공은 `.artifacts/ci-results/<gate>.status`에 `PASS`로 남고,
@@ -233,7 +233,7 @@ Trivy가 없거나 Critical/미승인 High/만료 예외가 있으면 `release/`
 script가 거부한다.
 
 `build-metadata.json`은 full commit SHA, image ID, Dockerfile hash와 base image,
-UTC 시작·종료 시각, Runtime version, 테스트 결과, V1~V37 migration 목록·hash,
+UTC 시작·종료 시각, Runtime version, 테스트 결과, V1~V38 migration 목록·hash,
 SBOM/취약점/Archive checksum, Jenkins Job/Build를 기록한다. `jq empty` 이후
 `SHA256SUMS`를 생성·즉시 재검증하고, 마지막 Artifact Secret gate까지 통과해야
 Jenkins artifact로 보존된다.
@@ -254,8 +254,15 @@ SHA는 양쪽 manifest와 실제 내용이 완전히 같을 때만 재사용한�
 EC2 설치와 Jenkins Credential ID는
 [`ci-artifact-promotion.md`](ci-artifact-promotion.md)에 고정한다.
 
-## 의도적으로 남긴 다음 단계
+## Stage 15 SCM Polling과 결과 알림
 
-- GitLab webhook 또는 multibranch pipeline 연결
-- Container Registry 주소·Credential 확정 후 push stage 추가
-- 승격된 Artifact를 사용하는 production deploy stage 추가
+`Jenkinsfile`은 `pollSCM('H/5 * * * *')`로 `gilbom-ci`의 SCM 변경만 감지한다.
+운영 배포·조건부 Rollback·격리 Rollback 훈련 Job에는 Trigger가 없으며,
+배포와 Rollback은 full SHA parameter와 Jenkins 인증 사용자 승인을 계속 요구한다.
+
+네 Pipeline은 결과 요약, 첫 미완료 gate, 재현 명령, 인증된 Jenkins console과
+Artifact 링크를 만들고 `gilbom-mattermost-webhook` Secret Text Credential로
+Mattermost에 전송한다. 성공 CI의 마지막 gate는 Jenkins console을 Gitleaks와
+exact ephemeral Secret 대조로 검사한다. 설정, 최소 읽기 권한과 9~14단계 최종
+증거 결합 절차는 [`stage15-cicd-operations.md`](stage15-cicd-operations.md)를
+따른다.
