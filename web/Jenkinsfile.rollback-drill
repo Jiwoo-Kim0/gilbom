@@ -1,0 +1,115 @@
+pipeline {
+    agent any
+
+    options {
+        disableConcurrentBuilds(abortPrevious: false)
+        skipDefaultCheckout(true)
+        timestamps()
+        timeout(time: 45, unit: 'MINUTES')
+    }
+
+    stages {
+        stage('Checkout trusted drill code') {
+            steps {
+                deleteDir()
+                checkout scm
+                script {
+                    env.APP_DIR = fileExists('web/Jenkinsfile.rollback-drill')
+                            ? 'web' : '.'
+                    env.ROLLBACK_DRILL_RUN_ID = (
+                            "jenkins-${env.BUILD_NUMBER}"
+                                    .toLowerCase()
+                                    .replaceAll('[^a-z0-9-]', '-')
+                                    .take(31)
+                    )
+                }
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        test "$(git rev-parse --is-shallow-repository)" = false
+                        printf '%s\n' "$ROLLBACK_DRILL_RUN_ID" \
+                            | grep -Eq '^[a-z0-9][a-z0-9-]{0,30}$'
+                        mkdir -p .artifacts
+                    '''
+                }
+            }
+        }
+
+        stage('Verify isolated DinD boundary') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        test "${DOCKER_TLS_VERIFY:-}" = 1
+                        case "${DOCKER_HOST:-}" in
+                            tcp://docker-builder:2376) ;;
+                            *) exit 1 ;;
+                        esac
+                        test ! -S /var/run/docker.sock
+                        test -z "${ARTIFACT_SSH_IDENTITY:-}"
+                        test -z "${DEPLOY_SSH_IDENTITY:-}"
+                        docker info >/dev/null
+                        docker compose version >/dev/null
+                    '''
+                }
+            }
+        }
+
+        stage('Verify rollback drill contract') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        sh scripts/verify-production-rollback-drill-contract.sh
+                    '''
+                }
+            }
+        }
+
+        stage('Run isolated Compose rollback drill') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        ROLLBACK_DRILL_ACK=isolated-compose-only \
+                        ROLLBACK_DRILL_RUN_ID="$ROLLBACK_DRILL_RUN_ID" \
+                            sh scripts/run-production-rollback-drill.sh
+                    '''
+                }
+            }
+        }
+
+        stage('Archive rollback drill evidence') {
+            steps {
+                dir(env.APP_DIR) {
+                    archiveArtifacts(
+                            artifacts: '.artifacts/rollback-drill/**',
+                            allowEmptyArchive: false,
+                            fingerprint: true
+                    )
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                if (env.APP_DIR && env.ROLLBACK_DRILL_RUN_ID) {
+                    dir(env.APP_DIR) {
+                        sh '''
+                            set +e
+                            sh scripts/cleanup-production-rollback-drill.sh \
+                                "$ROLLBACK_DRILL_RUN_ID"
+                        '''
+                        archiveArtifacts(
+                                artifacts: '.artifacts/rollback-drill/**',
+                                allowEmptyArchive: true,
+                                fingerprint: true
+                        )
+                    }
+                }
+            }
+        }
+    }
+}

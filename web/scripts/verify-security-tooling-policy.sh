@@ -37,9 +37,11 @@ for file in \
   scripts/verify-production-deploy-contract.sh \
   scripts/verify-production-deploy-job-contract.sh \
   scripts/verify-production-rollback-contract.sh \
+  scripts/verify-production-rollback-drill-contract.sh \
   scripts/test-production-deploy-boundary.sh \
   scripts/test-production-deploy-job.sh \
   scripts/test-production-rollback-job.sh \
+  scripts/test-production-rollback-drill-evidence.sh \
   scripts/test-production-deploy-preflight-integration.sh \
   scripts/test-production-conditional-rollback-integration.sh \
   scripts/verify-production-deploy-account.sh \
@@ -55,6 +57,9 @@ for file in \
   scripts/fetch-production-rollback-manifest.sh \
   scripts/render-production-rollback-approval.sh \
   scripts/verify-production-rollback-evidence.sh \
+  scripts/run-production-rollback-drill.sh \
+  scripts/cleanup-production-rollback-drill.sh \
+  scripts/verify-production-rollback-drill-evidence.sh \
   scripts/verify-external-https-smoke.py \
   infra/scripts/promote-release-artifacts.sh \
   infra/scripts/promote-ci-release-artifacts.sh \
@@ -75,7 +80,16 @@ for file in \
   docs/production-deploy-account.md \
   docs/production-root-deploy.md \
   docs/production-deploy-job.md \
-  docs/production-conditional-rollback.md
+  docs/production-conditional-rollback.md \
+  docs/production-rollback-drill.md \
+  Jenkinsfile.rollback-drill \
+  compose.rollback-drill.yaml \
+  test/rollback-drill/backend/Dockerfile \
+  test/rollback-drill/backend/entrypoint.sh \
+  test/rollback-drill/backend/healthcheck.sh \
+  test/rollback-drill/backend/compatibility-probe.sh \
+  test/rollback-drill/frontend/Dockerfile \
+  test/rollback-drill/frontend/nginx.conf
 do
   test -s "$file" || fail "required file is missing or empty: $file"
 done
@@ -136,9 +150,11 @@ sh -n \
   scripts/verify-production-deploy-contract.sh \
   scripts/verify-production-deploy-job-contract.sh \
   scripts/verify-production-rollback-contract.sh \
+  scripts/verify-production-rollback-drill-contract.sh \
   scripts/test-production-deploy-boundary.sh \
   scripts/test-production-deploy-job.sh \
   scripts/test-production-rollback-job.sh \
+  scripts/test-production-rollback-drill-evidence.sh \
   scripts/test-production-deploy-preflight-integration.sh \
   scripts/test-production-conditional-rollback-integration.sh \
   scripts/verify-production-deploy-account.sh \
@@ -154,6 +170,9 @@ sh -n \
   scripts/fetch-production-rollback-manifest.sh \
   scripts/render-production-rollback-approval.sh \
   scripts/verify-production-rollback-evidence.sh \
+  scripts/run-production-rollback-drill.sh \
+  scripts/cleanup-production-rollback-drill.sh \
+  scripts/verify-production-rollback-drill-evidence.sh \
   infra/scripts/promote-release-artifacts.sh \
   infra/scripts/promote-ci-release-artifacts.sh \
   infra/scripts/gilbom-deploy.sh \
@@ -167,7 +186,10 @@ sh -n \
   infra/scripts/gilbom-record-rollback-approval.sh \
   infra/scripts/gilbom-rollback-manifest.sh \
   infra/scripts/install-production-deploy-job-entrypoints.sh \
-  infra/scripts/prepare-production-deploy-account.sh
+  infra/scripts/prepare-production-deploy-account.sh \
+  test/rollback-drill/backend/entrypoint.sh \
+  test/rollback-drill/backend/healthcheck.sh \
+  test/rollback-drill/backend/compatibility-probe.sh
 python3 scripts/test-security-policy.py
 python3 -m py_compile \
   scripts/security_policy.py \
