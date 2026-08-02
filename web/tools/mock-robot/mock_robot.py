@@ -26,6 +26,7 @@ COMMAND_TYPES = (
     "START_MISSION",
     "PAUSE_MISSION",
     "RESUME_MISSION",
+    "COMPLETE_MISSION",
     "CANCEL_MISSION",
     "EMERGENCY_STOP",
     "CLEAR_EMERGENCY_STOP",
@@ -1039,6 +1040,7 @@ class MockRobot:
 
         with self.state_lock:
             mission_id_before = self.mission_id
+            mission_state_before = self.mission_state
             mission_started_at_before = self.mission_started_at
 
         overridden = self.command_outcomes.get(command_type)
@@ -1053,19 +1055,30 @@ class MockRobot:
         if status == "COMPLETED":
             with self.state_lock:
                 mission_id_after = self.mission_id
+                mission_state_after = self.mission_state
             mission_id = (
                 mission_id_before
-                if command_type == "CANCEL_MISSION"
+                if command_type in ("COMPLETE_MISSION", "CANCEL_MISSION")
                 else mission_id_after
             )
             event_type = {
                 "START_MISSION": "MISSION_STARTED",
                 "PAUSE_MISSION": "MISSION_PAUSED",
                 "RESUME_MISSION": "MISSION_RESUMED",
+                "COMPLETE_MISSION": "MISSION_COMPLETED",
                 "CANCEL_MISSION": "MISSION_CANCELLED",
             }.get(command_type)
+            if (
+                command_type == "EMERGENCY_STOP"
+                and mission_state_before == "RUNNING"
+                and mission_state_after == "PAUSED"
+            ):
+                event_type = "MISSION_PAUSED"
             if event_type is not None and mission_id is not None:
-                terminal = event_type == "MISSION_CANCELLED"
+                terminal = event_type in (
+                    "MISSION_COMPLETED",
+                    "MISSION_CANCELLED",
+                )
                 duration_sec = None
                 if terminal and mission_started_at_before is not None:
                     duration_sec = max(
@@ -1081,7 +1094,13 @@ class MockRobot:
                     mission_id,
                     duration_sec=duration_sec,
                     completion_reason=(
-                        "MOCK_COMMAND_CANCELLED" if terminal else None
+                        (
+                            "MOCK_COMMAND_COMPLETED"
+                            if event_type == "MISSION_COMPLETED"
+                            else "MOCK_COMMAND_CANCELLED"
+                        )
+                        if terminal
+                        else None
                     ),
                 )
             self.publish_json(
@@ -1141,8 +1160,27 @@ class MockRobot:
             if command_type == "RESUME_MISSION":
                 if self.mission_id is None:
                     return "FAILED", "NO_ACTIVE_MISSION"
+                if self.mode == "SAFE_STOP":
+                    return "REJECTED", "SAFETY_CONDITION_NOT_CLEARED"
+                if self.mission_state != "PAUSED":
+                    return "REJECTED", "ALREADY_IN_STATE"
                 self.mission_state = "RUNNING"
                 self.mode = "PATROLLING"
+                self.state_reason = "NONE"
+                return "COMPLETED", "OK"
+
+            if command_type == "COMPLETE_MISSION":
+                if self.mission_id is None:
+                    return "FAILED", "NO_ACTIVE_MISSION"
+                if self.mode == "SAFE_STOP":
+                    return "REJECTED", "SAFETY_CONDITION_NOT_CLEARED"
+                if self.mission_state != "RUNNING":
+                    return "REJECTED", "ALREADY_IN_STATE"
+                self.mission_id = None
+                self.mission_state = None
+                self.mission_started_at = None
+                self.zone_id = None
+                self.mode = "READY"
                 self.state_reason = "NONE"
                 return "COMPLETED", "OK"
 
@@ -1153,11 +1191,14 @@ class MockRobot:
                 self.mission_state = None
                 self.mission_started_at = None
                 self.zone_id = None
-                self.mode = "READY"
-                self.state_reason = "NONE"
+                if self.mode != "SAFE_STOP":
+                    self.mode = "READY"
+                    self.state_reason = "NONE"
                 return "COMPLETED", "OK"
 
             if command_type == "EMERGENCY_STOP":
+                if self.mission_state == "RUNNING":
+                    self.mission_state = "PAUSED"
                 self.mode = "SAFE_STOP"
                 self.state_reason = "REMOTE_ESTOP"
                 return "COMPLETED", "OK"
@@ -1165,9 +1206,15 @@ class MockRobot:
             if command_type == "CLEAR_EMERGENCY_STOP":
                 if self.mode != "SAFE_STOP":
                     return "REJECTED", "ALREADY_IN_STATE"
-                self.mode = "PAUSED" if self.mission_id is not None else "READY"
+                has_paused_mission = (
+                    self.mission_id is not None
+                    and self.mission_state in ("RUNNING", "PAUSED")
+                )
+                if has_paused_mission:
+                    self.mission_state = "PAUSED"
+                self.mode = "PAUSED" if has_paused_mission else "READY"
                 self.state_reason = (
-                    "REMOTE_PAUSE" if self.mission_id is not None else "NONE"
+                    "REMOTE_PAUSE" if has_paused_mission else "NONE"
                 )
                 return "COMPLETED", "OK"
 

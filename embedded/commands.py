@@ -11,24 +11,24 @@ from __future__ import annotations
 
 import logging
 import queue
-import re
 from collections import deque
 from datetime import datetime, timezone
 
 from comms import TopicKind
 from comms.codec import utc_now
-from comms.contract import SCHEMA_VERSION, ZONE_ID_PATTERN
+from comms.contract import SCHEMA_VERSION
 
 log = logging.getLogger(__name__)
 
 #: 처리한 command_id 를 기억하는 개수. 재실행 금지는 boot 안에서만 지키면 된다 (§12.5).
 HANDLED_COMMAND_MEMORY = 64
 
-#: 명령별 필수 parameters (§12.5). RESUME_MISSION 은 빈 object 다.
+#: 명령별 필수 parameters (§12.5). RESUME/COMPLETE 는 빈 object 다.
 REQUIRED_PARAMETERS = {
     "START_MISSION": ("mission_id", "zone_id"),
     "PAUSE_MISSION": ("reason",),
     "RESUME_MISSION": (),
+    "COMPLETE_MISSION": (),
     "CANCEL_MISSION": ("reason",),
     "EMERGENCY_STOP": ("reason",),
     "CLEAR_EMERGENCY_STOP": ("reason",),
@@ -38,7 +38,7 @@ REQUIRED_PARAMETERS = {
 RESERVED_COMMAND_TYPES = frozenset({"RETURN_TO_CHARGE", "UPDATE_CONFIG"})
 
 #: 정지를 먼저 하고 그 다음에 발행하는 명령 (계약 §16-10).
-STOP_BEFORE_REPORTING = frozenset({"EMERGENCY_STOP"})
+STOP_BEFORE_REPORTING = frozenset({"COMPLETE_MISSION", "EMERGENCY_STOP"})
 
 # commands/result 의 reason_code (§13.3).
 REASON_OK = "OK"
@@ -81,6 +81,7 @@ class CommandRunner:
             "START_MISSION": self._start_mission,
             "PAUSE_MISSION": self._pause_mission,
             "RESUME_MISSION": self._resume_mission,
+            "COMPLETE_MISSION": self._complete_mission,
             "CANCEL_MISSION": self._cancel_mission,
             "EMERGENCY_STOP": self._emergency_stop,
             "CLEAR_EMERGENCY_STOP": self._clear_emergency_stop,
@@ -179,17 +180,6 @@ class CommandRunner:
             # 지나쳐 주행이 재개되면 안 된다 — 해제는 CLEAR_EMERGENCY_STOP 이다.
             return REASON_SAFETY_NOT_CLEARED
         zone_id = parameters["zone_id"]
-        if not re.match(ZONE_ID_PATTERN, str(zone_id)):
-            # 명령은 거절하지 않는다 — 미션 수행 자체는 막을 이유가 없다. 다만 이 값은
-            # incident.location.zone_id 로 그대로 echo 되고, 서버는 거기에만 패턴을
-            # 걸어 두었다. 벗어나면 이 미션의 결함 event 가 전부 조용히 거부된다.
-            # 첫 결함이 날 때가 아니라 미션 시작 시점에 알아야 손을 쓸 수 있다.
-            log.warning(
-                "zone_id %r does not match the incident contract pattern %s;"
-                " every incident of this mission will be rejected by the server",
-                zone_id,
-                ZONE_ID_PATTERN,
-            )
         # 주행을 먼저 연다 — 여기서 막히면 보관함을 건드리지 않은 채 끝난다.
         self._state.start_patrol()
         self._state.start_mission(parameters["mission_id"], zone_id=zone_id)
@@ -228,7 +218,7 @@ class CommandRunner:
         return REASON_OK
 
     def _emergency_stop(self, parameters) -> str:
-        """미션 상태는 건드리지 않는다 — 미션 전이는 명시적 미션 명령으로만 한다."""
+        """주행을 즉시 멈추고 실행 중 Mission은 재개 가능한 PAUSED로 보존한다."""
         # 바퀴부터 세우고 전이·발행을 한다 (§16-10). 정지 실패가 명령을 삼키면 안 되므로
         # 예외는 여기서 막고 상태 전이는 그대로 간다.
         if self._stop is not None:
@@ -238,6 +228,29 @@ class CommandRunner:
                 log.exception("failed to stop the motor")
         if not self._state.safe_stop("REMOTE_ESTOP"):
             return REASON_ALREADY_IN_STATE
+        stopped = self._state.snapshot()
+        if stopped.mission_id is not None and stopped.mission_state == "RUNNING":
+            # Backend Mission 정본도 PAUSED가 되어야 해제 후 RESUME_MISSION을 만들 수
+            # 있다. 이미 PAUSED인 Mission에는 중복 Event를 발행하지 않는다.
+            self._events.mission_paused()
+        return REASON_OK
+
+    def _complete_mission(self, parameters) -> str:
+        """관리자가 현재 순찰을 정상 완료하고 활성 Mission 보관함을 비운다."""
+        snapshot = self._state.snapshot()
+        if snapshot.mission_id is None:
+            return REASON_NO_ACTIVE_MISSION
+        if snapshot.mode == "SAFE_STOP":
+            return REASON_SAFETY_NOT_CLEARED
+        if snapshot.mission_state != "RUNNING":
+            return REASON_ALREADY_IN_STATE
+        if self._stop is not None:
+            try:
+                self._stop()
+            except Exception:
+                log.exception("failed to stop the motor")
+        self._events.mission_completed("OPERATOR_COMPLETED")
+        self._state.stand_by()
         return REASON_OK
 
     def _clear_emergency_stop(self, parameters) -> str:

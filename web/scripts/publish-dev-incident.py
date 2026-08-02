@@ -4,7 +4,7 @@
 개발·시연용이다. Jetson 없이 결함 생성 경로를 돌려보기 위해 만들었고,
 `tools/mock-robot`은 presence·state·telemetry·command만 발행해서 incident를 다루지
 못한다. `test/통신테스트/mqtt_tls_test.py`도 incident를 보내지만 현재 MQTT v2 계약보다
-오래되어(ttl_sec 누락, zone_id 패턴 불일치) 서버가 MQTT_PAYLOAD_MALFORMED로 거부한다.
+오래되어(ttl_sec 누락, robot_id 사용) 서버가 MQTT_PAYLOAD_MALFORMED로 거부한다.
 
 --image를 주면 Incident와 같은 event_id로 증거 이미지를 먼저 업로드해서,
 업로드 → Incident → 결함 → 이미지 연결까지 한 번에 확인할 수 있다.
@@ -41,7 +41,7 @@ from pathlib import Path
 
 #: 계약 2.0의 필수 범위. 서버가 @Min(60) @Max(300)으로 검증한다.
 DEFAULT_TTL_SEC = 300
-#: zone_id는 ^[A-Z]-[0-9]{2}$ 여야 하고 patrol_area.area_code와 같아야 한다.
+#: zone_id는 형식을 해석하지 않으며 patrol_area.area_code와 같은 값을 사용한다.
 DEFAULT_ZONE_ID = "A-01"
 DEFAULT_MISSION_ID = "MIS-TEST-001"
 DEFAULT_MQTT_ID = "robot-test"

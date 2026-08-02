@@ -1,5 +1,9 @@
 # MQTT v2 임베디드 대조·수정 구현 내용
 
+> 2026-08-02 후속 정정: 아래에 기록된 `zone_id`의 `A-01` 형식 검증과 경고는
+> 제거되었다. 현재 `zone_id`는 Patrol Area 업무 코드를 해석하지 않고 그대로
+> 전달·보존하는 불투명 값이다.
+
 > 담당: 임베디드 — 로봇 통신
 > 작업일: 2026-08-01
 > 대상 계약: `tbs/v2` (`schema_version: "2.0"`, 2026-07-30 FROZEN — **이번에 열지 않았다**)
@@ -82,7 +86,7 @@
 | 접속 | MQTT 5, `CLEAN_START_FIRST_ONLY`, SessionExpiry 3600s, keepalive 30 |
 | LWT | `presence OFFLINE / UNGRACEFUL_DISCONNECT`, QoS1 retain |
 | SUBACK | 구독 거부를 `client.subscribed`·`subscribe_reason_codes`로 확인 |
-| 명령 6종 | START/PAUSE/RESUME/CANCEL_MISSION, EMERGENCY_STOP, CLEAR_EMERGENCY_STOP |
+| 명령 7종 | START/PAUSE/RESUME/COMPLETE/CANCEL_MISSION, EMERGENCY_STOP, CLEAR_EMERGENCY_STOP |
 | 예약 명령 | `RETURN_TO_CHARGE`·`UPDATE_CONFIG`는 `RESERVED_COMMAND_TYPES`로 미실행 |
 | 필수 parameters | 서버 `ttl()`과 로봇 `REQUIRED_PARAMETERS` 일치 |
 | `ttl_sec` | 60~300, 기본 300 (서버 `@Min(60) @Max(300)`과 동일) |

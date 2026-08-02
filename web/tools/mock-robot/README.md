@@ -126,7 +126,8 @@ WHERE patrol_area_id = :mission_patrol_area_id;
 
 State와 각 Event 계열을 서로 다른 주기로 계속 발행하려면 다음 옵션을 사용한다.
 Presence는 연결·종료를 나타내는 Retained 메시지라 주기 발행하지 않고, Mission
-Event는 실제 START·PAUSE·RESUME·CANCEL 명령과 자동 완료 시점에만 발행한다.
+Event는 실제 START·PAUSE·RESUME·CANCEL 명령, 실행 중 긴급정지와 자동 완료
+시점에만 발행한다.
 
 ```powershell
 $env:MQTT_PASSWORD='robot-test MQTT 비밀번호'
@@ -148,6 +149,11 @@ Mission 시작·일시정지·재개·취소 명령이 성공하면 각각 대�
 발행한다. 로컬 완료 흐름이 필요하면 `--mission-auto-complete-sec`에 양수를
 지정한다. RUNNING 상태의 벽시계 누적시간이 해당 값에 도달하면 마지막
 Telemetry를 먼저 발행하고 `MISSION_COMPLETED`와 완료 State를 발행한다.
+
+RUNNING Mission에서 긴급정지가 완료되면 Mock은 Mission 식별자를 유지한 채
+`SAFE_STOP`·`PAUSED`로 전환하고 `MISSION_PAUSED`를 한 번 발행한다. 긴급정지
+해제는 주행을 자동 재개하지 않고 `PAUSED`를 유지하며, 이후 별도 `RESUME_MISSION`
+명령이 완료되어야 `PATROLLING`·`RUNNING`과 `MISSION_RESUMED`로 전환한다.
 
 ```powershell
 $env:MQTT_PASSWORD='robot-test MQTT 비밀번호'

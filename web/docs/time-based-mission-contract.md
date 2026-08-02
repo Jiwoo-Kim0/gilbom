@@ -47,11 +47,20 @@ progressPercent
 - 오래된 Telemetry: 더 최신 표본이 있으면 진행률에 반영하지 않는다.
 - 역행 값: 저장 진행률은 `GREATEST`로 단조 증가한다.
 - 완료 전 상한: `99.99%`
-- 완료 확정: `MISSION_COMPLETED` Event에서만 `100%`
+- 자동 종료 요청: `RUNNING`의 `startedAt + plannedDurationSec`가 서버 시각에
+  도달하면 최대 5초 안에 `SYSTEM/COMPLETE_MISSION` 명령을 MQTT로 발행
+- 완료 확정: 로봇이 정지한 뒤 `MISSION_COMPLETED`를 발행해야
+  Backend가 `COMPLETED·100%`로 전이
+- 로봇 완료 Event: 계획시간 전 실제 종료를 `MISSION_COMPLETED·100%`로 확정
+- `PAUSED`는 자동 종료 명령 대상에서 제외하며 재개 후 이미
+  계획시간이 지났으면 다음 검사에서 `COMPLETE_MISSION`을 발행
+- Broker 발행 실패·ACK Timeout은 명령 이력에 표시하고 Mission을 거짓으로
+  `COMPLETED`로 바꾸지 않는다.
 
 현재 Embedded 계약에서 `mission.elapsed_sec`는 Mission 시작 후 벽시계 누적
-시간이다. `PAUSED` 중에도 증가한다. 일시정지 제외 수행시간으로 바꾸려면 Embedded
-누적 방식과 MQTT 의미를 함께 버전 변경해야 한다.
+시간이다. `PAUSED` 중에도 증가하지만 서버 자동 종료 명령은 안전한 명시적 재개를 위해
+`RUNNING`에만 적용한다. 일시정지 제외 수행시간으로 바꾸려면 Embedded 누적 방식과
+MQTT 의미를 함께 버전 변경해야 한다.
 
 ## 4. 조회와 화면
 
@@ -71,8 +80,10 @@ Route 선택·필터·목록·상세 표시는 제공하지 않는다.
 
 ## 5. 검증 경계
 
-- Backend: 실제 PostGIS Testcontainers로 V1~V32 Migration, Area별 Dummy,
-  Mission 생성·조회·ETA, 시간 진행률, PAUSED 증가와 완료 Event 100%를 검증한다.
+- Backend: 실제 PostGIS Testcontainers로 전체 Migration, Area별 Dummy,
+  Mission 생성·조회·ETA, 시간 진행률, 계획시간 `COMPLETE_MISSION`
+  자동 발행, PAUSED 유지와 완료 Event
+  100%를 검증한다.
 - Frontend: ESLint와 production build를 검증한다.
 - Browser Fixture: 실제 Chromium에서 로그인 상태와 REST 응답을 결정적 Fixture로
   제공해 생성 폼, 내부 Dummy ID, 계획시간 Payload, 시간 표시와 Route 비노출을

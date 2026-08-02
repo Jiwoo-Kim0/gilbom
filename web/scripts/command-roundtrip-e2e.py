@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run six normal Command flows through REST, TLS MQTT, DB, SSE, and React."""
+"""Run seven normal Command flows through REST, TLS MQTT, DB, SSE, and React."""
 
 from __future__ import annotations
 
@@ -273,7 +273,7 @@ def verify_database(
     )
     parts = result.split("|")
     support.ensure(
-        parts == ["6", "6", "6", "6", "CANCELLED", "READY", ""],
+        parts == ["7", "6", "7", "7", "CANCELLED", "READY", ""],
         "command_roundtrip_database_evidence",
     )
 
@@ -383,7 +383,7 @@ def main() -> int:
             mock_process,
         )
         print(
-            "[command-roundtrip-e2e] running six commands through React, "
+            "[command-roundtrip-e2e] running seven commands through React, "
             "REST, TLS MQTT, DB, and SSE"
         )
         run_playwright(client.session_cookie(), robot_id)
@@ -395,8 +395,8 @@ def main() -> int:
         )
         print(
             "[command-roundtrip-e2e] PASS: START, PAUSE, RESUME, "
-            "EMERGENCY_STOP, CLEAR_EMERGENCY_STOP, CANCEL each produced "
-            "ACCEPTED and COMPLETED"
+            "EMERGENCY_STOP, CLEAR_EMERGENCY_STOP, RESUME, CANCEL each "
+            "produced ACCEPTED and COMPLETED"
         )
         return 0
     except (

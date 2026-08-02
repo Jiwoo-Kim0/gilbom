@@ -57,6 +57,7 @@ REST→DB→TLS Broker→Mock→Result→DB→SSE→React를 통과했다. Broke
 | `START_MISSION` | O | O | `mission_id`, `zone_id` |
 | `PAUSE_MISSION` | O | O | `reason` |
 | `RESUME_MISSION` | O | O | 없음 또는 계약 기본값 |
+| `COMPLETE_MISSION` | O | O | 없음(정상 완료) |
 | `CANCEL_MISSION` | O | O | `reason` |
 | `EMERGENCY_STOP` | O | O | `reason` |
 | `CLEAR_EMERGENCY_STOP` | O | O | 없음 |
@@ -240,10 +241,12 @@ python scripts/command-roundtrip-e2e.py
 ```
 
 - 현재 Backend 소스로 이미지를 빌드하고 임시 PostgreSQL DB·Backend를 기동한다.
-- 실제 TLS Mosquitto에 Mock Robot을 연결하고 Chromium에서 여섯 명령을 실행한다.
+- 실제 TLS Mosquitto에 Mock Robot을 연결하고 Chromium에서 6종 명령을 7회 실행한다.
+  긴급정지 해제 뒤 `RESUME_MISSION`을 한 번 더 실행해 임무 복구를 검증한다.
 - 각 명령의 고유 `commandId`, `COMPLETED`, `ACCEPTED`·`COMPLETED` Result를
   화면·REST·DB에서 대조한다.
-- 최종 Mission `CANCELLED`, Robot mode `READY`, Mission 분리 상태를 검증한다.
+- 긴급정지 시 Mission `PAUSED`, 해제 후 명시적 재개 시 `RUNNING`을 확인하고,
+  최종 Mission `CANCELLED`, Robot mode `READY`, Mission 분리 상태를 검증한다.
 - 완료 뒤 임시 Backend·DB·Vite·Mock을 정리하고 정상 Compose Backend를 복구한다.
 
 비정상 Broker·Browser E2E:

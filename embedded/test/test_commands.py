@@ -31,6 +31,7 @@ DEFAULT_PARAMETERS = {
     "START_MISSION": {"mission_id": MISSION_ID, "zone_id": "A-01"},
     "PAUSE_MISSION": {"reason": "operator_request"},
     "RESUME_MISSION": {},
+    "COMPLETE_MISSION": {},
     "CANCEL_MISSION": {"reason": "operator_request"},
     "EMERGENCY_STOP": {"reason": "operator_request"},
     "CLEAR_EMERGENCY_STOP": {"reason": "operator_request"},
@@ -272,30 +273,15 @@ def test_start_mission_fills_the_slot_and_starts_patrolling(client, runner, stat
     assert [p["event_type"] for p in client.missions()] == ["MISSION_STARTED"]
 
 
-def test_a_zone_id_outside_the_contract_pattern_warns_but_still_starts(
-    client, runner, state, caplog
-):
-    """서버는 incident.location.zone_id 에만 ^[A-Z]-[0-9]{2}$ 를 건다.
-
-    벗어난 값이 오면 이 미션의 결함 event 가 전부 조용히 거부되므로, 첫 결함이 날
-    때가 아니라 미션 시작 시점에 알려야 한다. 명령 자체는 거절하지 않는다 —
-    순찰을 못 할 이유는 없고, 거절 권한도 로봇에 없다.
-    """
+def test_start_mission_preserves_an_opaque_zone_id(client, runner, state):
+    """구역 코드는 형식을 해석하지 않고 START_MISSION 값을 그대로 보존한다."""
     # command() 는 모듈 전역 parameters 를 공유한다 — 복사해서 건드린다.
     payload = copy.deepcopy(command("START_MISSION"))
-    payload["parameters"]["zone_id"] = "seoul-gangnam-3"
-    with caplog.at_level("WARNING"):
-        runner.handle(payload)
+    payload["parameters"]["zone_id"] = "똥방구 설사"
+    runner.handle(payload)
 
     assert statuses(client) == ["ACCEPTED", "COMPLETED"]
-    assert (state.mission_id, state.zone_id) == (MISSION_ID, "seoul-gangnam-3")
-    assert any("seoul-gangnam-3" in r.getMessage() for r in caplog.records)
-
-
-def test_a_valid_zone_id_does_not_warn(client, runner, state, caplog):
-    with caplog.at_level("WARNING"):
-        runner.handle(command("START_MISSION"))
-    assert [r for r in caplog.records if "zone_id" in r.getMessage()] == []
+    assert (state.mission_id, state.zone_id) == (MISSION_ID, "똥방구 설사")
 
 
 def test_telemetry_carries_the_mission_after_start(client, runner, state, clock):
@@ -334,6 +320,68 @@ def test_cancel_mission_empties_the_slot(client, runner, state, clock):
     assert (sample["mission_id"], sample["mission"]) == (None, None)
 
 
+def test_complete_mission_publishes_completed_and_empties_the_slot(
+    client, state, events, clock
+):
+    stops = []
+    runner = CommandRunner(
+        client,
+        state,
+        events,
+        stop_motor=lambda: stops.append(state.mode),
+        now=clock.now,
+    )
+    start_mission(runner, state)
+    runner.handle(command("COMPLETE_MISSION"))
+
+    assert stops == ["PATROLLING"]
+    assert [p["event_type"] for p in client.missions()] == [
+        "MISSION_STARTED",
+        "MISSION_COMPLETED",
+    ]
+    assert client.missions()[-1]["result"]["completion_reason"] == (
+        "OPERATOR_COMPLETED"
+    )
+    assert state.mission_id is None
+    assert (state.mode, state.reason_code) == ("READY", "NONE")
+
+
+def test_complete_while_paused_is_rejected_and_keeps_the_mission(
+    client, runner, state
+):
+    start_mission(runner, state)
+    runner.handle(command("PAUSE_MISSION"))
+    runner.handle(command("COMPLETE_MISSION"))
+
+    assert statuses(client)[-2:] == ["ACCEPTED", "REJECTED"]
+    assert last(client)["reason_code"] == "ALREADY_IN_STATE"
+    assert state.mission_id == MISSION_ID
+    assert state.mission_state == "PAUSED"
+    assert (state.mode, state.reason_code) == ("PAUSED", "REMOTE_PAUSE")
+    assert [p["event_type"] for p in client.missions()] == [
+        "MISSION_STARTED",
+        "MISSION_PAUSED",
+    ]
+
+
+def test_complete_while_safe_stopped_is_rejected_and_keeps_the_mission(
+    client, runner, state
+):
+    start_mission(runner, state)
+    runner.handle(command("EMERGENCY_STOP"))
+    runner.handle(command("COMPLETE_MISSION"))
+
+    assert statuses(client)[-2:] == ["ACCEPTED", "REJECTED"]
+    assert last(client)["reason_code"] == "SAFETY_CONDITION_NOT_CLEARED"
+    assert state.mission_id == MISSION_ID
+    assert state.mission_state == "PAUSED"
+    assert (state.mode, state.reason_code) == ("SAFE_STOP", "REMOTE_ESTOP")
+    assert [p["event_type"] for p in client.missions()] == [
+        "MISSION_STARTED",
+        "MISSION_PAUSED",
+    ]
+
+
 def test_pause_and_resume_move_the_mission(client, runner, state):
     start_mission(runner, state)
     runner.handle(command("PAUSE_MISSION"))
@@ -351,7 +399,8 @@ def test_pause_and_resume_move_the_mission(client, runner, state):
 
 
 @pytest.mark.parametrize(
-    "command_type", ["PAUSE_MISSION", "RESUME_MISSION", "CANCEL_MISSION"]
+    "command_type",
+    ["PAUSE_MISSION", "RESUME_MISSION", "COMPLETE_MISSION", "CANCEL_MISSION"],
 )
 def test_mission_commands_need_an_active_mission(client, runner, command_type):
     runner.handle(command(command_type))
@@ -445,20 +494,34 @@ def test_emergency_stop_stops_before_it_reports(client, runner, state):
     assert final["state"] == accepted["state"]
 
 
-def test_emergency_stop_leaves_the_mission_alone(client, runner, state):
+def test_emergency_stop_pauses_the_running_mission(client, runner, state):
     start_mission(runner, state)
     runner.handle(command("EMERGENCY_STOP"))
     assert state.mission_id == MISSION_ID
-    assert state.mission_state == "RUNNING"
-    assert [p["event_type"] for p in client.missions()] == ["MISSION_STARTED"]
+    assert state.mission_state == "PAUSED"
+    assert [p["event_type"] for p in client.missions()] == [
+        "MISSION_STARTED",
+        "MISSION_PAUSED",
+    ]
 
 
-def test_clearing_an_estop_returns_to_the_mission(client, runner, state):
+def test_clearing_an_estop_waits_for_explicit_resume(client, runner, state):
     start_mission(runner, state)
     runner.handle(command("EMERGENCY_STOP"))
     runner.handle(command("CLEAR_EMERGENCY_STOP"))
     assert last(client)["status"] == "COMPLETED"
+    assert (state.mode, state.reason_code) == ("PAUSED", "REMOTE_PAUSE")
+    assert state.mission_state == "PAUSED"
+
+    runner.handle(command("RESUME_MISSION"))
+    assert last(client)["status"] == "COMPLETED"
     assert (state.mode, state.reason_code) == ("PATROLLING", "NONE")
+    assert state.mission_state == "RUNNING"
+    assert [p["event_type"] for p in client.missions()] == [
+        "MISSION_STARTED",
+        "MISSION_PAUSED",
+        "MISSION_RESUMED",
+    ]
 
 
 def test_clearing_an_estop_without_a_mission_goes_to_ready(client, runner, state):

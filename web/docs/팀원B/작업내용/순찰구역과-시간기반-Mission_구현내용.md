@@ -25,8 +25,10 @@
 
 진행률은 GPS Route 투영이 아니라 최신 MQTT
 `mission.elapsed_sec / planned_duration_sec`로 계산한다. 현재 Embedded 의미에
-따라 PAUSED 중에도 벽시계 누적시간이 증가한다. 완료 Event 전에는 최대
-99.99%, `MISSION_COMPLETED` Event에서만 100%가 된다.
+따라 PAUSED 중에도 벽시계 누적시간이 증가한다. Telemetry 진행률은 완료 전 최대
+99.99%다. `MISSION_COMPLETED` Event가 먼저 오면 즉시 100%가 되고, Event가 없어도
+RUNNING 상태에서 계획 종료 시각에 도달하면 서버 SYSTEM 전이가
+`COMPLETED·100%`를 확정한다.
 
 Mission 화면은 생성·목록·상세·이력·계획/경과/남은 시간·ETA·Stale을 표시한다.
 지도는 Area Polygon/MultiPolygon, 실제 GPS Trajectory, 현재 Marker와 Area
@@ -93,8 +95,9 @@ progressPercent
 - 상태: RUNNING·PAUSED
 - 역행 값은 `GREATEST`로 무시
 - 오래된 Telemetry 무시
-- 완료 Event 전 99.99%
-- 완료 Event에서 상태·진행률을 원자적으로 COMPLETED·100%
+- 완료 전 Telemetry 진행률 99.99%
+- 완료 Event 또는 계획 종료 시각의 SYSTEM 전이에서 상태·진행률을 원자적으로
+  COMPLETED·100%
 
 ### 1.4 지도
 
@@ -224,10 +227,13 @@ features/mission/patrol-area-selection-preview.css
 투영하면 정상 우회도 진행률 역행·정지로 보인다. Embedded가 이미 제공하는
 단조 증가 `elapsed_sec`를 계획시간과 비교하는 것이 현재 업무 의미에 맞다.
 
-### 3.3 계획시간 도달로 자동 완료하지 않는다
+### 3.3 계획시간 도달 시 로봇에 정상 종료를 명령한다
 
-통신 지연·일시정지·Robot 업무 상태를 서버 시계가 알 수 없다. 계획시간 도달은
-99.99%까지만 표시하고 Robot 완료 Event가 실제 종결을 확정한다.
+서버가 `started_at + planned_duration_sec`를 주기적으로 확인하고, 도달한
+RUNNING Mission에 `SYSTEM/COMPLETE_MISSION`을 MQTT로 발행한다. 로봇이 모터를
+정지하고 `MISSION_COMPLETED`를 발행한 후에만 Backend가 COMPLETED·100%로
+전이한다. PAUSED는 명시적 재개가 가능해야 하므로 자동 종료 명령 대상에서
+제외한다. 명령 발행 실패나 Timeout인데 Mission만 완료로 속이지 않는다.
 
 ### 3.4 PAUSED 중 증가를 현재 계약으로 유지했다
 

@@ -47,13 +47,18 @@ const COMMAND_STEPS: readonly CommandStep[] = [
     safetyConfirmation: true,
   },
   {
+    commandType: 'RESUME_MISSION',
+    label: '임무 재개',
+    safetyConfirmation: true,
+  },
+  {
     commandType: 'CANCEL_MISSION',
     label: '임무 종료',
     reason: '정상 왕복 임무 종료',
   },
 ]
 
-test('여섯 정상 명령이 React에서 TLS MQTT와 ACK Result를 왕복한다', async ({
+test('긴급정지 복구를 포함한 일곱 명령이 정상 왕복한다', async ({
   context,
   page,
 }, testInfo) => {

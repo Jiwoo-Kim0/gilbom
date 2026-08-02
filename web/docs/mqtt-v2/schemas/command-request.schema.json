@@ -26,6 +26,7 @@
         "START_MISSION",
         "PAUSE_MISSION",
         "RESUME_MISSION",
+        "COMPLETE_MISSION",
         "CANCEL_MISSION",
         "EMERGENCY_STOP",
         "CLEAR_EMERGENCY_STOP"
@@ -79,8 +80,7 @@
               "$ref": "common.schema.json#/definitions/nonBlankString"
             },
             "zone_id": {
-              "type": "string",
-              "pattern": "^[A-Z]-[0-9]{2}$"
+              "type": "string"
             }
           }
         }
@@ -113,7 +113,10 @@
     {
       "properties": {
         "command_type": {
-          "const": "RESUME_MISSION"
+          "enum": [
+            "RESUME_MISSION",
+            "COMPLETE_MISSION"
+          ]
         },
         "parameters": {
           "type": "object",

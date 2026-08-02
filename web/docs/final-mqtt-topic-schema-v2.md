@@ -7,6 +7,9 @@
 > Encoding: UTF-8 JSON  
 > JSON Key: `snake_case`  
 > Time: ISO 8601 UTC `Z`
+>
+> 호환성 정정: 2026-08-02부터 `zone_id`는 `patrol_area.area_code`를 그대로 전달하는
+> 불투명 문자열이며 `A-01` 전용 형식을 강제하지 않는다. 기존 값은 계속 호환된다.
 
 이 문서는 로봇·MQTT Broker·웹 백엔드가 주고받는 v2 MQTT Topic과 JSON Payload를 정의한다. 코드 구현 예시는 제외하고 실제 통신에 필요한 경로, 발행 조건, 데이터 형식과 서버 사용처를 중심으로 정리한다.
 
@@ -758,7 +761,7 @@ tbs/v2/robots/{mqtt_id}/events/incident
 | `location.valid` | Boolean | O | 관측 위치 사용 가능 여부 |
 | `location.lat` | Number 또는 Null | O | 위도, 위치 무효 시 `null` |
 | `location.lon` | Number 또는 Null | O | 경도, 위치 무효 시 `null` |
-| `location.zone_id` | String 또는 Null | O | START_MISSION으로 받은 순찰 구역 코드 |
+| `location.zone_id` | String 또는 Null | O | START_MISSION으로 받은 순찰 구역 코드를 해석하지 않고 그대로 echo |
 | `incident.asset_type` | Enum String | O | `BRAILLE_BLOCK` |
 | `incident.block_type` | Enum String | O | `LINEAR`, `DOT`, `UNKNOWN` |
 | `incident.defect_type` | Enum String | O | MVP `DAMAGED` |
@@ -1187,12 +1190,29 @@ tbs/v2/robots/{mqtt_id}/commands/request
 
 | `command_type` | `parameters` | 권장 TTL |
 |---|---|---:|
-| `START_MISSION` | `mission_id`, `zone_id` | 60초 |
+| `START_MISSION` | `mission_id`, `zone_id`(불투명 구역 코드) | 60초 |
 | `PAUSE_MISSION` | `reason` | 30초 |
 | `RESUME_MISSION` | 빈 Object | 30초 |
+| `COMPLETE_MISSION` | 빈 Object | 30초 |
 | `CANCEL_MISSION` | `reason` | 30초 |
 | `EMERGENCY_STOP` | `reason` | 10초 |
 | `CLEAR_EMERGENCY_STOP` | `reason` | 30초 |
+
+활성 `RUNNING` Mission에서 `EMERGENCY_STOP`이 완료되면 로봇은 Mission 식별자를
+유지하고 `mode=SAFE_STOP`, `mission.state=PAUSED`로 전환한 뒤
+`MISSION_PAUSED` Event를 한 번 발행한다. 이미 `PAUSED`인 Mission에는 같은 Event를
+중복 발행하지 않는다.
+
+`CLEAR_EMERGENCY_STOP`은 안전 정지만 해제하며 주행을 자동 재개하지 않는다. 활성
+Mission이 있으면 `mode=PAUSED`, `mission.state=PAUSED`를 유지하고, 관리자가 별도
+`RESUME_MISSION`을 실행한 뒤에만 `PATROLLING`·`RUNNING`으로 전환하며
+`MISSION_RESUMED` Event를 발행한다.
+
+`COMPLETE_MISSION`은 `mission.state=RUNNING`에서만 허용한다. `PAUSED` 또는
+`mode=SAFE_STOP`에서는 거부하며, 긴급정지는 해제 후 명시적으로 재개한 다음 정상
+완료해야 한다. `CANCEL_MISSION`은 `READY`·`RUNNING`·`PAUSED`에서 허용하고,
+`SAFE_STOP` 중 취소하더라도 Mission만 `CANCELLED`로 종료하며 로봇의 안전 정지는
+해제하지 않는다.
 
 예약 명령은 v1의 이름을 유지하지만 MVP에서는 발행하지 않는다.
 
