@@ -1,11 +1,12 @@
 import {
+  CheckCircle2,
   CircleStop,
   Pause,
   Play,
   RefreshCw,
   RotateCcw,
   ShieldCheck,
-  Square,
+  XCircle,
 } from 'lucide-react'
 import {
   useCallback,
@@ -59,7 +60,8 @@ const commandIcons = {
   START_MISSION: Play,
   PAUSE_MISSION: Pause,
   RESUME_MISSION: RotateCcw,
-  CANCEL_MISSION: Square,
+  COMPLETE_MISSION: CheckCircle2,
+  CANCEL_MISSION: XCircle,
   EMERGENCY_STOP: CircleStop,
   CLEAR_EMERGENCY_STOP: ShieldCheck,
 } as const
@@ -181,6 +183,7 @@ export function CommandControlPage({
       const response = await getMissions(0, MISSION_PAGE_SIZE, {
         robotId: robot.robotId,
         patrolAreaId: '',
+        scope: 'ALL',
         status: '',
         startedFrom: '',
         startedTo: '',
@@ -218,11 +221,11 @@ export function CommandControlPage({
       ))
       .map((command) => command.commandType) ?? []
   ), [commands])
-  const effectiveMissionStatus = (
-    robot.missionStatus
-    ?? currentMission?.status
-    ?? null
-  )
+  const missionCatalogIsAuthoritative = canViewMissions
+    && !missionLoading
+    && missionError === null
+  const effectiveMissionStatus = currentMission?.status
+    ?? (missionCatalogIsAuthoritative ? null : robot.missionStatus)
 
   const selectedDefinition = selectedCommand === null
     ? null

@@ -24,7 +24,8 @@ const COMMAND_TYPE_LABELS: Record<CommandType, string> = {
   START_MISSION: '임무 시작',
   PAUSE_MISSION: '일시정지',
   RESUME_MISSION: '임무 재개',
-  CANCEL_MISSION: '임무 종료',
+  COMPLETE_MISSION: '임무 종료',
+  CANCEL_MISSION: '임무 취소',
   EMERGENCY_STOP: '긴급정지',
   CLEAR_EMERGENCY_STOP: '긴급정지 해제',
 }

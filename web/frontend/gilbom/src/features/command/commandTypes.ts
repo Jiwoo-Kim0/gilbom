@@ -2,6 +2,7 @@ export type CommandType =
   | 'START_MISSION'
   | 'PAUSE_MISSION'
   | 'RESUME_MISSION'
+  | 'COMPLETE_MISSION'
   | 'CANCEL_MISSION'
   | 'EMERGENCY_STOP'
   | 'CLEAR_EMERGENCY_STOP'
@@ -37,14 +38,14 @@ type StartMissionCommandCreateRequest = {
   }
 }
 
-type ResumeMissionCommandCreateRequest = {
-  commandType: 'RESUME_MISSION'
+type EmptyParametersCommandCreateRequest = {
+  commandType: 'RESUME_MISSION' | 'COMPLETE_MISSION'
   parameters: Record<string, never>
 }
 
 type ReasonCommandType = Exclude<
   CommandType,
-  'START_MISSION' | 'RESUME_MISSION'
+  'START_MISSION' | 'RESUME_MISSION' | 'COMPLETE_MISSION'
 >
 
 type ReasonCommandCreateRequest = {
@@ -56,7 +57,7 @@ type ReasonCommandCreateRequest = {
 
 export type CommandCreateRequest =
   | StartMissionCommandCreateRequest
-  | ResumeMissionCommandCreateRequest
+  | EmptyParametersCommandCreateRequest
   | ReasonCommandCreateRequest
 
 export type CommandResponse = {

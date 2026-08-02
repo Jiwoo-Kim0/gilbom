@@ -71,6 +71,8 @@ test('시간 기반 Mission을 경로 UI 없이 생성하고 진행 정보를 �
 }) => {
   let missionCreated = false
   let createPayload: Record<string, unknown> | null = null
+  const requestedMissionScopes: string[] = []
+  let robotCatalogRequestCount = 0
 
   await page.route('https://oapi.map.naver.com/**', (route) => route.abort())
   await page.route('**/api/v1/**', async (route) => {
@@ -90,7 +92,12 @@ test('시간 기반 Mission을 경로 UI 없이 생성하고 진행 정보를 �
         userId: '81000000-0000-4000-8000-000000000006',
         displayName: 'Mission E2E 관리자',
         roles: [{ roleCode: 'OPERATOR', roleName: '운영자' }],
-        permissions: ['MISSION_VIEW', 'MISSION_MANAGE'],
+        permissions: [
+          'MISSION_VIEW',
+          'MISSION_MANAGE',
+          'ROBOT_COMMAND_VIEW',
+          'ROBOT_COMMAND_EXECUTE',
+        ],
       })
       return
     }
@@ -102,7 +109,34 @@ test('시간 기반 Mission을 경로 UI 없이 생성하고 진행 정보를 �
       })
       return
     }
+    if (pathname === `/api/v1/robots/${ROBOT_ID}`) {
+      await fulfillJson(route, {
+        robotId: ROBOT_ID,
+        mqttId: 'robot-time-e2e',
+        robotName: '시간 계약 로봇',
+        serialNumber: 'TIME-E2E-001',
+        operationalStatus: 'ACTIVE',
+        connectivityStatus: 'ONLINE',
+        robotMode: 'PATROLLING',
+        missionStatus: 'RUNNING',
+        overallHealthStatus: 'OK',
+        registeredAt: '2026-07-30T00:00:00Z',
+        updatedAt: '2026-07-30T00:15:00Z',
+      })
+      return
+    }
+    if (pathname === `/api/v1/robots/${ROBOT_ID}/commands`) {
+      await fulfillJson(route, {
+        content: [],
+        page: 0,
+        size: 20,
+        totalElements: 0,
+        totalPages: 0,
+      })
+      return
+    }
     if (pathname === '/api/v1/robots') {
+      robotCatalogRequestCount += 1
       await fulfillJson(route, {
         content: [{
           robotId: ROBOT_ID,
@@ -112,6 +146,7 @@ test('시간 기반 Mission을 경로 UI 없이 생성하고 진행 정보를 �
           operationalStatus: 'ACTIVE',
           connectivityStatus: 'ONLINE',
           missionStatus: null,
+          missionAssignable: true,
           overallHealthStatus: 'NORMAL',
         }],
         page: 0,
@@ -182,6 +217,7 @@ test('시간 기반 Mission을 경로 UI 없이 생성하고 진행 정보를 �
       return
     }
     if (pathname === '/api/v1/missions') {
+      requestedMissionScopes.push(url.searchParams.get('scope') ?? '')
       const content = missionCreated
         ? [createdMission, runningMission]
         : [runningMission]
@@ -239,6 +275,16 @@ test('시간 기반 Mission을 경로 UI 없이 생성하고 진행 정보를 �
     name: '순찰 임무 관리',
   }))
     .toBeVisible()
+  await expect(page.locator('#mission-filter-scope')).toHaveValue('ACTIVE')
+  expect(requestedMissionScopes).toContain('ACTIVE')
+
+  await page.locator('#mission-filter-scope').selectOption('TERMINAL')
+  await page.getByRole('button', { name: '조회' }).click()
+  await expect.poll(() => requestedMissionScopes.at(-1)).toBe('TERMINAL')
+
+  await page.locator('#mission-filter-scope').selectOption('ACTIVE')
+  await page.getByRole('button', { name: '조회' }).click()
+  await expect.poll(() => requestedMissionScopes.at(-1)).toBe('ACTIVE')
   await expect(page.getByText('25.0%').first()).toBeVisible()
   await expect(page.getByText('계획').last()).toBeVisible()
   await expect(page.getByText('1시간 0분', { exact: true })).toBeVisible()
@@ -246,7 +292,20 @@ test('시간 기반 Mission을 경로 UI 없이 생성하고 진행 정보를 �
   await expect(page.getByText('45분 0초', { exact: true })).toBeVisible()
   await expect(page.getByText('계획 경로')).toHaveCount(0)
 
+  const completeButton = page
+    .getByTestId('mission-command-actions')
+    .getByRole('button', { name: '임무 완료' })
+  await expect(completeButton).toBeEnabled()
+  await completeButton.click()
+  const completeModal = page.getByRole('dialog', { name: '임무 완료 확인' })
+  const completeSafetyMessage = '로봇 주변에 위험 요소가 없고 완료 명령 후 안전하게 정지하는 절차를 확인했습니다.'
+  await expect(completeModal).toBeVisible()
+  await expect(completeModal.getByText(completeSafetyMessage, { exact: true }))
+    .toHaveCount(1)
+  await completeModal.getByRole('button', { name: '확인창 닫기' }).click()
+
   await page.getByRole('button', { name: '새 임무' }).click()
+  await expect.poll(() => robotCatalogRequestCount).toBeGreaterThan(1)
   await page.locator('#mission-create-robot').selectOption(ROBOT_ID)
   await page.locator('#mission-create-area').selectOption(AREA_ID)
   await page.locator('#mission-create-duration').fill('45')

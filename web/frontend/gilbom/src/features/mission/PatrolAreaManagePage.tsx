@@ -1,4 +1,6 @@
 import {
+  CheckCircle2,
+  CircleAlert,
   ClipboardCheck,
   MapPinned,
   Plus,
@@ -11,10 +13,14 @@ import {
   useState,
   type FormEvent,
 } from 'react'
-import { getApiErrorMessage } from '../../shared/api/apiClient'
+import {
+  ApiError,
+  getApiErrorMessage,
+} from '../../shared/api/apiClient'
 import { useAuthentication } from '../auth/authenticationContext'
 import { MISSION_MANAGE } from '../auth/permissions'
 import {
+  checkPatrolAreaCodeAvailability,
   createPatrolArea,
   getPatrolAreas,
 } from './missionApi'
@@ -30,6 +36,7 @@ import type {
   GeoJsonCoordinate,
   GeoJsonPolygon,
   PatrolArea,
+  PatrolAreaCodeAvailability,
   PatrolAreaBoundary,
 } from './missionTypes'
 import './mission.css'
@@ -57,6 +64,9 @@ export function PatrolAreaManagePage() {
   const [notice, setNotice] = useState<string | null>(null)
   const [registrationOpen, setRegistrationOpen] = useState(false)
   const [areaCode, setAreaCode] = useState('')
+  const [areaCodeAvailability, setAreaCodeAvailability] =
+    useState<PatrolAreaCodeAvailability | null>(null)
+  const [checkingAreaCode, setCheckingAreaCode] = useState(false)
   const [areaName, setAreaName] = useState('')
   const [centerLatitude, setCenterLatitude] = useState('')
   const [centerLongitude, setCenterLongitude] = useState('')
@@ -100,6 +110,7 @@ export function PatrolAreaManagePage() {
 
   function resetRegistrationForm() {
     setAreaCode('')
+    setAreaCodeAvailability(null)
     setAreaName('')
     setCenterLatitude('')
     setCenterLongitude('')
@@ -107,6 +118,28 @@ export function PatrolAreaManagePage() {
     setBoundaryMode('map')
     setBoundaryPoints([])
     setFormError(null)
+  }
+
+  async function handleAreaCodeAvailabilityCheck() {
+    const normalizedAreaCode = areaCode.trim()
+    if (normalizedAreaCode.length === 0) {
+      setFormError(new Error('중복 확인할 구역 코드를 입력해주세요.'))
+      return
+    }
+
+    setCheckingAreaCode(true)
+    setFormError(null)
+    try {
+      const availability = await checkPatrolAreaCodeAvailability(
+        normalizedAreaCode,
+      )
+      setAreaCodeAvailability(availability)
+    } catch (nextError) {
+      setAreaCodeAvailability(null)
+      setFormError(nextError)
+    } finally {
+      setCheckingAreaCode(false)
+    }
   }
 
   async function handleCreateArea(event: FormEvent<HTMLFormElement>) {
@@ -119,6 +152,16 @@ export function PatrolAreaManagePage() {
     const normalizedAreaName = areaName.trim()
     if (normalizedAreaCode.length === 0 || normalizedAreaName.length === 0) {
       setFormError(new Error('구역 코드와 구역 이름을 입력해주세요.'))
+      return
+    }
+    if (
+      areaCodeAvailability === null
+      || areaCodeAvailability.areaCode !== normalizedAreaCode
+    ) {
+      setFormError(new Error('구역 코드 중복 확인을 완료해주세요.'))
+      return
+    }
+    if (!areaCodeAvailability.available) {
       return
     }
 
@@ -202,11 +245,28 @@ export function PatrolAreaManagePage() {
         + '이제 순찰 임무 관리에서 선택할 수 있습니다.',
       )
     } catch (nextError) {
-      setFormError(nextError)
+      if (
+        nextError instanceof ApiError
+        && nextError.code === 'PATROL_AREA_CODE_CONFLICT'
+      ) {
+        setAreaCodeAvailability({
+          areaCode: normalizedAreaCode,
+          available: false,
+        })
+      } else {
+        setFormError(nextError)
+      }
     } finally {
       setSubmitting(false)
     }
   }
+
+  const normalizedAreaCode = areaCode.trim()
+  const matchingAreaCodeAvailability =
+    areaCodeAvailability?.areaCode === normalizedAreaCode
+      ? areaCodeAvailability
+      : null
+  const areaCodeConflict = matchingAreaCodeAvailability?.available === false
 
   return (
     <section className="page-stack" aria-labelledby="patrol-area-page-title">
@@ -295,20 +355,58 @@ export function PatrolAreaManagePage() {
             className="mission-create-form mission-area-create-form"
             onSubmit={handleCreateArea}
           >
-            <label className="admin-form-field" htmlFor="patrol-area-code">
-              구역 코드
-              <input
-                id="patrol-area-code"
-                type="text"
-                maxLength={50}
-                value={areaCode}
-                onChange={(event) => setAreaCode(event.target.value)}
-                placeholder="DEMO-ZONE-01"
-                disabled={submitting}
-                required
-              />
-              <small>Incident payload의 zone_id와 정확히 일치해야 합니다.</small>
-            </label>
+            <div className="admin-form-field mission-area-code-check">
+              <label htmlFor="patrol-area-code">구역 코드</label>
+              <div className="input-action-row">
+                <input
+                  id="patrol-area-code"
+                  type="text"
+                  maxLength={50}
+                  value={areaCode}
+                  onChange={(event) => {
+                    setAreaCode(event.target.value)
+                    setAreaCodeAvailability(null)
+                  }}
+                  aria-invalid={areaCodeConflict}
+                  aria-describedby="patrol-area-code-status"
+                  placeholder="A-01"
+                  disabled={submitting}
+                  required
+                />
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => void handleAreaCodeAvailabilityCheck()}
+                  disabled={submitting || checkingAreaCode}
+                >
+                  {checkingAreaCode ? '확인 중…' : '중복 확인'}
+                </button>
+              </div>
+              {matchingAreaCodeAvailability ? (
+                <p
+                  id="patrol-area-code-status"
+                  className={matchingAreaCodeAvailability.available
+                    ? 'availability-ok'
+                    : 'availability-denied'}
+                  role={matchingAreaCodeAvailability.available
+                    ? 'status'
+                    : 'alert'}
+                >
+                  {matchingAreaCodeAvailability.available ? (
+                    <CheckCircle2 size={15} aria-hidden="true" />
+                  ) : (
+                    <CircleAlert size={15} aria-hidden="true" />
+                  )}
+                  {matchingAreaCodeAvailability.available
+                    ? '사용 가능한 구역 코드입니다.'
+                    : '이미 등록된 구역 코드입니다.'}
+                </p>
+              ) : (
+                <small id="patrol-area-code-status">
+                  형식 제한은 없으며 Incident의 zone_id에 그대로 사용됩니다.
+                </small>
+              )}
+            </div>
             <label className="admin-form-field" htmlFor="patrol-area-name">
               구역 이름
               <input
@@ -428,7 +526,10 @@ export function PatrolAreaManagePage() {
             <button
               className="primary-button mission-create-submit"
               type="submit"
-              disabled={submitting}
+              disabled={
+                submitting
+                || matchingAreaCodeAvailability?.available !== true
+              }
             >
               <MapPinned size={17} aria-hidden="true" />
               {submitting ? '등록 중…' : '순찰 구역 등록'}

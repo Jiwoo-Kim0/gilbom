@@ -7,6 +7,8 @@ export type MissionStatus =
   | 'CANCELLED'
   | 'FAILED'
 
+export type MissionListScope = 'ACTIVE' | 'TERMINAL' | 'ALL'
+
 export type GeoJsonCoordinate = [longitude: number, latitude: number]
 
 export type GeoJsonPolygon = {
@@ -24,6 +26,7 @@ export type PatrolAreaBoundary = GeoJsonPolygon | GeoJsonMultiPolygon
 export type MissionFilters = {
   robotId: string
   patrolAreaId: string
+  scope: MissionListScope
   status: MissionStatus | ''
   startedFrom: string
   startedTo: string
@@ -159,6 +162,11 @@ export type PatrolAreaListResponse = {
   areas: PatrolArea[]
 }
 
+export type PatrolAreaCodeAvailability = {
+  areaCode: string
+  available: boolean
+}
+
 export type PatrolRoute = {
   patrolRouteId: string
   patrolAreaId: string
@@ -183,6 +191,7 @@ export type RobotOption = {
   operationalStatus: string
   connectivityStatus: string
   missionStatus: string | null
+  missionAssignable: boolean
   overallHealthStatus: string
 }
 

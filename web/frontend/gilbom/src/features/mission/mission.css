@@ -54,6 +54,15 @@
   border-color: color-mix(in srgb, var(--brand) 28%, var(--line));
 }
 
+.mission-area-code-check .secondary-button {
+  min-height: 43px;
+}
+
+.mission-area-code-check .availability-ok,
+.mission-area-code-check .availability-denied {
+  justify-self: start;
+}
+
 .mission-area-boundary-mode,
 .mission-area-boundary-field {
   grid-column: 1 / -1;
