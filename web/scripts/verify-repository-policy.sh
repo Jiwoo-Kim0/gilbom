@@ -32,6 +32,7 @@ sh scripts/verify-security-tooling-policy.sh
 sh scripts/verify-ci-checkout-contract.sh
 sh scripts/verify-ci-release-contract.sh
 sh scripts/verify-ci-artifact-transfer-contract.sh
+sh scripts/test-run-frontend-ci-task.sh
 sh scripts/verify-frontend-csp-source.sh
 sh -n infra/scripts/*.sh
 test -s docs/production-deployment-runbook.md

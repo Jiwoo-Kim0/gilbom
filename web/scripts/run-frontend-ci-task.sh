@@ -17,6 +17,23 @@ WORK_ROOT="$PROJECT_DIR/.artifacts/frontend-ci"
 HOST_UID="$(id -u)"
 HOST_GID="$(id -g)"
 
+# Docker must see nested bind targets before mounting the source tree
+# read-only at /app. A clean checkout does not contain these ignored paths.
+for source_mountpoint in \
+  "$SOURCE_DIR/node_modules" \
+  "$SOURCE_DIR/dist"
+do
+  [ ! -L "$source_mountpoint" ] || {
+    echo "Frontend CI mountpoint must not be a symlink: $source_mountpoint" >&2
+    exit 1
+  }
+  mkdir -p "$source_mountpoint"
+  [ -d "$source_mountpoint" ] || {
+    echo "Frontend CI mountpoint is not a directory: $source_mountpoint" >&2
+    exit 1
+  }
+done
+
 mkdir -p \
   "$WORK_ROOT/home" \
   "$WORK_ROOT/node_modules" \

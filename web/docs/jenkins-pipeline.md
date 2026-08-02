@@ -120,7 +120,9 @@ XML 결과 경로를 따로 검증하므로 한 gate의 과거 결과가 다른 
 
 Frontend도 source를 read-only `/app`에 두고 `node_modules`, npm cache와 `dist`만
 `.artifacts/frontend-ci/`로 분리한다. `npm ci`를 통과한 뒤 test, lint, production
-build가 독립 stage로 실행되고 build output이 비어 있으면 실패한다.
+build가 독립 stage로 실행되고 build output이 비어 있으면 실패한다. 깨끗한 checkout은
+ignored `node_modules/`와 `dist/`가 없으므로 실행기가 두 빈 경로를 먼저 만들고
+read-only `/app` 아래의 중첩 bind mount target으로만 사용한다.
 
 Image layer 검증의 `docker save` archive와 압축 해제본은 Jenkins의 256 MiB
 `/tmp`에 두지 않고 workspace의 ignored `.artifacts/image-verify-work/`에서
