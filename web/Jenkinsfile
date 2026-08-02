@@ -211,6 +211,36 @@ pipeline {
             }
         }
 
+        stage('Artifact transfer readiness') {
+            steps {
+                dir(env.APP_DIR) {
+                    withCredentials([
+                        sshUserPrivateKey(
+                                credentialsId: 'gilbom-artifact-upload-ssh',
+                                keyFileVariable: 'ARTIFACT_SSH_IDENTITY',
+                                usernameVariable: 'ARTIFACT_SSH_USER'
+                        ),
+                        file(
+                                credentialsId: 'gilbom-artifact-known-hosts',
+                                variable: 'ARTIFACT_KNOWN_HOSTS'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
+                            artifact_host="${ARTIFACT_HOST:-host.docker.internal}"
+                            artifact_port="${ARTIFACT_SSH_PORT:-22}"
+                            KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                            SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                            SSH_PORT="$artifact_port" \
+                                sh scripts/verify-ci-artifact-remote-readiness.sh \
+                                    "$ARTIFACT_SSH_USER@$artifact_host"
+                        '''
+                    }
+                }
+            }
+        }
+
         stage('Prepare ephemeral credentials') {
             steps {
                 dir(env.APP_DIR) {

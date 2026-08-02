@@ -20,8 +20,10 @@ line_of() {
 }
 
 for file in \
+  scripts/verify-ci-artifact-remote-readiness.sh \
   scripts/upload-ci-release-artifacts.sh \
   scripts/promote-ci-release-artifacts-remote.sh \
+  scripts/test-ci-artifact-ssh-paths.sh \
   scripts/test-promote-ci-release-artifacts.sh \
   infra/scripts/promote-ci-release-artifacts.sh
 do
@@ -46,6 +48,9 @@ assert_contains Jenkinsfile \
 assert_contains Jenkinsfile \
   "credentialsId: 'gilbom-artifact-known-hosts'" \
   "verified known_hosts Credential is missing"
+assert_contains Jenkinsfile \
+  "stage('Artifact transfer readiness')" \
+  "artifact destination readiness is not checked before expensive tests"
 assert_contains Jenkinsfile \
   'input message:' \
   "manual promotion approval is missing"
@@ -90,9 +95,13 @@ if grep -Fq 'StrictHostKeyChecking=no' \
 fi
 
 sh -n \
+  scripts/verify-ci-artifact-remote-readiness.sh \
   scripts/upload-ci-release-artifacts.sh \
   scripts/promote-ci-release-artifacts-remote.sh \
+  scripts/test-ci-artifact-ssh-paths.sh \
   scripts/test-promote-ci-release-artifacts.sh \
   infra/scripts/promote-ci-release-artifacts.sh
+
+sh scripts/test-ci-artifact-ssh-paths.sh
 
 echo "CI artifact transfer and atomic promotion contract: PASS"

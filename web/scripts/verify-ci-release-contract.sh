@@ -31,6 +31,7 @@ for stage in \
   "stage('Backend dependency scan')" \
   "stage('Frontend dependency scan')" \
   "stage('Image scanner readiness')" \
+  "stage('Artifact transfer readiness')" \
   "stage('Prepare ephemeral credentials')" \
   "stage('Backend full test')" \
   "stage('Backend security acceptance')" \

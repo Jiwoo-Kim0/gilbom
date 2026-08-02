@@ -59,18 +59,24 @@ Jenkins UI의 `Manage Jenkins → Credentials`에서 다음 두 Credential을 �
 | `gilbom-artifact-upload-ssh` | SSH Username with private key | username `ubuntu`, Jenkins 전용 private key |
 | `gilbom-artifact-known-hosts` | Secret file | fingerprint를 확인한 `known_hosts` |
 
+Jenkins는 file Credential을 `.../<job>@tmp/secretFiles/...` 아래에 배치한다.
+CI 전송 스크립트의 절대경로 검증은 이 Jenkins 관리형 `@tmp` 경로를 허용하되,
+공백과 shell metacharacter, symlink는 계속 거부한다.
+
 기본 대상은 Jenkins 컨테이너의 `host.docker.internal:22`다.
 다른 EC2 사설 주소를 사용해야 할 때만 Job 환경에 `ARTIFACT_HOST`와 선택적으로
 `ARTIFACT_SSH_PORT`를 설정한다.
 
 ## Pipeline 동작
 
-1. `Upload release artifacts to incoming`이 로컬 Checksum을 확인한다.
-2. SSH host key를 강제 검증하고 아홉 개의 파일만 SCP/SFTP로 전송한다.
-3. EC2 incoming 디렉터리에서 Checksum을 다시 확인한다.
-4. `Approve release artifact promotion`에서 Jenkins 사용자가 수동 승인한다.
-5. `Promote release artifact atomically`가 제한된 root 명령을 실행한다.
-6. root 명령이 구조·파일 형식·Checksum·기존 SHA 충돌을 검사하고 원자적으로
+1. 비싼 Test 전에 `Artifact transfer readiness`가 SSH host key, incoming 쓰기
+   권한, root 소유 승격 helper와 passwordless sudo 허용을 읽기 전용으로 확인한다.
+2. `Upload release artifacts to incoming`이 로컬 Checksum을 확인한다.
+3. SSH host key를 강제 검증하고 아홉 개의 파일만 SCP/SFTP로 전송한다.
+4. EC2 incoming 디렉터리에서 Checksum을 다시 확인한다.
+5. `Approve release artifact promotion`에서 Jenkins 사용자가 수동 승인한다.
+6. `Promote release artifact atomically`가 제한된 root 명령을 실행한다.
+7. root 명령이 구조·파일 형식·Checksum·기존 SHA 충돌을 검사하고 원자적으로
    rename한 뒤 전체 write bit가 제거됐는지 확인한다.
 
 전송 도중 중단된 incoming 디렉터리는 자동 덮어쓰지 않는다. 완전하며 Checksum이

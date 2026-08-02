@@ -37,10 +37,10 @@ printf '%s\n' "$SSH_PORT" | grep -Eq '^[0-9]{1,5}$' \
 [ "$REMOTE_ARTIFACT_ROOT" = /opt/gilbom/artifacts ] \
   || fail "REMOTE_ARTIFACT_ROOT must be /opt/gilbom/artifacts"
 printf '%s\n' "$KNOWN_HOSTS_FILE" \
-  | grep -Eq '^/[A-Za-z0-9._/-]+$' \
+  | grep -Eq '^/[A-Za-z0-9._/@-]+$' \
   || fail "KNOWN_HOSTS_FILE must use an absolute safe path"
 printf '%s\n' "$SSH_IDENTITY_FILE" \
-  | grep -Eq '^/[A-Za-z0-9._/-]+$' \
+  | grep -Eq '^/[A-Za-z0-9._/@-]+$' \
   || fail "SSH_IDENTITY_FILE must use an absolute safe path"
 [ -f "$KNOWN_HOSTS_FILE" ] && [ ! -L "$KNOWN_HOSTS_FILE" ] \
   || fail "KNOWN_HOSTS_FILE must be a regular non-symlink file"
