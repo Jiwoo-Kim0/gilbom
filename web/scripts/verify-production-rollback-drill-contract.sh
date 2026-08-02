@@ -91,6 +91,8 @@ for marker in \
   'run_scenario_b' \
   'run_scenario_c' \
   'remove_previous_images' \
+  'refusing to remove a previous-image container outside the drill' \
+  'refusing to remove a non-stopped previous-image container' \
   'load_previous_artifact' \
   'AUTOMATIC_ROLLBACK_SUCCEEDED' \
   'ROLLBACK_BLOCKED_EXPLICIT_COMPATIBILITY_APPROVAL_REQUIRED' \
@@ -102,6 +104,11 @@ do
     "$marker" \
     "required rollback drill marker is missing: $marker"
 done
+
+if grep -Eq 'docker[[:space:]]+image[[:space:]]+rm[[:space:]]+(-f|--force)' \
+    scripts/run-production-rollback-drill.sh; then
+  fail "previous-image removal must not force-delete an in-use image"
+fi
 
 if grep -Eiq \
     'flyway[[:space:]-]+undo|pg_restore|restore-db' \

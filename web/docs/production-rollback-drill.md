@@ -16,7 +16,9 @@ PostgreSQL Flyway 상태, healthcheck와 named Volume으로 재현한다. 두 �
 
 V35 Previous 스택에 DB row, 로봇 이미지, PDF fixture를 기록한다. 같은 V35
 Candidate의 Backend health를 실패시키고 Previous image tag와 config를 로컬 Docker
-저장소에서 삭제한다. 이전 Artifact의 checksum과 zstd stream을 검증한 뒤
+저장소에서 삭제한다. Compose 교체가 남긴 정지 컨테이너는 훈련 Project label과
+정지 상태를 모두 확인한 경우에만 먼저 제거하며, 실행 중이거나 다른 Project인
+컨테이너는 거부한다. 이전 Artifact의 checksum과 zstd stream을 검증한 뒤
 `docker load`하여 Previous Backend·Frontend를 복구한다.
 
 성공 조건:

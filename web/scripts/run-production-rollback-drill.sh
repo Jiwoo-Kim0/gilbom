@@ -296,6 +296,41 @@ load_previous_artifact() {
 }
 
 remove_previous_images() {
+  for previous_image in "$previous_backend" "$previous_frontend"
+  do
+    previous_container_ids="$(
+      docker container ls \
+        --all \
+        --filter "ancestor=$previous_image" \
+        --format '{{.ID}}'
+    )"
+    for previous_container_id in $previous_container_ids
+    do
+      container_project="$(
+        docker container inspect \
+          --format '{{index .Config.Labels "com.docker.compose.project"}}' \
+          "$previous_container_id"
+      )"
+      container_state="$(
+        docker container inspect \
+          --format '{{.State.Status}}' \
+          "$previous_container_id"
+      )"
+      case "$container_project" in
+        "$base_project"-a|"$base_project"-b|"$base_project"-c) ;;
+        *)
+          fail "refusing to remove a previous-image container outside the drill"
+          ;;
+      esac
+      case "$container_state" in
+        created|dead|exited) ;;
+        *)
+          fail "refusing to remove a non-stopped previous-image container"
+          ;;
+      esac
+      docker container rm "$previous_container_id" >/dev/null
+    done
+  done
   docker image rm "$previous_backend" "$previous_frontend" >/dev/null
   if docker image inspect "$previous_backend" >/dev/null 2>&1 \
       || docker image inspect "$previous_frontend" >/dev/null 2>&1; then
