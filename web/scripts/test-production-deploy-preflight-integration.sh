@@ -125,6 +125,10 @@ jq -n \
     | xargs sha256sum > SHA256SUMS
 )
 chown -R root:root /opt/gilbom /var/lib/gilbom/releases
+# Artifact upload root is intentionally root:<upload-group>:0710. The
+# immutable per-SHA destination remains entirely root:root and read-only.
+chown root:1000 /opt/gilbom/artifacts
+chmod 0710 /opt/gilbom/artifacts
 find "$artifact_dir" -type d -exec chmod 0550 {} +
 find "$artifact_dir" -type f -exec chmod 0440 {} +
 

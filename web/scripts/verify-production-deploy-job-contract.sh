@@ -95,6 +95,9 @@ manifest_line="$(grep -nF "stage('Collect and verify release manifest')" Jenkins
 assert_contains infra/scripts/gilbom-deploy.sh \
   'DEPLOY_APPROVAL_ROOT=/opt/gilbom/deploy-approvals' \
   "root deploy does not use the fixed approval root"
+assert_contains infra/scripts/gilbom-deploy-preflight.sh \
+  'assert_root_owned_directory "$ARTIFACT_ROOT"' \
+  "preflight does not preserve the root-owned artifact upload group boundary"
 assert_contains infra/scripts/gilbom-deploy.sh \
   'Jenkins deployment approval is invalid or stale' \
   "root deploy does not reject stale Jenkins approval"

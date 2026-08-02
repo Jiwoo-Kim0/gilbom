@@ -50,6 +50,16 @@ assert_root_directory() {
     || fail "required directory is group/world writable: $path"
 }
 
+assert_root_owned_directory() {
+  path="$1"
+  [ -d "$path" ] && [ ! -L "$path" ] \
+    || fail "required directory is missing or symlinked: $path"
+  [ "$(stat -c '%U' "$path")" = root ] \
+    || fail "required directory must be root-owned: $path"
+  [ -z "$(find "$path" -maxdepth 0 -perm /0022 -print -quit)" ] \
+    || fail "required directory is group/world writable: $path"
+}
+
 assert_root_file() {
   path="$1"
   [ -f "$path" ] && [ ! -L "$path" ] && [ -s "$path" ] \
@@ -86,8 +96,8 @@ policy="$artifact_dir/vulnerabilities/policy-summary.json"
 release_record_dir="$RELEASE_RECORD_ROOT/$release_sha"
 approval_file="$DEPLOY_APPROVAL_ROOT/$release_sha.json"
 
+assert_root_owned_directory "$ARTIFACT_ROOT"
 for directory in \
-  "$ARTIFACT_ROOT" \
   "$DEPLOY_ROOT" \
   "$RELEASE_RECORD_ROOT" \
   "$DEPLOY_APPROVAL_ROOT" \
