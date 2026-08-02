@@ -15,6 +15,7 @@ SECRET_ROOT=/opt/gilbom/secrets
 BACKUP_ROOT=/opt/gilbom/backups
 BACKUP_SCRIPT="$DEPLOY_ROOT/infra/scripts/backup-volumes.sh"
 MIGRATION_APPROVAL_ROOT=/opt/gilbom/migration-approvals
+DEPLOY_APPROVAL_ROOT=/opt/gilbom/deploy-approvals
 RELEASE_RECORD_ROOT=/var/lib/gilbom/releases
 CURRENT_SHA_PATH="$RELEASE_RECORD_ROOT/current.sha"
 PREVIOUS_SHA_PATH="$RELEASE_RECORD_ROOT/previous.sha"
@@ -42,6 +43,7 @@ for variable in \
   PROJECT_DIR EXPECTED_GIT_REVISION BACKEND_IMAGE FRONTEND_IMAGE \
   DEPLOY_PULL ALLOW_MUTABLE_IMAGE_TAGS SECRET_SCAN_DIR BACKUP_DIR \
   BACKUP_ROOT MIGRATION_APPROVAL_ROOT RELEASE_RECORD_ROOT \
+  DEPLOY_APPROVAL_ROOT \
   COMPOSE_PROJECT_NAME DOCKER_HOST DOCKER_CONTEXT
 do
   value="$(printenv "$variable" 2>/dev/null || true)"
@@ -147,6 +149,7 @@ assert_root_directory "$DEPLOY_ROOT"
 assert_root_directory "$SECRET_ROOT"
 assert_root_directory "$BACKUP_ROOT"
 assert_root_directory "$MIGRATION_APPROVAL_ROOT"
+assert_root_directory "$DEPLOY_APPROVAL_ROOT"
 assert_root_directory "$RELEASE_RECORD_ROOT"
 assert_root_secure_tree "$DEPLOY_ROOT"
 assert_root_secure_tree "$SECRET_ROOT"
@@ -295,6 +298,33 @@ compose() {
 compose config --quiet \
   || fail "fixed production Compose configuration is invalid"
 
+# 승인 화면에 표시된 현재 운영 SHA와 실제 배포 직전 상태를 같은 값으로
+# 고정한다. current.sha가 없는 기존 설치는 image.env를 읽되 성공 처리 전에는
+# 상태 파일을 쓰지 않는다.
+current_sha_bootstrap=false
+if [ -e "$CURRENT_SHA_PATH" ]; then
+  assert_root_file "$CURRENT_SHA_PATH"
+  current_sha="$(tr -d '\n' < "$CURRENT_SHA_PATH")"
+else
+  current_backend_sha="$(
+    sed -n 's/^BACKEND_IMAGE=gilbom-backend:\([0-9a-f]\{40\}\)$/\1/p' \
+      "$IMAGE_ENV_PATH"
+  )"
+  current_frontend_sha="$(
+    sed -n 's/^FRONTEND_IMAGE=gilbom-frontend:\([0-9a-f]\{40\}\)$/\1/p' \
+      "$IMAGE_ENV_PATH"
+  )"
+  [ -n "$current_backend_sha" ] \
+    && [ "$current_backend_sha" = "$current_frontend_sha" ] \
+    || fail "current.sha is absent and image.env cannot establish the current release"
+  current_sha="$current_backend_sha"
+  current_sha_bootstrap=true
+fi
+printf '%s\n' "$current_sha" | grep -Eq '^[0-9a-f]{40}$' \
+  || fail "current production SHA is invalid"
+[ "$current_sha" != "$release_sha" ] \
+  || fail "requested release is already current"
+
 db_id="$(compose ps -q db)"
 [ -n "$db_id" ] \
   || fail "running production PostgreSQL container is required"
@@ -421,7 +451,74 @@ pending_migration_count="$(
   jq -r '.migrations | length' "$migration_plan"
 )"
 
-# 15. 신규 migration이 있으면 root가 생성한 exact plan 승인만 허용한다.
+# 15. Jenkins 인증 사용자의 승인 기록이 exact preflight, Artifact, 현재 운영
+# SHA와 migration plan을 모두 가리키는지 확인한다. 승인 뒤 운영 상태가
+# 달라졌으면 배포를 진행하지 않는다.
+deploy_preflight="$release_record_dir/deploy-preflight.json"
+deploy_preflight_checksum="$release_record_dir/deploy-preflight.sha256"
+deploy_approval_file="$DEPLOY_APPROVAL_ROOT/$release_sha.json"
+for file in \
+  "$deploy_preflight" \
+  "$deploy_preflight_checksum" \
+  "$deploy_approval_file"
+do
+  assert_root_file "$file"
+done
+(
+  cd "$release_record_dir"
+  sha256sum -c deploy-preflight.sha256
+) || fail "deployment preflight checksum verification failed"
+deploy_preflight_sha256="$(sha256sum "$deploy_preflight" | awk '{print $1}')"
+artifact_manifest_sha256="$(
+  sha256sum "$artifact_dir/SHA256SUMS" | awk '{print $1}'
+)"
+jq -e \
+  --arg release_sha "$release_sha" \
+  --arg current_sha "$current_sha" \
+  --arg artifact_manifest_sha256 "$artifact_manifest_sha256" \
+  --arg migration_plan_sha256 "$migration_plan_sha256" \
+  --argjson current_version "$current_version" \
+  --argjson target_version "$latest_version" \
+  --slurpfile migration_plan "$migration_plan" \
+  '
+    .schemaVersion == 1
+    and .releaseSha == $release_sha
+    and .production.currentSha == $current_sha
+    and .production.rollbackTargetSha == $current_sha
+    and .artifact.sha256SumsSha256 == $artifact_manifest_sha256
+    and .flyway.currentVersion == $current_version
+    and .flyway.targetVersion == $target_version
+    and .flyway.migrationPlanSha256 == $migration_plan_sha256
+    and .flyway.pendingMigrations == $migration_plan[0].migrations
+    and (.flyway.compatibility | startswith("COMPATIBLE_"))
+    and .vulnerabilities.critical == 0
+    and .vulnerabilities.unapprovedHigh == 0
+  ' "$deploy_preflight" >/dev/null \
+  || fail "approved preflight differs from the deployment state"
+jq -e \
+  --arg release_sha "$release_sha" \
+  --arg preflight_sha256 "$deploy_preflight_sha256" \
+  --arg artifact_manifest_sha256 "$artifact_manifest_sha256" \
+  --arg current_sha "$current_sha" \
+  --arg migration_plan_sha256 "$migration_plan_sha256" \
+  '
+    .schemaVersion == 1
+    and .releaseSha == $release_sha
+    and .preflightSha256 == $preflight_sha256
+    and .artifactManifestSha256 == $artifact_manifest_sha256
+    and .currentSha == $current_sha
+    and .migrationPlanSha256 == $migration_plan_sha256
+    and (.approvedBy | type == "string")
+    and (.approvedBy | length >= 1 and length <= 64)
+    and (.approvedBy | test("^[^\\u0000-\\u001f\\u007f]+$"))
+    and (.approvedAtUtc | test(
+      "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    ))
+  ' "$deploy_approval_file" >/dev/null \
+  || fail "Jenkins deployment approval is invalid or stale"
+
+# 신규 migration이 있으면 같은 Jenkins 승인이 생성한 exact plan 승인도
+# 독립적으로 검사한다.
 approval_required=false
 approval_file="$MIGRATION_APPROVAL_ROOT/$release_sha.json"
 approval_snapshot="$work_dir/migration-approval.json"
@@ -438,7 +535,9 @@ if [ "$pending_migration_count" -gt 0 ]; then
       .schemaVersion == 1
       and .releaseSha == $release_sha
       and .migrationPlanSha256 == $plan_sha256
-      and (.approvedBy | test("^[A-Za-z0-9._@+-]{1,64}$"))
+      and (.approvedBy | type == "string")
+      and (.approvedBy | length >= 1 and length <= 64)
+      and (.approvedBy | test("^[^\\u0000-\\u001f\\u007f]+$"))
       and (.approvedAtUtc | test(
         "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
       ))
@@ -478,32 +577,13 @@ esac
   sha256sum -c SHA256SUMS
 ) || fail "backup bundle checksum verification failed"
 
-# 17. current.sha를 previous.sha로 원자 기록한다. 초기 state file이 없는
-# 기존 설치는 현재 image.env의 일치하는 full-SHA tag로만 bootstrap한다.
-if [ -e "$CURRENT_SHA_PATH" ]; then
-  assert_root_file "$CURRENT_SHA_PATH"
-  current_sha="$(tr -d '\n' < "$CURRENT_SHA_PATH")"
-else
-  current_backend_sha="$(
-    sed -n 's/^BACKEND_IMAGE=gilbom-backend:\([0-9a-f]\{40\}\)$/\1/p' \
-      "$IMAGE_ENV_PATH"
-  )"
-  current_frontend_sha="$(
-    sed -n 's/^FRONTEND_IMAGE=gilbom-frontend:\([0-9a-f]\{40\}\)$/\1/p' \
-      "$IMAGE_ENV_PATH"
-  )"
-  [ -n "$current_backend_sha" ] \
-    && [ "$current_backend_sha" = "$current_frontend_sha" ] \
-    || fail "current.sha is absent and image.env cannot establish the current release"
-  current_sha="$current_backend_sha"
+# 17. 승인 때 고정한 current.sha를 previous.sha로 원자 기록한다. 기존 설치의
+# bootstrap state도 이 시점에만 생성한다.
+if [ "$current_sha_bootstrap" = true ]; then
   # 기존 수동 배포를 Stage 11 state model로 편입하는 초기화이며, 요청한 새
   # release로의 성공 처리는 아니다. 이후 실패해도 기존 SHA가 current로 남는다.
   atomic_line "$CURRENT_SHA_PATH" "$current_sha" 0440
 fi
-printf '%s\n' "$current_sha" | grep -Eq '^[0-9a-f]{40}$' \
-  || fail "current production SHA is invalid"
-[ "$current_sha" != "$release_sha" ] \
-  || fail "requested release is already current"
 atomic_line "$PREVIOUS_SHA_PATH" "$current_sha" 0440
 
 # 18. 새 full-SHA image.env를 같은 filesystem에서 원자 교체한다.
@@ -664,6 +744,7 @@ jq -n \
   --argjson migration_count "$pending_migration_count" \
   --argjson approval_required "$approval_required" \
   --arg backup_bundle "$backup_bundle" \
+  --slurpfile deploy_approval "$deploy_approval_file" \
   --slurpfile migration_plan "$migration_plan" \
   --slurpfile migration_approval "$approval_snapshot" \
   '
@@ -696,6 +777,7 @@ jq -n \
         approvalRequired: $approval_required,
         approval: $migration_approval[0]
       },
+      approval: $deploy_approval[0],
       backupBundle: $backup_bundle,
       health: {
         backendReadiness: "PASS",

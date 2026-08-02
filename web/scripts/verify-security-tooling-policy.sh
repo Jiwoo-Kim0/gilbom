@@ -35,19 +35,35 @@ for file in \
   scripts/test-promote-ci-release-artifacts.sh \
   scripts/verify-ci-artifact-transfer-contract.sh \
   scripts/verify-production-deploy-contract.sh \
+  scripts/verify-production-deploy-job-contract.sh \
   scripts/test-production-deploy-boundary.sh \
+  scripts/test-production-deploy-job.sh \
+  scripts/test-production-deploy-preflight-integration.sh \
   scripts/verify-production-deploy-account.sh \
+  scripts/verify-production-deploy-job-host.sh \
+  scripts/run-production-deploy-preflight-remote.sh \
+  scripts/record-production-deploy-approval-remote.sh \
+  scripts/run-production-deploy-remote.sh \
+  scripts/fetch-production-release-manifest.sh \
+  scripts/render-production-deploy-approval.sh \
+  scripts/verify-production-release-evidence.sh \
+  scripts/verify-external-https-smoke.py \
   infra/scripts/promote-release-artifacts.sh \
   infra/scripts/promote-ci-release-artifacts.sh \
   infra/scripts/gilbom-deploy.sh \
   infra/scripts/gilbom-approve-migrations.sh \
   infra/scripts/gilbom-deploy-ssh-command.sh \
   infra/scripts/install-production-deploy-entrypoint.sh \
+  infra/scripts/gilbom-deploy-preflight.sh \
+  infra/scripts/gilbom-record-deploy-approval.sh \
+  infra/scripts/gilbom-release-manifest.sh \
+  infra/scripts/install-production-deploy-job-entrypoints.sh \
   infra/scripts/prepare-production-deploy-account.sh \
   docs/security-tooling-policy.md \
   docs/ci-artifact-promotion.md \
   docs/production-deploy-account.md \
-  docs/production-root-deploy.md
+  docs/production-root-deploy.md \
+  docs/production-deploy-job.md
 do
   test -s "$file" || fail "required file is missing or empty: $file"
 done
@@ -106,19 +122,34 @@ sh -n \
   scripts/test-promote-ci-release-artifacts.sh \
   scripts/verify-ci-artifact-transfer-contract.sh \
   scripts/verify-production-deploy-contract.sh \
+  scripts/verify-production-deploy-job-contract.sh \
   scripts/test-production-deploy-boundary.sh \
+  scripts/test-production-deploy-job.sh \
+  scripts/test-production-deploy-preflight-integration.sh \
   scripts/verify-production-deploy-account.sh \
+  scripts/verify-production-deploy-job-host.sh \
+  scripts/run-production-deploy-preflight-remote.sh \
+  scripts/record-production-deploy-approval-remote.sh \
+  scripts/run-production-deploy-remote.sh \
+  scripts/fetch-production-release-manifest.sh \
+  scripts/render-production-deploy-approval.sh \
+  scripts/verify-production-release-evidence.sh \
   infra/scripts/promote-release-artifacts.sh \
   infra/scripts/promote-ci-release-artifacts.sh \
   infra/scripts/gilbom-deploy.sh \
   infra/scripts/gilbom-approve-migrations.sh \
   infra/scripts/gilbom-deploy-ssh-command.sh \
   infra/scripts/install-production-deploy-entrypoint.sh \
+  infra/scripts/gilbom-deploy-preflight.sh \
+  infra/scripts/gilbom-record-deploy-approval.sh \
+  infra/scripts/gilbom-release-manifest.sh \
+  infra/scripts/install-production-deploy-job-entrypoints.sh \
   infra/scripts/prepare-production-deploy-account.sh
 python3 scripts/test-security-policy.py
 python3 -m py_compile \
   scripts/security_policy.py \
   scripts/render-vulnerability-report.py \
-  scripts/generate-build-metadata.py
+  scripts/generate-build-metadata.py \
+  scripts/verify-external-https-smoke.py
 
 echo "Security tooling policy definition: PASS"

@@ -95,6 +95,9 @@ grep -Fq 'migration-plan.json' "$DEPLOY_SCRIPT" \
 grep -Fq 'migration approval does not match the exact pending plan' \
   "$DEPLOY_SCRIPT" \
   || fail "exact migration approval verification is missing"
+grep -Fq 'Jenkins deployment approval is invalid or stale' \
+  "$DEPLOY_SCRIPT" \
+  || fail "exact Jenkins deployment approval verification is missing"
 grep -Fq 'sh "$BACKUP_SCRIPT"' "$DEPLOY_SCRIPT" \
   || fail "fixed production backup invocation is missing"
 grep -Fq 'atomic_line "$PREVIOUS_SHA_PATH"' "$DEPLOY_SCRIPT" \
@@ -107,6 +110,7 @@ for evidence in \
   'Frontend-to-Backend smoke response is not UP' \
   'Backend MQTT health is not UP' \
   'release-manifest.json' \
+  'approval: $deploy_approval[0]' \
   'atomic_line "$CURRENT_SHA_PATH"'
 do
   grep -Fq "$evidence" "$DEPLOY_SCRIPT" \

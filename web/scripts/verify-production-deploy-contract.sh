@@ -78,6 +78,12 @@ grep -Fq \
   || fail "dedicated Jenkins Credential ID is not documented"
 grep -Fq 'migration-plan.json' docs/production-root-deploy.md \
   || fail "migration approval workflow is not documented"
+grep -Fq 'DEPLOY_APPROVAL_ROOT=/opt/gilbom/deploy-approvals' \
+  infra/scripts/gilbom-deploy.sh \
+  || fail "Jenkins deployment approval root is not fixed"
+grep -Fq 'Jenkins deployment approval is invalid or stale' \
+  infra/scripts/gilbom-deploy.sh \
+  || fail "stale Jenkins approval is not rejected"
 
 sh scripts/test-production-deploy-boundary.sh
 echo "Production deploy contract verification: PASS"

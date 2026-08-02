@@ -1,0 +1,274 @@
+pipeline {
+    agent any
+
+    parameters {
+        string(
+                name: 'FULL_COMMIT_SHA',
+                defaultValue: '',
+                description: '배포할 master의 40자리 소문자 Git commit SHA'
+        )
+    }
+
+    environment {
+        PRODUCTION_DEPLOY_HOST = 'host.docker.internal'
+        PRODUCTION_DEPLOY_SSH_PORT = '22'
+        PRODUCTION_BASE_URL = 'https://i15d101.p.ssafy.io'
+        PRODUCTION_DEPLOY_APPROVERS = '김채운'
+    }
+
+    options {
+        disableConcurrentBuilds(abortPrevious: false)
+        skipDefaultCheckout(true)
+        timestamps()
+        timeout(time: 45, unit: 'MINUTES')
+    }
+
+    stages {
+        stage('Checkout trusted deployment code') {
+            steps {
+                deleteDir()
+                checkout scm
+                script {
+                    env.APP_DIR = fileExists('web/Jenkinsfile.deploy') ? 'web' : '.'
+                }
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        printf '%s\n' "$FULL_COMMIT_SHA" \
+                            | grep -Eq '^[0-9a-f]{40}$'
+                        test "$(git rev-parse --is-shallow-repository)" = false
+                        git cat-file -e "$FULL_COMMIT_SHA^{commit}"
+                        git merge-base --is-ancestor \
+                            "$FULL_COMMIT_SHA" origin/master
+                        mkdir -p .artifacts/deploy
+                    '''
+                }
+            }
+        }
+
+        stage('Collect production deploy preflight') {
+            steps {
+                dir(env.APP_DIR) {
+                    withCredentials([
+                        sshUserPrivateKey(
+                                credentialsId: 'gilbom-artifact-upload-ssh',
+                                keyFileVariable: 'ARTIFACT_SSH_IDENTITY',
+                                usernameVariable: 'ARTIFACT_SSH_USER'
+                        ),
+                        file(
+                                credentialsId: 'gilbom-artifact-known-hosts',
+                                variable: 'ARTIFACT_KNOWN_HOSTS'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
+                            KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                            SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                            SSH_PORT="$PRODUCTION_DEPLOY_SSH_PORT" \
+                                sh scripts/run-production-deploy-preflight-remote.sh \
+                                    "$FULL_COMMIT_SHA" \
+                                    "$ARTIFACT_SSH_USER@$PRODUCTION_DEPLOY_HOST" \
+                                    > .artifacts/deploy/preflight.json
+                            jq -e \
+                                --arg sha "$FULL_COMMIT_SHA" \
+                                '.releaseSha == $sha' \
+                                .artifacts/deploy/preflight.json >/dev/null
+                            sh scripts/render-production-deploy-approval.sh \
+                                .artifacts/deploy/preflight.json \
+                                > .artifacts/deploy/approval-summary.txt
+                            sha256sum .artifacts/deploy/preflight.json \
+                                | awk '{print $1}' \
+                                > .artifacts/deploy/preflight.sha256
+                        '''
+                    }
+                    script {
+                        def compatibility = sh(
+                                returnStdout: true,
+                                script: '''
+                                    jq -r '.flyway.compatibility' \
+                                        .artifacts/deploy/preflight.json
+                                '''
+                        ).trim()
+                        if (!compatibility.startsWith('COMPATIBLE_')) {
+                            error(
+                                    'Deployment preflight blocked:\n'
+                                            + readFile(
+                                                    '.artifacts/deploy/'
+                                                            + 'approval-summary.txt'
+                                            )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Approve production deployment') {
+            steps {
+                dir(env.APP_DIR) {
+                    script {
+                        def approver = input(
+                                id: 'ProductionDeployApproval',
+                                message: readFile(
+                                        '.artifacts/deploy/approval-summary.txt'
+                                ),
+                                ok: 'Deploy',
+                                submitter: env.PRODUCTION_DEPLOY_APPROVERS,
+                                submitterParameter: 'APPROVED_BY'
+                        )
+                        env.DEPLOY_APPROVED_BY = approver.toString()
+                        env.DEPLOY_APPROVED_AT_UTC = sh(
+                                returnStdout: true,
+                                script: "date -u '+%Y-%m-%dT%H:%M:%SZ'"
+                        ).trim()
+                    }
+                }
+            }
+        }
+
+        // Stage 9가 이미 아홉 개 Artifact를 EC2의 immutable staging
+        // (/opt/gilbom/artifacts/<SHA>)으로 전송했다. 여기서는 승인 화면에
+        // 표시한 exact preflight hash를 그 staging Artifact에 결속한다.
+        stage('Stage approved immutable Artifact') {
+            steps {
+                dir(env.APP_DIR) {
+                    withCredentials([
+                        sshUserPrivateKey(
+                                credentialsId: 'gilbom-artifact-upload-ssh',
+                                keyFileVariable: 'ARTIFACT_SSH_IDENTITY',
+                                usernameVariable: 'ARTIFACT_SSH_USER'
+                        ),
+                        file(
+                                credentialsId: 'gilbom-artifact-known-hosts',
+                                variable: 'ARTIFACT_KNOWN_HOSTS'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
+                            jq -n \
+                                --arg approvedBy "$DEPLOY_APPROVED_BY" \
+                                --arg approvedAtUtc "$DEPLOY_APPROVED_AT_UTC" \
+                                '{
+                                  approvedBy: $approvedBy,
+                                  approvedAtUtc: $approvedAtUtc
+                                }' > .artifacts/deploy/approval-input.json
+                            preflight_sha256="$(
+                                cat .artifacts/deploy/preflight.sha256
+                            )"
+                            KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                            SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                            SSH_PORT="$PRODUCTION_DEPLOY_SSH_PORT" \
+                                sh scripts/record-production-deploy-approval-remote.sh \
+                                    "$FULL_COMMIT_SHA" \
+                                    "$preflight_sha256" \
+                                    .artifacts/deploy/approval-input.json \
+                                    "$ARTIFACT_SSH_USER@$PRODUCTION_DEPLOY_HOST" \
+                                    > .artifacts/deploy/approval-record.json
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Run fixed root production deploy') {
+            steps {
+                dir(env.APP_DIR) {
+                    withCredentials([
+                        sshUserPrivateKey(
+                                credentialsId: 'gilbom-production-deploy',
+                                keyFileVariable: 'DEPLOY_SSH_IDENTITY',
+                                usernameVariable: 'DEPLOY_SSH_USER'
+                        ),
+                        file(
+                                credentialsId: 'gilbom-artifact-known-hosts',
+                                variable: 'DEPLOY_KNOWN_HOSTS'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
+                            test "$DEPLOY_SSH_USER" = deploy
+                            KNOWN_HOSTS_FILE="$DEPLOY_KNOWN_HOSTS" \
+                            SSH_IDENTITY_FILE="$DEPLOY_SSH_IDENTITY" \
+                            SSH_PORT="$PRODUCTION_DEPLOY_SSH_PORT" \
+                                sh scripts/run-production-deploy-remote.sh \
+                                    "$FULL_COMMIT_SHA" \
+                                    "$DEPLOY_SSH_USER@$PRODUCTION_DEPLOY_HOST"
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('External HTTPS smoke') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        python3 scripts/verify-external-https-smoke.py \
+                            "$PRODUCTION_BASE_URL" \
+                            .artifacts/deploy/external-https-smoke.json
+                    '''
+                }
+            }
+        }
+
+        stage('Collect and verify release manifest') {
+            steps {
+                dir(env.APP_DIR) {
+                    withCredentials([
+                        sshUserPrivateKey(
+                                credentialsId: 'gilbom-artifact-upload-ssh',
+                                keyFileVariable: 'ARTIFACT_SSH_IDENTITY',
+                                usernameVariable: 'ARTIFACT_SSH_USER'
+                        ),
+                        file(
+                                credentialsId: 'gilbom-artifact-known-hosts',
+                                variable: 'ARTIFACT_KNOWN_HOSTS'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
+                            KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                            SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                            SSH_PORT="$PRODUCTION_DEPLOY_SSH_PORT" \
+                                sh scripts/fetch-production-release-manifest.sh \
+                                    "$FULL_COMMIT_SHA" \
+                                    "$ARTIFACT_SSH_USER@$PRODUCTION_DEPLOY_HOST" \
+                                    > .artifacts/deploy/release-manifest.json
+                            sh scripts/verify-production-release-evidence.sh \
+                                .artifacts/deploy/preflight.json \
+                                .artifacts/deploy/approval-record.json \
+                                .artifacts/deploy/release-manifest.json \
+                                .artifacts/deploy/external-https-smoke.json
+                        '''
+                    }
+                    archiveArtifacts(
+                            artifacts: '.artifacts/deploy/**',
+                            allowEmptyArchive: false,
+                            fingerprint: true
+                    )
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                if (env.APP_DIR) {
+                    dir(env.APP_DIR) {
+                        archiveArtifacts(
+                                artifacts: '.artifacts/deploy/**',
+                                allowEmptyArchive: true,
+                                fingerprint: true
+                        )
+                    }
+                }
+            }
+        }
+    }
+}

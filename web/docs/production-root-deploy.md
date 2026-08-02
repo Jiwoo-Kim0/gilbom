@@ -22,6 +22,7 @@ sudo --non-interactive /usr/local/sbin/gilbom-deploy <40자리-full-sha>
 | Image 설정 | `/opt/gilbom/deploy/image.env` |
 | Secret root | `/opt/gilbom/secrets` |
 | Migration 승인 | `/opt/gilbom/migration-approvals/<release-sha>.json` |
+| Jenkins 배포 승인 | `/opt/gilbom/deploy-approvals/<release-sha>.json` |
 | DB·Volume backup | `/opt/gilbom/backups` |
 | Release 상태·Manifest | `/var/lib/gilbom/releases` |
 | 동시 실행 lock | `/run/gilbom-deploy/deploy.lock` |
@@ -117,5 +118,7 @@ log를 근거로 별도 rollback 호환성 승인을 수행한다.
 ```
 
 Release manifest에는 Artifact manifest hash, 두 image ID, Flyway 전·후 version,
-migration 승인, backup bundle, 네 health 결과가 기록된다. Secret 값은 기록하지
-않는다.
+migration 승인, Jenkins 승인자 ID·시간, backup bundle, 네 health 결과가
+기록된다. Secret 값은 기록하지 않는다. Stage 12 설치 이후에는 exact preflight
+hash와 결속된 Jenkins 배포 승인이 없거나 승인 이후 운영 상태가 달라진 경우에도
+root 배포기가 fail-closed된다.

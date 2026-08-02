@@ -27,6 +27,7 @@
 - [Production deployment Runbook](./docs/production-deployment-runbook.md)
 - [Stage 10 production deploy account](./docs/production-deploy-account.md)
 - [Stage 11 root production deploy entrypoint](./docs/production-root-deploy.md)
+- [Stage 12 manual production deployment Job](./docs/production-deploy-job.md)
 - [Day 7 completion and scoped feature freeze](./docs/day7-completion-freeze.md)
 - [OpenAPI v1](./docs/openapi-v1.yaml)
 
