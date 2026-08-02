@@ -597,6 +597,80 @@ pipeline {
                 }
             }
         }
+
+        // Stage 9: 검증된 release/만 불변 incoming 경계로 전송한다. 승격은
+        // Jenkins 사용자의 명시적 승인 뒤 root-owned helper가 수행한다.
+        stage('Upload release artifacts to incoming') {
+            steps {
+                dir(env.APP_DIR) {
+                    withCredentials([
+                        sshUserPrivateKey(
+                                credentialsId: 'gilbom-artifact-upload-ssh',
+                                keyFileVariable: 'ARTIFACT_SSH_IDENTITY',
+                                usernameVariable: 'ARTIFACT_SSH_USER'
+                        ),
+                        file(
+                                credentialsId: 'gilbom-artifact-known-hosts',
+                                variable: 'ARTIFACT_KNOWN_HOSTS'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
+                            artifact_host="${ARTIFACT_HOST:-host.docker.internal}"
+                            artifact_port="${ARTIFACT_SSH_PORT:-22}"
+                            KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                            SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                            SSH_PORT="$artifact_port" \
+                            REMOTE_ARTIFACT_ROOT=/opt/gilbom/artifacts \
+                                sh scripts/upload-ci-release-artifacts.sh \
+                                    release \
+                                    "$ARTIFACT_SSH_USER@$artifact_host"
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Approve release artifact promotion') {
+            steps {
+                script {
+                    input message: "Promote release ${env.RELEASE_SHA} to the immutable EC2 artifact directory?",
+                            ok: 'Promote'
+                }
+            }
+        }
+
+        stage('Promote release artifact atomically') {
+            steps {
+                dir(env.APP_DIR) {
+                    withCredentials([
+                        sshUserPrivateKey(
+                                credentialsId: 'gilbom-artifact-upload-ssh',
+                                keyFileVariable: 'ARTIFACT_SSH_IDENTITY',
+                                usernameVariable: 'ARTIFACT_SSH_USER'
+                        ),
+                        file(
+                                credentialsId: 'gilbom-artifact-known-hosts',
+                                variable: 'ARTIFACT_KNOWN_HOSTS'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
+                            artifact_host="${ARTIFACT_HOST:-host.docker.internal}"
+                            artifact_port="${ARTIFACT_SSH_PORT:-22}"
+                            KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                            SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                            SSH_PORT="$artifact_port" \
+                                sh scripts/promote-ci-release-artifacts-remote.sh \
+                                    "$RELEASE_SHA" \
+                                    "$ARTIFACT_SSH_USER@$artifact_host"
+                        '''
+                    }
+                }
+            }
+        }
     }
 
     post {

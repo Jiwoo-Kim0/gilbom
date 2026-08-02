@@ -230,8 +230,24 @@ SBOM/취약점/Archive checksum, Jenkins Job/Build를 기록한다. `jq empty` �
 `SHA256SUMS`를 생성·즉시 재검증하고, 마지막 Artifact Secret gate까지 통과해야
 Jenkins artifact로 보존된다.
 
+## Stage 9 Artifact 전송과 승격
+
+Stage 4~8이 모두 성공한 뒤 Jenkins는 `release/`를
+`/opt/gilbom/artifacts/.incoming/<full-sha>/`에만 전송한다. 전송 전후
+`SHA256SUMS`와 image archive checksum을 확인하고, SSH host key 검증과 전용
+private-key Credential을 강제한다.
+
+Jenkins의 `Approve release artifact promotion`에서 명시적으로 승인된 뒤에만
+EC2의 root-owned helper를 호출한다. Helper는 동일 SHA 충돌을 검사하고 같은
+filesystem 안에서 `/opt/gilbom/artifacts/<full-sha>/`로 atomic rename한다.
+최종 파일은 `root:root` mode `0440`, 디렉터리는 mode `0550`이다. 이미 존재하는
+SHA는 양쪽 manifest와 실제 내용이 완전히 같을 때만 재사용한다.
+
+EC2 설치와 Jenkins Credential ID는
+[`ci-artifact-promotion.md`](ci-artifact-promotion.md)에 고정한다.
+
 ## 의도적으로 남긴 다음 단계
 
 - GitLab webhook 또는 multibranch pipeline 연결
 - Container Registry 주소·Credential 확정 후 push stage 추가
-- 배포 대상과 승인 정책 확정 후 deploy stage 추가
+- 승격된 Artifact를 사용하는 production deploy stage 추가

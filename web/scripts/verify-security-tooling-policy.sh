@@ -25,8 +25,14 @@ for file in \
   scripts/verify-ci-release-contract.sh \
   scripts/build-release-artifacts.sh \
   scripts/transfer-release-artifacts.sh \
+  scripts/upload-ci-release-artifacts.sh \
+  scripts/promote-ci-release-artifacts-remote.sh \
+  scripts/test-promote-ci-release-artifacts.sh \
+  scripts/verify-ci-artifact-transfer-contract.sh \
   infra/scripts/promote-release-artifacts.sh \
-  docs/security-tooling-policy.md
+  infra/scripts/promote-ci-release-artifacts.sh \
+  docs/security-tooling-policy.md \
+  docs/ci-artifact-promotion.md
 do
   test -s "$file" || fail "required file is missing or empty: $file"
 done
@@ -53,6 +59,14 @@ grep -Fq 'sha256sum --check SHA256SUMS' \
   || fail "root promotion does not verify SHA-256"
 grep -Fq 'chown -R root:root' infra/scripts/promote-release-artifacts.sh \
   || fail "root ownership promotion is missing"
+grep -Fq 'StrictHostKeyChecking=yes' scripts/upload-ci-release-artifacts.sh \
+  || fail "CI Artifact upload does not enforce SSH host-key verification"
+grep -Fq 'sha256sum -c SHA256SUMS' \
+  infra/scripts/promote-ci-release-artifacts.sh \
+  || fail "CI root promotion does not verify SHA-256"
+grep -Fq 'mv -T -- "$incoming" "$destination"' \
+  infra/scripts/promote-ci-release-artifacts.sh \
+  || fail "CI root promotion is not an atomic same-filesystem rename"
 
 sh -n \
   scripts/verify-source-security.sh \
@@ -68,7 +82,12 @@ sh -n \
   scripts/verify-ci-release-contract.sh \
   scripts/build-release-artifacts.sh \
   scripts/transfer-release-artifacts.sh \
-  infra/scripts/promote-release-artifacts.sh
+  scripts/upload-ci-release-artifacts.sh \
+  scripts/promote-ci-release-artifacts-remote.sh \
+  scripts/test-promote-ci-release-artifacts.sh \
+  scripts/verify-ci-artifact-transfer-contract.sh \
+  infra/scripts/promote-release-artifacts.sh \
+  infra/scripts/promote-ci-release-artifacts.sh
 python3 scripts/test-security-policy.py
 python3 -m py_compile \
   scripts/security_policy.py \

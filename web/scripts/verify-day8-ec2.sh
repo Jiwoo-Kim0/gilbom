@@ -120,6 +120,7 @@ for path in \
   /opt/gilbom/app \
   /opt/gilbom/deploy \
   /opt/gilbom/artifacts \
+  /opt/gilbom/artifacts/.incoming \
   /opt/gilbom/secrets \
   /opt/gilbom/certbot \
   /opt/gilbom/backups \
@@ -134,6 +135,14 @@ done
   || fail "/opt/gilbom/secrets must be mode 0700"
 [ "$(stat -c '%a' /opt/gilbom/backups)" = 700 ] \
   || fail "/opt/gilbom/backups must be mode 0700"
+[ "$(stat -c '%U' /opt/gilbom/artifacts)" = root ] \
+  || fail "/opt/gilbom/artifacts must be root-owned"
+[ "$(stat -c '%a' /opt/gilbom/artifacts)" = 710 ] \
+  || fail "/opt/gilbom/artifacts must be mode 0710"
+[ "$(stat -c '%U' /opt/gilbom/artifacts/.incoming)" = root ] \
+  || fail "/opt/gilbom/artifacts/.incoming must be root-owned"
+[ "$(stat -c '%a' /opt/gilbom/artifacts/.incoming)" = 730 ] \
+  || fail "/opt/gilbom/artifacts/.incoming must be mode 0730"
 
 swap_file_active_bytes="$(
   swapon --show=NAME,SIZE --bytes --noheadings \

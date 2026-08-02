@@ -285,6 +285,15 @@ assert_contains scripts/verify-jenkins-runtime.sh \
 assert_contains infra/jenkins/jenkins.env.example \
   'JENKINS_HOME_DIR=/opt/jenkins/home' \
   "Jenkins persistent path must be under /opt/jenkins"
+assert_contains infra/scripts/prepare-day8-host.sh \
+  'install -d -o root -g "$ARTIFACT_UPLOAD_GROUP" -m 0710' \
+  "Artifact root must deny direct final-directory writes by the upload account"
+assert_contains infra/scripts/prepare-day8-host.sh \
+  'install -d -o root -g "$ARTIFACT_UPLOAD_GROUP" -m 0730' \
+  "Artifact incoming boundary permissions are missing"
+assert_contains infra/scripts/prepare-day8-host.sh \
+  '/opt/gilbom/artifacts/.incoming' \
+  "Artifact incoming boundary is not prepared on EC2"
 assert_contains Jenkinsfile \
   "disableConcurrentBuilds(abortPrevious: true)" \
   "Jenkins job concurrency guard is missing"
