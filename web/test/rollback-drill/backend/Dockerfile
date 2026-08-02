@@ -7,6 +7,7 @@ ARG DRILL_FORCE_UNHEALTHY
 
 RUN apk add --no-cache busybox-extras \
     && command -v busybox-extras \
+    && busybox-extras --list | grep -Fx httpd \
     && test -n "$DRILL_RELEASE_SHA" \
     && test -n "$DRILL_TARGET_FLYWAY_VERSION" \
     && test -n "$DRILL_MAX_SUPPORTED_FLYWAY" \
