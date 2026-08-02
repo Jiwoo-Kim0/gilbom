@@ -123,4 +123,4 @@ printf '%s\n' \
 printf '%s\n' '{"status":"UP","service":"gilbom-rollback-drill"}' \
   > /tmp/gilbom-drill-www/api/health
 
-exec httpd -f -p 8080 -h /tmp/gilbom-drill-www
+exec busybox-extras httpd -f -p 8080 -h /tmp/gilbom-drill-www

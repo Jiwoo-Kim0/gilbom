@@ -70,6 +70,9 @@ assert_contains test/rollback-drill/frontend/Dockerfile \
 assert_contains test/rollback-drill/frontend/Dockerfile \
   'ENTRYPOINT ["nginx"]' \
   "drill Frontend still depends on the root image entrypoint"
+assert_contains test/rollback-drill/backend/Dockerfile \
+  'apk add --no-cache busybox-extras' \
+  "drill Backend HTTP fixture runtime is not installed explicitly"
 if grep -Eq '^user[[:space:]]' test/rollback-drill/frontend/nginx.conf; then
   fail "non-root drill Frontend must not request a runtime UID transition"
 fi

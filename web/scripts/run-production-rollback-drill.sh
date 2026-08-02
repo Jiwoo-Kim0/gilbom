@@ -102,6 +102,27 @@ register_project() {
 }
 
 cleanup() {
+  cleanup_status="$?"
+  if [ "$cleanup_status" -ne 0 ] && [ -d "$EVIDENCE_ROOT" ]; then
+    for project in $projects
+    do
+      scenario="${project##*-}"
+      failure_dir="$EVIDENCE_ROOT/scenario-$scenario"
+      mkdir -p "$failure_dir"
+      printf '%s\n' "$cleanup_status" > "$failure_dir/runner-exit-code.txt"
+      COMPOSE_PROJECT_NAME="$project" \
+      BACKEND_IMAGE="$previous_backend" \
+      FRONTEND_IMAGE="$previous_frontend" \
+        docker compose --file "$COMPOSE_FILE" \
+          ps --all > "$failure_dir/failure-compose-ps.txt" 2>&1 || true
+      COMPOSE_PROJECT_NAME="$project" \
+      BACKEND_IMAGE="$previous_backend" \
+      FRONTEND_IMAGE="$previous_frontend" \
+        docker compose --file "$COMPOSE_FILE" \
+          logs --no-color --timestamps \
+          > "$failure_dir/failure-compose.log" 2>&1 || true
+    done
+  fi
   for project in $projects
   do
     COMPOSE_PROJECT_NAME="$project" \

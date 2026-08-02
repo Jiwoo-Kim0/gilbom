@@ -101,6 +101,8 @@ Finished: SUCCESS
 Jenkins는 `.artifacts/rollback-drill/**`을 fingerprint와 함께 보관한다. 핵심 파일은
 `summary.json`이며 세 시나리오 결과, DinD 격리, Artifact reload와 세 Volume 보존
 결과를 포함한다. `SHA256SUMS`로 모든 drill evidence의 무결성을 확인한다.
+시나리오가 중간에 실패해도 정리 전에 해당 Project의 `failure-compose.log`,
+`failure-compose-ps.txt`, runner 종료 코드를 먼저 보관한다.
 
 훈련 Project는 증거 생성과 검증이 끝난 후에만 `down --volumes`로 정리한다. 고정된
 project prefix 검증 때문에 운영 Compose Project는 정리 대상이 될 수 없다.
