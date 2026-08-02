@@ -105,12 +105,12 @@ Observation `created_at`의 UTC 날짜를 사용한다. 요청과 겹치는 날�
 | defectType | 전체 ADMIN | Robot 001 VIEWER |
 |---|---:|---:|
 | `DAMAGED` | 1 | 1 |
-| `CONTAMINATED` | 1 | 0 |
-| `UPLIFTED` | 1 | 0 |
-| `BLOCKED` | 1 | 1 |
-| `MISSING_SUSPECTED` | 0 | 0 |
 | `INSTALLATION_INVALID` | 0 | 0 |
-| `UNKNOWN_ANOMALY` | 0 | 0 |
+| `UNKNOWN_ANOMALY` | 3 | 1 |
+
+> 유형 축소(V36, 2026-08-01) 전 픽스처는 `CONTAMINATED`·`UPLIFTED`·`BLOCKED`를
+> 각 1건씩 두고 있었다. 세 유형이 없어지면서 모두 `UNKNOWN_ANOMALY`로 옮겼기 때문에
+> 그 3건이 한 줄로 합쳐졌다. 건수 자체는 그대로다.
 
 `DAMAGED` 병합 원본 한 건은 `merged_into_defect_id IS NULL` 조건으로 제외하며,
 각 유형은 `COUNT(DISTINCT defect_id)`로 집계한다.

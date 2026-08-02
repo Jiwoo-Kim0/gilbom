@@ -205,7 +205,7 @@ class StatisticsQueryServiceTest {
                 any(StatisticsPeriod.class)))
                 .thenReturn(List.of(
                         new StatisticsRepository.DefectTypeCount(
-                                DefectType.BLOCKED,
+                                DefectType.UNKNOWN_ANOMALY,
                                 1),
                         new StatisticsRepository.DefectTypeCount(
                                 DefectType.DAMAGED,
@@ -225,17 +225,9 @@ class StatisticsQueryServiceTest {
                         org.assertj.core.groups.Tuple.tuple(
                                 DefectType.DAMAGED, 2L),
                         org.assertj.core.groups.Tuple.tuple(
-                                DefectType.CONTAMINATED, 0L),
-                        org.assertj.core.groups.Tuple.tuple(
-                                DefectType.UPLIFTED, 0L),
-                        org.assertj.core.groups.Tuple.tuple(
-                                DefectType.BLOCKED, 1L),
-                        org.assertj.core.groups.Tuple.tuple(
-                                DefectType.MISSING_SUSPECTED, 0L),
-                        org.assertj.core.groups.Tuple.tuple(
                                 DefectType.INSTALLATION_INVALID, 0L),
                         org.assertj.core.groups.Tuple.tuple(
-                                DefectType.UNKNOWN_ANOMALY, 0L));
+                                DefectType.UNKNOWN_ANOMALY, 1L));
     }
 
     @Test

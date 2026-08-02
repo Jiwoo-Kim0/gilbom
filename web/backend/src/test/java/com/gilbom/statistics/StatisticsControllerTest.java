@@ -204,13 +204,13 @@ class StatisticsControllerTest {
                 .andExpect(jsonPath("$.to",
                         is("2026-07-05T00:00:00Z")))
                 .andExpect(jsonPath("$.totalDefectCount", is(4)))
-                .andExpect(jsonPath("$.items", hasSize(7)))
+                .andExpect(jsonPath("$.items", hasSize(3)))
                 .andExpect(jsonPath("$.items[0].defectType",
                         is("DAMAGED")))
                 .andExpect(jsonPath("$.items[0].defectCount", is(1)))
-                .andExpect(jsonPath("$.items[6].defectType",
+                .andExpect(jsonPath("$.items[2].defectType",
                         is("UNKNOWN_ANOMALY")))
-                .andExpect(jsonPath("$.items[6].defectCount", is(0)));
+                .andExpect(jsonPath("$.items[2].defectCount", is(2)));
     }
 
     @Test
@@ -599,17 +599,9 @@ class StatisticsControllerTest {
                         new StatisticsByDefectTypeItem(
                                 DefectType.DAMAGED, 1),
                         new StatisticsByDefectTypeItem(
-                                DefectType.CONTAMINATED, 1),
+                                DefectType.INSTALLATION_INVALID, 1),
                         new StatisticsByDefectTypeItem(
-                                DefectType.UPLIFTED, 1),
-                        new StatisticsByDefectTypeItem(
-                                DefectType.BLOCKED, 1),
-                        new StatisticsByDefectTypeItem(
-                                DefectType.MISSING_SUSPECTED, 0),
-                        new StatisticsByDefectTypeItem(
-                                DefectType.INSTALLATION_INVALID, 0),
-                        new StatisticsByDefectTypeItem(
-                                DefectType.UNKNOWN_ANOMALY, 0)));
+                                DefectType.UNKNOWN_ANOMALY, 2)));
     }
 
     private static StatisticsByAreaResponse areaResponse() {

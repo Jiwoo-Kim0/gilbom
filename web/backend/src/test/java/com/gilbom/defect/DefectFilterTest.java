@@ -33,12 +33,12 @@ class DefectFilterTest {
         DefectFilter filter = DefectFilter.of(
                 null, null, null,
                 null, null,
-                List.of(" damaged ", "uplifted"),
+                List.of(" damaged ", "unknown_anomaly"),
                 List.of("high"),
                 null, null, null, null, null);
 
         assertThat(filter.defectTypes())
-                .containsExactlyInAnyOrder("DAMAGED", "UPLIFTED");
+                .containsExactlyInAnyOrder("DAMAGED", "UNKNOWN_ANOMALY");
         assertThat(filter.severities()).containsExactly("HIGH");
     }
 
