@@ -41,7 +41,14 @@ mkdir -p \
   "$PROJECT_DIR/frontend/gilbom" \
   "$FAKE_BIN"
 cp "$SCRIPT_DIR/run-frontend-ci-task.sh" "$PROJECT_DIR/scripts/"
-ln -s "$SCRIPT_DIR/test-run-frontend-ci-task.sh" "$FAKE_BIN/docker"
+cp "$SCRIPT_DIR/test-run-frontend-ci-task.sh" "$FAKE_BIN/docker"
+chmod 0700 "$FAKE_BIN/docker"
+
+RESOLVED_DOCKER="$(PATH="$FAKE_BIN:$PATH" command -v docker)"
+[ "$RESOLVED_DOCKER" = "$FAKE_BIN/docker" ] || {
+  echo "Frontend CI regression test did not resolve the fake docker command" >&2
+  exit 1
+}
 
 EXPECTED_SOURCE_DIR="$PROJECT_DIR/frontend/gilbom"
 EXPECTED_WORK_ROOT="$PROJECT_DIR/.artifacts/frontend-ci"
