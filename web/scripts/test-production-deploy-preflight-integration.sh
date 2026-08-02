@@ -20,8 +20,10 @@ current_sha=1111111111111111111111111111111111111111
 artifact_dir="/opt/gilbom/artifacts/$release_sha"
 release_record_dir="/var/lib/gilbom/releases/$release_sha"
 fake_bin=/fixture-bin
+fake_image_save=/fixture-image-save
 
-rm -rf -- /opt/gilbom /var/lib/gilbom/releases "$fake_bin"
+rm -rf -- \
+  /opt/gilbom /var/lib/gilbom/releases "$fake_bin" "$fake_image_save"
 install -d -o root -g root -m 0700 \
   /opt/gilbom/artifacts \
   /opt/gilbom/backups \
@@ -33,7 +35,8 @@ install -d -o root -g root -m 0700 \
   /run/gilbom-deploy \
   "$artifact_dir/sbom" \
   "$artifact_dir/vulnerabilities" \
-  "$fake_bin"
+  "$fake_bin" \
+  "$fake_image_save"
 
 printf 'services: {}\n' > /opt/gilbom/deploy/compose.prod.yaml
 printf 'RUNTIME=value\n' > /opt/gilbom/deploy/runtime.env
@@ -132,6 +135,27 @@ chmod 0710 /opt/gilbom/artifacts
 find "$artifact_dir" -type d -exec chmod 0550 {} +
 find "$artifact_dir" -type f -exec chmod 0440 {} +
 
+jq -n \
+  --arg release_sha "$release_sha" \
+  '[
+    {
+      Config: (
+        "blobs/sha256/"
+        + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ),
+      RepoTags: ["gilbom-backend:" + $release_sha],
+      Layers: []
+    },
+    {
+      Config: (
+        "blobs/sha256/"
+        + "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ),
+      RepoTags: ["gilbom-frontend:" + $release_sha],
+      Layers: []
+    }
+  ]' > "$fake_image_save/manifest.json"
+
 {
   printf '%s\n' '#!/bin/sh'
   printf '%s\n' 'set -eu'
@@ -179,10 +203,13 @@ find "$artifact_dir" -type f -exec chmod 0440 {} +
     "    image=\"\${command_line##* }\"; printf '[\"%s\"]\\n' \"\$image\"; exit 0 ;;"
   printf '%s\n' '  "image inspect --format {{.Id}} gilbom-backend:"*)'
   printf '%s\n' \
-    '    printf "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n"; exit 0 ;;'
+    '    printf "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\\n"; exit 0 ;;'
   printf '%s\n' '  "image inspect --format {{.Id}} gilbom-frontend:"*)'
   printf '%s\n' \
-    '    printf "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\\n"; exit 0 ;;'
+    '    printf "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\\n"; exit 0 ;;'
+  printf '%s\n' '  "image save gilbom-backend:"*" gilbom-frontend:"*)'
+  printf '%s\n' \
+    '    exec tar -cf - -C /fixture-image-save manifest.json ;;'
   printf '%s\n' '  "inspect --format {{.State.Health.Status}} fixture-db")'
   printf '%s\n' '    printf "healthy\\n"; exit 0 ;;'
   printf '%s\n' '  "inspect --format {{.State.Status}} fixture-"*)'
@@ -277,6 +304,22 @@ jq -e \
     = root:root:440 ] \
   || fail "deployment approval ownership or mode is invalid"
 
+cp /tmp/deploy-preflight.json /tmp/original-deploy-preflight.json
+cp /tmp/deploy-approval.json /tmp/original-deploy-approval.json
+sh "$PROJECT_DIR/infra/scripts/gilbom-deploy-preflight.sh" \
+  "$release_sha" > /tmp/retry-deploy-preflight.json
+cmp -s \
+  /tmp/original-deploy-preflight.json \
+  /tmp/retry-deploy-preflight.json \
+  || fail "technical retry did not preserve the immutable approved preflight"
+sh "$PROJECT_DIR/infra/scripts/gilbom-record-deploy-approval.sh" \
+  "$release_sha" "$preflight_digest" \
+  < /tmp/deploy-approval-input.json > /tmp/retry-deploy-approval.json
+cmp -s \
+  /tmp/original-deploy-approval.json \
+  /tmp/retry-deploy-approval.json \
+  || fail "technical retry did not reuse the immutable deployment approval"
+
 sh "$PROJECT_DIR/infra/scripts/gilbom-deploy.sh" "$release_sha" \
   > /tmp/deploy-output.txt
 grep -Fq "Production deploy boundary: PASS ($release_sha)" \
@@ -291,6 +334,14 @@ jq -e \
   '
     .releaseSha == $release_sha
     and .approval.approvedBy == "CHAEUN KIM"
+    and .images.backend.id
+      == "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    and .images.backend.engineId
+      == "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    and .images.frontend.id
+      == "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    and .images.frontend.engineId
+      == "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
     and .flyway.beforeVersion == 35
     and .flyway.afterVersion == 36
     and .health.backendReadiness == "PASS"

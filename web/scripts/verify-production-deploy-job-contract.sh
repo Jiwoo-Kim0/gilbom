@@ -98,6 +98,9 @@ assert_contains infra/scripts/gilbom-deploy.sh \
 assert_contains infra/scripts/gilbom-deploy-preflight.sh \
   'assert_root_owned_directory "$ARTIFACT_ROOT"' \
   "preflight does not preserve the root-owned artifact upload group boundary"
+assert_contains infra/scripts/gilbom-deploy-preflight.sh \
+  'production state changed after immutable deployment approval' \
+  "approved preflight cannot be reused safely for a technical retry"
 assert_contains infra/scripts/gilbom-deploy.sh \
   'Jenkins deployment approval is invalid or stale' \
   "root deploy does not reject stale Jenkins approval"
@@ -107,6 +110,9 @@ assert_contains infra/scripts/gilbom-deploy.sh \
 assert_contains infra/scripts/gilbom-record-deploy-approval.sh \
   'source: "jenkins-production-deploy-approval"' \
   "Jenkins migration approval provenance is missing"
+assert_contains infra/scripts/gilbom-record-deploy-approval.sh \
+  'immutable deployment approval conflicts with this retry' \
+  "immutable deployment approval is not safely reusable for a retry"
 assert_contains Jenkinsfile.deploy \
   "approvedBy = approver['APPROVED_BY']" \
   "Jenkins Map approval result is not reduced to the authenticated user ID"

@@ -112,6 +112,11 @@ parameter로 host, URL, Compose 또는 Secret 경로를 전달하게 만들지 �
 전송하며, root helper는 표시된 preflight checksum과 일치할 때만 immutable 승인
 기록을 만든다.
 
+승인 뒤 실제 운영 변경 전에 기술적 오류가 발생하면 같은 SHA의 재실행은 기존
+preflight와 승인 파일을 덮어쓰지 않는다. Artifact, 현재 운영 SHA, Flyway version,
+migration plan이 승인 당시와 동일한 경우에만 exact 승인 증거를 재사용하며, 하나라도
+달라졌으면 재시도를 차단한다.
+
 승인 이후 Pipeline은 다음 순서로 실행한다.
 
 1. 승인된 preflight hash를 EC2 immutable Artifact staging과 결속

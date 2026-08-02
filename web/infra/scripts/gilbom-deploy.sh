@@ -61,7 +61,8 @@ unset CDPATH ENV BASH_ENV GIT_DIR GIT_WORK_TREE
 
 for command in \
   awk basename bash chown chmod cmp cp cut date dirname docker find flock \
-  grep install jq mktemp mv printenv rm sed sha256sum sleep stat tail tr wc zstd
+  grep install jq mktemp mv printenv rm sed sha256sum sleep stat tail tar tr \
+  wc zstd
 do
   command -v "$command" >/dev/null 2>&1 \
     || fail "required command is missing: $command"
@@ -276,16 +277,63 @@ done
 
 expected_backend_id="$(jq -r '.images.backend.id' "$metadata")"
 expected_frontend_id="$(jq -r '.images.frontend.id' "$metadata")"
-actual_backend_id="$(
+backend_engine_id="$(
   docker image inspect --format '{{.Id}}' "$backend_image"
 )" || fail "loaded Backend image is unavailable"
-actual_frontend_id="$(
+frontend_engine_id="$(
   docker image inspect --format '{{.Id}}' "$frontend_image"
 )" || fail "loaded Frontend image is unavailable"
+
+# Docker의 containerd image store와 classic image store는 같은 image config를
+# 로드해도 `docker image inspect .Id`에 서로 다른 종류의 digest를 노출할 수
+# 있다. 저장소 모드에 독립적인 image identity는 docker-save manifest의 Config
+# content digest이므로, 로드된 두 tag를 다시 스트리밍 save하여 이를 검증한다.
+loaded_manifest="$work_dir/loaded-images-manifest.json"
+if bash -o pipefail -c \
+    'docker image save "$1" "$2" | tar -xOf - manifest.json' \
+    gilbom-loaded-images "$backend_image" "$frontend_image" \
+    > "$loaded_manifest"; then
+  :
+else
+  fail "could not inspect loaded image config identities"
+fi
+jq -e 'type == "array" and length == 2' "$loaded_manifest" >/dev/null \
+  || fail "loaded image save manifest is invalid"
+
+portable_image_id() {
+  image="$1"
+  config_path="$(
+    jq -er \
+      --arg image "$image" \
+      '
+        [
+          .[]
+          | select(
+              (.RepoTags | type == "array")
+              and (.RepoTags | index($image) != null)
+            )
+          | .Config
+        ]
+        | if length == 1 then .[0] else error("ambiguous image tag") end
+      ' "$loaded_manifest"
+  )" || fail "loaded image tag is missing from save manifest: $image"
+  printf '%s\n' "$config_path" \
+    | grep -Eq \
+        '^(blobs/sha256/[0-9a-f]{64}|[0-9a-f]{64}[.]json)$' \
+    || fail "loaded image config path is unsafe: $image"
+  config_name="$(basename -- "$config_path")"
+  config_digest="${config_name%.json}"
+  printf 'sha256:%s\n' "$config_digest"
+}
+
+actual_backend_id="$(portable_image_id "$backend_image")"
+actual_frontend_id="$(portable_image_id "$frontend_image")"
 [ "$actual_backend_id" = "$expected_backend_id" ] \
-  || fail "loaded Backend image ID differs from release metadata"
+  || fail \
+    "loaded Backend config ID differs from release metadata (expected=$expected_backend_id actual=$actual_backend_id engine=$backend_engine_id)"
 [ "$actual_frontend_id" = "$expected_frontend_id" ] \
-  || fail "loaded Frontend image ID differs from release metadata"
+  || fail \
+    "loaded Frontend config ID differs from release metadata (expected=$expected_frontend_id actual=$actual_frontend_id engine=$frontend_engine_id)"
 
 compose() {
   docker compose \
@@ -736,8 +784,10 @@ jq -n \
   --arg compose_sha256 "$(sha256sum "$COMPOSE_PATH" | awk '{print $1}')" \
   --arg backend_image "$backend_image" \
   --arg backend_image_id "$actual_backend_id" \
+  --arg backend_engine_id "$backend_engine_id" \
   --arg frontend_image "$frontend_image" \
   --arg frontend_image_id "$actual_frontend_id" \
+  --arg frontend_engine_id "$frontend_engine_id" \
   --argjson flyway_before "$current_version" \
   --argjson flyway_after "$applied_version" \
   --arg migration_plan_sha256 "$migration_plan_sha256" \
@@ -761,11 +811,13 @@ jq -n \
       images: {
         backend: {
           name: $backend_image,
-          id: $backend_image_id
+          id: $backend_image_id,
+          engineId: $backend_engine_id
         },
         frontend: {
           name: $frontend_image,
-          id: $frontend_image_id
+          id: $frontend_image_id,
+          engineId: $frontend_engine_id
         }
       },
       flyway: {

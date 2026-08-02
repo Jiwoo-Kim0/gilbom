@@ -108,13 +108,7 @@ jq -e \
   ' "$preflight" >/dev/null \
   || fail "preflight does not permit deployment"
 
-[ ! -e "$deploy_approval" ] \
-  || fail "immutable deployment approval already exists"
 pending_migration_count="$(jq -r '.flyway.pendingMigrations | length' "$preflight")"
-if [ "$pending_migration_count" -gt 0 ]; then
-  [ ! -e "$migration_approval" ] \
-    || fail "immutable migration approval already exists"
-fi
 
 approved_by="$(jq -r '.approvedBy' "$approval_input")"
 approved_at_utc="$(jq -r '.approvedAtUtc' "$approval_input")"
@@ -127,6 +121,61 @@ approval_age_seconds="$((now_epoch - approved_epoch))"
 artifact_manifest_sha256="$(jq -r '.artifact.sha256SumsSha256' "$preflight")"
 current_sha="$(jq -r '.production.currentSha' "$preflight")"
 migration_plan_sha256="$(jq -r '.flyway.migrationPlanSha256' "$preflight")"
+
+if [ -e "$deploy_approval" ]; then
+  [ -f "$deploy_approval" ] && [ ! -L "$deploy_approval" ] \
+    || fail "immutable deployment approval is unsafe"
+  [ "$(stat -c '%U:%G' "$deploy_approval")" = root:root ] \
+    || fail "immutable deployment approval must be root:root"
+  [ -z "$(find "$deploy_approval" -perm /0022 -print -quit)" ] \
+    || fail "immutable deployment approval is group/world writable"
+  jq -e \
+    --arg release_sha "$release_sha" \
+    --arg preflight_sha256 "$actual_preflight_sha256" \
+    --arg artifact_manifest_sha256 "$artifact_manifest_sha256" \
+    --arg current_sha "$current_sha" \
+    --arg migration_plan_sha256 "$migration_plan_sha256" \
+    '
+      .schemaVersion == 1
+      and .releaseSha == $release_sha
+      and .preflightSha256 == $preflight_sha256
+      and .artifactManifestSha256 == $artifact_manifest_sha256
+      and .currentSha == $current_sha
+      and .migrationPlanSha256 == $migration_plan_sha256
+      and (.approvedBy | type == "string")
+      and (.approvedBy | length >= 1 and length <= 64)
+      and (.approvedBy | explode | all(. >= 32 and . != 127))
+      and (.approvedAtUtc | test(
+        "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+      ))
+    ' "$deploy_approval" >/dev/null \
+    || fail "immutable deployment approval conflicts with this retry"
+  if [ "$pending_migration_count" -gt 0 ]; then
+    [ -f "$migration_approval" ] && [ ! -L "$migration_approval" ] \
+      || fail "immutable migration approval is missing or unsafe"
+    [ "$(stat -c '%U:%G' "$migration_approval")" = root:root ] \
+      || fail "immutable migration approval must be root:root"
+    [ -z "$(find "$migration_approval" -perm /0022 -print -quit)" ] \
+      || fail "immutable migration approval is group/world writable"
+    jq -e \
+      --arg release_sha "$release_sha" \
+      --arg migration_plan_sha256 "$migration_plan_sha256" \
+      '
+        .schemaVersion == 1
+        and .releaseSha == $release_sha
+        and .migrationPlanSha256 == $migration_plan_sha256
+        and .source == "jenkins-production-deploy-approval"
+      ' "$migration_approval" >/dev/null \
+      || fail "immutable migration approval conflicts with this retry"
+  fi
+  cat "$deploy_approval"
+  exit 0
+fi
+
+if [ "$pending_migration_count" -gt 0 ]; then
+  [ ! -e "$migration_approval" ] \
+    || fail "orphaned immutable migration approval already exists"
+fi
 
 temporary="$(mktemp "$DEPLOY_APPROVAL_ROOT/.approval.XXXXXX")"
 jq -n -S \

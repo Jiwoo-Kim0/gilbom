@@ -92,7 +92,7 @@ entrypoint는 다음을 순서대로 수행한다.
 1. 단일 full SHA와 고정 경로·root 소유권·권한 검증
 2. `flock` 동시 배포 차단
 3. Artifact 전체 checksum과 `zstd -t` 검증
-4. `zstd -dc | docker load`, 두 image tag와 metadata image ID 검증
+4. `zstd -dc | docker load`, 두 image tag와 metadata config ID 검증
 5. 운영 Flyway version 조회, 신규 migration plan 비교와 승인 검사
 6. 기존 DB·PDF·image·MQTT volume backup 및 checksum 재검사
 7. `current.sha`를 `previous.sha`로 기록하고 `image.env` 원자 교체
@@ -100,6 +100,12 @@ entrypoint는 다음을 순서대로 수행한다.
 9. Backend readiness, Frontend health, Frontend→Backend, MQTT health 검사
 10. 적용 후 Flyway version·script 재검사와 release manifest 기록
 11. 모든 단계가 성공한 경우에만 `current.sha` 원자 갱신
+
+Image ID 검증은 Docker 저장소 모드에 따라 의미가 달라질 수 있는
+`docker image inspect .Id`를 metadata와 직접 비교하지 않는다. 로드된 tag를
+`docker image save`로 다시 스트리밍하고 `manifest.json`의 `Config` content
+digest를 비교한다. Release Manifest의 `images.*.id`에는 이 portable config
+ID를, `images.*.engineId`에는 EC2 Docker가 노출한 로컬 engine ID를 기록한다.
 
 실패 후 migration이 이미 적용됐을 수 있으므로 자동 image rollback은 하지 않는다.
 `current.sha`는 성공 전까지 바뀌지 않으며, backup과 `previous.sha`, container

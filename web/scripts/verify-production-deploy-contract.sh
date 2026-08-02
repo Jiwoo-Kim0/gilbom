@@ -84,6 +84,13 @@ grep -Fq 'DEPLOY_APPROVAL_ROOT=/opt/gilbom/deploy-approvals' \
 grep -Fq 'Jenkins deployment approval is invalid or stale' \
   infra/scripts/gilbom-deploy.sh \
   || fail "stale Jenkins approval is not rejected"
+grep -Fq \
+  'docker image save "$1" "$2" | tar -xOf - manifest.json' \
+  infra/scripts/gilbom-deploy.sh \
+  || fail "portable loaded image config identity verification is missing"
+grep -Fq 'engineId: $backend_engine_id' \
+  infra/scripts/gilbom-deploy.sh \
+  || fail "Docker storage-specific Backend engine ID evidence is missing"
 
 sh scripts/test-production-deploy-boundary.sh
 echo "Production deploy contract verification: PASS"

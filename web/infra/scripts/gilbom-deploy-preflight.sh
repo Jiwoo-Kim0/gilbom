@@ -306,8 +306,11 @@ fi
 install -d -o root -g root -m 0700 "$release_record_dir"
 [ ! -e "$release_record_dir/release-manifest.json" ] \
   || fail "release already has an immutable deployment manifest"
-[ ! -e "$approval_file" ] \
-  || fail "release already has an immutable deployment approval"
+existing_approval=false
+if [ -e "$approval_file" ]; then
+  assert_root_file "$approval_file"
+  existing_approval=true
+fi
 
 migration_plan="$release_record_dir/migration-plan.json"
 jq -cS \
@@ -331,14 +334,33 @@ jq -cS \
       ]
     }
   ' "$metadata" > "$work_dir/migration-plan.json"
-atomic_root_file "$work_dir/migration-plan.json" "$migration_plan" 0440
-migration_plan_sha256="$(sha256sum "$migration_plan" | awk '{print $1}')"
+migration_plan_sha256="$(
+  sha256sum "$work_dir/migration-plan.json" | awk '{print $1}'
+)"
+if [ "$existing_approval" = true ]; then
+  assert_root_file "$migration_plan"
+  assert_root_file "$release_record_dir/migration-plan.sha256"
+  (
+    cd "$release_record_dir"
+    sha256sum -c migration-plan.sha256 >/dev/null
+  ) || fail "approved migration plan checksum verification failed"
+  cmp -s "$work_dir/migration-plan.json" "$migration_plan" \
+    || fail "production migration state changed after immutable approval"
+  [ "$(
+    sha256sum "$migration_plan" | awk '{print $1}'
+  )" = "$migration_plan_sha256" ] \
+    || fail "approved migration plan differs from current production state"
+else
+  atomic_root_file "$work_dir/migration-plan.json" "$migration_plan" 0440
+fi
 printf '%s  migration-plan.json\n' "$migration_plan_sha256" \
   > "$work_dir/migration-plan.sha256"
-atomic_root_file \
-  "$work_dir/migration-plan.sha256" \
-  "$release_record_dir/migration-plan.sha256" \
-  0440
+if [ "$existing_approval" != true ]; then
+  atomic_root_file \
+    "$work_dir/migration-plan.sha256" \
+    "$release_record_dir/migration-plan.sha256" \
+    0440
+fi
 
 generated_at_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 preflight="$work_dir/deploy-preflight.json"
@@ -404,6 +426,46 @@ jq -n -S \
       }
     }
   ' > "$preflight"
+
+if [ "$existing_approval" = true ]; then
+  stored_preflight="$release_record_dir/deploy-preflight.json"
+  stored_preflight_checksum="$release_record_dir/deploy-preflight.sha256"
+  assert_root_file "$stored_preflight"
+  assert_root_file "$stored_preflight_checksum"
+  (
+    cd "$release_record_dir"
+    sha256sum -c deploy-preflight.sha256 >/dev/null
+  ) || fail "immutable approved preflight checksum verification failed"
+  jq -S 'del(.generatedAtUtc)' "$preflight" \
+    > "$work_dir/current-preflight-state.json"
+  jq -S 'del(.generatedAtUtc)' "$stored_preflight" \
+    > "$work_dir/approved-preflight-state.json"
+  cmp -s \
+    "$work_dir/current-preflight-state.json" \
+    "$work_dir/approved-preflight-state.json" \
+    || fail "production state changed after immutable deployment approval"
+  stored_preflight_sha256="$(
+    sha256sum "$stored_preflight" | awk '{print $1}'
+  )"
+  jq -e \
+    --arg release_sha "$release_sha" \
+    --arg preflight_sha256 "$stored_preflight_sha256" \
+    --arg artifact_manifest_sha256 "$sha256_sums_sha256" \
+    --arg current_sha "$current_sha" \
+    --arg migration_plan_sha256 "$migration_plan_sha256" \
+    '
+      .schemaVersion == 1
+      and .releaseSha == $release_sha
+      and .preflightSha256 == $preflight_sha256
+      and .artifactManifestSha256 == $artifact_manifest_sha256
+      and .currentSha == $current_sha
+      and .migrationPlanSha256 == $migration_plan_sha256
+    ' "$approval_file" >/dev/null \
+    || fail "immutable approval does not match the current preflight state"
+  cat "$stored_preflight"
+  exit 0
+fi
+
 atomic_root_file \
   "$preflight" \
   "$release_record_dir/deploy-preflight.json" \
