@@ -8,7 +8,7 @@ CSRF endpoint GET도 수행하지 않는다.
 
 자동 검증 범위:
 
-- 호스트의 wildcard listen port와 금지된 내부 port
+- 호스트의 wildcard listen port 전체 inventory와 금지된 내부 port
 - 실제 EC2에 연결된 Security Group의 Inbound rule
 - 기본 Trust Store를 이용한 HTTPS hostname·certificate chain과 만료일
 - 비허용 Origin의 CORS 거부
@@ -75,8 +75,11 @@ jq . /tmp/day10-production-readonly.json
 
 ## Security Group 정책
 
+- 호스트 wildcard listener와 SG Inbound의 교집합만 실제 외부 도달 가능
+  port로 판정한다. SG에서 막힌 host listener는 증거에 별도로 기록한다.
 - TCP/80, TCP/443만 Internet 전체 공개를 허용한다.
 - SSH 22와 MQTT TLS 8883은 필요한 고정 CIDR로만 제한한다.
+- UDP·ICMP·모든 protocol 인바운드는 허용하지 않는다.
 - PostgreSQL 5432, Backend 8080, Jenkins 8081, Grafana 3001,
   Prometheus 9090, Alertmanager 9093, Loki 3100은 Inbound rule 자체를
   허용하지 않는다.

@@ -38,6 +38,18 @@ def tcp(port: int, cidr: str) -> dict[str, object]:
     }
 
 
+def udp(port: int, cidr: str) -> dict[str, object]:
+    return {
+        "IpProtocol": "udp",
+        "FromPort": port,
+        "ToPort": port,
+        "IpRanges": [{"CidrIp": cidr}],
+        "Ipv6Ranges": [],
+        "UserIdGroupPairs": [],
+        "PrefixListIds": [],
+    }
+
+
 class ProductionReadonlyEvidenceTest(unittest.TestCase):
     def test_expected_public_listeners_pass(self) -> None:
         listeners = MODULE.parse_public_listeners(
@@ -61,6 +73,20 @@ class ProductionReadonlyEvidenceTest(unittest.TestCase):
         with self.assertRaises(MODULE.EvidenceError):
             MODULE.validate_public_listeners(listeners)
 
+    def test_unknown_wildcard_listener_is_deferred_to_sg_correlation(self) -> None:
+        listeners = MODULE.parse_public_listeners(
+            "LISTEN 0 4096 0.0.0.0:80 0.0.0.0:*\n"
+            "LISTEN 0 4096 0.0.0.0:443 0.0.0.0:*\n"
+            "LISTEN 0 4096 0.0.0.0:8988 0.0.0.0:*\n"
+        )
+        host = MODULE.validate_public_listeners(listeners)
+        sg = {
+            "allowedInboundTcpPorts": [22, 80, 443, 8883],
+        }
+        evidence = MODULE.correlate_external_ports(host, sg)
+        self.assertEqual(evidence["externallyReachableTcpPorts"], [80, 443])
+        self.assertEqual(evidence["hostBoundButSgBlockedTcpPorts"], [8988])
+
     def test_restricted_ssh_and_mqtt_security_groups_pass(self) -> None:
         document = security_groups(
             tcp(80, "0.0.0.0/0"),
@@ -79,6 +105,30 @@ class ProductionReadonlyEvidenceTest(unittest.TestCase):
             tcp(80, "0.0.0.0/0"),
             tcp(443, "0.0.0.0/0"),
             tcp(22, "0.0.0.0/0"),
+        )
+        with self.assertRaises(MODULE.EvidenceError):
+            MODULE.validate_security_groups(
+                document,
+                ["sg-0123456789abcdef0"],
+            )
+
+    def test_restricted_unknown_inbound_port_fails(self) -> None:
+        document = security_groups(
+            tcp(80, "0.0.0.0/0"),
+            tcp(443, "0.0.0.0/0"),
+            tcp(8988, "203.0.113.10/32"),
+        )
+        with self.assertRaises(MODULE.EvidenceError):
+            MODULE.validate_security_groups(
+                document,
+                ["sg-0123456789abcdef0"],
+            )
+
+    def test_restricted_udp_inbound_rule_fails(self) -> None:
+        document = security_groups(
+            tcp(80, "0.0.0.0/0"),
+            tcp(443, "0.0.0.0/0"),
+            udp(8883, "203.0.113.10/32"),
         )
         with self.assertRaises(MODULE.EvidenceError):
             MODULE.validate_security_groups(
