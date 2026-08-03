@@ -102,6 +102,10 @@ public class SecurityConfig {
                                 "/api/health",
                                 "/actuator/health",
                                 "/actuator/health/**",
+                                // Nginx는 /actuator를 프록시하지 않고 Backend는 port를
+                                // publish하지 않는다. 이 endpoint에 닿을 수 있는 것은
+                                // internal app network의 Prometheus뿐이다.
+                                "/actuator/prometheus",
                                 "/api/v1/system/health",
                                 "/api/v1/system/info",
                                 "/api/v1/auth/csrf-token",

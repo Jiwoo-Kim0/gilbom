@@ -43,6 +43,8 @@ dependencies {
 
     // CVE gate가 검증한 최소 patched JDBC driver를 명시적으로 고정한다.
     runtimeOnly 'org.postgresql:postgresql:42.7.12'
+    // Prometheus가 /actuator/prometheus를 긁는다. Registry는 실행 시점에만 필요하다.
+    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'

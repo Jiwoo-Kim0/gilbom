@@ -77,8 +77,12 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        # prometheus는 Nginx가 /actuator를 프록시하지 않아 외부에서 닿지 않는다.
+        # 수집은 Docker 내부 network의 Prometheus만 수행한다.
+        include: health,info,prometheus
   endpoint:
+    prometheus:
+      access: read-only
     health:
       probes:
         enabled: true
@@ -107,6 +111,12 @@ management:
       show-values: never
     env:
       show-values: never
+
+logging:
+  pattern:
+    # Nginx access log와 응답 헤더가 같은 X-Request-Id를 쓰므로, 로그 한 줄에서
+    # 요청 하나를 edge부터 Backend까지 이어서 볼 수 있다. 요청 밖 로그는 빈칸이다.
+    level: "%5p [%X{requestId:-}]"
 
 info:
   app:

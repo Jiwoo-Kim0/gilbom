@@ -10,6 +10,8 @@ import org.mockito.Mockito;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 class SecurityAuditServiceTest {
 
     private static final UUID USER_ID =
@@ -17,8 +19,9 @@ class SecurityAuditServiceTest {
 
     private final AuditLogService auditLogService =
             Mockito.mock(AuditLogService.class);
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private final SecurityAuditService service =
-            new SecurityAuditService(auditLogService);
+            new SecurityAuditService(auditLogService, meterRegistry);
 
     @Test
     void accessDenialRecordsOnlySafeRequestMetadata() {
