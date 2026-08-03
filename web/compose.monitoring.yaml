@@ -223,6 +223,11 @@ services:
       - ./infra/monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
+      # host가 쓰고 Alloy는 읽기만 한다. 디스크·container·backup metric이 이 경로로 온다.
+      - type: bind
+        source: ${MONITORING_TEXTFILE_DIR:-/opt/gilbom/monitoring/textfile}
+        target: /var/lib/alloy/textfile
+        read_only: true
       - alloy_data:/var/lib/alloy/data
     read_only: true
     tmpfs:
