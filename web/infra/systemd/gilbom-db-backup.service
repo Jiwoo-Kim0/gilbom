@@ -1,0 +1,24 @@
+[Unit]
+Description=Take an encrypted Gilbom PostgreSQL backup
+Wants=network-online.target
+Requires=docker.service
+After=network-online.target docker.service
+ConditionFileIsExecutable=/usr/local/sbin/gilbom-backup
+ConditionPathExists=/opt/gilbom/deploy/compose.prod.yaml
+ConditionPathExists=/opt/gilbom/deploy/runtime.env
+ConditionPathExists=/opt/gilbom/deploy/image.env
+ConditionPathExists=/opt/gilbom/secrets/backup-recipient.asc
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0027
+ExecStart=/usr/local/sbin/gilbom-backup database
+TimeoutStartSec=30min
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full

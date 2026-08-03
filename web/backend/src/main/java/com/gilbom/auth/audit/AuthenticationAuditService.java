@@ -12,21 +12,29 @@ import com.gilbom.auth.audit.AuthenticationAuditEvent.ActorType;
 import com.gilbom.auth.audit.AuthenticationAuditEvent.Result;
 import com.gilbom.auth.audit.AuthenticationAuditEvent.TargetType;
 
+import io.micrometer.core.instrument.MeterRegistry;
+
 @Service
 public class AuthenticationAuditService {
 
     private static final Logger LOGGER =
             LoggerFactory.getLogger(AuthenticationAuditService.class);
+    // 로그인 실패·계정 잠금·rate limit 급증을 Alertmanager에서 볼 수 있게 한다.
+    // action과 result는 모두 enum이라 label 조합이 유한하다.
+    static final String EVENT_METRIC = "gilbom.security.auth.events";
 
     private final AuthenticationAuditRepository repository;
     private final BestEffortAuthenticationAuditWriter bestEffortWriter;
+    private final MeterRegistry meterRegistry;
 
     public AuthenticationAuditService(
             AuthenticationAuditRepository repository,
-            BestEffortAuthenticationAuditWriter bestEffortWriter
+            BestEffortAuthenticationAuditWriter bestEffortWriter,
+            MeterRegistry meterRegistry
     ) {
         this.repository = repository;
         this.bestEffortWriter = bestEffortWriter;
+        this.meterRegistry = meterRegistry;
     }
 
     @Transactional
@@ -272,12 +280,14 @@ public class AuthenticationAuditService {
     public void appendRequired(AuthenticationAuditEvent event) {
         requirePolicy(event, FailurePolicy.REQUIRED);
         repository.append(event);
+        countEvent(event);
     }
 
     public void appendBestEffort(AuthenticationAuditEvent event) {
         requirePolicy(event, FailurePolicy.BEST_EFFORT);
         try {
             bestEffortWriter.appendInIndependentTransaction(event);
+            countEvent(event);
         } catch (RuntimeException exception) {
             // 예외 원문은 SQL·credential을 포함할 수 있으므로 requestId만 기록한다.
             LOGGER.error(
@@ -285,6 +295,15 @@ public class AuthenticationAuditService {
                     event.requestContext().requestId()
             );
         }
+    }
+
+    private void countEvent(AuthenticationAuditEvent event) {
+        meterRegistry.counter(
+                EVENT_METRIC,
+                "action",
+                event.action().name(),
+                "result",
+                event.result().name()).increment();
     }
 
     private static AuthenticationAuditEvent event(

@@ -5,6 +5,8 @@ x-logging: &jenkins-logging
   options:
     max-size: "${JENKINS_LOG_MAX_SIZE:-10m}"
     max-file: "${JENKINS_LOG_MAX_FILES:-3}"
+    # Alloy가 Docker socket 없이 container를 구분하려면 attrs가 필요하다.
+    labels: "com.docker.compose.project,com.docker.compose.service"
 
 services:
   docker-builder:

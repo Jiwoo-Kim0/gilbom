@@ -248,10 +248,12 @@ API Key 원문, `Authorization` 헤더, Prompt와 응답 원문은 로그하지 
 | `LOGGING_LEVEL_COM_GILBOM` |  | local `DEBUG`, 그 외 `INFO` |
 | `GILBOM_HTTP_BODY_LOGGING_ENABLED` |  | 모든 환경 `false` |
 | `MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS` |  | 외부 노출은 `never` |
-| `MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE` |  | `health,info`만 |
+| `MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE` |  | `health,info,prometheus`만 |
 | `GILBOM_AUDIT_RETENTION_DAYS` |  | 기본 `365` |
 
 Actuator `env`, `configprops`, heap dump, thread dump는 공개하지 않는다.
+`prometheus`는 Prometheus 수집용으로만 열려 있다. Nginx가 `/actuator`를 프록시하지 않고
+Backend는 port를 publish하지 않으므로 internal `app` network 밖에서는 닿지 않는다.
 
 ## 6. 시작 시 Fail-fast 검증
 

@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the Gilbom PostgreSQL backup daily
+
+[Timer]
+# 새벽에 돌린다. 서비스를 멈추지 않으므로 시연 시간대와 겹쳐도 위험하지는 않다.
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=15min
+AccuracySec=1min
+Persistent=true
+Unit=gilbom-db-backup.service
+
+[Install]
+WantedBy=timers.target

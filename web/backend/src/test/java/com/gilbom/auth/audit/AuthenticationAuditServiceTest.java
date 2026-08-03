@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.dao.DataAccessResourceFailureException;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 class AuthenticationAuditServiceTest {
 
     private static final UUID REQUEST_ID =
@@ -27,8 +29,13 @@ class AuthenticationAuditServiceTest {
             Mockito.mock(AuthenticationAuditRepository.class);
     private final BestEffortAuthenticationAuditWriter bestEffortWriter =
             Mockito.mock(BestEffortAuthenticationAuditWriter.class);
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private final AuthenticationAuditService service =
-            new AuthenticationAuditService(repository, bestEffortWriter);
+            new AuthenticationAuditService(
+                    repository,
+                    bestEffortWriter,
+                    meterRegistry
+            );
 
     @Test
     void requiredLoginSuccessPropagatesAuditFailure() {

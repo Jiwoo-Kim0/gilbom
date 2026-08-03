@@ -1,3 +1,8 @@
+// Host metric 수집기다. /host/proc와 /host/sys만 읽고 host 루트 파일시스템은
+// 마운트하지 않는다. 그래서 unix exporter의 filesystem collector는 쓸 수 없다
+// (host의 mount point를 container 안에서 stat할 수 없다). 디스크 여유·Docker 디스크·
+// robot_images 사용량은 host의 gilbom-host-metrics.timer가 textfile로 써 넣고
+// 아래 textfile collector가 그대로 노출한다.
 prometheus.exporter.unix "host" {
 	procfs_path    = "/host/proc"
 	sysfs_path     = "/host/sys"
@@ -9,10 +14,16 @@ prometheus.exporter.unix "host" {
 		"meminfo",
 		"pressure",
 		"stat",
+		"textfile",
 		"time",
 		"timex",
 		"vmstat",
 	]
+
+	textfile {
+		// Backup 성공 시각과 host 파일시스템 사용량이 여기에 쌓인다.
+		directory = "/var/lib/alloy/textfile"
+	}
 }
 
 prometheus.scrape "host" {

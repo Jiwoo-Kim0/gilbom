@@ -136,7 +136,9 @@ Base64와 원본 bytes는 보고서, 버전, 멱등 저장소, 감사·애플리
 - API Key getter를 공개하지 않고 `toString()`은 항상 `[REDACTED]`로 표시한다.
 - 실패 예외에는 Provider 응답 원문과 원래 HTTP 예외를 보존하지 않는다.
 - `Authorization` 헤더, Prompt, 사용자 입력, 응답 원문을 애플리케이션 로그에 기록하지 않는다.
-- Actuator 노출은 `health,info`로 제한하고 `env`, `configprops`의 값 표시를 `never`로 고정한다.
+- Actuator 노출은 `health,info,prometheus`로 제한하고 `env`, `configprops`의 값 표시를 `never`로
+  고정한다. `prometheus`는 Nginx가 프록시하지 않는 내부망 전용 수집 경로이며, LLM Prompt·응답·
+  Authorization을 실을 수 있는 metric은 등록하지 않는다.
 - 관측 정보가 필요할 때는 모델 식별자, Prompt 버전, token usage, 성공 여부 같은 비본문 메타데이터만 사용한다.
 - 이미지 관측 정보는 전송 장수와 성공 여부만 기록할 수 있다. bytes, Base64, data URL, `defectId`와 `incidentCode`의 조합을 로그에 남기지 않는다.
 - `request_control.llm_invocation_usage`에는 UTC 날짜, 사용자 UUID, provider·model,

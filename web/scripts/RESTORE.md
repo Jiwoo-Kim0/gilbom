@@ -6,6 +6,12 @@
 > `/opt/gilbom/deploy` 운영 환경에는 적용하지 않는다. 운영 복원은
 > `infra/scripts/backup-volumes.sh`가 만든 전체 bundle을 대상으로 별도 승인 후
 > 수행한다.
+>
+> **운영 backup이 실제로 복원되는지 확인하는 것은 `scripts/restore-drill.sh`다.**
+> 운영 stack을 건드리지 않고 임시 PostgreSQL과 임시 volume에 복원한 뒤 스키마·
+> Flyway version·주요 데이터·TOTP key version·이미지 SHA-256·MQTT credential까지
+> 검사한다. 절차는
+> [day10-observability-backup-runbook.md](../docs/day10-observability-backup-runbook.md) 6절에 있다.
 
 **둘을 항상 같이 복원한다.** 한쪽만 되돌리면 화면이 깨지는데, 그 방식이 눈에 잘 안 띈다.
 

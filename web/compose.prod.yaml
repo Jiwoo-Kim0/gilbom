@@ -5,6 +5,9 @@ x-logging: &default-logging
   options:
     max-size: "${LOG_MAX_SIZE:-10m}"
     max-file: "${LOG_MAX_FILES:-3}"
+    # json-file 드라이버가 매 줄에 attrs를 함께 쓴다. Alloy가 Docker socket 없이
+    # container를 구분할 수 있는 유일한 경로다.
+    labels: "com.docker.compose.project,com.docker.compose.service"
 
 services:
   # 공개 설정은 매 배포에 갱신하고, 운영 중 발급된 credential은 named volume에서 보존한다.

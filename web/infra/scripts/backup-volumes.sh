@@ -11,6 +11,11 @@ RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-}"
 IMAGE_ENV_FILE="${IMAGE_ENV_FILE:-}"
 BACKUP_ROOT="${BACKUP_ROOT:-}"
 QUIESCED=false
+BACKUP_NAME=volumes
+STARTED_AT="$(date -u +%s)"
+
+# shellcheck source=infra/scripts/backup-common.sh
+. "$SCRIPT_DIR/backup-common.sh"
 
 if [ -z "$ENV_FILE" ] \
     && [ -z "$RUNTIME_ENV_FILE" ] \
@@ -20,6 +25,10 @@ fi
 
 fail() {
   echo "Production volume backup failed: $1" >&2
+  # 실패도 metric으로 남긴다. 남기지 않으면 timer가 죽은 것과 구분되지 않는다.
+  gilbom_backup_record_result \
+    "$BACKUP_NAME" 0 "$(( $(date -u +%s) - STARTED_AT ))" 0 \
+    2>/dev/null || true
   exit 1
 }
 
@@ -71,6 +80,10 @@ case "$BACKUP_ROOT" in
     fail "BACKUP_ROOT must be an absolute path"
     ;;
 esac
+
+# 서비스를 멈추기 전에 암호화 수단을 확인한다. 멈춘 뒤에 실패하면 정지 시간만 늘어난다.
+gilbom_backup_require_gpg
+recipient_fingerprint="$(gilbom_backup_recipient_fingerprint)"
 
 cd "$PROJECT_DIR"
 compose config --quiet
@@ -150,6 +163,8 @@ do
     ' sh "$logical_name" "$(id -u)" "$(id -g)"
   [ -s "$archive" ] || fail "volume archive is empty: $logical_name"
   chmod 0600 "$archive"
+  # mosquitto credential과 보고서 PDF가 들어 있다. 평문으로 두지 않는다.
+  gilbom_backup_encrypt_file "$archive" >/dev/null
 done
 
 robot_images_volume="$(
@@ -199,18 +214,27 @@ volume_image_count="$(wc -l < "$robot_image_volume_manifest" | tr -d ' ')"
 } > "$bundle/robot_images.summary"
 chmod 0600 "$bundle/robot_images.summary"
 
+# dump와 volume archive는 이미 암호화됐다. robot_images manifest는 hash와 object key뿐이라
+# 로컬 검증에 쓰도록 평문으로 둔다. 번들 전체를 반출할 때는 manifest도 함께 나간다.
 (
   cd "$bundle"
   sha256sum \
-    ./*.dump \
-    ./*.dump.sha256 \
-    ./*.tar.gz \
+    ./*.dump.gpg \
+    ./*.dump.gpg.sha256 \
+    ./*.tar.gz.gpg \
     ./robot_images.database.sha256 \
     ./robot_images.volume.sha256 \
     ./robot_images.summary \
     > SHA256SUMS
 )
 chmod 0600 "$bundle/SHA256SUMS"
+
+gilbom_backup_write_manifest \
+  "$bundle/bundle.manifest.json" \
+  "$BACKUP_NAME" \
+  "$recipient_fingerprint" \
+  "$bundle/SHA256SUMS" \
+  "$bundle/robot_images.summary"
 
 compose up \
   --detach \
@@ -220,5 +244,14 @@ compose up \
   || fail "services did not recover after backup"
 QUIESCED=false
 
+gilbom_backup_prune_directories "$BACKUP_ROOT" "*-$project_name"
+
+gilbom_backup_record_result \
+  "$BACKUP_NAME" \
+  1 \
+  "$(( $(date -u +%s) - STARTED_AT ))" \
+  "$(gilbom_backup_directory_size "$bundle")"
+
 echo "Production volume backup: PASS"
 echo "Backup bundle: $bundle"
+echo "Manifest: $bundle/bundle.manifest.json"

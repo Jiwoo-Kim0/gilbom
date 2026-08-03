@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import com.gilbom.common.web.RequestIdFilter;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.servlet.http.HttpServletRequest;
 
 @Service
@@ -24,11 +25,19 @@ public class SecurityAuditService {
             "denialType"
     );
     private static final int MAXIMUM_PATH_LENGTH = 500;
+    // 거부 급증을 Alertmanager에서 본다. 요청 경로는 label에 넣지 않는다.
+    // 임의 URL이 곧 label 값이 되어 시계열이 무한히 늘어나기 때문이다.
+    static final String DENIAL_METRIC = "gilbom.security.denials";
 
     private final AuditLogService auditLogService;
+    private final MeterRegistry meterRegistry;
 
-    public SecurityAuditService(AuditLogService auditLogService) {
+    public SecurityAuditService(
+            AuditLogService auditLogService,
+            MeterRegistry meterRegistry
+    ) {
         this.auditLogService = auditLogService;
+        this.meterRegistry = meterRegistry;
     }
 
     public void recordAccessDenied(
@@ -84,6 +93,10 @@ public class SecurityAuditService {
                     null,
                     AuditResult.DENIED
             ));
+            meterRegistry.counter(
+                    DENIAL_METRIC,
+                    "type",
+                    denialType).increment();
         } catch (RuntimeException exception) {
             LOGGER.error(
                     "Security denial audit was unavailable. requestId={}",

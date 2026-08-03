@@ -5,6 +5,8 @@ x-logging: &monitoring-logging
   options:
     max-size: "${MONITORING_LOG_MAX_SIZE:-10m}"
     max-file: "${MONITORING_LOG_MAX_FILES:-3}"
+    # Alloy가 Docker socket 없이 container를 구분하려면 attrs가 필요하다.
+    labels: "com.docker.compose.project,com.docker.compose.service"
 
 services:
   prometheus:
@@ -21,6 +23,7 @@ services:
       - "${MONITORING_BIND_ADDRESS:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./infra/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/monitoring/prometheus/rules:/etc/prometheus/rules:ro
       - prometheus_data:/prometheus
     read_only: true
     tmpfs:
@@ -34,7 +37,73 @@ services:
     mem_reservation: ${PROMETHEUS_MEMORY_RESERVATION:-128m}
     pids_limit: ${PROMETHEUS_PIDS_LIMIT:-128}
     networks:
+      # Backend를 긁으려면 운영 stack의 internal app network에 함께 있어야 한다.
+      # 두 network 모두 internal이라 여기서 egress가 생기지는 않는다.
       - monitoring
+      - app
+    logging: *monitoring-logging
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.listen-address=:9093
+    ports:
+      - "${MONITORING_BIND_ADDRESS:-127.0.0.1}:${ALERTMANAGER_PORT:-9093}:9093"
+    volumes:
+      - ./infra/monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    secrets:
+      - alertmanager_mattermost_webhook
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: "${ALERTMANAGER_CPUS:-0.25}"
+    mem_limit: ${ALERTMANAGER_MEMORY_LIMIT:-128m}
+    mem_reservation: ${ALERTMANAGER_MEMORY_RESERVATION:-32m}
+    pids_limit: ${ALERTMANAGER_PIDS_LIMIT:-64}
+    networks:
+      # Mattermost webhook으로 알람을 내보내야 하므로 egress가 필요하다.
+      - monitoring
+      - alert-egress
+    logging: *monitoring-logging
+
+  blackbox:
+    image: prom/blackbox-exporter:v0.28.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/blackbox/blackbox.yml
+      - --web.listen-address=:9115
+    extra_hosts:
+      # EC2는 자기 공인 IP로 되돌아오는 접속을 받지 못한다(hairpin NAT 미지원).
+      # 도메인을 host로 직접 돌려 published 443 port를 친다. 인증서 SNI와 Host 헤더는
+      # 도메인 그대로라서 TLS 검증과 만료일 확인은 실제 값 그대로 나온다.
+      # 대신 공개 DNS와 보안그룹 경로는 이 probe로 검증되지 않는다.
+      - "${PROBE_DOMAIN:-i15d101.p.ssafy.io}:host-gateway"
+    volumes:
+      - ./infra/monitoring/blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      # ICMP probe를 하지 않으므로 NET_RAW도 필요 없다.
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: "${BLACKBOX_CPUS:-0.25}"
+    mem_limit: ${BLACKBOX_MEMORY_LIMIT:-64m}
+    mem_reservation: ${BLACKBOX_MEMORY_RESERVATION:-16m}
+    pids_limit: ${BLACKBOX_PIDS_LIMIT:-64}
+    networks:
+      # 공개 도메인을 바깥에서 보듯 확인해야 해서 egress가 필요하다.
+      - monitoring
+      - probe-egress
     logging: *monitoring-logging
 
   loki:
@@ -85,6 +154,8 @@ services:
       - "${MONITORING_BIND_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3001}:3000"
     volumes:
       - ./infra/monitoring/grafana/provisioning/datasources/gilbom.yml:/etc/grafana/provisioning/datasources/gilbom.yml:ro
+      - ./infra/monitoring/grafana/provisioning/dashboards/gilbom.yml:/etc/grafana/provisioning/dashboards/gilbom.yml:ro
+      - ./infra/monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     secrets:
       - grafana_admin_password
@@ -156,6 +227,11 @@ services:
       - ./infra/monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
+      # host가 쓰고 Alloy는 읽기만 한다. 디스크·container·backup metric이 이 경로로 온다.
+      - type: bind
+        source: ${MONITORING_TEXTFILE_DIR:-/opt/gilbom/monitoring/textfile}
+        target: /var/lib/alloy/textfile
+        read_only: true
       - alloy_data:/var/lib/alloy/data
     read_only: true
     tmpfs:
@@ -190,6 +266,9 @@ services:
     volumes:
       - ./infra/monitoring/alloy/config-logs.alloy:/etc/alloy/config.alloy:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      # 배포·backup·certbot 스크립트는 systemd 아래에서 돌아 journal에만 남는다.
+      # 읽기 권한은 아래 DAC_READ_SEARCH가 해결한다.
+      - /var/log/journal:/var/log/journal:ro
       - alloy_log_data:/var/lib/alloy/log-data
     read_only: true
     tmpfs:
@@ -212,6 +291,7 @@ services:
 
 volumes:
   prometheus_data:
+  alertmanager_data:
   loki_data:
   grafana_data:
   alloy_data:
@@ -220,7 +300,19 @@ volumes:
 secrets:
   grafana_admin_password:
     file: ${GRAFANA_ADMIN_PASSWORD_SECRET_FILE:?GRAFANA_ADMIN_PASSWORD_SECRET_FILE is required}
+  alertmanager_mattermost_webhook:
+    file: ${ALERTMANAGER_WEBHOOK_SECRET_FILE:?ALERTMANAGER_WEBHOOK_SECRET_FILE is required}
 
 networks:
   monitoring:
     internal: true
+  # 운영 stack이 만든 internal app network에 참여한다. 이름은 운영 Compose의
+  # project 이름을 따라간다(기본 gilbom → gilbom_app).
+  app:
+    external: true
+    name: ${APP_NETWORK_NAME:-gilbom_app}
+  # 공개 HTTPS 종단 확인과 알람 발송에만 쓰는 egress다. 수집 대상은 여기에 두지 않는다.
+  probe-egress:
+    driver: bridge
+  alert-egress:
+    driver: bridge

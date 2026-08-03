@@ -36,6 +36,7 @@ jenkins_config="$(mktemp)"
 trap 'rm -f "$monitoring_config" "$jenkins_config"' EXIT HUP INT TERM
 
 GRAFANA_ADMIN_PASSWORD_SECRET_FILE=/dev/null \
+ALERTMANAGER_WEBHOOK_SECRET_FILE=/dev/null \
   docker compose -f compose.monitoring.yaml config > "$monitoring_config"
 COMPOSE_PROJECT_NAME=gilbom-jenkins \
   docker compose -f compose.jenkins.yaml config > "$jenkins_config"

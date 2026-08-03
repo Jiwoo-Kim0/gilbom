@@ -1,0 +1,21 @@
+[Unit]
+Description=Write Gilbom host and container metrics for Prometheus
+Requires=docker.service
+After=docker.service
+ConditionFileIsExecutable=/usr/local/sbin/gilbom-host-metrics
+ConditionPathIsDirectory=/opt/gilbom/monitoring/textfile
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+# 결과 파일은 Alloy가 읽어야 하므로 0644가 되게 둔다.
+UMask=0022
+ExecStart=/usr/local/sbin/gilbom-host-metrics
+TimeoutStartSec=5min
+Nice=15
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
