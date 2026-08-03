@@ -5,7 +5,7 @@
   "scope": "day10-stage6-recovery",
   "checks": {
     "existingCiResilienceAutomation": "IMPLEMENTED",
-    "isolatedActualBackupRestore": "IMPLEMENTED_PENDING_ACTUAL_BUNDLE_RUN",
+    "isolatedActualBackupRestore": "PASS",
     "stagingServiceRestart": "PENDING_NO_STAGING",
     "stagingEc2RebootRecovery": "PENDING_NO_STAGING",
     "stagingCertificateDryRun": "PENDING_NO_STAGING",
@@ -21,5 +21,17 @@
     "stagingReboot": ".artifacts/day10/staging/reboot-recovery.json",
     "stagingCertificate": ".artifacts/day10/staging/certbot-dry-run.txt",
     "stagingRollback": ".artifacts/day10/staging/rollback-rehearsal.json"
+  },
+  "actualIsolatedRestoreEvidence": {
+    "capturedAtUtc": "2026-08-03T07:21:08Z",
+    "bundle": "20260803T070355Z-gilbom",
+    "summarySha256": "c5cbd0d53c0f1eee987ebb2cf0e0ecc6e2257dd580a55660704dc7932e31b5a4",
+    "restoreLogSha256": "71fbcd00f88f935fbe04e540450095eaeeafd3e472121660d3c50abff7ece970",
+    "databaseTablesMatched": 41,
+    "databaseSequencesMatched": 1,
+    "robotImageFilesMatched": 2,
+    "reportPdfFilesMatched": 0,
+    "productionDatabaseRestorePerformed": false,
+    "productionHostRebootPerformed": false
   }
 }

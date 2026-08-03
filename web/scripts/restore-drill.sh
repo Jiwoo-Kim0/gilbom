@@ -28,6 +28,7 @@ BUNDLE="${1:-}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgis/postgis:16-3.5}"
 ALPINE_IMAGE="${ALPINE_IMAGE:-alpine:3.22}"
 DRILL_ID="restore-drill-$(date -u +%Y%m%d%H%M%S)-$$"
+DRILL_BOOTSTRAP_DB=postgres
 DRILL_DB=gilbom
 DRILL_USER=gilbom_drill
 WORK_DIR=""
@@ -181,7 +182,7 @@ docker run \
   --detach \
   --name "$CONTAINER" \
   --network "$NETWORK" \
-  --env POSTGRES_DB="$DRILL_DB" \
+  --env POSTGRES_DB="$DRILL_BOOTSTRAP_DB" \
   --env POSTGRES_USER="$DRILL_USER" \
   --env POSTGRES_PASSWORD="$drill_password" \
   --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
@@ -191,8 +192,15 @@ docker run \
 ready=false
 attempt=0
 while [ "$attempt" -lt 60 ]; do
-  if docker exec "$CONTAINER" pg_isready \
-      --username "$DRILL_USER" --dbname "$DRILL_DB" >/dev/null 2>&1; then
+  # PostgreSQL 공식 entrypoint는 새 PGDATA를 초기화하는 동안 임시 server를
+  # 먼저 띄운다. 이때도 pg_isready는 성공하지만, 곧 그 server를 내리고 최종
+  # server를 다시 시작한다. 최종 초기화 marker 없이 pg_isready만 믿으면
+  # 바로 뒤의 pg_restore가 shutdown 전환과 충돌한다.
+  if docker logs "$CONTAINER" 2>&1 \
+      | grep -Fq 'PostgreSQL init process complete; ready for start up.' \
+      && docker exec "$CONTAINER" pg_isready \
+        --username "$DRILL_USER" --dbname "$DRILL_BOOTSTRAP_DB" \
+        >/dev/null 2>&1; then
     ready=true
     break
   fi
@@ -201,6 +209,17 @@ while [ "$attempt" -lt 60 ]; do
 done
 [ "$ready" = true ] || fail "temporary PostgreSQL did not become ready"
 check "임시 PostgreSQL 기동" PASS "$CONTAINER"
+
+# postgis/postgis 이미지는 POSTGRES_DB에 PostGIS와 tiger schema를 미리 만든다.
+# 운영 dump에도 같은 객체가 있으므로 그 DB에 곧바로 복원하면 충돌한다. 확장이나
+# schema가 없는 template0에서 별도 대상 DB를 만든 뒤 dump가 모든 객체를 복원하게 한다.
+docker exec "$CONTAINER" \
+  createdb \
+    --username "$DRILL_USER" \
+    --template template0 \
+    "$DRILL_DB" \
+  || fail "empty restore database could not be created"
+check "빈 복원 DB 생성" PASS "$DRILL_DB (template0)"
 
 for archive in "$WORK_DIR"/*.tar.gz; do
   [ -f "$archive" ] || continue

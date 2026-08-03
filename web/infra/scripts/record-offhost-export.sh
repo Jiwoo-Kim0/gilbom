@@ -11,10 +11,10 @@
 set -eu
 set +x
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-
-# shellcheck source=infra/scripts/backup-common.sh
-. "$SCRIPT_DIR/backup-common.sh"
+# 이 파일은 /usr/local/sbin에 단독 설치된다. backup-common.sh는 저장소 안에서
+# backup 생성기들이 공유하지만 이 진입점은 textfile 경로만 필요하므로, 설치 후
+# 저장소 상대 경로를 source하지 않는다.
+BACKUP_TEXTFILE_DIR="${BACKUP_TEXTFILE_DIR:-/opt/gilbom/monitoring/textfile}"
 
 fail() {
   echo "Off-host export record failed: $1" >&2

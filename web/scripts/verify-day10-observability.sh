@@ -228,6 +228,12 @@ assert_contains infra/scripts/backup-common.sh \
 assert_contains infra/scripts/record-offhost-export.sh \
   'only encrypted (.gpg) artifacts may be exported off-host' \
   "평문 반출을 막는 검사가 없다"
+assert_contains infra/scripts/record-offhost-export.sh \
+  'BACKUP_TEXTFILE_DIR="${BACKUP_TEXTFILE_DIR:-/opt/gilbom/monitoring/textfile}"' \
+  "단독 설치되는 off-host 반출 진입점에 metric 경로 기본값이 없다"
+assert_not_contains infra/scripts/record-offhost-export.sh \
+  '. "$SCRIPT_DIR/backup-common.sh"' \
+  "단독 설치되는 off-host 반출 진입점이 미설치 저장소 파일을 source한다"
 
 for script in \
   infra/scripts/backup-common.sh \
@@ -255,6 +261,15 @@ assert_contains scripts/restore-drill.sh \
 assert_contains scripts/restore-drill.sh \
   'report_pdf_data restored file SHA-256' \
   "복원본 PDF file hash 대조가 없다"
+assert_contains scripts/restore-drill.sh \
+  'PostgreSQL init process complete; ready for start up.' \
+  "복원 Drill이 PostgreSQL 초기화용 임시 server를 최종 server로 오인할 수 있다"
+assert_contains scripts/restore-drill.sh \
+  'DRILL_BOOTSTRAP_DB=postgres' \
+  "PostGIS 초기 객체와 운영 dump가 충돌하지 않도록 bootstrap DB를 분리하지 않았다"
+assert_contains scripts/restore-drill.sh \
+  '--template template0' \
+  "복원 대상 DB가 완전히 빈 template0에서 생성되지 않는다"
 assert_file scripts/generate-restore-drill-evidence.py \
   "복원 JSON 증거 생성기가 없다"
 assert_file scripts/test-database-content-manifest.py \
