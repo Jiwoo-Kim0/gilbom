@@ -163,14 +163,15 @@ Secret 값·provider token/private-key 패턴을 다시 검사한 뒤에만 보�
 `/opt/gilbom/artifacts/.incoming/<SHA>/`로만 전송한다. Jenkins Credential의
 private key와 검증된 `known_hosts`를 사용하며 전송 전후 SHA-256을 확인한다.
 
-Jenkins 수동 승인 이후
-`/usr/local/sbin/gilbom-promote-ci-release-artifacts`가 root로 실행된다. 이
+모든 CI gate가 성공하면
+`/usr/local/sbin/gilbom-promote-ci-release-artifacts`가 root로 자동 실행된다. 이
 명령은 Git checkout에서 직접 실행하지 않고
 `infra/scripts/promote-ci-release-artifacts.sh`를 root 소유 mode `0755`로
 설치한 사본이다. 검증된 incoming 디렉터리를 동일 filesystem의
 `/opt/gilbom/artifacts/<SHA>/`로 atomic rename하고 모든 entry를 root 소유
 읽기 전용으로 만든다. 기존 SHA는 `SHA256SUMS`와 양쪽 실제 파일이 동일할 때만
-재사용한다.
+재사용한다. 이 승격은 운영 Compose를 변경하지 않으며 운영 배포와 조건부
+Rollback의 수동 승인 경계는 유지한다.
 
 ## 6. 실행
 

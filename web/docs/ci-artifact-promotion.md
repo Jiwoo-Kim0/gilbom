@@ -7,8 +7,9 @@ Stage 9는 Stage 4~8의 모든 검사와 `release/SHA256SUMS` 검증이 끝난 �
 /opt/gilbom/artifacts/.incoming/<40자리 release SHA>/
 ```
 
-Jenkins의 수동 승인 이후, 운영 host에 root 소유로 설치한 승격 명령이 구조와
-SHA-256을 다시 검사하고 같은 filesystem 안에서 다음 경로로 rename한다.
+모든 CI gate가 성공하면 운영 host에 root 소유로 설치한 승격 명령을 자동
+호출한다. 이 명령은 구조와 SHA-256을 다시 검사하고 같은 filesystem 안에서 다음
+경로로 rename한다.
 
 ```text
 /opt/gilbom/artifacts/<40자리 release SHA>/
@@ -18,6 +19,11 @@ SHA-256을 다시 검사하고 같은 filesystem 안에서 다음 경로로 rena
 동일 SHA가 이미 존재하면 incoming과 final의 `SHA256SUMS`가 완전히 같고 양쪽
 내용 검증도 성공한 경우에만 기존 디렉터리를 재사용한다. Checksum이 다르면 기존
 디렉터리를 수정하거나 교체하지 않고 실패한다.
+
+CI를 동일 SHA로 다시 실행했을 때 최종 경로가 이미 `root:root 0550`이면 최초
+성공 CI가 만든 immutable Artifact를 canonical release로 재사용한다. 업로드
+계정은 최종 경로에 쓰거나 내용을 변경할 수 없으며, 소유권·mode·non-symlink
+경계만 확인한 뒤 새 incoming 업로드를 생략한다.
 
 ## EC2 최초 설정
 
@@ -71,14 +77,17 @@ CI 전송 스크립트의 절대경로 검증은 이 Jenkins 관리형 `@tmp` �
 
 1. 비싼 Test 전에 `Artifact transfer readiness`가 SSH host key, incoming 쓰기
    권한, root 소유 승격 helper와 passwordless sudo 허용을 읽기 전용으로 확인한다.
-2. `Upload release artifacts to incoming`이 로컬 Checksum을 확인한다.
-3. SSH host key를 강제 검증하고 아홉 개의 파일만 SCP/SFTP로 전송한다.
-4. EC2 incoming 디렉터리에서 Checksum을 다시 확인한다.
-5. `Approve release artifact promotion`에서 Jenkins 사용자가 수동 승인한다.
-6. `Promote release artifact atomically`가 제한된 root 명령을 실행한다.
+2. 동일 SHA의 root-owned immutable Artifact가 이미 있으면 이를 재사용한다.
+3. 그렇지 않으면 `Upload release artifacts to incoming`이 로컬 Checksum을
+   확인한다.
+4. SSH host key를 강제 검증하고 아홉 개의 파일만 SCP/SFTP로 전송한다.
+5. EC2 incoming 디렉터리에서 Checksum을 다시 확인한다.
+6. `Promote release artifact automatically`가 제한된 root 명령을 즉시 실행한다.
 7. root 명령이 구조·파일 형식·Checksum·기존 SHA 충돌을 검사하고 원자적으로
    rename한 뒤 전체 write bit가 제거됐는지 확인한다.
 
-전송 도중 중단된 incoming 디렉터리는 자동 덮어쓰지 않는다. 완전하며 Checksum이
-같은 경우에만 재사용하고, 그 외에는 운영자가 원인을 확인한 뒤 해당 SHA의
-incoming 디렉터리만 명시적으로 정리해야 한다.
+이 자동 승격은 운영 Compose나 `current.sha`를 변경하지 않는다. 실제 운영 배포와
+조건부 Rollback의 Jenkins 인증 사용자 승인은 별도로 유지한다. 전송 도중 CI가
+실패하거나 중단되면 해당 build는 자신의 full SHA incoming 디렉터리를
+`.aborted-<SHA>-build-<번호>`로 격리한다. 완전하며 Checksum이 같은 incoming만
+재사용하고 다른 내용은 덮어쓰지 않는다.

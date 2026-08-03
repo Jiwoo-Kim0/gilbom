@@ -42,6 +42,25 @@ public class AuthenticationUserRepository {
         );
     }
 
+    public boolean isMfaExemptUser(UUID userId) {
+        Boolean exempt = jdbcTemplate.queryForObject(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM auth.admin_user
+                    WHERE user_id = ?
+                      AND account_status = 'ACTIVE'
+                      AND is_active = TRUE
+                      AND password_change_required = FALSE
+                      AND mfa_required = FALSE
+                )
+                """,
+                Boolean.class,
+                userId
+        );
+        return Boolean.TRUE.equals(exempt);
+    }
+
     private List<RoleSummaryResponse> findRoles(UUID userId) {
         return jdbcTemplate.query(
                 """

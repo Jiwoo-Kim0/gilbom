@@ -24,6 +24,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.gilbom.auth.model.AuthenticationState;
+import com.gilbom.auth.mfa.AuthenticationResponse;
 import com.gilbom.auth.ratelimit.AuthenticationRateLimitExceededException;
 import com.gilbom.auth.session.SessionSecurityStateRepository;
 import com.gilbom.common.error.BusinessException;
@@ -74,6 +75,7 @@ class AuthenticationLoginControllerTest {
             throws Exception {
         when(loginService.login(
                 any(LoginRequest.class),
+                any(),
                 any()
         )).thenReturn(new LoginChallengeResponse(
                 AuthenticationState.MFA_REQUIRED,
@@ -97,6 +99,36 @@ class AuthenticationLoginControllerTest {
                 .andExpect(jsonPath("$.authenticated").doesNotExist())
                 .andExpect(jsonPath("$.sessionId").doesNotExist())
                 .andExpect(jsonPath("$.csrfToken").doesNotExist());
+    }
+
+    @Test
+    void mfaExemptPasswordSuccessReturnsTheAuthenticatedSession()
+            throws Exception {
+        when(loginService.login(
+                any(LoginRequest.class),
+                any(),
+                any()
+        )).thenReturn(new AuthenticationResponse(
+                null,
+                "replacement-csrf",
+                CHALLENGE_EXPIRY.plusSeconds(3600),
+                false
+        ));
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .with(csrf().asHeader())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validLoginJson()))
+                .andExpect(status().isOk())
+                .andExpect(header().string(
+                        HttpHeaders.CACHE_CONTROL,
+                        containsString("no-store")
+                ))
+                .andExpect(jsonPath(
+                        "$.csrfToken",
+                        is("replacement-csrf")
+                ))
+                .andExpect(jsonPath("$.loginState").doesNotExist());
     }
 
     @Test
@@ -125,6 +157,7 @@ class AuthenticationLoginControllerTest {
     void allCredentialFailuresUseTheStable401Contract() throws Exception {
         when(loginService.login(
                 any(LoginRequest.class),
+                any(),
                 any()
         )).thenThrow(new BusinessException(
                 ErrorCode.AUTH_UNAUTHENTICATED,
@@ -147,6 +180,7 @@ class AuthenticationLoginControllerTest {
     void accountRateLimitReturnsRetryAfter() throws Exception {
         when(loginService.login(
                 any(LoginRequest.class),
+                any(),
                 any()
         )).thenThrow(new AuthenticationRateLimitExceededException(37));
 

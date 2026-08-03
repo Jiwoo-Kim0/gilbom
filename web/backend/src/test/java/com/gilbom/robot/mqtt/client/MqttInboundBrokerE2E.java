@@ -15,6 +15,7 @@ import org.eclipse.paho.mqttv5.client.MqttAsyncClient;
 import org.eclipse.paho.mqttv5.client.MqttCallback;
 import org.eclipse.paho.mqttv5.client.MqttConnectionOptions;
 import org.eclipse.paho.mqttv5.client.MqttDisconnectResponse;
+import org.eclipse.paho.mqttv5.client.persist.MemoryPersistence;
 import org.eclipse.paho.mqttv5.common.MqttException;
 import org.eclipse.paho.mqttv5.common.MqttMessage;
 import org.junit.jupiter.api.BeforeEach;
@@ -167,14 +168,16 @@ class MqttInboundBrokerE2E {
 
         MqttAsyncClient backendClient = new MqttAsyncClient(
                 broker,
-                "inbound-e2e-server-" + testId);
+                "inbound-e2e-server-" + testId,
+                new MemoryPersistence());
         backendClient.setCallback(new DispatchingCallback(
                 dispatcher,
                 deliveries,
                 callbackFailure));
         MqttAsyncClient robotClient = new MqttAsyncClient(
                 broker,
-                "inbound-e2e-robot-" + testId);
+                "inbound-e2e-robot-" + testId,
+                new MemoryPersistence());
 
         try {
             backendClient.connect(connectionOptions(

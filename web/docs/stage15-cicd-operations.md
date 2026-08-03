@@ -160,8 +160,8 @@ Jenkins artifact SSH Credential을 사용하는 환경에서는
 
 ## 5. 최종 증거 판정
 
-최신 Stage 15 CI를 한 번 `SUCCESS`로 완료하고 Artifact 승격까지 승인한다. 그
-CI 로그의 exact `RELEASE_SHA`로 `gilbom-deploy`를 실행해 운영 배포도
+최신 Stage 15 CI를 한 번 `SUCCESS`로 완료하면 Artifact는 자동 승격된다. 그 CI
+로그의 exact `RELEASE_SHA`로 `gilbom-deploy`를 실행해 운영 배포를 수동 승인하고
 `SUCCESS`로 끝낸다. 최종 판정은 CI SHA와 운영 `current.sha`가 다르면 실패한다.
 해당 CI build에서 다음 두 항목을 내려받는다.
 

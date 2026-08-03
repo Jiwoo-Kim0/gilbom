@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 
 @RestController
@@ -32,13 +33,22 @@ public class AuthenticationLoginController {
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE
     )
-    public ResponseEntity<LoginChallengeResponse> login(
+    public ResponseEntity<LoginResponse> login(
             @Valid @RequestBody LoginRequest request,
-            HttpServletRequest servletRequest
+            HttpServletRequest servletRequest,
+            HttpServletResponse servletResponse
     ) {
-        return ResponseEntity.status(HttpStatus.ACCEPTED)
+        LoginResponse loginResponse = loginService.login(
+                request,
+                servletRequest,
+                servletResponse
+        );
+        HttpStatus status = loginResponse instanceof LoginChallengeResponse
+                ? HttpStatus.ACCEPTED
+                : HttpStatus.OK;
+        return ResponseEntity.status(status)
                 .cacheControl(CacheControl.noStore())
-                .body(loginService.login(request, servletRequest));
+                .body(loginResponse);
     }
 
     @PostMapping(

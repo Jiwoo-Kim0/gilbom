@@ -10,7 +10,7 @@ import com.gilbom.auth.session.AuthenticationSessionService.ChallengeSession;
 public record LoginChallengeResponse(
         AuthenticationState loginState,
         Instant challengeExpiresAt
-) {
+) implements LoginResponse {
 
     private static final Set<AuthenticationState> EXPOSED_STATES = Set.of(
             AuthenticationState.PASSWORD_CHANGE_REQUIRED,

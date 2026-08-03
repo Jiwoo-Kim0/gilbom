@@ -163,6 +163,27 @@ public class AuthenticationDefenseService {
         );
     }
 
+    @Transactional
+    public AuthenticatedSession completeMfaBypassAndRecordLogin(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            UUID userId,
+            Authentication authentication,
+            AuthenticationRequestAuditContext context
+    ) {
+        if (accountRepository.recordCompletedLogin(userId) != 1) {
+            throw unauthenticated();
+        }
+        rateLimiter.resetMfaFailures(userId);
+        auditService.recordLoginSucceededRequired(context, userId);
+        return sessionService.completeMfaBypass(
+                request,
+                response,
+                userId,
+                authentication
+        );
+    }
+
     public void logout(
             HttpServletRequest request,
             UUID userId,

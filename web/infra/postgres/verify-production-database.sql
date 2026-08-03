@@ -10,12 +10,12 @@ SELECT (
         WHERE extname = 'postgis'
     )
     AND (
-        SELECT COUNT(*) = 38
+        SELECT COUNT(*) = 39
                AND COUNT(*) FILTER (WHERE NOT success) = 0
                AND COUNT(*) FILTER (
-                   WHERE version::INTEGER BETWEEN 1 AND 38
+                   WHERE version::INTEGER BETWEEN 1 AND 39
                      AND success
-               ) = 38
+               ) = 39
         FROM flyway_history.flyway_schema_history
     )
     AND (
@@ -56,6 +56,37 @@ SELECT (
         FROM auth.role
         WHERE is_system
           AND role_code NOT IN ('ADMIN', 'MANAGER', 'OPERATOR')
+    )
+    AND (
+        SELECT COUNT(*)
+        FROM auth.admin_user
+        WHERE mfa_required = FALSE
+    ) = 1
+    AND EXISTS (
+        SELECT 1
+        FROM auth.admin_user admin_user
+        JOIN auth.user_role user_role
+          ON user_role.user_id = admin_user.user_id
+         AND user_role.is_active = TRUE
+         AND user_role.is_primary = TRUE
+        JOIN auth.role role
+          ON role.role_id = user_role.role_id
+         AND role.role_code = 'MANAGER'
+         AND role.is_system = TRUE
+         AND role.is_active = TRUE
+        WHERE admin_user.user_id =
+              '39000000-0000-4000-8000-000000000001'
+          AND admin_user.normalized_email =
+              'consultant.manager@gilbom.test'
+          AND admin_user.account_status = 'ACTIVE'
+          AND admin_user.is_active = TRUE
+          AND admin_user.password_change_required = FALSE
+          AND admin_user.mfa_required = FALSE
+    )
+    AND NOT EXISTS (
+        SELECT 1
+        FROM auth.mfa_factor
+        WHERE user_id = '39000000-0000-4000-8000-000000000001'
     )
     AND NOT HAS_SCHEMA_PRIVILEGE(:'application_role', 'flyway_history', 'USAGE')
     AND NOT HAS_SCHEMA_PRIVILEGE(:'application_role', 'auth', 'CREATE')

@@ -89,7 +89,17 @@ PIPELINES = {
                 "Integration stack start",
                 "docker compose up -d --no-build --wait",
             ),
-            ("flyway-v1-v35", "Flyway V1-V35", "docker compose exec -T db psql"),
+            (
+                "auth-security-integration",
+                "Authentication temporary DB integration",
+                "python3 scripts/auth-security-integration-test.py",
+            ),
+            (
+                "mqtt-broker-e2e",
+                "Actual TLS MQTT Broker E2E",
+                "sh scripts/run-mqtt-broker-e2e-ci.sh",
+            ),
+            ("flyway-v1-v39", "Flyway V1-V39", "docker compose exec -T db psql"),
             (
                 "postgis-rbac-session",
                 "PostGIS/RBAC/Session",
@@ -133,6 +143,11 @@ PIPELINES = {
             ),
             ("sbom-cve", "Image SBOM/CVE policy", "sh scripts/scan-image-security.sh"),
             (
+                "security-regression-baseline",
+                "Security regression baseline evidence",
+                "python3 scripts/generate-security-regression-baseline.py",
+            ),
+            (
                 "release-security-artifacts",
                 "Release SBOM/CVE Artifact preparation",
                 "sh scripts/prepare-release-security-artifacts.sh",
@@ -150,7 +165,7 @@ PIPELINES = {
             ),
             (
                 "artifact-promotion",
-                "Approved Artifact promotion",
+                "Automatic Artifact promotion",
                 "sh scripts/promote-ci-release-artifacts-remote.sh",
             ),
             (
@@ -234,7 +249,7 @@ def ci_diagnosis(root: Path) -> tuple[str, str, list[str]]:
             passed.append(label)
             continue
         return label, reproduce, passed
-    return "후처리 또는 수동 Artifact 승격", "Jenkins Console에서 마지막 오류 확인", passed
+    return "후처리 또는 자동 Artifact 승격", "Jenkins Console에서 마지막 오류 확인", passed
 
 
 def file_diagnosis(root: Path, pipeline: str) -> tuple[str, str, list[str]]:

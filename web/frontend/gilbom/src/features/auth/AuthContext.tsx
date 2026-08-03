@@ -111,7 +111,8 @@ function reducer(
     }
     case 'AUTHENTICATION_COMPLETED':
       if (
-        state.status !== 'MFA_REQUIRED'
+        state.status !== 'ANONYMOUS'
+        && state.status !== 'MFA_REQUIRED'
         && state.status !== 'MFA_ENROLLMENT_REQUIRED'
       ) {
         return state

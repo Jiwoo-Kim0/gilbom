@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -16,6 +17,18 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
 
 
 class CicdNotificationTest(unittest.TestCase):
+    @staticmethod
+    def load_generator_module():
+        specification = importlib.util.spec_from_file_location(
+            "generate_cicd_notification",
+            SCRIPT,
+        )
+        if specification is None or specification.loader is None:
+            raise RuntimeError("could not load CI/CD notification generator")
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+        return module
+
     def run_generator(self, result: str, output: Path) -> dict[str, object]:
         environment = os.environ.copy()
         environment.update(
@@ -65,6 +78,25 @@ class CicdNotificationTest(unittest.TestCase):
             summary = self.run_generator("SUCCESS", Path(temporary))
             self.assertEqual(summary["diagnosis"], "모든 필수 게이트 통과")
             self.assertIsNone(summary["suspectedGate"])
+
+    def test_current_flyway_gate_does_not_create_obsolete_v35_failure(self) -> None:
+        generator = self.load_generator_module()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            results = root / ".artifacts/ci-results"
+            results.mkdir(parents=True)
+            for result_id, _, _ in generator.PIPELINES["ci"]["ordered_gates"]:
+                if result_id == "postgis-rbac-session":
+                    break
+                (results / f"{result_id}.status").write_text(
+                    "PASS\n",
+                    encoding="utf-8",
+                )
+
+            suspected, _, passed = generator.ci_diagnosis(root)
+            self.assertEqual(suspected, "PostGIS/RBAC/Session")
+            self.assertIn("Flyway V1-V39", passed)
+            self.assertNotIn("Flyway V1-V35", passed)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,13 @@
 pipeline {
     agent any
 
+    environment {
+        // CI는 gitignore된 로컬 .env에 의존하지 않는다. 임시 keyring을 사용하는
+        // 인증·MFA 회귀에서도 운영과 같은 TOTP 암호화 경계를 명시적으로 강제한다.
+        MFA_TOTP_SECRET_ENCRYPTION_ENABLED = 'true'
+        MFA_TOTP_SECRET_ACTIVE_KEY_VERSION = '1'
+    }
+
     // Stage 15: source 변경 감지는 CI Job에만 둔다. 운영 배포·Rollback은
     // full SHA 입력과 인증 사용자 승인 없이는 시작되지 않는다.
     triggers {
@@ -408,14 +415,59 @@ pipeline {
                 dir(env.APP_DIR) {
                     sh '''
                         set -eu
-                        docker compose up --detach --no-build --wait --wait-timeout 180
+                        MQTT_BIND_ADDRESS=0.0.0.0 \
+                        MQTT_PUBLIC_HOSTNAME=docker-builder \
+                            docker compose up \
+                                --detach --no-build --wait --wait-timeout 180
                         sh scripts/record-ci-result.sh integration-stack-start
                     '''
                 }
             }
         }
 
-        stage('Flyway V1-V38') {
+        stage('Authentication temporary DB integration') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        GILBOM_SECURITY_TEST_BIND_ADDRESS=0.0.0.0 \
+                        GILBOM_SECURITY_TEST_PUBLISHED_HOST=docker-builder \
+                        GILBOM_SECURITY_TEST_OUTPUT=.artifacts/security-regression/auth-security-integration.json \
+                            python3 scripts/auth-security-integration-test.py
+                        jq -e '
+                            .status == "PASS"
+                            and .checkCount > 0
+                            and .isolation.backendRemoved == true
+                            and .isolation.databaseRemoved == true
+                        ' .artifacts/security-regression/auth-security-integration.json \
+                            > /dev/null
+                        sh scripts/record-ci-result.sh auth-security-integration
+                    '''
+                }
+            }
+        }
+
+        stage('Actual TLS MQTT Broker E2E') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        MQTT_E2E_PUBLISHED_HOST=docker-builder \
+                            sh scripts/run-mqtt-broker-e2e-ci.sh
+                        jq -e '
+                            .status == "PASS"
+                            and .brokerTransport == "TLS"
+                            and .resultFiles > 0
+                            and .cleanupPassed == true
+                        ' .artifacts/security-regression/mqtt-broker-e2e.json \
+                            > /dev/null
+                        sh scripts/record-ci-result.sh mqtt-broker-e2e
+                    '''
+                }
+            }
+        }
+
+        stage('Flyway V1-V39') {
             steps {
                 dir(env.APP_DIR) {
                     sh '''
@@ -425,15 +477,15 @@ pipeline {
                             psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
                                 --no-password --tuples-only --no-align --command "
                                     SELECT (
-                                        COUNT(*) = 38
+                                        COUNT(*) = 39
                                         AND MIN(version::INTEGER) = 1
-                                        AND MAX(version::INTEGER) = 38
+                                        AND MAX(version::INTEGER) = 39
                                         AND BOOL_AND(success)
                                     )::int
                                     FROM flyway_history.flyway_schema_history;
                                 "
                         ' | grep -qx 1
-                        sh scripts/record-ci-result.sh flyway-v1-v38
+                        sh scripts/record-ci-result.sh flyway-v1-v39
                     '''
                 }
             }
@@ -633,6 +685,24 @@ pipeline {
             }
         }
 
+        stage('Security regression baseline evidence') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        python3 scripts/generate-security-regression-baseline.py
+                        jq -e '
+                            .status == "PASS"
+                            and .executionBoundary == "Jenkins TLS DinD"
+                            and ([.gates[].status] | all(. == "PASS"))
+                        ' .artifacts/security-regression/baseline-summary.json \
+                            > /dev/null
+                        sh scripts/record-ci-result.sh security-regression-baseline
+                    '''
+                }
+            }
+        }
+
         // Stages 6-8: 검사를 모두 통과한 full-SHA image만 release/로 승격한다.
         stage('Prepare release SBOM and vulnerability artifacts') {
             steps {
@@ -676,8 +746,9 @@ pipeline {
             }
         }
 
-        // Stage 9: 검증된 release/만 불변 incoming 경계로 전송한다. 승격은
-        // Jenkins 사용자의 명시적 승인 뒤 root-owned helper가 수행한다.
+        // Stage 9: 검증된 release/만 불변 incoming 경계로 전송한 뒤
+        // root-owned helper가 자동으로 원자적 승격한다. 이 단계는 운영 배포가
+        // 아니며, 운영 배포와 조건부 Rollback의 Jenkins 승인은 계속 유지한다.
         stage('Upload release artifacts to incoming') {
             steps {
                 dir(env.APP_DIR) {
@@ -697,13 +768,29 @@ pipeline {
                             set +x
                             artifact_host="${ARTIFACT_HOST:-host.docker.internal}"
                             artifact_port="${ARTIFACT_SSH_PORT:-22}"
-                            KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
-                            SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
-                            SSH_PORT="$artifact_port" \
-                            REMOTE_ARTIFACT_ROOT=/opt/gilbom/artifacts \
-                                sh scripts/upload-ci-release-artifacts.sh \
-                                    release \
-                                    "$ARTIFACT_SSH_USER@$artifact_host"
+                            reuse_marker=.artifacts/ci-release-already-promoted
+                            rm -f -- "$reuse_marker"
+                            if KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                               SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                               SSH_PORT="$artifact_port" \
+                                    sh scripts/check-ci-release-artifact-remote.sh \
+                                        "$RELEASE_SHA" \
+                                        "$ARTIFACT_SSH_USER@$artifact_host"
+                            then
+                                mkdir -p .artifacts
+                                printf 'REUSED\\n' > "$reuse_marker"
+                            else
+                                lookup_status="$?"
+                                [ "$lookup_status" -eq 10 ] \
+                                    || exit "$lookup_status"
+                                KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                                SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                                SSH_PORT="$artifact_port" \
+                                REMOTE_ARTIFACT_ROOT=/opt/gilbom/artifacts \
+                                    sh scripts/upload-ci-release-artifacts.sh \
+                                        release \
+                                        "$ARTIFACT_SSH_USER@$artifact_host"
+                            fi
                             sh scripts/record-ci-result.sh artifact-upload
                         '''
                     }
@@ -711,16 +798,7 @@ pipeline {
             }
         }
 
-        stage('Approve release artifact promotion') {
-            steps {
-                script {
-                    input message: "Promote release ${env.RELEASE_SHA} to the immutable EC2 artifact directory?",
-                            ok: 'Promote'
-                }
-            }
-        }
-
-        stage('Promote release artifact atomically') {
+        stage('Promote release artifact automatically') {
             steps {
                 dir(env.APP_DIR) {
                     withCredentials([
@@ -737,14 +815,19 @@ pipeline {
                         sh '''
                             set -eu
                             set +x
-                            artifact_host="${ARTIFACT_HOST:-host.docker.internal}"
-                            artifact_port="${ARTIFACT_SSH_PORT:-22}"
-                            KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
-                            SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
-                            SSH_PORT="$artifact_port" \
-                                sh scripts/promote-ci-release-artifacts-remote.sh \
-                                    "$RELEASE_SHA" \
-                                    "$ARTIFACT_SSH_USER@$artifact_host"
+                            if [ -f .artifacts/ci-release-already-promoted ]
+                            then
+                                echo "Automatic Artifact promotion: REUSED ($RELEASE_SHA)"
+                            else
+                                artifact_host="${ARTIFACT_HOST:-host.docker.internal}"
+                                artifact_port="${ARTIFACT_SSH_PORT:-22}"
+                                KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                                SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                                SSH_PORT="$artifact_port" \
+                                    sh scripts/promote-ci-release-artifacts-remote.sh \
+                                        "$RELEASE_SHA" \
+                                        "$ARTIFACT_SSH_USER@$artifact_host"
+                            fi
                             sh scripts/record-ci-result.sh artifact-promotion
                         '''
                     }
@@ -819,6 +902,8 @@ pipeline {
                         archiveArtifacts(
                                 artifacts: '.artifacts/source-security/**,'
                                         + '.artifacts/image-security/**,'
+                                        + '.artifacts/security-regression/**,'
+                                        + '.artifacts/backend-ci/build/test-results/**,'
                                         + '.artifacts/ci-results/**,'
                                         + '.artifacts/runtime/**,'
                                         + '.artifacts/jenkins-log-security/**,'
@@ -866,6 +951,43 @@ pipeline {
                             '
                     done
                 '''
+            }
+        }
+        unsuccessful {
+            script {
+                if (env.APP_DIR && env.RELEASE_SHA && env.BUILD_NUMBER) {
+                    dir(env.APP_DIR) {
+                        try {
+                            withCredentials([
+                                sshUserPrivateKey(
+                                        credentialsId: 'gilbom-artifact-upload-ssh',
+                                        keyFileVariable: 'ARTIFACT_SSH_IDENTITY',
+                                        usernameVariable: 'ARTIFACT_SSH_USER'
+                                ),
+                                file(
+                                        credentialsId: 'gilbom-artifact-known-hosts',
+                                        variable: 'ARTIFACT_KNOWN_HOSTS'
+                                )
+                            ]) {
+                                sh '''
+                                    set +x
+                                    artifact_host="${ARTIFACT_HOST:-host.docker.internal}"
+                                    artifact_port="${ARTIFACT_SSH_PORT:-22}"
+                                    KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                                    SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                                    SSH_PORT="$artifact_port" \
+                                        sh scripts/quarantine-ci-release-artifacts-remote.sh \
+                                            "$RELEASE_SHA" \
+                                            "$BUILD_NUMBER" \
+                                            "$ARTIFACT_SSH_USER@$artifact_host"
+                                '''
+                            }
+                        } catch (Exception ignored) {
+                            echo 'CI incoming quarantine skipped or failed; '
+                                    + 'inspect the exact RELEASE_SHA before retrying'
+                        }
+                    }
+                }
             }
         }
         cleanup {

@@ -4,9 +4,9 @@ set -eu
 
 TASK="${1:-}"
 case "$TASK" in
-  test|securityAcceptanceTest) ;;
+  test|securityAcceptanceTest|mqttBrokerE2E) ;;
   *)
-    echo "Backend CI task must be test or securityAcceptanceTest" >&2
+    echo "Backend CI task must be test, securityAcceptanceTest, or mqttBrokerE2E" >&2
     exit 1
     ;;
 esac
@@ -30,6 +30,32 @@ set -- docker run --rm \
   --volume "$WORK_ROOT/cache:/ci-cache" \
   --volume "$WORK_ROOT/build:/ci-build" \
   --workdir /workspace
+
+if [ "$TASK" = mqttBrokerE2E ]; then
+  : "${MQTT_E2E_BROKER:?MQTT_E2E_BROKER is required}"
+  : "${MQTT_E2E_SERVER_USERNAME:?MQTT_E2E_SERVER_USERNAME is required}"
+  : "${MQTT_E2E_SERVER_PASSWORD:?MQTT_E2E_SERVER_PASSWORD is required}"
+  : "${MQTT_E2E_ROBOT_USERNAME:?MQTT_E2E_ROBOT_USERNAME is required}"
+  : "${MQTT_E2E_ROBOT_PASSWORD:?MQTT_E2E_ROBOT_PASSWORD is required}"
+  : "${MQTT_E2E_CA_CERTIFICATE_HOST:?MQTT_E2E_CA_CERTIFICATE_HOST is required}"
+  case "$MQTT_E2E_BROKER" in
+    ssl://*) ;;
+    *)
+      echo "MQTT_E2E_BROKER must use ssl://" >&2
+      exit 1
+      ;;
+  esac
+  test -f "$MQTT_E2E_CA_CERTIFICATE_HOST"
+  test -r "$MQTT_E2E_CA_CERTIFICATE_HOST"
+  set -- "$@" \
+    --env MQTT_E2E_BROKER \
+    --env MQTT_E2E_SERVER_USERNAME \
+    --env MQTT_E2E_SERVER_PASSWORD \
+    --env MQTT_E2E_ROBOT_USERNAME \
+    --env MQTT_E2E_ROBOT_PASSWORD \
+    --env MQTT_E2E_CA_CERTIFICATE=/mqtt-e2e/ca.pem \
+    --volume "$MQTT_E2E_CA_CERTIFICATE_HOST:/mqtt-e2e/ca.pem:ro"
+fi
 
 if [ -S /var/run/docker.sock ]; then
   DOCKER_SOCKET_GID="$(stat -c '%g' /var/run/docker.sock)"

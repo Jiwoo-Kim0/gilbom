@@ -97,6 +97,13 @@ tasks.register('mqttBrokerE2E', Test) {
                             + "failures=${result.failedTestCount}, "
                             + "skipped=${result.skippedTestCount}"
             )
+            if (result.testCount == 0 || result.skippedTestCount > 0) {
+                throw new GradleException(
+                        "MQTT Broker E2E must execute without skipped tests: "
+                                + "tests=${result.testCount}, "
+                                + "skipped=${result.skippedTestCount}"
+                )
+            }
         }
     }
 }

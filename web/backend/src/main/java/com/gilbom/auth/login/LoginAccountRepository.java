@@ -26,6 +26,7 @@ public class LoginAccountRepository {
                 admin_user.last_failed_login_at,
                 admin_user.locked_until,
                 admin_user.password_change_required,
+                admin_user.mfa_required,
                 EXISTS (
                     SELECT 1
                     FROM auth.mfa_factor factor
@@ -108,6 +109,7 @@ public class LoginAccountRepository {
                 resultSet.getString("password_hash"),
                 authenticationState,
                 resultSet.getBoolean("password_change_required"),
+                resultSet.getBoolean("mfa_required"),
                 resultSet.getBoolean("mfa_enrolled")
         );
     }
@@ -121,6 +123,7 @@ public class LoginAccountRepository {
             String passwordHash,
             AccountAuthenticationState authenticationState,
             boolean passwordChangeRequired,
+            boolean mfaRequired,
             boolean mfaEnrolled
     ) {
     }

@@ -29,6 +29,11 @@ public class AuthenticationStateMachine {
                     AuthenticationState.MFA_ENROLLMENT_REQUIRED,
                     event);
             case MFA_VERIFIED -> afterMfaVerification(currentState, event);
+            case MFA_BYPASS_CONFIRMED -> from(
+                    currentState,
+                    AuthenticationState.MFA_REQUIRED,
+                    AuthenticationState.AUTHENTICATED,
+                    event);
             case MFA_RESET -> from(
                     currentState,
                     AuthenticationState.AUTHENTICATED,

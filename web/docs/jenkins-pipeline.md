@@ -28,6 +28,14 @@
 - 로컬 Mosquitto healthcheck는 TLS chain, Backend 계정 인증과 system topic
   응답을 확인한다. Integration smoke는 Broker 중단·재시작 뒤 이 Docker health와
   Backend MQTT health가 모두 복구되는지 검증한다.
+- 통합 Stack 기동 뒤 인증 전용 임시 DB와 Backend를 만들어 로그인·MFA·Session
+  회귀를 실제 HTTP/PostgreSQL 경계에서 실행한다. DinD가 소유한 임의 port는
+  `docker-builder`로 접근하며 성공·실패와 관계없이 임시 Backend와 DB 삭제 여부를
+  JSON 증거에 기록한다.
+- 실제 TLS MQTT Broker E2E는 build 때 생성한 CA와 `docker-builder` SAN 인증서를
+  사용한다. 임시 Robot Credential을 password registry에 추가해 TTL·재전송·DB
+  반영을 검사하고, 종료 trap에서 Credential을 삭제한 뒤 JUnit XML과 정리 결과를
+  함께 보존한다.
 - 프론트 컨테이너에서 Backend 전체 Actuator health를 호출해 DB health
   contributor까지 `UP`인지 확인한다.
 - Integration smoke의 실제 Secret과 Authorization·prompt·LLM response canary가
@@ -114,9 +122,9 @@ port에 접근한다. Jenkins container 자체에는
 Backend test container는 Jenkins UID/GID의 non-root로 실행한다. Source는
 read-only `/workspace`에 두고 HOME, Gradle project cache, isolated build output은
 ignored `.artifacts/backend-ci/`의 서로 다른 writable mount로 격리한다. 전체
-Test와 `securityAcceptanceTest`가 Gradle 다운로드 cache는 공유하지만 각 task의
-XML 결과 경로를 따로 검증하므로 한 gate의 과거 결과가 다른 gate를 통과시키지
-못한다.
+Test, `securityAcceptanceTest`와 `mqttBrokerE2E`가 Gradle 다운로드 cache는
+공유하지만 각 task의 XML 결과 경로를 따로 검증하므로 한 gate의 과거 결과가 다른
+gate를 통과시키지 못한다. 세 결과 경로는 Jenkins Artifact에 보존한다.
 
 Frontend도 source를 read-only `/app`에 두고 `node_modules`, npm cache와 `dist`만
 `.artifacts/frontend-ci/`로 분리한다. `npm ci`를 통과한 뒤 test, lint, production
@@ -150,6 +158,12 @@ Trivy의 일반·Java DB는 Backend 전체 Test보다 먼저 내려받아 scanne
 DinD service가 소유한다. Pipeline은 이 검증에서만 Frontend를 DinD의 외부
 interface에 bind하고 `docker-builder:<published-port>`로 접속한다. 개발자 host
 socket 환경에서는 기존처럼 `127.0.0.1:<published-port>`가 기본값이다.
+
+인증 임시 Backend와 TLS MQTT Broker도 같은 원칙을 사용한다. Jenkins에서는
+`0.0.0.0`에 임의 port를 bind하고 `docker-builder`로만 접근하며, 개발자 host
+socket 실행은 기본 `127.0.0.1` 경계를 유지한다. 전체 필수 marker, 인증·MQTT JSON과
+Backend JUnit XML은
+`.artifacts/security-regression/baseline-summary.json`으로 집계된다.
 
 로컬 `mqtt-init`은 root one-shot으로 인증 자산을 만들되 `runtime/`과 `ca/`
 소유권을 bind source의 Jenkins UID/GID로 되돌린다. Broker와 Backend 접근에는
@@ -205,7 +219,7 @@ gate 뒤에만 실행된다. Source 보안 명령은 action 단위로 나뉘어 
 로컬 재현 명령의 경계를 일치시킨다.
 
 기존 검증은 Backend 전체 Test, security acceptance, Frontend test/lint/build,
-full-SHA image build, 두 runtime image, 빈 DB V1~V38, PostGIS·RBAC·Session,
+full-SHA image build, 두 runtime image, 빈 DB V1~V39, PostGIS·RBAC·Session,
 CSRF·권한·append-only, integration, graceful shutdown, 보고서·LLM fallback,
 장애 복구, volume 영속성, image layer/history/log Secret, 필수 Trivy 순으로
 실행한다. 각 성공은 `.artifacts/ci-results/<gate>.status`에 `PASS`로 남고,
@@ -233,7 +247,7 @@ Trivy가 없거나 Critical/미승인 High/만료 예외가 있으면 `release/`
 script가 거부한다.
 
 `build-metadata.json`은 full commit SHA, image ID, Dockerfile hash와 base image,
-UTC 시작·종료 시각, Runtime version, 테스트 결과, V1~V38 migration 목록·hash,
+UTC 시작·종료 시각, Runtime version, 테스트 결과, V1~V39 migration 목록·hash,
 SBOM/취약점/Archive checksum, Jenkins Job/Build를 기록한다. `jq empty` 이후
 `SHA256SUMS`를 생성·즉시 재검증하고, 마지막 Artifact Secret gate까지 통과해야
 Jenkins artifact로 보존된다.
@@ -245,11 +259,17 @@ Stage 4~8이 모두 성공한 뒤 Jenkins는 `release/`를
 `SHA256SUMS`와 image archive checksum을 확인하고, SSH host key 검증과 전용
 private-key Credential을 강제한다.
 
-Jenkins의 `Approve release artifact promotion`에서 명시적으로 승인된 뒤에만
-EC2의 root-owned helper를 호출한다. Helper는 동일 SHA 충돌을 검사하고 같은
-filesystem 안에서 `/opt/gilbom/artifacts/<full-sha>/`로 atomic rename한다.
+모든 CI gate와 전송 후 Checksum 검증이 성공하면 EC2의 root-owned helper를
+자동 호출한다. Helper는 동일 SHA 충돌을 검사하고 같은 filesystem 안에서
+`/opt/gilbom/artifacts/<full-sha>/`로 atomic rename한다.
 최종 파일은 `root:root` mode `0440`, 디렉터리는 mode `0550`이다. 이미 존재하는
 SHA는 양쪽 manifest와 실제 내용이 완전히 같을 때만 재사용한다.
+동일 SHA CI 재실행은 root-owned 최종 경로를 최초 성공 빌드의 canonical
+Artifact로 취급해 새 build timestamp가 포함된 incoming을 다시 만들지 않는다.
+
+Artifact 자동 승격은 운영 배포가 아니다. `gilbom-deploy`의 full SHA 입력과
+Jenkins 인증 사용자 승인은 계속 유지한다. 실패하거나 중단된 CI의 incoming은
+build 번호가 포함된 hidden 경로로 격리해 다음 SCM Polling 실행을 막지 않는다.
 
 EC2 설치와 Jenkins Credential ID는
 [`ci-artifact-promotion.md`](ci-artifact-promotion.md)에 고정한다.

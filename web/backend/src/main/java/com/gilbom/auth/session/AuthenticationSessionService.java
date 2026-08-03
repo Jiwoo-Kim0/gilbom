@@ -129,12 +129,47 @@ public class AuthenticationSessionService {
             UUID userId,
             Authentication authentication
     ) {
+        return completeAuthentication(
+                request,
+                response,
+                userId,
+                authentication,
+                AuthenticationEvent.MFA_VERIFIED
+        );
+    }
+
+    /**
+     * DB가 한 계정으로 제한한 MFA 예외를 비밀번호 검증 직후 인증 완료한다.
+     */
+    @Transactional
+    public AuthenticatedSession completeMfaBypass(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            UUID userId,
+            Authentication authentication
+    ) {
+        return completeAuthentication(
+                request,
+                response,
+                userId,
+                authentication,
+                AuthenticationEvent.MFA_BYPASS_CONFIRMED
+        );
+    }
+
+    private AuthenticatedSession completeAuthentication(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            UUID userId,
+            Authentication authentication,
+            AuthenticationEvent completionEvent
+    ) {
         HttpSession session = requireCurrentSession(request);
         String previousSessionId = session.getId();
         SessionSecurityState current = requireUsableState(session, userId);
         AuthenticationState nextState = stateMachine.transition(
                 current.authenticationState(),
-                AuthenticationEvent.MFA_VERIFIED
+                completionEvent
         );
         requireInternalPrincipal(userId, authentication);
 
