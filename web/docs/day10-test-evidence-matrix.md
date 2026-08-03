@@ -117,7 +117,7 @@
 | C03 | EC2 재부팅 후 Docker·Compose·Timer 자동 시작 | 부분 | `restart: unless-stopped`와 복구 검사는 있으나 실제 호스트 reboot 증거가 없다. 스테이징 전용 reboot drill 필요 | 스테이징 EC2 | `(예정) .artifacts/day10/staging/reboot-recovery.json` | 스테이징 중단 발생, 운영 실행 금지 |
 | C04 | 인증서 갱신 Timer·webroot·Nginx reload와 실제 ACME dry-run | 부분 | 정적 계약과 Timer active 검사는 존재한다. 스테이징에서 `certbot renew --dry-run` 결과와 갱신 전후 HTTPS를 보존해야 한다. | CI + 스테이징 EC2 | `.artifacts/ci-results/repository-policy.status`; `(예정) .artifacts/day10/staging/certbot-dry-run.txt` | 스테이징 ACME 요청·Nginx reload 가능 |
 | C05 | S3 최소권한과 Block Public Access | N/A | 현재 저장소는 `local-disk` named volume이다. S3 전환 PR에서 IAM policy, bucket public access와 presigned URL test를 필수로 추가 | 향후 CI + 스테이징 AWS | `(향후) .artifacts/day10/aws/s3-access.json` | 현재 없음 |
-| C06 | DB·이미지·PDF·MQTT Volume 백업 전체 복원 재확인 | 예 | 구현 완료. 백업 시 DB table별 정규화 SHA-256, Robot image·승인 PDF의 DB 참조/Volume SHA-256을 고정하고 새 내부 Network·DB container·Named Volume 복원본에서 완전 일치시킨다. 새 형식의 실제 암호화 backup과 복호화 키 보관 환경에서 1회 실행 증거를 생성해야 한다. | 격리 Compose | `.artifacts/day10/restore/summary.json`, `.artifacts/day10/restore/restore.log` | 없음. 운영 DB 자동 복원 금지. 새 Volume backup 생성 시 짧은 서비스 quiesce 발생 |
+| C06 | DB·이미지·PDF·MQTT Volume 백업 전체 복원 재확인 | 예 | 없음. 2026-08-03 실제 암호화 bundle을 새 내부 Network·DB container·Named Volume에 복원해 DB table별 정규화 SHA-256, sequence 상태, Robot image·승인 PDF의 DB 참조/Volume SHA-256 완전 일치를 확인했다. | 격리 Compose | `.artifacts/day10/restore/summary.json`, `.artifacts/day10/restore/restore.log`, `docs/day10-stage6-recovery-status.json` | 없음. 운영 DB 자동 복원 금지. 새 Volume backup 생성 시 짧은 서비스 quiesce 발생 |
 | C07 | 외부 노출 포트와 AWS Security Group | 부분 | Compose의 Backend/DB 비공개와 EC2 container binding은 검사한다. 호스트 `ss` 결과와 외부 관점 TCP scan, SG 규칙 증거가 없다. | 스테이징 EC2 + 외부 검사 Runner | `(예정) .artifacts/day10/staging/exposed-ports.json`, `(예정) .artifacts/day10/aws/security-groups.json` | read-only scan, 허용 범위 내 네트워크 부하 |
 | C08 | Backend·Frontend dependency와 image Critical/High 취약점 | 예 | 없음 | CI | `.artifacts/source-security/dependency-policy-summary.json`, `.artifacts/image-security/policy-summary.json`, `.artifacts/ci-results/sbom-cve.status` | 없음 |
 | C09 | Cosign으로 release archive 서명과 배포 전 검증 | 예 | 없음. Registry가 아닌 실제 전달물 `images.tar.zst`를 Blob 서명하고 정상·변조·wrong-key를 검사한다. root 승격·preflight·배포·Rollback load가 EC2 고정 공개키로 재검증한다. | CI + EC2 root 승격/배포 | `release/images.tar.zst.sigstore.json`, `.artifacts/cosign/summary.json`, `.artifacts/ci-results/cosign-blob-signature.status`, preflight·Release Manifest의 `artifact.signature` | CI 서명은 없음, EC2 검증은 read-only. 실패 시 배포 차단 |
@@ -153,8 +153,8 @@
 4. `C10` 운영과 분리된 스테이징 배포·Rollback 실행 경계
 
 `B06` k6는 이번 완료 범위에서 제외하고 별도 성능 검증 단계로 연기했다.
-`C06` 격리 전체 backup restore 로직과 JSON 증거 생성은 구현을 완료했으며,
-새 형식의 실제 backup을 대상으로 한 실행만 남았다.
+`C06`은 새 형식의 실제 backup `20260803T070355Z-gilbom`을 대상으로 한
+격리 복원과 JSON 증거 생성을 완료해 PASS로 판정했다.
 
 ### 새 테스트를 만들지 않고 연결만 할 항목
 
@@ -262,13 +262,18 @@ EC2 root 소유 공개키다. 단일 공개키를 임의로 교체하면 이전 
 - Restore Drill은 새 internal Docker Network, 새 PostgreSQL container와 새
   Named Volume만 만든다. `pg_restore --exit-on-error` 뒤 같은 DB manifest와
   file manifest를 재생성해 backup 시점 값과 byte-for-byte로 비교한다.
+- PostgreSQL 공식 entrypoint의 초기화용 임시 server가 먼저 readiness를
+  반환하므로 최종 초기화 marker와 `pg_isready`를 함께 확인한다.
+  `postgis/postgis`가 bootstrap DB에 선생성하는 PostGIS/tiger 객체와 dump가
+  충돌하지 않도록 실제 복원 DB는 `template0`에서 별도로 만든다.
 - `summary.json`은 단순 exit code만 보지 않고 bundle checksum, DB content,
   Robot image, 승인 PDF의 필수 PASS marker가 모두 존재해야만 PASS가 된다.
 - 평문 dump와 archive는 임시 작업 디렉터리에만 존재하고 종료 시 제거한다.
   복호화 Private key는 Git·운영 EC2에 두지 않으며 키 보관 환경에서 Drill한다.
 - 이전 형식 backup은 새 DB/PDF hash manifest가 없으므로 완전한 C06 증거로
-  승격하지 않는다. 배포된 새 backup 스크립트로 만든 실제 bundle을 한 번
-  복원해야 `.artifacts/day10/restore/summary.json`이 최종 PASS가 된다.
+  승격하지 않는다. 새 형식 bundle의 실제 실행에서는 DB 41개 table과 1개
+  sequence, Robot image 2개, 승인 PDF 0개의 hash·참조가 모두 일치했고
+  `.artifacts/day10/restore/summary.json`이 최종 PASS를 기록했다.
 
 현재 확인 가능한 스테이징 EC2가 없으므로 실제 reboot, ACME dry-run과
 스테이징 Rollback은 PASS로 간주하지 않고 `PENDING_NO_STAGING`으로 남긴다.

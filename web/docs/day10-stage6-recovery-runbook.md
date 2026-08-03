@@ -8,7 +8,7 @@
 | 항목 | 상태 | 완료 증거 |
 | --- | --- | --- |
 | 기존 CI 강제 재시작·Volume 보존·Rollback A/B/C | 자동화됨 | Jenkins `resilience-recovery`, `volume-persistence`, Rollback Drill Artifact |
-| 실제 backup의 새 DB·image·PDF Volume 복원 | 구현 완료, 실제 bundle 실행 필요 | `.artifacts/day10/restore/summary.json` |
+| 실제 backup의 새 DB·image·PDF Volume 복원 | `PASS` (2026-08-03) | `.artifacts/day10/restore/summary.json`, `.artifacts/day10/restore/restore.log` |
 | 스테이징 EC2 강제 재시작·reboot | `PENDING_NO_STAGING` | `(예정) .artifacts/day10/staging/reboot-recovery.json` |
 | 스테이징 인증서 ACME dry-run | `PENDING_NO_STAGING` | `(예정) .artifacts/day10/staging/certbot-dry-run.txt` |
 | 스테이징 CI/CD Rollback 재훈련 | `PENDING_NO_STAGING` | `(예정) .artifacts/day10/staging/rollback-rehearsal.json` |
@@ -78,6 +78,12 @@ jq . .artifacts/day10/restore/summary.json
 
 Drill은 `restore-drill-*` 이름의 internal Network, DB container와 Named
 Volume만 사용하고 기본 실행에서는 성공·실패와 관계없이 모두 정리한다.
+
+2026-08-03 실제 bundle `20260803T070355Z-gilbom`으로 실행한 결과 DB 41개
+table과 1개 sequence, Robot image 2개, 승인 PDF 0개의 DB 참조·Volume
+SHA-256이 모두 일치했다. `postgis/postgis`가 초기화 중 만드는 임시 server와
+PostGIS/tiger 선생성 객체를 복원 대상으로 오인하지 않도록, 최종 server
+기동 marker를 확인하고 `template0` 기반의 빈 대상 DB에만 복원한다.
 
 ## 4. 스테이징 후속 순서
 
