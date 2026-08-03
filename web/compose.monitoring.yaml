@@ -5,6 +5,8 @@ x-logging: &monitoring-logging
   options:
     max-size: "${MONITORING_LOG_MAX_SIZE:-10m}"
     max-file: "${MONITORING_LOG_MAX_FILES:-3}"
+    # Alloy가 Docker socket 없이 container를 구분하려면 attrs가 필요하다.
+    labels: "com.docker.compose.project,com.docker.compose.service"
 
 services:
   prometheus:
@@ -264,6 +266,9 @@ services:
     volumes:
       - ./infra/monitoring/alloy/config-logs.alloy:/etc/alloy/config.alloy:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      # 배포·backup·certbot 스크립트는 systemd 아래에서 돌아 journal에만 남는다.
+      # 읽기 권한은 아래 DAC_READ_SEARCH가 해결한다.
+      - /var/log/journal:/var/log/journal:ro
       - alloy_log_data:/var/lib/alloy/log-data
     read_only: true
     tmpfs:

@@ -1,3 +1,9 @@
+// 로그 수집기다. Docker socket 없이 JSON 로그 파일과 host journal만 읽는다.
+//
+// container 이름을 socket 없이 얻는 방법: 각 stack의 logging 옵션에
+// labels="com.docker.compose.project,com.docker.compose.service"를 주면 json-file
+// 드라이버가 매 줄에 attrs를 함께 쓴다. 아래 stage.json이 그 attrs를 읽는다.
+
 local.file_match "docker_logs" {
 	path_targets = [{
 		"__path__" = "/var/lib/docker/containers/*/*-json.log",
@@ -13,7 +19,125 @@ loki.source.file "docker_logs" {
 }
 
 loki.process "docker" {
+	// stage.docker가 봉투를 벗기기 전에 attrs를 먼저 꺼낸다. 순서가 바뀌면
+	// 애플리케이션 로그 본문을 JSON으로 파싱하려다 실패한다.
+	stage.json {
+		expressions = {
+			compose_project = "attrs.\"com.docker.compose.project\"",
+			compose_service = "attrs.\"com.docker.compose.service\"",
+		}
+	}
+
 	stage.docker { }
+
+	stage.labels {
+		values = {
+			compose_project = "compose_project",
+			compose_service = "compose_service",
+		}
+	}
+
+	// Backend 로그는 "%5p [requestId]", Nginx access log는 줄 끝 따옴표 안에 같은 값을 둔다.
+	stage.regex {
+		expression = "[\\[\"](?P<request_id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})[\\]\"]"
+	}
+
+	// label이 아니라 structured metadata로 넣는다. requestId는 요청마다 달라
+	// label로 만들면 stream이 무한히 갈라진다.
+	stage.structured_metadata {
+		values = {
+			requestId = "request_id",
+		}
+	}
+
+	forward_to = [loki.process.redact.receiver]
+}
+
+discovery.relabel "journal" {
+	targets = []
+
+	rule {
+		source_labels = ["__journal__systemd_unit"]
+		target_label  = "unit"
+	}
+
+	rule {
+		source_labels = ["__journal_syslog_identifier"]
+		target_label  = "syslog_identifier"
+	}
+}
+
+loki.source.journal "host" {
+	// 배포·backup·certbot 스크립트는 systemd 아래에서 돌아 journal로만 남는다.
+	path       = "/var/log/journal"
+	max_age    = "12h"
+	forward_to = [loki.process.redact.receiver]
+
+	labels = {
+		job             = "systemd-journal",
+		compose_service = "host",
+	}
+
+	relabel_rules = discovery.relabel.journal.rules
+}
+
+// 민감값은 Loki에 들어가기 전에 지운다. 저장된 뒤에 지우는 것은 사실상 불가능하다.
+// 여기 빠진 항목이 곧 유출 경로이므로, 새 비밀 형식이 생기면 이 목록을 함께 늘린다.
+loki.process "redact" {
+	stage.replace {
+		expression = "(?i)((?:password|passwd|pwd)[\"'=: ]+)([^\\s\",;}]+)"
+		replace    = "${1}[REDACTED]"
+	}
+
+	stage.replace {
+		expression = "(?i)((?:proxy-)?authorization[\"'=: ]+)([^\\s\",;}]+)"
+		replace    = "${1}[REDACTED]"
+	}
+
+	stage.replace {
+		expression = "(?i)((?:set-)?cookie[\"'=: ]+)([^\\r\\n]+)"
+		replace    = "${1}[REDACTED]"
+	}
+
+	// Session cookie는 헤더 이름 없이 값만 찍히는 경우가 있어 이름으로 한 번 더 지운다.
+	stage.replace {
+		expression = "(?i)((?:__Host-)?GILBOM_SESSION|JSESSIONID)=([^;\\s\"]+)"
+		replace    = "${1}=[REDACTED]"
+	}
+
+	stage.replace {
+		expression = "(?i)((?:x-)?csrf[_-]?token[\"'=: ]+)([^\\s\",;}]+)"
+		replace    = "${1}[REDACTED]"
+	}
+
+	stage.replace {
+		expression = "(?i)((?:api[_-]?key|secret|token)[\"'=: ]+)([^\\s\",;}]+)"
+		replace    = "${1}[REDACTED]"
+	}
+
+	// 이미지 서명 URL은 query string 전체가 비밀이다.
+	stage.replace {
+		expression = "([?&](?:expires|signature|sig|token|key)=)([^&\\s\"]+)"
+		replace    = "${1}[REDACTED]"
+	}
+
+	// GitLab personal access token과 OpenAI 계열 key는 형식만으로 식별된다.
+	stage.replace {
+		expression = "(glpat-)[A-Za-z0-9_\\-]{16,}"
+		replace    = "${1}[REDACTED]"
+	}
+
+	stage.replace {
+		expression = "(sk-)[A-Za-z0-9_\\-]{16,}"
+		replace    = "${1}[REDACTED]"
+	}
+
+	// TOTP keyring 항목은 "1=<base64>" 형식이라 값만 지운다.
+	stage.replace {
+		expression = "(?i)(totp[_-]?keyring[\"'=: ]+)([^\\s\",;}]+)"
+		replace    = "${1}[REDACTED]"
+	}
+
 	forward_to = [loki.write.local.receiver]
 }
 
