@@ -2055,11 +2055,13 @@ paths:
     post:
       tags: [Robots]
       operationId: issueOrRotateRobotCredential
-      summary: 로봇 MQTT Credential 최초 발급 또는 회전
+      summary: 로봇 통합 Provisioning Credential 최초 발급 또는 회전
       description: |
         ACTIVE Credential이 없으면 최초 버전을 발급하고, 있으면 같은 MQTT username의
         password를 교체한 뒤 기존 버전을 REVOKED(ROTATED), 새 버전을 ACTIVE로 저장합니다.
-        새 password는 이 응답에서 한 번만 반환되며 멱등 재요청으로 다시 조회할 수 없습니다.
+        같은 트랜잭션에서 로봇 이미지 업로드 API Key도 교체하고 Robot UUID, MQTT ID,
+        이미지 업로드 URL과 함께 반환합니다. 새 MQTT password와 이미지 API Key는
+        이 응답에서 한 번만 반환되며 멱등 재요청으로 다시 조회할 수 없습니다.
         DB 반영 실패 시 Broker 계정을 제거하거나 이전 password hash로 복구합니다.
       x-required-permission: ROBOT_REGISTER
       security:
@@ -2075,7 +2077,7 @@ paths:
         - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "201":
-          description: 최초 발급 또는 회전 완료
+          description: MQTT·이미지 업로드 통합 Provisioning 발급 또는 회전 완료
           headers:
             Location:
               description: 생성된 Credential 식별 경로
@@ -6789,12 +6791,22 @@ components:
     MqttCredentialIssuanceResponse:
       type: object
       required:
+        - robotId
+        - mqttId
         - credentialId
         - credentialType
         - mqtt
+        - imageUpload
         - expiresAt
       additionalProperties: false
       properties:
+        robotId:
+          type: string
+          format: uuid
+          description: Jetson의 ROBOT_UUID에 주입할 DB 내부 Robot 식별자
+        mqttId:
+          type: string
+          description: Jetson의 MQTT_ID에 주입할 외부 통신 식별자
         credentialId:
           type: string
           format: uuid
@@ -6803,9 +6815,26 @@ components:
           enum: [MQTT_PASSWORD]
         mqtt:
           $ref: "#/components/schemas/MqttCredentialConnection"
+        imageUpload:
+          $ref: "#/components/schemas/RobotImageUploadCredential"
         expiresAt:
           type: string
           format: date-time
+
+    RobotImageUploadCredential:
+      type: object
+      required: [url, apiKey]
+      additionalProperties: false
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Jetson의 UPLOAD_URL에 주입할 POST /api/v1/images 전체 URL
+        apiKey:
+          type: string
+          format: password
+          readOnly: true
+          description: Jetson의 UPLOAD_API_KEY에 주입하며 이 응답에서만 한 번 표시되는 로봇 전용 Secret
 
     MqttCredentialConnection:
       type: object

@@ -57,6 +57,7 @@ Credential 발급과 Mosquitto 반영이 모두 성공한 뒤 다음 정보를 �
 
 | 항목 | 예 | Secret |
 |---|---|:---:|
+| `robot_uuid` | DB `robot.robot_id` UUID | X |
 | `mqtt_id` | `RBT-001` | X |
 | `mqtt_broker_host` | `mqtt.example.com` | X |
 | `mqtt_broker_port` | `8883` | X |
@@ -67,11 +68,13 @@ Credential 발급과 Mosquitto 반영이 모두 성공한 뒤 다음 정보를 �
 | `mqtt_schema_version` | `2.0` | X |
 | `ca_certificate` 또는 설치 안내 | `ca.pem` | X |
 | `credential_expires_at` | UTC 시각 | X |
+| `image_upload_url` | `https://example.com/api/v1/images` | X |
+| `image_upload_api_key` | `gik_...` | O |
 
 `mqtt_id`와 username은 ACL 적용을 위해 같은 값을 사용한다.
 Client ID는 인증·권한 식별자가 아니며 동시에 연결되는 MQTT Client마다 고유해야
 한다. 단일 로봇 프로세스는 `<mqtt_id>-main` 같은 값을 사용할 수 있다.
-비밀번호만 Secret이다. CA 인증서는 공개 가능한 신뢰 정보지만 변조되지 않도록
+MQTT 비밀번호와 이미지 업로드 API Key가 Secret이다. CA 인증서는 공개 가능한 신뢰 정보지만 변조되지 않도록
 서버의 인증서 Fingerprint 또는 승인된 경로로 전달한다.
 
 ## 5. 관리자 화면의 1회 발급 결과
@@ -80,10 +83,13 @@ Client ID는 인증·권한 식별자가 아니며 동시에 연결되는 MQTT C
 
 ```text
 로봇 코드       RBT-001
+Robot UUID      f59c163e-f080-40ee-81ca-94b9d8f235bf
 Broker          mqtt.example.com:8883
 MQTT Username   RBT-001
 MQTT Password   ************  [표시] [복사]
 Client ID       RBT-001
+Image Upload    https://example.com/api/v1/images
+Image API Key   gik_************  [표시] [복사]
 만료 시각       2027-01-23 13:00 KST
 
 [Provisioning 파일 1회 다운로드]
@@ -91,8 +97,8 @@ Client ID       RBT-001
 
 화면 규칙:
 
-- Credential이 Mosquitto에 정상 반영된 뒤에만 Password를 표시한다.
-- Password 원문은 해당 성공 응답에서만 반환한다.
+- Credential이 Mosquitto와 이미지 API Key 저장소에 정상 반영된 뒤에만 두 Secret을 표시한다.
+- MQTT Password와 이미지 API Key 원문은 해당 성공 응답에서만 반환한다.
 - 새로고침하거나 화면을 닫으면 다시 조회할 수 없다.
 - Response에 `Cache-Control: no-store`, `Pragma: no-cache`를 적용한다.
 - Frontend는 원문을 `localStorage`, `sessionStorage`, URL, 전역 상태 영속 저장소,
@@ -123,6 +129,7 @@ mode:  0600
 
 ```dotenv
 # 로봇 식별
+ROBOT_UUID=f59c163e-f080-40ee-81ca-94b9d8f235bf
 MQTT_ID=RBT-001
 
 # MQTT Broker
@@ -133,6 +140,10 @@ MQTT_PASSWORD=<발급 화면에서 한 번 받은 실제 비밀번호>
 MQTT_CLIENT_ID=RBT-001
 MQTT_KEEPALIVE_SEC=30
 MQTT_SCHEMA_VERSION=2.0
+
+# 결함 증거 이미지 HTTPS 업로드
+UPLOAD_URL=https://example.com/api/v1/images
+UPLOAD_API_KEY=<발급 화면에서 한 번 받은 실제 이미지 API Key>
 
 # TLS
 MQTT_TLS_ENABLED=true
