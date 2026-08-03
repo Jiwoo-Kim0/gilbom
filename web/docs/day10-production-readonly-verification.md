@@ -97,6 +97,36 @@ jq . /tmp/day10-production-readonly.json
 나머지 TLS·CORS·Cookie·Header·Release·Cosign·CVE·Backup·Container·
 Jenkins/DinD 검증은 정상적으로 PASS/FAIL 판정한다.
 
+## 2026-08-03 운영 실행 결과
+
+- 운영 수집기: `PARTIAL`
+- TLS·CORS·Cookie·보안 Header: PASS
+- Release SHA·Manifest·Cosign Blob 검증: PASS
+- Critical 0·High 0 취약점 정책: PASS
+- 최신 암호화 Backup `SHA256SUMS`: PASS
+- DB·MQTT·Backend·Frontend health: PASS
+- deploy 계정 Docker group 미가입: PASS
+- Jenkins Docker Socket 미마운트·DinD TLS: PASS
+- S3: N/A
+
+최초 host inventory와 독립 off-host probe에서 Gerrit Code Review 개발용
+인증 서비스가 Apache TLS TCP/8989로 외부에 노출된 것을 발견했다. 운영자가
+미사용 서비스임을 확인한 뒤 별도 승인 조치로 `httpd.service`와
+`gerrit.service`를 중지하고 부팅 자동 시작을 해제했다. 설정과 데이터는
+삭제하지 않았다.
+
+조치 후 독립 off-host probe 결과:
+
+- OPEN: 22, 80, 443, 8883
+- CLOSED_OR_FILTERED: 3001, 3100, 5432, 8080, 8081, 8988, 8989,
+  9090, 9093, 29418
+- 예상하지 않은 외부 OPEN port: 없음
+
+따라서 effective TCP 외부 노출 검증은 PASS다. 다만 AWS API 인증이 없어
+IMDSv2로 고정한 실제 연결 SG 3개의 Inbound rule source·CIDR·UDP·ICMP
+원문은 확인하지 못했다. 전체 상태는 이 한 항목 때문에 PARTIAL이며, 이를
+PASS로 바꾸려면 AWS Describe 원문 또는 동등한 제어 영역 증거가 필요하다.
+
 ## Security Group 정책
 
 - 호스트 wildcard listener와 SG Inbound의 교집합만 실제 외부 도달 가능

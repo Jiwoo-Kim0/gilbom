@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "status": "PASS_AFTER_REMEDIATION",
+  "capturedAtUtc": "2026-08-03T07:59:21Z",
+  "target": "i15d101.p.ssafy.io",
+  "method": "INDEPENDENT_OFF_HOST_TCP_CONNECTIVITY_PROBE",
+  "beforeRemediation": {
+    "openTcpPorts": [
+      22,
+      80,
+      443,
+      8883,
+      8989
+    ],
+    "unexpectedOpenTcpPorts": [
+      8989
+    ],
+    "finding": {
+      "port": 8989,
+      "service": "Gerrit Code Review 3.13.1 via Apache TLS",
+      "authenticationMode": "DEVELOPMENT_BECOME_ANY_ACCOUNT",
+      "status": "FAIL"
+    }
+  },
+  "remediation": {
+    "authorizedAsUnusedByOperator": true,
+    "servicesStoppedAndDisabled": [
+      "httpd.service",
+      "gerrit.service"
+    ],
+    "configurationOrDataDeleted": false
+  },
+  "afterRemediation": {
+    "openTcpPorts": [
+      22,
+      80,
+      443,
+      8883
+    ],
+    "closedOrFilteredTcpPorts": [
+      3001,
+      3100,
+      5432,
+      8080,
+      8081,
+      8988,
+      8989,
+      9090,
+      9093,
+      29418
+    ],
+    "unexpectedOpenTcpPorts": [],
+    "status": "PASS"
+  },
+  "limitations": [
+    "This proves effective TCP reachability only from the independent probe source.",
+    "AWS Security Group rule sources, CIDRs, UDP rules, and ICMP rules were not inspected."
+  ]
+}

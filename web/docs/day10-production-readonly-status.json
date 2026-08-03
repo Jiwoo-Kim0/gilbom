@@ -1,12 +1,53 @@
 {
   "schemaVersion": 1,
-  "status": "IMPLEMENTED_PENDING_PRODUCTION_RUN",
-  "recordedAtDate": "2026-08-03",
+  "status": "PARTIAL_AWS_SECURITY_GROUP_RULES_NOT_VERIFIED",
+  "recordedAtUtc": "2026-08-03T07:59:21Z",
   "scope": "day10-production-readonly-verification",
   "collector": "/usr/local/sbin/gilbom-production-readonly-evidence",
-  "expectedEvidence": "/tmp/day10-production-readonly.json",
+  "productionEvidence": {
+    "capturedAtUtc": "2026-08-03T07:57:52Z",
+    "path": "/tmp/day10-production-readonly.json",
+    "status": "PARTIAL",
+    "currentSha": "7bda33b66da21e3565e8ed5b2dabe5246f96c62c",
+    "previousSha": "0d52af1814ad384f37926a16df5567d5609d8c16",
+    "https": "PASS",
+    "releaseManifest": "PASS",
+    "cosign": "PASS",
+    "vulnerabilityPolicy": "PASS",
+    "backupChecksum": "PASS",
+    "containerHealth": "PASS",
+    "hostBoundary": "PASS"
+  },
+  "externalPortEvidence": {
+    "path": "docs/day10-production-external-port-evidence.json",
+    "status": "PASS_AFTER_REMEDIATION"
+  },
+  "awsSecurityGroups": {
+    "status": "NOT_VERIFIED_NO_AWS_API_AUTHENTICATION",
+    "attachedGroupIds": [
+      "sg-00c3357d389d784dd",
+      "sg-0a3d457791d4350e9",
+      "sg-0cf7a3fd6f6987f97"
+    ]
+  },
+  "authorizedRemediation": {
+    "finding": "Public Gerrit development service on TCP/8989",
+    "services": [
+      "httpd.service",
+      "gerrit.service"
+    ],
+    "action": "STOP_AND_DISABLE",
+    "configurationOrDataDeleted": false,
+    "hostPortsAfter": [
+      22,
+      80,
+      443,
+      8883
+    ],
+    "gerritPortsClosed": true
+  },
   "s3": "N/A_LOCAL_PERSISTENT_VOLUMES",
-  "productionMutationAllowed": false,
+  "verificationMutationAllowed": false,
   "prohibitedActions": [
     "LOGIN_LOCK",
     "DATABASE_FAILURE_INJECTION",
@@ -15,5 +56,8 @@
     "UNAPPROVED_EC2_REBOOT",
     "CERTIFICATE_REPLACEMENT",
     "SECURITY_GROUP_MUTATION"
+  ],
+  "remainingEvidence": [
+    "AWS_SECURITY_GROUP_INBOUND_RULE_SOURCE_AND_CIDR_REVIEW"
   ]
 }
