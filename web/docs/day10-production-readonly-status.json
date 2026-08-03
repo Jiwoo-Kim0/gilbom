@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "status": "IMPLEMENTED_PENDING_PRODUCTION_RUN",
+  "recordedAtDate": "2026-08-03",
+  "scope": "day10-production-readonly-verification",
+  "collector": "/usr/local/sbin/gilbom-production-readonly-evidence",
+  "expectedEvidence": "/tmp/day10-production-readonly.json",
+  "s3": "N/A_LOCAL_PERSISTENT_VOLUMES",
+  "productionMutationAllowed": false,
+  "prohibitedActions": [
+    "LOGIN_LOCK",
+    "DATABASE_FAILURE_INJECTION",
+    "BACKUP_RESTORE",
+    "LOAD_TEST",
+    "UNAPPROVED_EC2_REBOOT",
+    "CERTIFICATE_REPLACEMENT",
+    "SECURITY_GROUP_MUTATION"
+  ]
+}
