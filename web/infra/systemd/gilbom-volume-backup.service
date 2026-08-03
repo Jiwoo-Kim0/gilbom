@@ -1,0 +1,25 @@
+[Unit]
+Description=Take an encrypted Gilbom volume backup
+Wants=network-online.target
+Requires=docker.service
+After=network-online.target docker.service
+ConditionFileIsExecutable=/usr/local/sbin/gilbom-backup
+ConditionPathExists=/opt/gilbom/deploy/compose.prod.yaml
+ConditionPathExists=/opt/gilbom/deploy/runtime.env
+ConditionPathExists=/opt/gilbom/deploy/image.env
+ConditionPathExists=/opt/gilbom/secrets/backup-recipient.asc
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0027
+# 이 작업은 Frontend·Backend·Mosquitto를 잠시 멈춘다. 짧은 유지보수 시간대에만 돈다.
+ExecStart=/usr/local/sbin/gilbom-backup volumes
+TimeoutStartSec=45min
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full

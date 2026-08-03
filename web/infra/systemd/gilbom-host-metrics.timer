@@ -1,0 +1,13 @@
+[Unit]
+Description=Collect Gilbom host metrics every two minutes
+
+[Timer]
+# 디스크 알람이 이 주기에 매달려 있다. HostMetricsStale은 10분을 임계로 쓰므로
+# 여기서 주기를 늘리면 그 임계도 함께 늘려야 한다.
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=30s
+Unit=gilbom-host-metrics.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the Gilbom volume backup daily
+
+[Timer]
+# DB backup보다 늦게 시작한다. 두 작업이 겹치면 정지 시간 동안 dump가 돈다.
+OnCalendar=*-*-* 04:10:00
+RandomizedDelaySec=10min
+AccuracySec=1min
+Persistent=true
+Unit=gilbom-volume-backup.service
+
+[Install]
+WantedBy=timers.target

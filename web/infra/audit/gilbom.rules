@@ -1,0 +1,30 @@
+# Gilbom 운영 경로 감사 규칙
+#
+# CloudTrail을 쓰지 않으므로 "누가 운영 파일을 건드렸는가"는 host auditd가 답한다.
+# 애플리케이션 감사 로그(audit_log 테이블)는 서비스 안의 행위를, 이 규칙은 서비스
+# 바깥의 행위를 남긴다. 두 기록이 겹치지 않으므로 둘 다 필요하다.
+#
+# /etc/audit/rules.d/gilbom.rules로 설치하고 augenrules --load로 적용한다.
+
+# 비밀값 디렉터리. 읽기까지 남긴다 — 유출은 대개 읽기에서 시작한다.
+-w /opt/gilbom/secrets -p rwa -k gilbom_secrets
+
+# 배포 산출물과 운영 Compose·환경 파일
+-w /opt/gilbom/deploy -p wa -k gilbom_deploy
+-w /opt/gilbom/artifacts -p wa -k gilbom_artifacts
+
+# 관측 설정. 알람을 끄는 변경이 조용히 일어나면 안 된다.
+-w /opt/gilbom/monitoring -p wa -k gilbom_monitoring
+
+# 인증서와 갱신 상태
+-w /opt/gilbom/certbot -p wa -k gilbom_certbot
+
+# Backup 산출물. 삭제와 반출 흔적을 남긴다.
+-w /opt/gilbom/backups -p wa -k gilbom_backups
+
+# 권한 있는 진입점 실행
+-w /usr/local/sbin/gilbom-deploy -p x -k gilbom_privileged_exec
+-w /usr/local/sbin/gilbom-backup -p x -k gilbom_privileged_exec
+-w /usr/local/sbin/gilbom-certificate -p x -k gilbom_privileged_exec
+-w /usr/local/sbin/gilbom-host-metrics -p x -k gilbom_privileged_exec
+-w /usr/local/sbin/gilbom-approve-migrations -p x -k gilbom_privileged_exec
