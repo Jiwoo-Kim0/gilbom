@@ -152,6 +152,8 @@ services:
       - "${MONITORING_BIND_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3001}:3000"
     volumes:
       - ./infra/monitoring/grafana/provisioning/datasources/gilbom.yml:/etc/grafana/provisioning/datasources/gilbom.yml:ro
+      - ./infra/monitoring/grafana/provisioning/dashboards/gilbom.yml:/etc/grafana/provisioning/dashboards/gilbom.yml:ro
+      - ./infra/monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     secrets:
       - grafana_admin_password

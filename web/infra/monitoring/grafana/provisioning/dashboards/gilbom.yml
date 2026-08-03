@@ -1,0 +1,14 @@
+apiVersion: 1
+
+providers:
+  - name: gilbom
+    orgId: 1
+    folder: 길봄
+    type: file
+    # 대시보드 정본은 저장소다. 화면에서 고치면 다음 배포에 덮인다.
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: false
