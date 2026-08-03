@@ -89,7 +89,7 @@ PIPELINES = {
                 "Integration stack start",
                 "docker compose up -d --no-build --wait",
             ),
-            ("flyway-v1-v35", "Flyway V1-V35", "docker compose exec -T db psql"),
+            ("flyway-v1-v38", "Flyway V1-V38", "docker compose exec -T db psql"),
             (
                 "postgis-rbac-session",
                 "PostGIS/RBAC/Session",
@@ -150,7 +150,7 @@ PIPELINES = {
             ),
             (
                 "artifact-promotion",
-                "Approved Artifact promotion",
+                "Automatic Artifact promotion",
                 "sh scripts/promote-ci-release-artifacts-remote.sh",
             ),
             (
@@ -234,7 +234,7 @@ def ci_diagnosis(root: Path) -> tuple[str, str, list[str]]:
             passed.append(label)
             continue
         return label, reproduce, passed
-    return "후처리 또는 수동 Artifact 승격", "Jenkins Console에서 마지막 오류 확인", passed
+    return "후처리 또는 자동 Artifact 승격", "Jenkins Console에서 마지막 오류 확인", passed
 
 
 def file_diagnosis(root: Path, pipeline: str) -> tuple[str, str, list[str]]:

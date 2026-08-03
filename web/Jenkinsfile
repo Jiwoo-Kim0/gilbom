@@ -676,8 +676,9 @@ pipeline {
             }
         }
 
-        // Stage 9: 검증된 release/만 불변 incoming 경계로 전송한다. 승격은
-        // Jenkins 사용자의 명시적 승인 뒤 root-owned helper가 수행한다.
+        // Stage 9: 검증된 release/만 불변 incoming 경계로 전송한 뒤
+        // root-owned helper가 자동으로 원자적 승격한다. 이 단계는 운영 배포가
+        // 아니며, 운영 배포와 조건부 Rollback의 Jenkins 승인은 계속 유지한다.
         stage('Upload release artifacts to incoming') {
             steps {
                 dir(env.APP_DIR) {
@@ -697,13 +698,29 @@ pipeline {
                             set +x
                             artifact_host="${ARTIFACT_HOST:-host.docker.internal}"
                             artifact_port="${ARTIFACT_SSH_PORT:-22}"
-                            KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
-                            SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
-                            SSH_PORT="$artifact_port" \
-                            REMOTE_ARTIFACT_ROOT=/opt/gilbom/artifacts \
-                                sh scripts/upload-ci-release-artifacts.sh \
-                                    release \
-                                    "$ARTIFACT_SSH_USER@$artifact_host"
+                            reuse_marker=.artifacts/ci-release-already-promoted
+                            rm -f -- "$reuse_marker"
+                            if KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                               SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                               SSH_PORT="$artifact_port" \
+                                    sh scripts/check-ci-release-artifact-remote.sh \
+                                        "$RELEASE_SHA" \
+                                        "$ARTIFACT_SSH_USER@$artifact_host"
+                            then
+                                mkdir -p .artifacts
+                                printf 'REUSED\\n' > "$reuse_marker"
+                            else
+                                lookup_status="$?"
+                                [ "$lookup_status" -eq 10 ] \
+                                    || exit "$lookup_status"
+                                KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                                SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                                SSH_PORT="$artifact_port" \
+                                REMOTE_ARTIFACT_ROOT=/opt/gilbom/artifacts \
+                                    sh scripts/upload-ci-release-artifacts.sh \
+                                        release \
+                                        "$ARTIFACT_SSH_USER@$artifact_host"
+                            fi
                             sh scripts/record-ci-result.sh artifact-upload
                         '''
                     }
@@ -711,16 +728,7 @@ pipeline {
             }
         }
 
-        stage('Approve release artifact promotion') {
-            steps {
-                script {
-                    input message: "Promote release ${env.RELEASE_SHA} to the immutable EC2 artifact directory?",
-                            ok: 'Promote'
-                }
-            }
-        }
-
-        stage('Promote release artifact atomically') {
+        stage('Promote release artifact automatically') {
             steps {
                 dir(env.APP_DIR) {
                     withCredentials([
@@ -737,14 +745,19 @@ pipeline {
                         sh '''
                             set -eu
                             set +x
-                            artifact_host="${ARTIFACT_HOST:-host.docker.internal}"
-                            artifact_port="${ARTIFACT_SSH_PORT:-22}"
-                            KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
-                            SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
-                            SSH_PORT="$artifact_port" \
-                                sh scripts/promote-ci-release-artifacts-remote.sh \
-                                    "$RELEASE_SHA" \
-                                    "$ARTIFACT_SSH_USER@$artifact_host"
+                            if [ -f .artifacts/ci-release-already-promoted ]
+                            then
+                                echo "Automatic Artifact promotion: REUSED ($RELEASE_SHA)"
+                            else
+                                artifact_host="${ARTIFACT_HOST:-host.docker.internal}"
+                                artifact_port="${ARTIFACT_SSH_PORT:-22}"
+                                KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                                SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                                SSH_PORT="$artifact_port" \
+                                    sh scripts/promote-ci-release-artifacts-remote.sh \
+                                        "$RELEASE_SHA" \
+                                        "$ARTIFACT_SSH_USER@$artifact_host"
+                            fi
                             sh scripts/record-ci-result.sh artifact-promotion
                         '''
                     }
@@ -866,6 +879,43 @@ pipeline {
                             '
                     done
                 '''
+            }
+        }
+        unsuccessful {
+            script {
+                if (env.APP_DIR && env.RELEASE_SHA && env.BUILD_NUMBER) {
+                    dir(env.APP_DIR) {
+                        try {
+                            withCredentials([
+                                sshUserPrivateKey(
+                                        credentialsId: 'gilbom-artifact-upload-ssh',
+                                        keyFileVariable: 'ARTIFACT_SSH_IDENTITY',
+                                        usernameVariable: 'ARTIFACT_SSH_USER'
+                                ),
+                                file(
+                                        credentialsId: 'gilbom-artifact-known-hosts',
+                                        variable: 'ARTIFACT_KNOWN_HOSTS'
+                                )
+                            ]) {
+                                sh '''
+                                    set +x
+                                    artifact_host="${ARTIFACT_HOST:-host.docker.internal}"
+                                    artifact_port="${ARTIFACT_SSH_PORT:-22}"
+                                    KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                                    SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                                    SSH_PORT="$artifact_port" \
+                                        sh scripts/quarantine-ci-release-artifacts-remote.sh \
+                                            "$RELEASE_SHA" \
+                                            "$BUILD_NUMBER" \
+                                            "$ARTIFACT_SSH_USER@$artifact_host"
+                                '''
+                            }
+                        } catch (Exception ignored) {
+                            echo 'CI incoming quarantine skipped or failed; '
+                                    + 'inspect the exact RELEASE_SHA before retrying'
+                        }
+                    }
+                }
             }
         }
         cleanup {

@@ -6,6 +6,11 @@ case "$(basename -- "$0")" in
   ssh)
     printf 'ssh %s\n' "$*" >> "$SSH_CALL_LOG"
     case " $* " in
+      *" release=\"\$artifact_root/${RELEASE_SHA:-}\""*)
+        printf 'CI immutable release lookup: MISSING (%s)\n' \
+          "${RELEASE_SHA:-}"
+        exit 10
+        ;;
       *" test -d '/opt/gilbom/artifacts/.incoming/${RELEASE_SHA:-}'"*) exit 1 ;;
     esac
     exit 0
@@ -66,6 +71,20 @@ cp "$SCRIPT_DIR/test-ci-artifact-ssh-paths.sh" "$FAKE_BIN/scp"
 cp "$SCRIPT_DIR/test-ci-artifact-ssh-paths.sh" "$FAKE_BIN/jq"
 chmod 0700 "$FAKE_BIN/ssh" "$FAKE_BIN/scp" "$FAKE_BIN/jq"
 
+if PATH="$FAKE_BIN:$PATH" \
+   RELEASE_SHA="$RELEASE_SHA" \
+   KNOWN_HOSTS_FILE="$KNOWN_HOSTS_FILE" \
+   SSH_IDENTITY_FILE="$SSH_IDENTITY_FILE" \
+    sh "$PROJECT_DIR/scripts/check-ci-release-artifact-remote.sh" \
+      "$RELEASE_SHA" \
+      ubuntu@host.docker.internal
+then
+  echo "missing immutable release was incorrectly reported present" >&2
+  exit 1
+else
+  [ "$?" -eq 10 ]
+fi
+
 PATH="$FAKE_BIN:$PATH" \
 RELEASE_SHA="$RELEASE_SHA" \
 KNOWN_HOSTS_FILE="$KNOWN_HOSTS_FILE" \
@@ -87,9 +106,20 @@ SSH_IDENTITY_FILE="$SSH_IDENTITY_FILE" \
     "$RELEASE_SHA" \
     ubuntu@host.docker.internal
 
+PATH="$FAKE_BIN:$PATH" \
+KNOWN_HOSTS_FILE="$KNOWN_HOSTS_FILE" \
+SSH_IDENTITY_FILE="$SSH_IDENTITY_FILE" \
+  sh "$PROJECT_DIR/scripts/quarantine-ci-release-artifacts-remote.sh" \
+    "$RELEASE_SHA" \
+    7 \
+    ubuntu@host.docker.internal
+
 grep -Fq "UserKnownHostsFile=$KNOWN_HOSTS_FILE" "$SSH_CALL_LOG"
 grep -Fq -- "-i $SSH_IDENTITY_FILE" "$SSH_CALL_LOG"
 grep -Fq "sudo --non-interactive" "$SSH_CALL_LOG"
+grep -Fq "CI incoming quarantine: PASS ($RELEASE_SHA, build 7)" \
+  "$SSH_CALL_LOG" \
+  || grep -Fq ".aborted-$RELEASE_SHA-build-7" "$SSH_CALL_LOG"
 [ "$(grep -c '^scp ' "$SSH_CALL_LOG")" -eq 3 ]
 
 echo "Jenkins @tmp SSH Credential path regression test: PASS"

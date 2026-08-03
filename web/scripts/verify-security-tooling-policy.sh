@@ -28,9 +28,11 @@ for file in \
   scripts/verify-ci-release-contract.sh \
   scripts/build-release-artifacts.sh \
   scripts/transfer-release-artifacts.sh \
+  scripts/check-ci-release-artifact-remote.sh \
   scripts/verify-ci-artifact-remote-readiness.sh \
   scripts/upload-ci-release-artifacts.sh \
   scripts/promote-ci-release-artifacts-remote.sh \
+  scripts/quarantine-ci-release-artifacts-remote.sh \
   scripts/test-ci-artifact-ssh-paths.sh \
   scripts/test-promote-ci-release-artifacts.sh \
   scripts/verify-ci-artifact-transfer-contract.sh \
@@ -141,9 +143,11 @@ sh -n \
   scripts/verify-ci-release-contract.sh \
   scripts/build-release-artifacts.sh \
   scripts/transfer-release-artifacts.sh \
+  scripts/check-ci-release-artifact-remote.sh \
   scripts/verify-ci-artifact-remote-readiness.sh \
   scripts/upload-ci-release-artifacts.sh \
   scripts/promote-ci-release-artifacts-remote.sh \
+  scripts/quarantine-ci-release-artifacts-remote.sh \
   scripts/test-ci-artifact-ssh-paths.sh \
   scripts/test-promote-ci-release-artifacts.sh \
   scripts/verify-ci-artifact-transfer-contract.sh \

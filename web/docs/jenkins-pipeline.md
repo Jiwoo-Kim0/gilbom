@@ -245,11 +245,17 @@ Stage 4~8이 모두 성공한 뒤 Jenkins는 `release/`를
 `SHA256SUMS`와 image archive checksum을 확인하고, SSH host key 검증과 전용
 private-key Credential을 강제한다.
 
-Jenkins의 `Approve release artifact promotion`에서 명시적으로 승인된 뒤에만
-EC2의 root-owned helper를 호출한다. Helper는 동일 SHA 충돌을 검사하고 같은
-filesystem 안에서 `/opt/gilbom/artifacts/<full-sha>/`로 atomic rename한다.
+모든 CI gate와 전송 후 Checksum 검증이 성공하면 EC2의 root-owned helper를
+자동 호출한다. Helper는 동일 SHA 충돌을 검사하고 같은 filesystem 안에서
+`/opt/gilbom/artifacts/<full-sha>/`로 atomic rename한다.
 최종 파일은 `root:root` mode `0440`, 디렉터리는 mode `0550`이다. 이미 존재하는
 SHA는 양쪽 manifest와 실제 내용이 완전히 같을 때만 재사용한다.
+동일 SHA CI 재실행은 root-owned 최종 경로를 최초 성공 빌드의 canonical
+Artifact로 취급해 새 build timestamp가 포함된 incoming을 다시 만들지 않는다.
+
+Artifact 자동 승격은 운영 배포가 아니다. `gilbom-deploy`의 full SHA 입력과
+Jenkins 인증 사용자 승인은 계속 유지한다. 실패하거나 중단된 CI의 incoming은
+build 번호가 포함된 hidden 경로로 격리해 다음 SCM Polling 실행을 막지 않는다.
 
 EC2 설치와 Jenkins Credential ID는
 [`ci-artifact-promotion.md`](ci-artifact-promotion.md)에 고정한다.

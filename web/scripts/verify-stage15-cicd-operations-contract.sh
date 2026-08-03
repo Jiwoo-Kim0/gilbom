@@ -72,6 +72,12 @@ assert_contains scripts/generate-cicd-notification.py \
 assert_contains scripts/generate-cicd-notification.py \
   '"console": console_url' \
   "authenticated Jenkins console link is missing"
+assert_contains scripts/generate-cicd-notification.py \
+  '("flyway-v1-v38", "Flyway V1-V38"' \
+  "Mattermost CI diagnosis does not match the current Flyway V1-V38 gate"
+if grep -Fq 'flyway-v1-v35' scripts/generate-cicd-notification.py; then
+  fail "Mattermost CI diagnosis still contains the obsolete Flyway V1-V35 gate"
+fi
 assert_contains scripts/verify-jenkins-console-secret.sh \
   'gitleaks dir' \
   "Jenkins console is not scanned by Gitleaks"

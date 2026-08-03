@@ -20,9 +20,11 @@ line_of() {
 }
 
 for file in \
+  scripts/check-ci-release-artifact-remote.sh \
   scripts/verify-ci-artifact-remote-readiness.sh \
   scripts/upload-ci-release-artifacts.sh \
   scripts/promote-ci-release-artifacts-remote.sh \
+  scripts/quarantine-ci-release-artifacts-remote.sh \
   scripts/test-ci-artifact-ssh-paths.sh \
   scripts/test-promote-ci-release-artifacts.sh \
   infra/scripts/promote-ci-release-artifacts.sh
@@ -32,15 +34,13 @@ done
 
 metadata_line="$(line_of "stage('Build metadata and release integrity')")"
 upload_line="$(line_of "stage('Upload release artifacts to incoming')")"
-approval_line="$(line_of "stage('Approve release artifact promotion')")"
-promotion_line="$(line_of "stage('Promote release artifact atomically')")"
+promotion_line="$(line_of "stage('Promote release artifact automatically')")"
 test -n "$metadata_line" && test -n "$upload_line" \
-  && test -n "$approval_line" && test -n "$promotion_line" \
-  || fail "one or more Stage 9 Jenkins stages are missing"
+  && test -n "$promotion_line" \
+  || fail "one or more automatic Stage 9 Jenkins stages are missing"
 test "$metadata_line" -lt "$upload_line" \
-  && test "$upload_line" -lt "$approval_line" \
-  && test "$approval_line" -lt "$promotion_line" \
-  || fail "Stage 9 upload, approval, and promotion order is invalid"
+  && test "$upload_line" -lt "$promotion_line" \
+  || fail "Stage 9 upload and automatic promotion order is invalid"
 
 assert_contains Jenkinsfile \
   "credentialsId: 'gilbom-artifact-upload-ssh'" \
@@ -52,8 +52,18 @@ assert_contains Jenkinsfile \
   "stage('Artifact transfer readiness')" \
   "artifact destination readiness is not checked before expensive tests"
 assert_contains Jenkinsfile \
-  'input message:' \
-  "manual promotion approval is missing"
+  'sh scripts/check-ci-release-artifact-remote.sh' \
+  "same-SHA CI retry does not reuse the trusted immutable Artifact"
+assert_contains Jenkinsfile \
+  'ci-release-already-promoted' \
+  "same-SHA Artifact reuse is not propagated to automatic promotion"
+if grep -Fq "stage('Approve release artifact promotion')" Jenkinsfile \
+  || grep -Fq 'Promote release ${env.RELEASE_SHA}' Jenkinsfile; then
+  fail "CI Artifact promotion must not wait for manual input"
+fi
+assert_contains Jenkinsfile \
+  'scripts/quarantine-ci-release-artifacts-remote.sh' \
+  "unsuccessful CI does not quarantine its incoming Artifact"
 assert_contains scripts/upload-ci-release-artifacts.sh \
   'REMOTE_ARTIFACT_ROOT="${REMOTE_ARTIFACT_ROOT:-/opt/gilbom/artifacts}"' \
   "upload does not target the required artifact root"
@@ -95,9 +105,11 @@ if grep -Fq 'StrictHostKeyChecking=no' \
 fi
 
 sh -n \
+  scripts/check-ci-release-artifact-remote.sh \
   scripts/verify-ci-artifact-remote-readiness.sh \
   scripts/upload-ci-release-artifacts.sh \
   scripts/promote-ci-release-artifacts-remote.sh \
+  scripts/quarantine-ci-release-artifacts-remote.sh \
   scripts/test-ci-artifact-ssh-paths.sh \
   scripts/test-promote-ci-release-artifacts.sh \
   infra/scripts/promote-ci-release-artifacts.sh
