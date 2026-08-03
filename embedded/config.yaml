@@ -57,10 +57,9 @@ mqtt:
   outbox_path: var/outbox.sqlite3   # 미전송 event 저장소 (커밋 금지)
 
 upload:
-  # ⚠️ 로봇용 X-API-Key 발급 경로가 아직 없다 (웹팀 확인 중). 그래서 둘 다 `env?:` 다 —
-  #    없으면 이미지 업로드만 건너뛰고 로봇은 정상 기동한다. MQTT E2E(presence·state·
-  #    telemetry·command)는 이 값 없이 전부 돌아간다. 결함 event 도 image_id: null 로
-  #    발행된다. 키가 나오면 두 값을 채우면 그때부터 사진이 붙는다.
+  # 관리자 Robot Credential 발급 응답의 imageUpload.url·imageUpload.apiKey를 넣는다.
+  # 둘 다 `env?:`라 없어도 로봇은 정상 기동하지만 이미지 업로드만 건너뛰고 결함
+  # event는 image_id: null로 발행된다. Secret 원문은 발급 응답에서 한 번만 보인다.
   url: ${env?:UPLOAD_URL}          # POST /api/v1/images 전체 URL
   api_key: ${env?:UPLOAD_API_KEY}  # 기기별 X-API-Key. 세션 쿠키·CSRF 아니다.
 

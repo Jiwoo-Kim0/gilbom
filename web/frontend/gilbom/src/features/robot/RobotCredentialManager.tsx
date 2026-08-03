@@ -334,6 +334,14 @@ export function RobotCredentialManager({
                 </div>
                 <dl className="robot-credential-result">
                   <div>
+                    <dt>Robot UUID</dt>
+                    <dd>{issuedCredential.robotId}</dd>
+                  </div>
+                  <div>
+                    <dt>MQTT ID</dt>
+                    <dd>{issuedCredential.mqttId}</dd>
+                  </div>
+                  <div>
                     <dt>Broker</dt>
                     <dd>{issuedCredential.mqtt.brokerUri}</dd>
                   </div>
@@ -349,9 +357,18 @@ export function RobotCredentialManager({
                     <dt>1회 비밀번호</dt>
                     <dd>{issuedCredential.mqtt.password}</dd>
                   </div>
+                  <div>
+                    <dt>이미지 업로드 URL</dt>
+                    <dd>{issuedCredential.imageUpload.url}</dd>
+                  </div>
+                  <div>
+                    <dt>1회 이미지 API Key</dt>
+                    <dd>{issuedCredential.imageUpload.apiKey}</dd>
+                  </div>
                 </dl>
                 <p className="robot-credential-warning">
-                  창을 닫기 전에 승인된 경로로 Jetson에 연결 정보를 주입하세요.
+                  창을 닫기 전에 Robot UUID, MQTT 연결 정보와 이미지 업로드 정보를
+                  승인된 경로로 Jetson에 주입하세요. 두 Secret은 다시 표시되지 않습니다.
                 </p>
                 <div className="robot-credential-actions">
                   <button

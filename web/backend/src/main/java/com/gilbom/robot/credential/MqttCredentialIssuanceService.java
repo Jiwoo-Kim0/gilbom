@@ -35,6 +35,8 @@ import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
 import com.gilbom.robot.data.api.response.MqttCredentialResponse;
 import com.gilbom.robot.data.application.result.IssuedMqttCredential;
+import com.gilbom.storage.auth.IssuedRobotImageApiKey;
+import com.gilbom.storage.auth.RobotImageApiKeyIssuanceService;
 
 @Service
 public class MqttCredentialIssuanceService {
@@ -64,19 +66,22 @@ public class MqttCredentialIssuanceService {
     private final MqttCredentialProvisioner provisioner;
     private final MqttCredentialProvisioningProperties properties;
     private final AuditLogService auditLogService;
+    private final RobotImageApiKeyIssuanceService imageApiKeyIssuanceService;
 
     public MqttCredentialIssuanceService(
             JdbcTemplate jdbcTemplate,
             MqttCredentialSecretGenerator secretGenerator,
             MqttCredentialProvisioner provisioner,
             MqttCredentialProvisioningProperties properties,
-            AuditLogService auditLogService
+            AuditLogService auditLogService,
+            RobotImageApiKeyIssuanceService imageApiKeyIssuanceService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.secretGenerator = secretGenerator;
         this.provisioner = provisioner;
         this.properties = properties;
         this.auditLogService = auditLogService;
+        this.imageApiKeyIssuanceService = imageApiKeyIssuanceService;
     }
 
     @Transactional
@@ -178,6 +183,9 @@ public class MqttCredentialIssuanceService {
                 null,
                 null);
 
+        IssuedRobotImageApiKey imageApiKey =
+                imageApiKeyIssuanceService.rotate(robotId);
+
         auditLogService.appendRequired(new AuditLogRecord(
                 AuditRequestContext.requestIdOnly(requestId),
                 actorUserId,
@@ -200,13 +208,17 @@ public class MqttCredentialIssuanceService {
                 requestPath);
 
         return new IssuedMqttCredential(
+                robotId,
+                robot.mqttId(),
                 credentialId,
                 CREDENTIAL_TYPE,
                 brokerUri,
                 robot.mqttId(),
                 password,
                 robot.mqttId(),
-                times.expiresAt());
+                times.expiresAt(),
+                imageApiKey.uploadUrl(),
+                imageApiKey.apiKey());
     }
 
     @Transactional(readOnly = true)

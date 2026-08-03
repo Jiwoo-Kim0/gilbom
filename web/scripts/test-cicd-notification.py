@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -41,7 +42,7 @@ class CicdNotificationTest(unittest.TestCase):
         )
         subprocess.run(
             [
-                "python3",
+                sys.executable,
                 str(SCRIPT),
                 "--pipeline",
                 "ci",
@@ -95,7 +96,7 @@ class CicdNotificationTest(unittest.TestCase):
 
             suspected, _, passed = generator.ci_diagnosis(root)
             self.assertEqual(suspected, "PostGIS/RBAC/Session")
-            self.assertIn("Flyway V1-V40", passed)
+            self.assertIn("Flyway V1-V41", passed)
             self.assertNotIn("Flyway V1-V35", passed)
 
 

@@ -100,13 +100,17 @@ class MqttCredentialIssuanceControllerTest {
     void returnsGeneratedMqttPasswordOnceWithNoStoreHeaders() throws Exception {
         Instant expiresAt = Instant.parse("2027-01-23T00:00:00Z");
         IssuedMqttCredential issued = new IssuedMqttCredential(
+                ROBOT_ID,
+                "RBT-001",
                 CREDENTIAL_ID,
                 "MQTT_PASSWORD",
                 "ssl://125.137.58.131:8883",
                 "RBT-001",
                 "generated-one-time-password",
                 "RBT-001",
-                expiresAt);
+                expiresAt,
+                "https://example.test/api/v1/images",
+                "gik_generated-one-time-image-key");
         when(issuanceService.issue(
                 eq(ROBOT_ID),
                 eq(ACTOR_USER_ID),
@@ -130,6 +134,10 @@ class MqttCredentialIssuanceControllerTest {
                 .andExpect(header().string("Cache-Control", "no-store"))
                 .andExpect(header().string("Pragma", "no-cache"))
                 .andExpect(jsonPath(
+                        "$.robotId",
+                        is(ROBOT_ID.toString())))
+                .andExpect(jsonPath("$.mqttId", is("RBT-001")))
+                .andExpect(jsonPath(
                         "$.credentialId",
                         is(CREDENTIAL_ID.toString())))
                 .andExpect(jsonPath("$.credentialType", is("MQTT_PASSWORD")))
@@ -141,6 +149,12 @@ class MqttCredentialIssuanceControllerTest {
                         "$.mqtt.password",
                         is("generated-one-time-password")))
                 .andExpect(jsonPath("$.mqtt.clientId", is("RBT-001")))
+                .andExpect(jsonPath(
+                        "$.imageUpload.url",
+                        is("https://example.test/api/v1/images")))
+                .andExpect(jsonPath(
+                        "$.imageUpload.apiKey",
+                        is("gik_generated-one-time-image-key")))
                 .andExpect(jsonPath("$.secretHash").doesNotExist())
                 .andExpect(jsonPath("$.secretFingerprint").doesNotExist());
 

@@ -122,6 +122,8 @@ public class MqttCredentialIssuanceController {
 
         MqttCredentialIssuanceResponse response =
                 new MqttCredentialIssuanceResponse(
+                        credential.robotId(),
+                        credential.mqttId(),
                         credential.credentialId(),
                         credential.credentialType(),
                         new MqttCredentialIssuanceResponse.MqttConnection(
@@ -129,6 +131,9 @@ public class MqttCredentialIssuanceController {
                                 credential.username(),
                                 credential.password(),
                                 credential.clientId()),
+                        new MqttCredentialIssuanceResponse.ImageUpload(
+                                credential.imageUploadUrl(),
+                                credential.imageUploadApiKey()),
                         credential.expiresAt());
         URI location = URI.create(
                 "/api/v1/robots/" + robotId

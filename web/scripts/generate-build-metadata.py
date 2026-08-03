@@ -24,7 +24,7 @@ REQUIRED_RESULTS = (
     "sha-image-build",
     "backend-runtime-image",
     "frontend-runtime-image",
-    "flyway-v1-v40",
+    "flyway-v1-v41",
     "postgis-rbac-session",
     "csrf-permission-audit",
     "integration-smoke",
@@ -97,9 +97,9 @@ def migration_evidence() -> dict[str, object]:
             )
     entries.sort(key=lambda entry: entry["version"])
     versions = [entry["version"] for entry in entries]
-    if versions != list(range(1, 41)):
-        raise SystemExit("Flyway migrations must be contiguous from V1 through V40")
-    return {"latestVersion": "V40", "migrations": entries}
+    if versions != list(range(1, 42)):
+        raise SystemExit("Flyway migrations must be contiguous from V1 through V41")
+    return {"latestVersion": "V41", "migrations": entries}
 
 
 def result_evidence() -> dict[str, str]:

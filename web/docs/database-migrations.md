@@ -62,6 +62,7 @@
 | V35 | 미시작 Mission 삭제 경계 | 시작·진행 이력이 없는 `CREATED` Mission과 최초 상태 이력만 삭제할 수 있도록 DB Trigger와 runtime 권한을 제한적으로 추가 |
 | V36 | 결함 유형 3종 축소 | 기존 결함과 관측의 제거 대상 유형을 `UNKNOWN_ANOMALY`로 보정하고 DB CHECK를 `DAMAGED`, `INSTALLATION_INVALID`, `UNKNOWN_ANOMALY`로 제한 |
 | V37 | `zone_id` 형식 제약 해제 | Incident·결함의 `zone_id`를 Patrol Area 업무 코드의 불투명 복사본으로 취급하고 `A-01` 정규식 제약을 제거하며 길이를 `VARCHAR(50)`으로 통일 |
+| V41 | 이미지 API Key 애플리케이션 발급 권한 | MQTT Credential 통합 Provisioning에서 `storage.robot_image_api_key` 해시 행을 추가할 수 있도록 Runtime 애플리케이션 역할에 INSERT 권한 부여 |
 | V38 | 종료 Mission 논리 삭제·정상 종료 명령 | COMPLETED·CANCELLED·FAILED Mission은 실행 증거를 보존한 채 목록에서 숨기고, `COMPLETE_MISSION`을 명령 제약에 추가 |
 | V39 | 컨설턴트 MANAGER 검증 계정 | 고정된 외부 검증 계정 한 개를 `MANAGER`로 추가하고 해당 계정에 한해서만 MFA 예외를 허용하도록 DB 제약과 고유 인덱스로 제한 |
 | V40 | 컨설턴트 MANAGER 로봇 범위 보강 | V39 검증 계정에 배포 시점의 기존 로봇을 `OWNER`로 명시 배정해 로봇·파생 결함이 0건으로 필터링되는 문제를 해결하되, 일반 비관리자에게 시스템 `ADMIN`의 전체 객체 범위를 확장하지 않음 |

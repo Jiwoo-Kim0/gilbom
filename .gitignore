@@ -24,7 +24,10 @@ embedded/scripts/orincar.env
 embedded/**/.env
 test/통신테스트/.env
 # 로봇 런타임 데이터 — Outbox(sqlite)·증거 이미지 (embedded/var/)
-embedded/var/
+embedded/var/*
+!embedded/var/evidence/
+embedded/var/evidence/*
+!embedded/var/evidence/README.md
 embedded/**/*.sqlite3
 # 카메라 녹화물 — 용량 크고 현장 영상이다
 embedded/DataRecorder/recordings/

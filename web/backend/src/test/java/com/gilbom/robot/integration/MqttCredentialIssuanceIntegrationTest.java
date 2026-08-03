@@ -75,6 +75,9 @@ import com.gilbom.robot.data.api.response.MqttCredentialRegistryStatusResponse;
 import com.gilbom.security.config.SecurityConfig;
 import com.gilbom.security.web.SecurityErrorResponseWriter;
 import com.gilbom.security.web.SecurityHeadersFilter;
+import com.gilbom.storage.StorageProperties;
+import com.gilbom.storage.auth.RobotImageApiKeyIssuanceService;
+import com.gilbom.storage.auth.RobotImageApiKeySecretGenerator;
 
 import io.micrometer.core.instrument.MeterRegistry;
 
@@ -84,6 +87,7 @@ import io.micrometer.core.instrument.MeterRegistry;
         properties = {
                 "spring.profiles.default=test",
                 "spring.jpa.hibernate.ddl-auto=none",
+                "gilbom.storage.upload-url=https://example.test/api/v1/images",
                 "mqtt.credential-provisioning.public-broker-uri="
                         + "ssl://125.137.58.131:8883"
         })
@@ -157,6 +161,9 @@ class MqttCredentialIssuanceIntegrationTest {
                 "DELETE FROM request_control.idempotency_request");
         jdbcTemplate.update(
                 "DELETE FROM robot.robot_credential WHERE robot_id = ?",
+                ROBOT_ID);
+        jdbcTemplate.update(
+                "DELETE FROM storage.robot_image_api_key WHERE robot_id = ?",
                 ROBOT_ID);
         jdbcTemplate.update(
                 "DELETE FROM auth.user_robot_assignment WHERE robot_id = ?",
@@ -360,20 +367,31 @@ class MqttCredentialIssuanceIntegrationTest {
                 .andExpect(header().string("Cache-Control", "no-store"))
                 .andExpect(header().string("Pragma", "no-cache"))
                 .andExpect(jsonPath(
+                        "$.robotId",
+                        is(ROBOT_ID.toString())))
+                .andExpect(jsonPath("$.mqttId", is(ROBOT_CODE)))
+                .andExpect(jsonPath(
                         "$.mqtt.brokerUri",
                         is("ssl://125.137.58.131:8883")))
                 .andExpect(jsonPath("$.mqtt.username", is(ROBOT_CODE)))
                 .andExpect(jsonPath("$.mqtt.clientId", is(ROBOT_CODE)))
+                .andExpect(jsonPath(
+                        "$.imageUpload.url",
+                        is("https://example.test/api/v1/images")))
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
 
         JsonNode response = objectMapper.readTree(responseJson);
         String password = response.at("/mqtt/password").asText();
+        String imageApiKey = response.at("/imageUpload/apiKey").asText();
         UUID credentialId =
                 UUID.fromString(response.get("credentialId").asText());
 
         assertThat(Base64.getUrlDecoder().decode(password)).hasSize(32);
+        assertThat(imageApiKey).startsWith("gik_");
+        assertThat(Base64.getUrlDecoder().decode(imageApiKey.substring(4)))
+                .hasSize(32);
         assertThat(provisioner.username).isEqualTo(ROBOT_CODE);
         assertThat(provisioner.password).isEqualTo(password);
         assertThat(provisioner.provisionCount).hasValue(1);
@@ -400,6 +418,16 @@ class MqttCredentialIssuanceIntegrationTest {
                 .containsEntry("issued_by", ADMIN_USER_ID)
                 .doesNotContainValue(password);
 
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT key_prefix, key_hash, key_status
+                FROM storage.robot_image_api_key
+                WHERE robot_id = ?
+                """, ROBOT_ID))
+                .containsEntry("key_prefix", imageApiKey.substring(0, 12))
+                .containsEntry("key_hash", sha256Hex(imageApiKey))
+                .containsEntry("key_status", "ACTIVE")
+                .doesNotContainValue(imageApiKey);
+
         assertThat(jdbcTemplate.queryForObject("""
                 SELECT operational_status
                 FROM robot.robot
@@ -417,6 +445,7 @@ class MqttCredentialIssuanceIntegrationTest {
         assertThat(storedIdempotentBody)
                 .contains("\"secretReplayable\": false")
                 .doesNotContain(password)
+                .doesNotContain(imageApiKey)
                 .doesNotContain(provisioner.passwordHash);
 
         assertThat(jdbcTemplate.queryForObject("""
@@ -446,6 +475,12 @@ class MqttCredentialIssuanceIntegrationTest {
         assertThat(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*)
                 FROM robot.robot_credential
+                WHERE robot_id = ?
+                """, Integer.class, ROBOT_ID))
+                .isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM storage.robot_image_api_key
                 WHERE robot_id = ?
                 """, Integer.class, ROBOT_ID))
                 .isEqualTo(1);
@@ -1065,7 +1100,10 @@ class MqttCredentialIssuanceIntegrationTest {
 
     @SpringBootConfiguration
     @EnableAutoConfiguration
-    @EnableConfigurationProperties(MqttCredentialProvisioningProperties.class)
+    @EnableConfigurationProperties({
+            MqttCredentialProvisioningProperties.class,
+            StorageProperties.class
+    })
     @Import({
             SecurityConfig.class,
             SecurityErrorResponseWriter.class,
@@ -1080,6 +1118,8 @@ class MqttCredentialIssuanceIntegrationTest {
             MqttCredentialIssuanceService.class,
             MqttCredentialRegistryService.class,
             MqttCredentialSecretGenerator.class,
+            RobotImageApiKeyIssuanceService.class,
+            RobotImageApiKeySecretGenerator.class,
             AuthenticatedUserIdResolver.class,
             PasswordHashingConfiguration.class,
             ProvisionerTestConfiguration.class

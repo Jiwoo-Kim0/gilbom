@@ -44,7 +44,7 @@ for stage in \
   "stage('Start integration stack')" \
   "stage('Authentication temporary DB integration')" \
   "stage('Actual TLS MQTT Broker E2E')" \
-  "stage('Flyway V1-V40')" \
+  "stage('Flyway V1-V41')" \
   "stage('PostGIS RBAC and Spring Session')" \
   "stage('CSRF permission and append-only audit')" \
   "stage('Integration smoke')" \
@@ -95,11 +95,11 @@ assert_contains Jenkinsfile \
   'MQTT_PUBLIC_HOSTNAME=docker-builder' \
   "MQTT Broker certificate SAN must include the DinD access hostname"
 assert_contains Jenkinsfile \
-  'COUNT(*) = 40' \
-  "Flyway history gate must require all 40 migrations"
+  'COUNT(*) = 41' \
+  "Flyway history gate must require all 41 migrations"
 assert_contains Jenkinsfile \
-  'MAX(version::INTEGER) = 40' \
-  "Flyway history gate must require V40 as the maximum migration"
+  'MAX(version::INTEGER) = 41' \
+  "Flyway history gate must require V41 as the maximum migration"
 assert_contains Jenkinsfile \
   '.artifacts/security-regression/**' \
   "security regression evidence must be archived"
