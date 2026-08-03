@@ -172,6 +172,7 @@ MOSQUITTO_PASSWORD_FILE_SECRET_FILE=$SECRET_DIR/mosquitto_passwd
 MOSQUITTO_TLS_FULLCHAIN_FILE=$SECRET_DIR/mosquitto_tls_fullchain.pem
 MOSQUITTO_TLS_PRIVATE_KEY_SECRET_FILE=$SECRET_DIR/mosquitto_tls_private_key.pem
 
+GILBOM_STORAGE_UPLOAD_URL=https://report-smoke.example.invalid/api/v1/images
 GILBOM_STORAGE_SIGNING_KEY_SECRET_FILE=$SECRET_DIR/gilbom_storage_signing_key
 AUTH_RATE_LIMIT_HMAC_KEY_VERSION=1
 AUTH_RATE_LIMIT_HMAC_KEY_SECRET_FILE=$SECRET_DIR/gilbom_auth_rate_limit_hmac_key
@@ -379,7 +380,7 @@ frontend_id="$(compose ps -q frontend)"
   || fail "a required smoke container is missing"
 
 [ "$(db_admin_query \
-  "SELECT (COUNT(*) > 0 AND bool_and(success))::int FROM flyway_history.flyway_schema_history;")" = 1 ] \
+  "SELECT (COUNT(*) = 41 AND bool_and(success))::int FROM flyway_history.flyway_schema_history;")" = 1 ] \
   || fail "Flyway did not complete successfully"
 [ "$(db_admin_query "SELECT COUNT(*) FROM report.anomaly_report;")" = 0 ] \
   || fail "the disposable PostgreSQL volume was not empty"
