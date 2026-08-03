@@ -244,6 +244,52 @@ class AuthenticationDefenseServiceTest {
     }
 
     @Test
+    void requiredSuccessAuditPrecedesMfaBypassSessionPromotion() {
+        HttpServletRequest request = Mockito.mock(HttpServletRequest.class);
+        HttpServletResponse response = Mockito.mock(HttpServletResponse.class);
+        Authentication authentication = Mockito.mock(Authentication.class);
+        AuthenticatedSession expected = new AuthenticatedSession(
+                AuthenticationState.AUTHENTICATED,
+                NOW.plusSeconds(8 * 60 * 60),
+                "csrf"
+        );
+        when(accountRepository.recordCompletedLogin(USER_ID)).thenReturn(1);
+        when(sessionService.completeMfaBypass(
+                request,
+                response,
+                USER_ID,
+                authentication
+        )).thenReturn(expected);
+
+        AuthenticatedSession result =
+                service.completeMfaBypassAndRecordLogin(
+                        request,
+                        response,
+                        USER_ID,
+                        authentication,
+                        CONTEXT
+                );
+
+        assertThat(result).isSameAs(expected);
+        InOrder order = inOrder(
+                accountRepository,
+                rateLimiter,
+                auditService,
+                sessionService
+        );
+        order.verify(accountRepository).recordCompletedLogin(USER_ID);
+        order.verify(rateLimiter).resetMfaFailures(USER_ID);
+        order.verify(auditService)
+                .recordLoginSucceededRequired(CONTEXT, USER_ID);
+        order.verify(sessionService).completeMfaBypass(
+                request,
+                response,
+                USER_ID,
+                authentication
+        );
+    }
+
+    @Test
     void failedRequiredSuccessAuditPreventsSessionPromotion() {
         HttpServletRequest request = Mockito.mock(HttpServletRequest.class);
         HttpServletResponse response = Mockito.mock(HttpServletResponse.class);

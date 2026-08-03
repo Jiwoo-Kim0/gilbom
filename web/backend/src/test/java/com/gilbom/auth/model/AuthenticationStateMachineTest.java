@@ -55,6 +55,23 @@ class AuthenticationStateMachineTest {
     }
 
     @Test
+    void onlyTheInternalMfaRequiredStageCanConfirmMfaBypass() {
+        assertThat(stateMachine.transition(
+                AuthenticationState.MFA_REQUIRED,
+                AuthenticationEvent.MFA_BYPASS_CONFIRMED))
+                .isEqualTo(AuthenticationState.AUTHENTICATED);
+
+        assertThatThrownBy(() -> stateMachine.transition(
+                AuthenticationState.ANONYMOUS,
+                AuthenticationEvent.MFA_BYPASS_CONFIRMED))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> stateMachine.transition(
+                AuthenticationState.MFA_ENROLLMENT_REQUIRED,
+                AuthenticationEvent.MFA_BYPASS_CONFIRMED))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void invalidationReturnsEveryStateToAnonymous() {
         for (AuthenticationState state : AuthenticationState.values()) {
             assertThat(stateMachine.transition(state, AuthenticationEvent.INVALIDATED))

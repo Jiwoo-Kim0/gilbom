@@ -13,6 +13,7 @@ import com.gilbom.auth.account.EmailAddressPolicy;
 import com.gilbom.auth.audit.AuthenticationAuditService;
 import com.gilbom.auth.audit.AuthenticationRequestAuditContext;
 import com.gilbom.auth.login.LoginAccountRepository.LoginAccount;
+import com.gilbom.auth.mfa.MfaAuthenticationCompletionService;
 import com.gilbom.auth.model.AuthenticationEvent;
 import com.gilbom.auth.password.PasswordHashingService;
 import com.gilbom.auth.ratelimit.AuthenticationRateLimitExceededException;
@@ -21,6 +22,7 @@ import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
 @Service
 public class AuthenticationLoginService {
@@ -33,6 +35,7 @@ public class AuthenticationLoginService {
     private final LoginAccountRepository accountRepository;
     private final PasswordHashingService passwordHashingService;
     private final AuthenticationDefenseService defenseService;
+    private final MfaAuthenticationCompletionService completionService;
     private final AuthenticationAuditService auditService;
     private final Clock clock;
 
@@ -40,19 +43,22 @@ public class AuthenticationLoginService {
             LoginAccountRepository accountRepository,
             PasswordHashingService passwordHashingService,
             AuthenticationDefenseService defenseService,
+            MfaAuthenticationCompletionService completionService,
             AuthenticationAuditService auditService,
             Clock clock
     ) {
         this.accountRepository = accountRepository;
         this.passwordHashingService = passwordHashingService;
         this.defenseService = defenseService;
+        this.completionService = completionService;
         this.auditService = auditService;
         this.clock = clock;
     }
 
-    public LoginChallengeResponse login(
+    public LoginResponse login(
             LoginRequest loginRequest,
-            HttpServletRequest servletRequest
+            HttpServletRequest servletRequest,
+            HttpServletResponse servletResponse
     ) {
         String normalizedEmail =
                 EmailAddressPolicy.normalize(loginRequest.email());
@@ -96,7 +102,7 @@ public class AuthenticationLoginService {
         }
 
         LoginAccount verifiedAccount = account.orElseThrow();
-        return LoginChallengeResponse.from(
+        LoginChallengeResponse challenge = LoginChallengeResponse.from(
                 defenseService.completePasswordVerification(
                         normalizedEmail,
                         verifiedAccount.userId(),
@@ -104,6 +110,16 @@ public class AuthenticationLoginService {
                         servletRequest,
                         auditContext
                 )
+        );
+        if (verifiedAccount.mfaRequired()
+                || verifiedAccount.passwordChangeRequired()) {
+            return challenge;
+        }
+        return completionService.completeMfaBypass(
+                servletRequest,
+                servletResponse,
+                verifiedAccount.userId(),
+                auditContext
         );
     }
 
@@ -131,6 +147,11 @@ public class AuthenticationLoginService {
     private static AuthenticationEvent nextEvent(LoginAccount account) {
         if (account.passwordChangeRequired()) {
             return AuthenticationEvent.PASSWORD_VERIFIED_CHANGE_REQUIRED;
+        }
+        if (!account.mfaRequired()) {
+            // 같은 transaction에서 정책 예외를 확인한 뒤 즉시 승격하는 내부
+            // challenge이며 클라이언트에는 노출하지 않는다.
+            return AuthenticationEvent.PASSWORD_VERIFIED_MFA_REQUIRED;
         }
         return account.mfaEnrolled()
                 ? AuthenticationEvent.PASSWORD_VERIFIED_MFA_REQUIRED

@@ -95,7 +95,7 @@ class CicdNotificationTest(unittest.TestCase):
 
             suspected, _, passed = generator.ci_diagnosis(root)
             self.assertEqual(suspected, "PostGIS/RBAC/Session")
-            self.assertIn("Flyway V1-V38", passed)
+            self.assertIn("Flyway V1-V39", passed)
             self.assertNotIn("Flyway V1-V35", passed)
 
 

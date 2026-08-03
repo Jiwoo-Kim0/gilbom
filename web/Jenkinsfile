@@ -408,14 +408,59 @@ pipeline {
                 dir(env.APP_DIR) {
                     sh '''
                         set -eu
-                        docker compose up --detach --no-build --wait --wait-timeout 180
+                        MQTT_BIND_ADDRESS=0.0.0.0 \
+                        MQTT_PUBLIC_HOSTNAME=docker-builder \
+                            docker compose up \
+                                --detach --no-build --wait --wait-timeout 180
                         sh scripts/record-ci-result.sh integration-stack-start
                     '''
                 }
             }
         }
 
-        stage('Flyway V1-V38') {
+        stage('Authentication temporary DB integration') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        GILBOM_SECURITY_TEST_BIND_ADDRESS=0.0.0.0 \
+                        GILBOM_SECURITY_TEST_PUBLISHED_HOST=docker-builder \
+                        GILBOM_SECURITY_TEST_OUTPUT=.artifacts/security-regression/auth-security-integration.json \
+                            python3 scripts/auth-security-integration-test.py
+                        jq -e '
+                            .status == "PASS"
+                            and .checkCount > 0
+                            and .isolation.backendRemoved == true
+                            and .isolation.databaseRemoved == true
+                        ' .artifacts/security-regression/auth-security-integration.json \
+                            > /dev/null
+                        sh scripts/record-ci-result.sh auth-security-integration
+                    '''
+                }
+            }
+        }
+
+        stage('Actual TLS MQTT Broker E2E') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        MQTT_E2E_PUBLISHED_HOST=docker-builder \
+                            sh scripts/run-mqtt-broker-e2e-ci.sh
+                        jq -e '
+                            .status == "PASS"
+                            and .brokerTransport == "TLS"
+                            and .resultFiles > 0
+                            and .cleanupPassed == true
+                        ' .artifacts/security-regression/mqtt-broker-e2e.json \
+                            > /dev/null
+                        sh scripts/record-ci-result.sh mqtt-broker-e2e
+                    '''
+                }
+            }
+        }
+
+        stage('Flyway V1-V39') {
             steps {
                 dir(env.APP_DIR) {
                     sh '''
@@ -425,15 +470,15 @@ pipeline {
                             psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
                                 --no-password --tuples-only --no-align --command "
                                     SELECT (
-                                        COUNT(*) = 38
+                                        COUNT(*) = 39
                                         AND MIN(version::INTEGER) = 1
-                                        AND MAX(version::INTEGER) = 38
+                                        AND MAX(version::INTEGER) = 39
                                         AND BOOL_AND(success)
                                     )::int
                                     FROM flyway_history.flyway_schema_history;
                                 "
                         ' | grep -qx 1
-                        sh scripts/record-ci-result.sh flyway-v1-v38
+                        sh scripts/record-ci-result.sh flyway-v1-v39
                     '''
                 }
             }
@@ -628,6 +673,24 @@ pipeline {
                         TRIVY_REQUIRE_PREPARED=true \
                             sh scripts/scan-image-security.sh
                         sh scripts/record-ci-result.sh sbom-cve
+                    '''
+                }
+            }
+        }
+
+        stage('Security regression baseline evidence') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        python3 scripts/generate-security-regression-baseline.py
+                        jq -e '
+                            .status == "PASS"
+                            and .executionBoundary == "Jenkins TLS DinD"
+                            and ([.gates[].status] | all(. == "PASS"))
+                        ' .artifacts/security-regression/baseline-summary.json \
+                            > /dev/null
+                        sh scripts/record-ci-result.sh security-regression-baseline
                     '''
                 }
             }
@@ -832,6 +895,8 @@ pipeline {
                         archiveArtifacts(
                                 artifacts: '.artifacts/source-security/**,'
                                         + '.artifacts/image-security/**,'
+                                        + '.artifacts/security-regression/**,'
+                                        + '.artifacts/backend-ci/build/test-results/**,'
                                         + '.artifacts/ci-results/**,'
                                         + '.artifacts/runtime/**,'
                                         + '.artifacts/jenkins-log-security/**,'

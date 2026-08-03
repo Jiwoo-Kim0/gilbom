@@ -15,6 +15,7 @@ import org.eclipse.paho.mqttv5.client.MqttAsyncClient;
 import org.eclipse.paho.mqttv5.client.MqttCallback;
 import org.eclipse.paho.mqttv5.client.MqttConnectionOptions;
 import org.eclipse.paho.mqttv5.client.MqttDisconnectResponse;
+import org.eclipse.paho.mqttv5.client.persist.MemoryPersistence;
 import org.eclipse.paho.mqttv5.common.MqttException;
 import org.eclipse.paho.mqttv5.common.MqttMessage;
 import org.junit.jupiter.api.Tag;
@@ -60,7 +61,8 @@ class MqttPublisherBrokerE2E {
         CountDownLatch delivery = new CountDownLatch(1);
         MqttAsyncClient robotClient = new MqttAsyncClient(
                 broker,
-                "ttl-e2e-robot-" + testId
+                "ttl-e2e-robot-" + testId,
+                new MemoryPersistence()
         );
         robotClient.setCallback(new CapturingCallback(received, delivery));
         Mqttv5PahoMessageHandler outboundHandler = null;

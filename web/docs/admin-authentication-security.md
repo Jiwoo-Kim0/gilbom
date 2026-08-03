@@ -330,6 +330,18 @@ python3 scripts/auth-security-integration-test.py
 않는다. 종료 성공·실패와 관계없이 임시 컨테이너와 DB를 제거하며, 생성한 비밀번호,
 TOTP secret, 복구 코드, 세션 ID와 CSRF 토큰은 출력하지 않는다.
 
+Jenkins TLS DinD에서는 공개 port의 소유자가 Jenkins container가 아니라
+`docker-builder`이므로 Pipeline이 다음 경계를 설정한다.
+
+```text
+GILBOM_SECURITY_TEST_BIND_ADDRESS=0.0.0.0
+GILBOM_SECURITY_TEST_PUBLISHED_HOST=docker-builder
+GILBOM_SECURITY_TEST_OUTPUT=.artifacts/security-regression/auth-security-integration.json
+```
+
+JSON에는 민감값 대신 검사명, 임시 Backend·DB 삭제 여부와 PASS/FAIL만 기록한다.
+로컬 host Docker 실행은 두 network 값을 생략해 `127.0.0.1`만 사용한다.
+
 검증 범위는 이메일 UNIQUE 동시 요청, 계정 열거 방지, pre-auth 보호 API 차단,
 TOTP·복구 코드 재사용 차단, 세션 ID·CSRF 교체, 동시 인증 세션 1개, 비밀번호 변경·
 로그아웃·유휴/절대 만료 후 재사용 차단, IP·계정 Rate Limit, Argon2id 전용 저장과

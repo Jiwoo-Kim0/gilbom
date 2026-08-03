@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import concurrent.futures
+import datetime as dt
 import hashlib
 import hmac
 import http.cookiejar
@@ -39,6 +40,106 @@ class CheckFailure(RuntimeError):
 def ensure(condition: bool, check: str) -> None:
     if not condition:
         raise CheckFailure(check)
+
+
+def utc_now() -> str:
+    return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace(
+        "+00:00",
+        "Z",
+    )
+
+
+def configured_hostname(name: str, default: str) -> str:
+    value = os.getenv(name, default).strip()
+    ensure(
+        bool(value)
+        and len(value) <= 253
+        and all(
+            character.isalnum() or character in ".-"
+            for character in value
+        )
+        and not value.startswith((".", "-"))
+        and not value.endswith((".", "-")),
+        name.lower(),
+    )
+    return value
+
+
+def configured_bind_address() -> str:
+    value = os.getenv(
+        "GILBOM_SECURITY_TEST_BIND_ADDRESS",
+        "127.0.0.1",
+    ).strip()
+    ensure(
+        value in {"127.0.0.1", "0.0.0.0"},
+        "gilbom_security_test_bind_address",
+    )
+    return value
+
+
+def published_port(binding: str) -> int:
+    for line in binding.splitlines():
+        _, separator, value = line.strip().rpartition(":")
+        if separator and value.isdigit() and 0 < int(value) <= 65535:
+            return int(value)
+    raise CheckFailure("temporary_backend_port")
+
+
+def evidence_path() -> Path | None:
+    configured = os.getenv("GILBOM_SECURITY_TEST_OUTPUT", "").strip()
+    if not configured:
+        return None
+    candidate = Path(configured)
+    if not candidate.is_absolute():
+        candidate = PROJECT_DIR / candidate
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(PROJECT_DIR)
+    except ValueError as error:
+        raise CheckFailure("security_test_evidence_path_boundary") from error
+    return resolved
+
+
+def write_evidence(
+    output: Path | None,
+    *,
+    status: str,
+    started_at: str,
+    checks: list[str],
+    failed_check: str | None,
+    published_host: str,
+    bind_address: str,
+    backend_removed: bool,
+    database_removed: bool,
+) -> None:
+    if output is None:
+        return
+    payload = {
+        "schemaVersion": 1,
+        "status": status,
+        "startedAtUtc": started_at,
+        "completedAtUtc": utc_now(),
+        "isolation": {
+            "dedicatedDatabase": True,
+            "temporaryBackend": True,
+            "backendRemoved": backend_removed,
+            "databaseRemoved": database_removed,
+        },
+        "network": {
+            "bindAddress": bind_address,
+            "publishedHost": published_host,
+        },
+        "checks": checks,
+        "checkCount": len(checks),
+        "failedCheck": failed_check,
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(output.name + ".tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(output)
 
 
 def command(
@@ -873,13 +974,30 @@ def run_integration(base_url: str, db_container: str, database: str) -> list[str
 
 
 def main() -> int:
+    started_at = utc_now()
     suffix = secrets.token_hex(5)
     database = f"gilbom_security_test_{suffix}"
     container_name = f"gilbom-auth-security-test-{suffix}"
     os.environ["GILBOM_SECURITY_TEST_CONTAINER"] = container_name
+    output = evidence_path()
+    bind_address = configured_bind_address()
+    published_host = configured_hostname(
+        "GILBOM_SECURITY_TEST_PUBLISHED_HOST",
+        "127.0.0.1",
+    )
+    ensure(
+        published_host == "127.0.0.1" or bind_address == "0.0.0.0",
+        "security_test_remote_bind_boundary",
+    )
     db_created = False
     backend_started = False
+    backend_removed = False
+    database_removed = False
     db_container = ""
+    checks: list[str] = []
+    status = "FAIL"
+    failed_check: str | None = "not_started"
+    exit_code = 1
 
     try:
         db_container = compose("ps", "-q", "db")
@@ -914,7 +1032,7 @@ def main() -> int:
             "--name",
             container_name,
             "-p",
-            "127.0.0.1::8080",
+            f"{bind_address}::8080",
             "-e",
             f"SPRING_DATASOURCE_URL=jdbc:postgresql://db:5432/{database}",
             "-e",
@@ -927,17 +1045,19 @@ def main() -> int:
         port_binding = command(
             ["docker", "port", container_name, "8080/tcp"]
         )
-        ensure(port_binding.startswith("127.0.0.1:"), "temporary_backend_port")
-        port = port_binding.rsplit(":", 1)[1]
-        base_url = f"http://127.0.0.1:{port}"
+        port = published_port(port_binding)
+        base_url = f"http://{published_host}:{port}"
         wait_until_healthy(base_url, container_name)
 
         checks = run_integration(base_url, db_container, database)
         for check in checks:
             print(f"PASS {check}")
         print(f"auth_security_integration=passed checks={len(checks)}")
-        return 0
+        status = "PASS"
+        failed_check = None
+        exit_code = 0
     except CheckFailure as failure:
+        failed_check = str(failure)
         print(f"auth_security_integration=failed check={failure}", file=sys.stderr)
         if backend_started:
             diagnostic_logs = command(
@@ -951,27 +1071,53 @@ def main() -> int:
                     + "\ntemporary_backend_log_tail_end",
                     file=sys.stderr,
                 )
-        return 1
     except Exception as exception:
+        failed_check = "unexpected_harness_error"
         print(
             "auth_security_integration=failed "
             + "check=unexpected_harness_error "
             + f"type={type(exception).__name__}",
             file=sys.stderr,
         )
-        return 1
     finally:
         if backend_started:
             command(
                 ["docker", "rm", "-f", container_name],
                 allow_failure=True,
             )
+            backend_removed = not bool(command(
+                ["docker", "inspect", "-f", "{{.Id}}", container_name],
+                allow_failure=True,
+            ))
+            if not backend_removed:
+                status = "FAIL"
+                failed_check = failed_check or "temporary_backend_cleanup"
+                exit_code = 1
         if db_created and db_container:
-            psql(
-                db_container,
-                "postgres",
-                f"DROP DATABASE IF EXISTS {database} WITH (FORCE);",
-            )
+            try:
+                psql(
+                    db_container,
+                    "postgres",
+                    f"DROP DATABASE IF EXISTS {database} WITH (FORCE);",
+                )
+                database_removed = True
+            except CheckFailure:
+                status = "FAIL"
+                failed_check = failed_check or "temporary_database_cleanup"
+                exit_code = 1
+        write_evidence(
+            output,
+            status=status,
+            started_at=started_at,
+            checks=checks,
+            failed_check=failed_check,
+            published_host=published_host,
+            bind_address=bind_address,
+            backend_removed=backend_removed,
+            database_removed=database_removed,
+        )
+
+    return exit_code
 
 
 if __name__ == "__main__":

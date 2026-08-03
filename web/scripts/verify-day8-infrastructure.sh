@@ -319,8 +319,8 @@ assert_contains Jenkinsfile \
   ".artifacts/runtime/build-resources.txt" \
   "build-time resource evidence is not collected"
 assert_contains infra/postgres/verify-empty-database.sql \
-  'SELECT COUNT(*) = 38' \
-  "empty database gate must cover Flyway V1 through V38"
+  'SELECT COUNT(*) = 39' \
+  "empty database gate must cover Flyway V1 through V39"
 assert_contains infra/postgres/verify-production-database.sql \
   'Production PostGIS/Flyway/approved-system-seed/runtime-role contract: PASS' \
   "production database audit is missing"

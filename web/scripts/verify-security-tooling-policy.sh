@@ -17,8 +17,13 @@ for file in \
   scripts/verify-repository-policy.sh \
   scripts/scan-image-security.sh \
   scripts/test-scan-image-security.sh \
+  scripts/run-backend-ci-task.sh \
   scripts/run-frontend-ci-task.sh \
   scripts/test-run-frontend-ci-task.sh \
+  scripts/run-mqtt-broker-e2e-ci.sh \
+  scripts/auth-security-integration-test.py \
+  scripts/generate-security-regression-baseline.py \
+  scripts/test-security-regression-baseline.py \
   scripts/render-vulnerability-report.py \
   scripts/prepare-release-security-artifacts.sh \
   scripts/create-release-image-archive.sh \
@@ -135,6 +140,7 @@ sh -n \
   scripts/run-backend-ci-task.sh \
   scripts/run-frontend-ci-task.sh \
   scripts/test-run-frontend-ci-task.sh \
+  scripts/run-mqtt-broker-e2e-ci.sh \
   scripts/record-ci-result.sh \
   scripts/prepare-release-security-artifacts.sh \
   scripts/create-release-image-archive.sh \
@@ -195,10 +201,14 @@ sh -n \
   test/rollback-drill/backend/healthcheck.sh \
   test/rollback-drill/backend/compatibility-probe.sh
 python3 scripts/test-security-policy.py
+python3 scripts/test-security-regression-baseline.py
 python3 -m py_compile \
   scripts/security_policy.py \
   scripts/render-vulnerability-report.py \
   scripts/generate-build-metadata.py \
-  scripts/verify-external-https-smoke.py
+  scripts/verify-external-https-smoke.py \
+  scripts/auth-security-integration-test.py \
+  scripts/generate-security-regression-baseline.py \
+  scripts/test-security-regression-baseline.py
 
 echo "Security tooling policy definition: PASS"

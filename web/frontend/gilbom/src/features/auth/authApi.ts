@@ -8,6 +8,7 @@ import type {
   AuthenticationResponse,
   AuthenticationSessionState,
   LoginChallenge,
+  LoginResponse,
   MfaEnrollmentConfirmationResponse,
   MyProfile,
   PublicRegistrationResponse,
@@ -55,7 +56,7 @@ export function registerAccount(input: {
 export function login(input: {
   email: string
   password: string
-}): Promise<LoginChallenge> {
+}): Promise<LoginResponse> {
   return apiJson('/api/v1/auth/login', {
     method: 'POST',
     body: jsonBody(input),

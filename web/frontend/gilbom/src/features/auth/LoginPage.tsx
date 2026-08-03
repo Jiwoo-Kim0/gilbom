@@ -19,7 +19,7 @@ type LoginLocationState = {
 export function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { acceptChallenge } = useAuthentication()
+  const { acceptChallenge, completeAuthentication } = useAuthentication()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<unknown>(null)
@@ -39,10 +39,15 @@ export function LoginPage() {
 
     setSubmitting(true)
     try {
-      const challenge = await login({ email, password })
+      const response = await login({ email, password })
       setPassword('')
-      acceptChallenge(challenge)
-      navigate(stateRoutes[challenge.loginState], { replace: true })
+      if ('loginState' in response) {
+        acceptChallenge(response)
+        navigate(stateRoutes[response.loginState], { replace: true })
+      } else {
+        completeAuthentication(response)
+        navigate('/defects', { replace: true })
+      }
     } catch (requestError) {
       setPassword('')
       setError(requestError)

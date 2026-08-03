@@ -89,7 +89,17 @@ PIPELINES = {
                 "Integration stack start",
                 "docker compose up -d --no-build --wait",
             ),
-            ("flyway-v1-v38", "Flyway V1-V38", "docker compose exec -T db psql"),
+            (
+                "auth-security-integration",
+                "Authentication temporary DB integration",
+                "python3 scripts/auth-security-integration-test.py",
+            ),
+            (
+                "mqtt-broker-e2e",
+                "Actual TLS MQTT Broker E2E",
+                "sh scripts/run-mqtt-broker-e2e-ci.sh",
+            ),
+            ("flyway-v1-v39", "Flyway V1-V39", "docker compose exec -T db psql"),
             (
                 "postgis-rbac-session",
                 "PostGIS/RBAC/Session",
@@ -132,6 +142,11 @@ PIPELINES = {
                 "sh scripts/verify-production-images.sh",
             ),
             ("sbom-cve", "Image SBOM/CVE policy", "sh scripts/scan-image-security.sh"),
+            (
+                "security-regression-baseline",
+                "Security regression baseline evidence",
+                "python3 scripts/generate-security-regression-baseline.py",
+            ),
             (
                 "release-security-artifacts",
                 "Release SBOM/CVE Artifact preparation",

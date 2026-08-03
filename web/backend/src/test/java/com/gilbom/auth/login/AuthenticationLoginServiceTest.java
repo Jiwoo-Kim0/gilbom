@@ -18,12 +18,15 @@ import org.mockito.Mockito;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 
 import com.gilbom.auth.AuthenticationDefenseService;
 import com.gilbom.auth.account.AccountAuthenticationState;
 import com.gilbom.auth.account.AccountStatus;
 import com.gilbom.auth.audit.AuthenticationAuditService;
 import com.gilbom.auth.login.LoginAccountRepository.LoginAccount;
+import com.gilbom.auth.mfa.AuthenticationResponse;
+import com.gilbom.auth.mfa.MfaAuthenticationCompletionService;
 import com.gilbom.auth.model.AuthenticationEvent;
 import com.gilbom.auth.model.AuthenticationState;
 import com.gilbom.auth.password.PasswordHashingService;
@@ -53,6 +56,8 @@ class AuthenticationLoginServiceTest {
             Mockito.mock(PasswordHashingService.class);
     private final AuthenticationDefenseService defenseService =
             Mockito.mock(AuthenticationDefenseService.class);
+    private final MfaAuthenticationCompletionService completionService =
+            Mockito.mock(MfaAuthenticationCompletionService.class);
     private final AuthenticationAuditService auditService =
             Mockito.mock(AuthenticationAuditService.class);
     private final AuthenticationLoginService service =
@@ -60,10 +65,13 @@ class AuthenticationLoginServiceTest {
                     accountRepository,
                     passwordHashingService,
                     defenseService,
+                    completionService,
                     auditService,
                     Clock.fixed(NOW, ZoneOffset.UTC)
             );
     private final MockHttpServletRequest servletRequest = request();
+    private final MockHttpServletResponse servletResponse =
+            new MockHttpServletResponse();
 
     @Test
     void passwordSuccessReturnsChangeRequiredWithoutAuthenticating() {
@@ -85,7 +93,11 @@ class AuthenticationLoginServiceTest {
         )).thenReturn(challenge);
 
         LoginChallengeResponse response =
-                service.login(new LoginRequest(EMAIL, PASSWORD), servletRequest);
+                (LoginChallengeResponse) service.login(
+                        new LoginRequest(EMAIL, PASSWORD),
+                        servletRequest,
+                        servletResponse
+                );
 
         assertThat(response.loginState())
                 .isEqualTo(AuthenticationState.PASSWORD_CHANGE_REQUIRED);
@@ -122,7 +134,11 @@ class AuthenticationLoginServiceTest {
         ));
 
         LoginChallengeResponse response =
-                service.login(new LoginRequest(EMAIL, PASSWORD), servletRequest);
+                (LoginChallengeResponse) service.login(
+                        new LoginRequest(EMAIL, PASSWORD),
+                        servletRequest,
+                        servletResponse
+                );
 
         assertThat(response.loginState())
                 .isEqualTo(AuthenticationState.MFA_ENROLLMENT_REQUIRED);
@@ -147,10 +163,58 @@ class AuthenticationLoginServiceTest {
         ));
 
         LoginChallengeResponse response =
-                service.login(new LoginRequest(EMAIL, PASSWORD), servletRequest);
+                (LoginChallengeResponse) service.login(
+                        new LoginRequest(EMAIL, PASSWORD),
+                        servletRequest,
+                        servletResponse
+                );
 
         assertThat(response.loginState())
                 .isEqualTo(AuthenticationState.MFA_REQUIRED);
+    }
+
+    @Test
+    void passwordSuccessCompletesTheExplicitMfaExemptAccount() {
+        LoginAccount account = activeAccount(false, false, false, null);
+        allowAndMatch(account);
+        when(defenseService.completePasswordVerification(
+                Mockito.eq(EMAIL),
+                Mockito.eq(USER_ID),
+                Mockito.eq(
+                        AuthenticationEvent.PASSWORD_VERIFIED_MFA_REQUIRED
+                ),
+                Mockito.eq(servletRequest),
+                Mockito.any()
+        )).thenReturn(new ChallengeSession(
+                AuthenticationState.MFA_REQUIRED,
+                NOW.plusSeconds(300)
+        ));
+        AuthenticationResponse completed = new AuthenticationResponse(
+                null,
+                "replacement-csrf",
+                NOW.plusSeconds(3600),
+                false
+        );
+        when(completionService.completeMfaBypass(
+                Mockito.eq(servletRequest),
+                Mockito.eq(servletResponse),
+                Mockito.eq(USER_ID),
+                Mockito.any()
+        )).thenReturn(completed);
+
+        LoginResponse response = service.login(
+                new LoginRequest(EMAIL, PASSWORD),
+                servletRequest,
+                servletResponse
+        );
+
+        assertThat(response).isSameAs(completed);
+        verify(completionService).completeMfaBypass(
+                Mockito.eq(servletRequest),
+                Mockito.eq(servletResponse),
+                Mockito.eq(USER_ID),
+                Mockito.any()
+        );
     }
 
     @Test
@@ -164,7 +228,8 @@ class AuthenticationLoginServiceTest {
 
         assertThatThrownBy(() -> service.login(
                 new LoginRequest(EMAIL, PASSWORD),
-                servletRequest
+                servletRequest,
+                servletResponse
         )).isInstanceOfSatisfying(BusinessException.class, exception -> {
             assertThat(exception.errorCode())
                     .isEqualTo(ErrorCode.AUTH_UNAUTHENTICATED);
@@ -197,7 +262,8 @@ class AuthenticationLoginServiceTest {
 
         assertThatThrownBy(() -> service.login(
                 new LoginRequest(EMAIL, PASSWORD),
-                servletRequest
+                servletRequest,
+                servletResponse
         )).isInstanceOfSatisfying(BusinessException.class, exception ->
                 assertThat(exception.errorCode())
                         .isEqualTo(ErrorCode.AUTH_UNAUTHENTICATED));
@@ -234,6 +300,7 @@ class AuthenticationLoginServiceTest {
                         null
                 ),
                 false,
+                true,
                 true
         );
         when(accountRepository.findByNormalizedEmail(EMAIL))
@@ -247,7 +314,8 @@ class AuthenticationLoginServiceTest {
 
         assertThatThrownBy(() -> service.login(
                 new LoginRequest(EMAIL, secretPassword),
-                servletRequest
+                servletRequest,
+                servletResponse
         )).isInstanceOfSatisfying(BusinessException.class, exception ->
                 assertThat(exception.errorCode())
                         .isEqualTo(ErrorCode.AUTH_UNAUTHENTICATED));
@@ -273,7 +341,8 @@ class AuthenticationLoginServiceTest {
 
         assertThatThrownBy(() -> service.login(
                 new LoginRequest(EMAIL, PASSWORD),
-                servletRequest
+                servletRequest,
+                servletResponse
         )).isInstanceOfSatisfying(
                 AuthenticationRateLimitExceededException.class,
                 exception -> assertThat(exception.retryAfterSeconds())
@@ -302,6 +371,20 @@ class AuthenticationLoginServiceTest {
             boolean mfaEnrolled,
             Instant lockedUntil
     ) {
+        return activeAccount(
+                passwordChangeRequired,
+                true,
+                mfaEnrolled,
+                lockedUntil
+        );
+    }
+
+    private static LoginAccount activeAccount(
+            boolean passwordChangeRequired,
+            boolean mfaRequired,
+            boolean mfaEnrolled,
+            Instant lockedUntil
+    ) {
         int failures = lockedUntil == null ? 0 : 5;
         Instant lastFailure =
                 lockedUntil == null ? null : lockedUntil.minusSeconds(900);
@@ -315,6 +398,7 @@ class AuthenticationLoginServiceTest {
                         lockedUntil
                 ),
                 passwordChangeRequired,
+                mfaRequired,
                 mfaEnrolled
         );
     }

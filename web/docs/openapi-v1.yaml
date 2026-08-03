@@ -231,7 +231,8 @@ paths:
       operationId: login
       summary: 관리자 이메일·비밀번호 검증
       description: |
-        성공해도 업무 권한을 부여하지 않고 비밀번호 변경 또는 MFA 다음 상태를 반환합니다.
+        일반 계정은 비밀번호 변경 또는 MFA 다음 상태를 반환합니다.
+        고정된 컨설턴트 테스트 계정은 MFA 없이 인증을 완료하고 200을 반환합니다.
         익명 세션에 결합된 CSRF 토큰이 필요합니다.
       security:
         - serverSession: []
@@ -244,6 +245,17 @@ paths:
             schema:
               $ref: "#/components/schemas/LoginRequest"
       responses:
+        "200":
+          description: MFA 예외 테스트 계정 인증 완료
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthenticationResponse"
         "202":
           description: 비밀번호 검증 성공, 초기 비밀번호 변경 또는 MFA 단계 필요
           headers:

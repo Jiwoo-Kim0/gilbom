@@ -1,6 +1,6 @@
 \set ON_ERROR_STOP on
 
--- 빈 volume에서 PostGIS, Flyway V1~V38, 필수 account/MFA/session/RBAC/security schema를 검증한다.
+-- 빈 volume에서 PostGIS, Flyway V1~V39, 필수 account/MFA/session/RBAC/security schema를 검증한다.
 -- flyway_role과 application_role은 psql --set으로 전달하며 비밀번호는 받거나 출력하지 않는다.
 SELECT (
     :'flyway_role' <> :'application_role'
@@ -10,12 +10,12 @@ SELECT (
         WHERE extname = 'postgis'
     )
     AND (
-        SELECT COUNT(*) = 38
+        SELECT COUNT(*) = 39
                AND COUNT(*) FILTER (WHERE NOT success) = 0
                AND COUNT(*) FILTER (
-                   WHERE version::INTEGER BETWEEN 1 AND 38
+                   WHERE version::INTEGER BETWEEN 1 AND 39
                      AND success
-               ) = 38
+               ) = 39
         FROM flyway_history.flyway_schema_history
     )
     AND to_regclass('auth.admin_user') IS NOT NULL
@@ -61,6 +61,46 @@ SELECT (
           AND character_maximum_length = 254
           AND is_generated = 'ALWAYS'
           AND is_nullable = 'NO'
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'auth'
+          AND table_name = 'admin_user'
+          AND column_name = 'mfa_required'
+          AND data_type = 'boolean'
+          AND is_nullable = 'NO'
+    )
+    AND (
+        SELECT COUNT(*)
+        FROM auth.admin_user
+        WHERE mfa_required = FALSE
+    ) = 1
+    AND EXISTS (
+        SELECT 1
+        FROM auth.admin_user admin_user
+        JOIN auth.user_role user_role
+          ON user_role.user_id = admin_user.user_id
+         AND user_role.is_active = TRUE
+         AND user_role.is_primary = TRUE
+        JOIN auth.role role
+          ON role.role_id = user_role.role_id
+         AND role.role_code = 'MANAGER'
+         AND role.is_system = TRUE
+         AND role.is_active = TRUE
+        WHERE admin_user.user_id =
+              '39000000-0000-4000-8000-000000000001'
+          AND admin_user.normalized_email =
+              'consultant.manager@gilbom.test'
+          AND admin_user.account_status = 'ACTIVE'
+          AND admin_user.is_active = TRUE
+          AND admin_user.password_change_required = FALSE
+          AND admin_user.mfa_required = FALSE
+    )
+    AND NOT EXISTS (
+        SELECT 1
+        FROM auth.mfa_factor
+        WHERE user_id = '39000000-0000-4000-8000-000000000001'
     )
     AND EXISTS (
         SELECT 1

@@ -191,6 +191,7 @@ class InitialPasswordChangeServiceTest {
                                 null
                         ),
                         true,
+                        true,
                         false
                 )));
     }

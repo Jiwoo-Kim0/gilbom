@@ -1,0 +1,187 @@
+# Day 10 테스트 증거 매트릭스
+
+기준일: 2026-08-03
+
+## 1. 목적과 판정 원칙
+
+이 문서는 Day 10 통합·보안·장애 테스트를 기존 자동화와 대조해 중복 구현을
+막고, 새 테스트 로직이 필요한 항목과 실행·증거 연결만 필요한 항목을 구분한다.
+
+- `예`: 반복 실행 가능한 자동 판정 로직이 있고 현재 CI 또는 격리 환경에서
+  실행된다.
+- `부분`: 자동 판정 로직이나 정적 계약 검사는 있지만 CI 연결, 실제 외부 경계,
+  호스트 수명주기 또는 PASS 증거 보존이 부족하다.
+- `아니오`: 요구사항을 직접 검증하는 자동 테스트가 없다.
+- `N/A`: 현재 운영 구조에는 대상 자체가 없다. 대상이 도입되면 다시 필수
+  게이트로 전환한다.
+- PASS 증거는 실행 결과로 생성된 파일만 인정한다. 테스트 소스와 Runbook은
+  구현 근거이지 PASS 증거가 아니다.
+- `.artifacts/backend-ci/build/test-results/**`와
+  `.artifacts/security-regression/**`는 Jenkins 최종 archive 목록에 포함한다.
+  장기 판정은 status marker, JUnit XML과 기준선 JSON을 함께 사용한다.
+- 이 단계의 최종 집계 증거는
+  `.artifacts/security-regression/baseline-summary.json`이며 모든 필수 gate가
+  `PASS`일 때만 생성 Stage가 통과한다.
+- `(예정)`은 아직 존재하는 PASS가 아니라 이후 구현이 생성해야 할 고정
+  증거 경로다.
+
+실행 환경은 다음 의미로 사용한다.
+
+- `CI`: Jenkins의 TLS DinD 안에서 실행하며 운영 Docker Socket과 운영
+  Credential을 사용하지 않는다.
+- `격리 Compose`: 운영과 다른 Compose project, network, volume에서 실행한다.
+- `스테이징 EC2`: 운영과 같은 호스트·systemd·TLS 구성을 복제한 테스트
+  인스턴스다.
+- `운영`: 실패 유도 없이 read-only 조회나 승인된 배포·Rollback 경계만
+  검증한다.
+
+## 2. 애플리케이션·인증·권한
+
+| ID | 검증 항목 | 기존 자동 테스트 | 추가 구현 필요 여부 | 실행 환경 | PASS 증거 파일 | 운영 영향 |
+| --- | --- | --- | --- | --- | --- | --- |
+| A01 | 로그인 성공·실패·임시 잠금·동일 오류 계약 | 예 | 없음 | CI | `.artifacts/ci-results/backend-test.status`, `.artifacts/backend-ci/build/test-results/test/*.xml` | 없음 |
+| A02 | MFA 등록·성공·실패·복구 코드·복구 코드 중복 사용 | 예 | 없음 | CI | A01과 동일 | 없음 |
+| A03 | TOTP 인접 time-step 허용과 같은 time-step 재사용 차단 | 예 | 없음 | CI | A01과 동일 | 없음 |
+| A04 | 호스트 시간 오차·NTP 이상 상태에서 TOTP 허용 범위 확인 | 아니오 | 필요. 애플리케이션 시계를 임의 변경하지 말고 주입 가능한 Clock 기반 테스트와 스테이징 NTP 상태 증거를 추가한다. | CI + 스테이징 EC2 | `(예정) .artifacts/day10/totp-clock-drift.json` | CI는 없음, 스테이징은 read-only 시간 조회 |
+| A05 | 로그아웃·idle/absolute 만료·Session ID와 CSRF 교체·이전 Session 재사용 차단 | 예 | 없음. 기존 HTTP/DB Runner를 원격 DinD 포트와 전용 DB 격리에 연결했다. | CI + 격리 Compose | `.artifacts/ci-results/auth-security-integration.status`, `.artifacts/security-regression/auth-security-integration.json` | 없음 |
+| A06 | 동시 세션 제한·비밀번호/권한/Scope 변경 시 기존 세션 즉시 폐기 | 예 | 없음 | CI | `.artifacts/ci-results/backend-test.status`, `.artifacts/ci-results/security-acceptance.status` | 없음 |
+| A07 | 역할별 401·403, ALLOW-DENY 우선순위, 만료 권한, 마지막 ADMIN 보호 | 예 | 없음 | CI | `.artifacts/ci-results/security-acceptance.status`, `.artifacts/backend-ci/build/test-results/securityAcceptanceTest/*.xml` | 없음 |
+| A08 | 객체 Scope, 목록·상세·지도·요약 IDOR, SSE 구독 중 Scope/Session 재검사 | 예 | 없음 | CI | A07과 동일 | 없음 |
+| A09 | CSRF 누락·이전 Token·만료 Session의 CSRF 재사용 차단 | 부분 | 누락과 Session/CSRF 교체 전 Token 재사용은 검증한다. 유효 Session의 Token 한 글자 변조를 명시적으로 검증하는 MockMvc와 HTTP 통합 case를 추가한다. | CI + 격리 Compose | `.artifacts/ci-results/backend-test.status`, `.artifacts/ci-results/csrf-permission-audit.status`; `(예정) .artifacts/day10/csrf-tamper.json` | 없음 |
+| A10 | 운영 CORS exact allowlist와 Credential preflight | 부분 | 단위 테스트는 존재한다. 실제 HTTPS 경계에서 허용 Origin 1개와 비허용 Origin 1개를 확인하는 smoke가 필요 | CI + 스테이징 EC2 | `.artifacts/ci-results/backend-test.status`; `(예정) .artifacts/day10/staging/cors-smoke.json` | 스테이징 read-only HTTP |
+| A11 | 운영 Cookie의 `Secure`, `HttpOnly`, `SameSite`, Path와 로그아웃 만료 | 부분 | 운영 Profile 단위 테스트는 존재한다. 실제 HTTPS `Set-Cookie` 증거 수집이 필요 | CI + 스테이징 EC2 | `.artifacts/ci-results/backend-test.status`; `(예정) .artifacts/day10/staging/cookie-smoke.json` | 스테이징 Session·감사 행 생성 가능, 운영 없음 |
+| A12 | HSTS·CSP·nosniff·frame·referrer·permissions 등 보안 응답 Header | 예 | 테스트 로직 추가 없음. `scripts/verify-day8-ec2.sh`의 Header 결과를 파일로 보존하도록 실행 wrapper만 필요 | CI + 운영 read-only | `.artifacts/ci-results/frontend-runtime-image.status`; `(예정) .artifacts/day10/production/security-headers.json` | 운영 read-only HTTPS |
+| A13 | 악성 HTML·Script를 실행 가능한 DOM으로 렌더링하지 않음 | 예 | 없음 | CI | `.artifacts/ci-results/frontend-test.status` | 없음 |
+| A14 | 과도한 Body/Image, 잘못된 기간, 미래 시각, Page size와 Pagination 경계 | 예 | 없음 | CI | `.artifacts/ci-results/backend-test.status`, `.artifacts/ci-results/frontend-test.status` | 없음 |
+| A15 | 멱등 키의 동일 Body replay와 상이 Body 충돌, 동시 요청 단일 처리 | 예 | 없음 | CI | `.artifacts/ci-results/backend-test.status`, `.artifacts/ci-results/frontend-test.status` | 없음 |
+| A16 | 확장자·Content-Type이 아니라 실제 JPEG byte 형식으로 이미지 검증 | 예 | 없음 | CI | `.artifacts/ci-results/backend-test.status` | 없음 |
+| A17 | 필수 운영 Secret·DB 설정 오류 시 fail-fast/fail-closed | 예 | 없음 | CI + 격리 Compose | `.artifacts/ci-results/backend-test.status`, `.artifacts/ci-results/report-llm-fallback.status` | 없음 |
+
+주요 구현 근거:
+
+- 인증 전체 HTTP/DB 시나리오:
+  `scripts/auth-security-integration-test.py`
+- TOTP와 복구:
+  `backend/src/test/java/com/gilbom/auth/mfa/TotpServiceTest.java`,
+  `backend/src/test/java/com/gilbom/auth/mfa/MfaAuthenticationCompletionServiceTest.java`
+- 권한·세션 폐기·마지막 ADMIN:
+  `backend/src/test/java/com/gilbom/auth/mfa/AuthenticationUserRepositoryIntegrationTest.java`
+- 객체와 SSE Scope:
+  `backend/src/test/java/com/gilbom/defect/integration/DefectQueryScopeIntegrationTest.java`,
+  `backend/src/test/java/com/gilbom/robot/integration/RobotQueryScopeIntegrationTest.java`,
+  `backend/src/test/java/com/gilbom/defect/realtime/DefectSseServiceTest.java`,
+  `backend/src/test/java/com/gilbom/robot/realtime/RobotSseServiceTest.java`
+- CORS·Header·CSRF:
+  `backend/src/test/java/com/gilbom/security/CorsEnabledSecurityConfigTest.java`,
+  `backend/src/test/java/com/gilbom/security/SecurityConfigTest.java`
+- 이미지 실제 byte 검사:
+  `backend/src/test/java/com/gilbom/storage/ImageUploadServiceTest.java`
+
+## 3. 보고서·LLM·감사·MQTT
+
+| ID | 검증 항목 | 기존 자동 테스트 | 추가 구현 필요 여부 | 실행 환경 | PASS 증거 파일 | 운영 영향 |
+| --- | --- | --- | --- | --- | --- | --- |
+| B01 | LLM Timeout·빈 응답·비 JSON·잘못된 Schema와 Template fallback | 예 | 없음 | CI + 격리 Compose | `.artifacts/ci-results/backend-test.status`, `.artifacts/ci-results/report-llm-fallback.status` | 없음 |
+| B02 | 보고서 생성·수정·검토 요청·반려·승인, 자기 승인 차단, 승인본 변경 차단 | 예 | 없음 | CI + 격리 Compose | B01과 동일 | 없음 |
+| B03 | 감사 로그 필수 기록 실패 시 업무 Transaction Rollback, append-only, 민감정보 redaction | 예 | 없음 | CI | `.artifacts/ci-results/security-acceptance.status`, `.artifacts/ci-results/csrf-permission-audit.status`, `.artifacts/ci-results/jenkins-log-secret.status` | 없음 |
+| B04 | MQTT TTL·Replay·Retain·멱등성과 실제 TLS Broker 왕복 | 예 | 없음. 기존 `mqttBrokerE2E`를 DinD TLS Broker와 임시 Robot Credential에 연결하고 종료 시 Credential 삭제를 검증한다. | CI + 격리 Compose | `.artifacts/ci-results/mqtt-broker-e2e.status`, `.artifacts/security-regression/mqtt-broker-e2e.json`, `.artifacts/backend-ci/build/test-results/mqttBrokerE2E/*.xml` | 없음 |
+| B05 | Robot별 MQTT Topic ACL 허용·타 Robot/역방향 Topic 거부 | 부분 | ACL 설정과 수동 부정 테스트 Runbook은 존재하지만 자동 PASS 판정이 없다. 격리 Broker에 두 Robot Credential을 발급해 허용/거부를 함께 확인하는 자동 테스트가 필요 | 격리 Compose | `(예정) .artifacts/day10/mqtt-acl/summary.json` | 없음 |
+| B06 | 인증·RBAC·Session을 포함한 대용량 데이터와 k6 부하 | 아니오 | 필요. Seed 생성, 로그인/MFA 준비율, 정상/잠금 계정 분리, Role/Scope별 시나리오와 Session cleanup을 구현. 기존 `passwordHashLoadTest`는 Argon2 단일 부하라 이 요구를 대체하지 않는다. | 격리 Compose + 스테이징 EC2 | `(예정) .artifacts/day10/k6/summary.json`, `(예정) .artifacts/day10/k6/thresholds.json` | 운영에서는 실행 금지, 스테이징 자원 부하 |
+
+주요 구현 근거:
+
+- LLM 오류와 결과 검증:
+  `backend/src/test/java/com/gilbom/llm/GmsLlmClientTest.java`,
+  `backend/src/test/java/com/gilbom/report/generation/ReportLlmResultValidatorTest.java`,
+  `scripts/container-resilience-smoke.sh`
+- 보고서 Workflow:
+  `backend/src/test/java/com/gilbom/report/integration/ReportDomainServiceIntegrationTest.java`,
+  `backend/src/test/java/com/gilbom/report/integration/ReportApplicationServiceIntegrationTest.java`
+- 감사:
+  `backend/src/test/java/com/gilbom/audit/AuditLogServiceTest.java`,
+  `backend/src/test/java/com/gilbom/audit/integration/AuditLogIntegrationTest.java`
+- MQTT 실제 Broker E2E:
+  `backend/src/test/java/com/gilbom/robot/mqtt/client/MqttPublisherBrokerE2E.java`,
+  `backend/src/test/java/com/gilbom/robot/mqtt/client/MqttInboundBrokerE2E.java`
+- MQTT ACL과 현재 수동 부정 절차:
+  `infra/mosquitto/acl`,
+  `infra/mosquitto/README.md`
+
+## 4. CI/CD·호스트·복구
+
+| ID | 검증 항목 | 기존 자동 테스트 | 추가 구현 필요 여부 | 실행 환경 | PASS 증거 파일 | 운영 영향 |
+| --- | --- | --- | --- | --- | --- | --- |
+| C01 | CI/CD 성공·실패 알림, 수동 배포 승인, 조건부 Rollback A/B/C | 예 | 없음 | CI + 격리 Compose + 승인된 운영 배포 | `.artifacts/cicd-notification/summary.json`, `.artifacts/deploy/release-manifest.json`, `.artifacts/rollback-drill/summary.json`, `stage15-final-evidence.json` | 훈련은 없음, 실제 배포는 승인된 운영 변경 |
+| C02 | DB·Robot image·Report PDF Volume 보존과 이전 Artifact reload | 예 | 없음 | CI + 격리 Compose | `.artifacts/ci-results/volume-persistence.status`, `.artifacts/rollback-drill/summary.json` | 없음 |
+| C03 | EC2 재부팅 후 Docker·Compose·Timer 자동 시작 | 부분 | `restart: unless-stopped`와 복구 검사는 있으나 실제 호스트 reboot 증거가 없다. 스테이징 전용 reboot drill 필요 | 스테이징 EC2 | `(예정) .artifacts/day10/staging/reboot-recovery.json` | 스테이징 중단 발생, 운영 실행 금지 |
+| C04 | 인증서 갱신 Timer·webroot·Nginx reload와 실제 ACME dry-run | 부분 | 정적 계약과 Timer active 검사는 존재한다. 스테이징에서 `certbot renew --dry-run` 결과와 갱신 전후 HTTPS를 보존해야 한다. | CI + 스테이징 EC2 | `.artifacts/ci-results/repository-policy.status`; `(예정) .artifacts/day10/staging/certbot-dry-run.txt` | 스테이징 ACME 요청·Nginx reload 가능 |
+| C05 | S3 최소권한과 Block Public Access | N/A | 현재 저장소는 `local-disk` named volume이다. S3 전환 PR에서 IAM policy, bucket public access와 presigned URL test를 필수로 추가 | 향후 CI + 스테이징 AWS | `(향후) .artifacts/day10/aws/s3-access.json` | 현재 없음 |
+| C06 | DB·이미지·PDF·MQTT Volume 백업 전체 복원 재확인 | 부분 | 백업 checksum, archive 열람과 `pg_restore --list`는 자동화됐다. 격리된 빈 project에 실제 restore 후 DB/파일 hash를 대조하는 drill이 필요 | 격리 Compose | `(예정) .artifacts/day10/restore/summary.json` | 없음. 운영 DB 자동 복원 금지 |
+| C07 | 외부 노출 포트와 AWS Security Group | 부분 | Compose의 Backend/DB 비공개와 EC2 container binding은 검사한다. 호스트 `ss` 결과와 외부 관점 TCP scan, SG 규칙 증거가 없다. | 스테이징 EC2 + 외부 검사 Runner | `(예정) .artifacts/day10/staging/exposed-ports.json`, `(예정) .artifacts/day10/aws/security-groups.json` | read-only scan, 허용 범위 내 네트워크 부하 |
+| C08 | Backend·Frontend dependency와 image Critical/High 취약점 | 예 | 없음 | CI | `.artifacts/source-security/dependency-policy-summary.json`, `.artifacts/image-security/policy-summary.json`, `.artifacts/ci-results/sbom-cve.status` | 없음 |
+| C09 | Cosign으로 release image/archive 서명과 배포 전 검증 | 아니오 | 필요. CI signer identity/key 정책, 서명 대상 digest, signature bundle, deploy/rollback verify gate를 먼저 설계한다. `verify-day8-signed-image.py`는 URL 서명 검사이며 Cosign 증거가 아니다. | CI + 배포 preflight | `(예정) release/signatures/*.bundle`, `(예정) .artifacts/ci-results/cosign-verify.status` | CI는 없음, 배포 시 read-only 검증 |
+
+주요 구현 근거:
+
+- Rollback 훈련:
+  `Jenkinsfile.rollback-drill`,
+  `scripts/run-production-rollback-drill.sh`,
+  `scripts/verify-production-rollback-drill-evidence.sh`
+- 운영·Stage 15 증거:
+  `scripts/verify-day8-ec2.sh`,
+  `scripts/collect-stage15-host-evidence.sh`,
+  `scripts/generate-stage15-final-evidence.py`
+- Volume 복구:
+  `scripts/container-resilience-smoke.sh`,
+  `scripts/verify-day8-persistence.sh`
+- 인증서 자동화:
+  `scripts/verify-certbot-automation.sh`,
+  `infra/systemd/gilbom-certificate-renew.timer`
+- 취약점:
+  `scripts/verify-source-security.sh`,
+  `scripts/scan-image-security.sh`
+
+## 5. 실제 누락과 다음 구현 경계
+
+### 새 테스트 로직이 필요한 항목
+
+1. `B06` k6 인증·권한·Session 부하 시나리오
+2. `C09` Cosign 서명·검증과 배포 차단 계약
+3. `C06` 격리된 전체 backup restore drill
+4. `C03` 스테이징 EC2 reboot recovery drill
+5. `B05` Robot별 MQTT ACL 자동 부정 테스트
+6. `A09`의 명시적인 CSRF Token 변조 case
+7. `A10`, `A11`, `C04`, `C07` 실제 외부/호스트 경계 검증
+8. `A04` 애플리케이션 Clock과 스테이징 NTP 증거
+
+### 새 테스트를 만들지 않고 연결만 할 항목
+
+`B04` TLS MQTT Stage, `A05` 인증 임시 DB Stage와 Backend JUnit archive 연결은
+2026-08-03에 완료했다. 남은 연결 작업은 다음과 같다.
+
+1. Frontend TAP 결과를
+   JUnit 또는 JSON으로 변환해 보존한다.
+2. 스테이징·운영 read-only 스크립트의 console PASS를 고정 JSON/TXT Artifact로
+   회수한다.
+
+### 현재 중복 구현하지 않을 항목
+
+로그인·잠금·MFA·복구 코드, TOTP time-step 재사용, Session·CSRF 교체와 만료,
+동시 Session·권한 변경 폐기, RBAC·DENY·마지막 ADMIN, 객체·SSE Scope,
+입력 제한, XSS 렌더링, LLM fallback, Report Workflow, 감사 Transaction,
+이미지 byte 검사, Rollback A/B/C, Volume 보존, Critical/High 검사는 기존
+자동 테스트를 그대로 사용한다.
+
+## 6. 권장 실행 순서
+
+1. CI 증거 보존과 기존 MQTT/Auth Runner 연결
+2. Cosign release provenance gate
+3. 격리 Compose backup restore와 k6 기준선
+4. 스테이징 EC2의 CORS/Cookie/포트/인증서/NTP read-only 검사
+5. 스테이징 reboot recovery
+6. 모든 스테이징 증거가 PASS한 뒤 운영에는 외부 HTTPS와 host 상태의
+   read-only 재검사만 수행
+
+운영에서 의도적으로 로그인 잠금, 장애, DB 복원, 재부팅 또는 부하를 유발하지
+않는다. 운영 변경이 필요한 검증은 기존 수동 승인 배포·Rollback Job의 범위를
+넘기지 않는다.

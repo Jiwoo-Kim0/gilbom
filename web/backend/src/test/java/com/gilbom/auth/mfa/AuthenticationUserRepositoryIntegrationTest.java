@@ -29,6 +29,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import com.gilbom.auth.login.LoginAccountRepository;
+
 @Testcontainers(disabledWithoutDocker = true)
 class AuthenticationUserRepositoryIntegrationTest {
 
@@ -79,6 +81,41 @@ class AuthenticationUserRepositoryIntegrationTest {
                 .load()
                 .migrate();
         repository = new AuthenticationUserRepository(jdbcTemplate);
+    }
+
+    @Test
+    void migrationSeedsExactlyOneMfaExemptManagerAccount() {
+        UUID consultantId = UUID.fromString(
+                "39000000-0000-4000-8000-000000000001"
+        );
+
+        assertThat(jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM auth.admin_user
+                WHERE mfa_required = FALSE
+                """,
+                Integer.class
+        )).isEqualTo(1);
+        assertThat(repository.isMfaExemptUser(consultantId)).isTrue();
+        assertThat(new LoginAccountRepository(jdbcTemplate)
+                .findByNormalizedEmail("consultant.manager@gilbom.test")
+                .orElseThrow()
+                .mfaRequired()).isFalse();
+        assertThat(repository.findActiveUser(consultantId)
+                .orElseThrow()
+                .roles())
+                .extracting(RoleSummaryResponse::roleCode)
+                .containsExactly("MANAGER");
+        assertThat(jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM auth.mfa_factor
+                WHERE user_id = ?
+                """,
+                Integer.class,
+                consultantId
+        )).isZero();
     }
 
     @Test

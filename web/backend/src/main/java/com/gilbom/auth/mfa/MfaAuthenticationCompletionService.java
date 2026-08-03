@@ -165,11 +165,55 @@ public class MfaAuthenticationCompletionService {
         return authenticationResponse(snapshot, true);
     }
 
+    /**
+     * 계정 저장소에서 명시적으로 MFA가 면제된 단일 테스트 계정만 사용한다.
+     */
+    @Transactional
+    public AuthenticationResponse completeMfaBypass(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            UUID userId,
+            AuthenticationRequestAuditContext auditContext
+    ) {
+        if (!userRepository.isMfaExemptUser(userId)) {
+            throw unauthenticated();
+        }
+        requireChallenge(
+                request,
+                userId,
+                AuthenticationState.MFA_REQUIRED
+        );
+        CompletionSnapshot snapshot = completeAuthentication(
+                request,
+                response,
+                userId,
+                auditContext,
+                true
+        );
+        return authenticationResponse(snapshot, false);
+    }
+
     private CompletionSnapshot completeAuthentication(
             HttpServletRequest request,
             HttpServletResponse response,
             UUID userId,
             AuthenticationRequestAuditContext auditContext
+    ) {
+        return completeAuthentication(
+                request,
+                response,
+                userId,
+                auditContext,
+                false
+        );
+    }
+
+    private CompletionSnapshot completeAuthentication(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            UUID userId,
+            AuthenticationRequestAuditContext auditContext,
+            boolean mfaBypassed
     ) {
         AuthenticationUser user = userRepository.findActiveUser(userId)
                 .orElseThrow(
@@ -183,8 +227,15 @@ public class MfaAuthenticationCompletionService {
                                 .map(SimpleGrantedAuthority::new)
                                 .toList()
                 );
-        AuthenticatedSession session =
-                defenseService.completeMfaAndRecordLogin(
+        AuthenticatedSession session = mfaBypassed
+                ? defenseService.completeMfaBypassAndRecordLogin(
+                        request,
+                        response,
+                        userId,
+                        authentication,
+                        auditContext
+                )
+                : defenseService.completeMfaAndRecordLogin(
                         request,
                         response,
                         userId,

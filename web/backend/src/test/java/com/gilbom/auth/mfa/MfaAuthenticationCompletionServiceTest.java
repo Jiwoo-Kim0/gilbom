@@ -225,6 +225,68 @@ class MfaAuthenticationCompletionServiceTest {
         );
     }
 
+    @Test
+    void explicitMfaExemptionCompletesWithoutASecondFactor() {
+        when(userRepository.isMfaExemptUser(USER_ID)).thenReturn(true);
+        when(sessionService.findCurrentState(request))
+                .thenReturn(Optional.of(challenge(
+                        AuthenticationState.MFA_REQUIRED
+                )));
+        when(userRepository.findActiveUser(USER_ID))
+                .thenReturn(Optional.of(user()));
+        when(defenseService.completeMfaBypassAndRecordLogin(
+                Mockito.eq(request),
+                Mockito.eq(response),
+                Mockito.eq(USER_ID),
+                Mockito.any(),
+                Mockito.eq(auditContext)
+        )).thenReturn(new AuthenticatedSession(
+                AuthenticationState.AUTHENTICATED,
+                NOW.plusSeconds(8 * 60 * 60),
+                "replacement-csrf"
+        ));
+
+        AuthenticationResponse result = service.completeMfaBypass(
+                request,
+                response,
+                USER_ID,
+                auditContext
+        );
+
+        assertThat(result.csrfToken()).isEqualTo("replacement-csrf");
+        verify(defenseService).completeMfaBypassAndRecordLogin(
+                Mockito.eq(request),
+                Mockito.eq(response),
+                Mockito.eq(USER_ID),
+                Mockito.any(),
+                Mockito.eq(auditContext)
+        );
+    }
+
+    @Test
+    void nonExemptAccountCannotUseTheMfaBypassCompletion() {
+        when(userRepository.isMfaExemptUser(USER_ID)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.completeMfaBypass(
+                request,
+                response,
+                USER_ID,
+                auditContext
+        )).isInstanceOfSatisfying(BusinessException.class, exception ->
+                assertThat(exception.errorCode())
+                        .isEqualTo(ErrorCode.AUTH_UNAUTHENTICATED)
+        );
+
+        verify(defenseService, never())
+                .completeMfaBypassAndRecordLogin(
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()
+                );
+    }
+
     private static SessionSecurityState challenge(
             AuthenticationState state
     ) {

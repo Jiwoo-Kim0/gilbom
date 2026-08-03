@@ -41,7 +41,10 @@ for stage in \
   "stage('Build full-SHA images')" \
   "stage('Backend runtime image')" \
   "stage('Frontend runtime image')" \
-  "stage('Flyway V1-V38')" \
+  "stage('Start integration stack')" \
+  "stage('Authentication temporary DB integration')" \
+  "stage('Actual TLS MQTT Broker E2E')" \
+  "stage('Flyway V1-V39')" \
   "stage('PostGIS RBAC and Spring Session')" \
   "stage('CSRF permission and append-only audit')" \
   "stage('Integration smoke')" \
@@ -49,6 +52,7 @@ for stage in \
   "stage('Report LLM fallback and resilience suite')" \
   "stage('Image layer history and log Secret scan')" \
   "stage('Required image SBOM and CVE scan')" \
+  "stage('Security regression baseline evidence')" \
   "stage('Prepare release SBOM and vulnerability artifacts')" \
   "stage('Create release image archive')" \
   "stage('Build metadata and release integrity')"
@@ -68,6 +72,36 @@ assert_contains Jenkinsfile \
 assert_contains Jenkinsfile \
   'TRIVY_REQUIRE_PREPARED=true' \
   "required image scan must consume fail-fast scanner readiness"
+assert_contains Jenkinsfile \
+  'GILBOM_SECURITY_TEST_PUBLISHED_HOST=docker-builder' \
+  "authentication integration must reach published DinD ports through docker-builder"
+assert_contains Jenkinsfile \
+  'MQTT_E2E_PUBLISHED_HOST=docker-builder' \
+  "MQTT Broker E2E must reach the TLS DinD broker through docker-builder"
+assert_contains Jenkinsfile \
+  'MQTT_PUBLIC_HOSTNAME=docker-builder' \
+  "MQTT Broker certificate SAN must include the DinD access hostname"
+assert_contains Jenkinsfile \
+  'COUNT(*) = 39' \
+  "Flyway history gate must require all 39 migrations"
+assert_contains Jenkinsfile \
+  'MAX(version::INTEGER) = 39' \
+  "Flyway history gate must require V39 as the maximum migration"
+assert_contains Jenkinsfile \
+  '.artifacts/security-regression/**' \
+  "security regression evidence must be archived"
+assert_contains Jenkinsfile \
+  'python3 scripts/generate-security-regression-baseline.py' \
+  "security regression gates must be aggregated before release preparation"
+assert_contains scripts/run-backend-ci-task.sh \
+  'test|securityAcceptanceTest|mqttBrokerE2E' \
+  "Backend CI runner must allow the dedicated MQTT Broker E2E task"
+assert_contains scripts/run-mqtt-broker-e2e-ci.sh \
+  'MQTT_E2E_CA_CERTIFICATE_HOST="$CA_CERTIFICATE"' \
+  "MQTT Broker E2E must mount the generated TLS CA into the test runner"
+assert_contains backend/build.gradle \
+  'MQTT Broker E2E must execute without skipped tests' \
+  "MQTT Broker E2E must fail closed when no real test executes"
 assert_contains Jenkinsfile \
   'test "$BACKEND_IMAGE" = "gilbom-backend:$RELEASE_SHA"' \
   "Backend build must use the full release SHA"

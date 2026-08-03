@@ -26,6 +26,8 @@ export type LoginChallenge = {
   challengeExpiresAt: string
 }
 
+export type LoginResponse = LoginChallenge | AuthenticationResponse
+
 export type AuthenticationSessionState = {
   authenticationState:
     | 'ANONYMOUS'
