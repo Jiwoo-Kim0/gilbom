@@ -15,6 +15,9 @@
 set -eu
 set +x
 
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+PROJECT_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+
 KEEP=false
 if [ "${1:-}" = "--keep" ]; then
   KEEP=true
@@ -24,7 +27,7 @@ fi
 BUNDLE="${1:-}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgis/postgis:16-3.5}"
 ALPINE_IMAGE="${ALPINE_IMAGE:-alpine:3.22}"
-DRILL_ID="restore-drill-$(date -u +%Y%m%d%H%M%S)"
+DRILL_ID="restore-drill-$(date -u +%Y%m%d%H%M%S)-$$"
 DRILL_DB=gilbom
 DRILL_USER=gilbom_drill
 WORK_DIR=""
@@ -48,6 +51,37 @@ check() {
     printf '  FAIL  %s%s\n' "$label" "${detail:+ — $detail}"
     FAILURES=$((FAILURES + 1))
   fi
+}
+
+find_drill_volume() {
+  suffix=$1
+  for candidate in $CREATED_VOLUMES
+  do
+    case "$candidate" in
+      *-"$suffix")
+        printf '%s\n' "$candidate"
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+hash_restored_volume() {
+  volume_name=$1
+  output_name=$2
+  docker run --rm \
+    --read-only \
+    --mount "type=volume,src=$volume_name,dst=/source,readonly" \
+    --mount "type=bind,src=$WORK_DIR,dst=/out" \
+    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
+    "$ALPINE_IMAGE" \
+    sh -ec '
+      cd /source
+      find . -type f -exec sha256sum {} \; \
+        | sed "s#  \./#  #" \
+        | sort > "/out/$1"
+    ' sh "$output_name"
 }
 
 cleanup() {
@@ -95,6 +129,24 @@ else
   check "SHA256SUMS 존재" FAIL "번들이 아니거나 backup이 중간에 끊겼다"
 fi
 [ "$FAILURES" -eq 0 ] || fail "bundle integrity check failed"
+
+for required_manifest in \
+  database.content.sha256 \
+  robot_images.database.sha256 \
+  robot_images.volume.sha256 \
+  report_pdf_data.database.sha256 \
+  report_pdf_data.volume.sha256
+do
+  [ -f "$BUNDLE/$required_manifest" ] \
+    && [ ! -L "$BUNDLE/$required_manifest" ] \
+    || fail \
+      "required content manifest is missing: $required_manifest (새 volume backup이 필요하다)"
+  grep -Eq \
+    "^[0-9a-f]{64}  \\./$required_manifest$" \
+    "$BUNDLE/SHA256SUMS" \
+    || fail "content manifest is not covered by SHA256SUMS: $required_manifest"
+done
+check "DB·image·PDF source hash manifest" PASS
 
 WORK_DIR="$(mktemp -d)"
 chmod 0700 "$WORK_DIR"
@@ -191,6 +243,39 @@ drill_sql() {
       --set ON_ERROR_STOP=1 \
       --command "$1"
 }
+
+docker exec \
+  --interactive \
+  --env PGHOST=127.0.0.1 \
+  --env PGUSER="$DRILL_USER" \
+  --env PGDATABASE="$DRILL_DB" \
+  --env PGPASSWORD="$drill_password" \
+  "$CONTAINER" \
+  sh -s \
+  < "$PROJECT_DIR/infra/scripts/generate-database-content-manifest.sh" \
+  > "$WORK_DIR/database.content.sha256" \
+  || fail "restored database content manifest could not be generated"
+if cmp -s \
+    "$BUNDLE/database.content.sha256" \
+    "$WORK_DIR/database.content.sha256"; then
+  table_count="$(
+    awk '!/^#/ && $3 ~ /^table:/ { count++ } END { print count + 0 }' \
+      "$WORK_DIR/database.content.sha256"
+  )"
+  check "DB table content SHA-256" PASS "$table_count개 table 완전 일치"
+  sequence_count="$(
+    awk '!/^#/ && $3 ~ /^sequence:/ { count++ } END { print count + 0 }' \
+      "$WORK_DIR/database.content.sha256"
+  )"
+  check "DB sequence state SHA-256" PASS "$sequence_count개 sequence 완전 일치"
+else
+  diff -u \
+    "$BUNDLE/database.content.sha256" \
+    "$WORK_DIR/database.content.sha256" \
+    > "$WORK_DIR/database.content.diff" 2>/dev/null || true
+  check "DB table content SHA-256" FAIL "backup 시점과 복원본 내용이 다르다"
+  check "DB sequence state SHA-256" FAIL "backup 시점과 복원본 내용이 다르다"
+fi
 
 echo
 echo "5. 스키마와 마이그레이션"
@@ -294,12 +379,7 @@ echo "  주의: keyring을 잃으면 이 암호문은 복구 불가다. DB backu
 
 echo
 echo "8. 이미지 파일과 DB 참조"
-image_volume=""
-for volume in $CREATED_VOLUMES; do
-  case "$volume" in
-    *robot_images) image_volume="$volume" ;;
-  esac
-done
+image_volume="$(find_drill_volume robot_images || true)"
 
 if [ -z "$image_volume" ]; then
   check "robot_images volume" FAIL "번들에 robot_images archive가 없다"
@@ -312,41 +392,139 @@ else
       AND image_status = 'AVAILABLE'
       AND deleted_at IS NULL
     ORDER BY object_key;
-  " > "$WORK_DIR/database.sha256" 2>/dev/null || true
+  " > "$WORK_DIR/robot_images.database.sha256" 2>/dev/null \
+    || fail "restored robot image database references could not be read"
 
-  docker run --rm \
-    --mount "type=volume,src=$image_volume,dst=/source,readonly" \
-    --mount "type=bind,src=$WORK_DIR,dst=/out" \
-    "$ALPINE_IMAGE" \
-    sh -ec '
-      cd /source
-      find . -type f -name "*.jpg" -exec sha256sum {} \; \
-        | sed "s#  \./#  #" \
-        | sort > /out/volume.sha256
-    ' || fail "restored volume could not be hashed"
+  hash_restored_volume \
+    "$image_volume" \
+    robot_images.volume.sha256 \
+    || fail "restored robot_images volume could not be hashed"
 
-  expected_count="$(grep -c . "$WORK_DIR/database.sha256" 2>/dev/null || echo 0)"
+  if cmp -s \
+      "$BUNDLE/robot_images.volume.sha256" \
+      "$WORK_DIR/robot_images.volume.sha256"; then
+    restored_image_files="$(
+      awk 'NF { count++ } END { print count + 0 }' \
+        "$WORK_DIR/robot_images.volume.sha256"
+    )"
+    check \
+      "robot_images restored file SHA-256" \
+      PASS \
+      "$restored_image_files개 file 완전 일치"
+  else
+    check \
+      "robot_images restored file SHA-256" \
+      FAIL \
+      "backup 시점과 복원본 file manifest가 다르다"
+  fi
+
+  if cmp -s \
+      "$BUNDLE/robot_images.database.sha256" \
+      "$WORK_DIR/robot_images.database.sha256"; then
+    check "robot image DB reference SHA-256" PASS
+  else
+    check "robot image DB reference SHA-256" FAIL "DB 참조 manifest가 다르다"
+  fi
+
+  expected_count="$(
+    awk 'NF { count++ } END { print count + 0 }' \
+      "$WORK_DIR/robot_images.database.sha256"
+  )"
   missing=0
   while IFS= read -r expected; do
     [ -n "$expected" ] || continue
-    grep -Fxq "$expected" "$WORK_DIR/volume.sha256" || missing=$((missing + 1))
-  done < "$WORK_DIR/database.sha256"
+    grep -Fxq "$expected" "$WORK_DIR/robot_images.volume.sha256" \
+      || missing=$((missing + 1))
+  done < "$WORK_DIR/robot_images.database.sha256"
 
   if [ "$missing" -eq 0 ]; then
-    check "object_key ↔ 파일 + SHA-256" PASS "$expected_count건 모두 일치"
+    check \
+      "robot image DB reference ↔ file SHA-256" \
+      PASS \
+      "$expected_count건 모두 일치"
   else
-    check "object_key ↔ 파일 + SHA-256" FAIL "$missing건 누락 또는 변조"
+    check \
+      "robot image DB reference ↔ file SHA-256" \
+      FAIL \
+      "$missing건 누락 또는 변조"
   fi
 fi
 
 echo
-echo "9. MQTT credential"
-credential_volume=""
-for volume in $CREATED_VOLUMES; do
-  case "$volume" in
-    *mosquitto_credentials) credential_volume="$volume" ;;
-  esac
-done
+echo "9. 승인 PDF 파일과 DB 참조"
+report_pdf_volume="$(find_drill_volume report_pdf_data || true)"
+if [ -z "$report_pdf_volume" ]; then
+  check "report_pdf_data volume" FAIL "번들에 report_pdf_data archive가 없다"
+else
+  drill_sql "
+    SELECT encode(approved_pdf_sha256, 'hex')
+        || '  ' || approved_pdf_storage_key
+    FROM report.anomaly_report
+    WHERE approved_pdf_storage_key IS NOT NULL
+      AND approved_pdf_sha256 IS NOT NULL
+    ORDER BY approved_pdf_storage_key;
+  " > "$WORK_DIR/report_pdf_data.database.sha256" 2>/dev/null \
+    || fail "restored report PDF database references could not be read"
+
+  hash_restored_volume \
+    "$report_pdf_volume" \
+    report_pdf_data.volume.sha256 \
+    || fail "restored report_pdf_data volume could not be hashed"
+
+  if cmp -s \
+      "$BUNDLE/report_pdf_data.volume.sha256" \
+      "$WORK_DIR/report_pdf_data.volume.sha256"; then
+    restored_pdf_files="$(
+      awk 'NF { count++ } END { print count + 0 }' \
+        "$WORK_DIR/report_pdf_data.volume.sha256"
+    )"
+    check \
+      "report_pdf_data restored file SHA-256" \
+      PASS \
+      "$restored_pdf_files개 file 완전 일치"
+  else
+    check \
+      "report_pdf_data restored file SHA-256" \
+      FAIL \
+      "backup 시점과 복원본 file manifest가 다르다"
+  fi
+
+  if cmp -s \
+      "$BUNDLE/report_pdf_data.database.sha256" \
+      "$WORK_DIR/report_pdf_data.database.sha256"; then
+    check "report PDF DB reference SHA-256" PASS
+  else
+    check "report PDF DB reference SHA-256" FAIL "DB 참조 manifest가 다르다"
+  fi
+
+  expected_pdf_count="$(
+    awk 'NF { count++ } END { print count + 0 }' \
+      "$WORK_DIR/report_pdf_data.database.sha256"
+  )"
+  missing_pdf=0
+  while IFS= read -r expected_pdf
+  do
+    [ -n "$expected_pdf" ] || continue
+    grep -Fxq "$expected_pdf" "$WORK_DIR/report_pdf_data.volume.sha256" \
+      || missing_pdf=$((missing_pdf + 1))
+  done < "$WORK_DIR/report_pdf_data.database.sha256"
+
+  if [ "$missing_pdf" -eq 0 ]; then
+    check \
+      "report PDF DB reference ↔ file SHA-256" \
+      PASS \
+      "$expected_pdf_count건 모두 일치"
+  else
+    check \
+      "report PDF DB reference ↔ file SHA-256" \
+      FAIL \
+      "$missing_pdf건 누락 또는 변조"
+  fi
+fi
+
+echo
+echo "10. MQTT credential"
+credential_volume="$(find_drill_volume mosquitto_credentials || true)"
 if [ -z "$credential_volume" ]; then
   check "mosquitto credential volume" FAIL "번들에 archive가 없다"
 else
@@ -364,7 +542,7 @@ else
 fi
 
 echo
-echo "10. 세션 처리 정책"
+echo "11. 세션 처리 정책"
 session_rows="$(
   drill_sql "SELECT count(*) FROM session_store.spring_session;" 2>/dev/null || echo error
 )"

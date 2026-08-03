@@ -295,17 +295,18 @@ sudo /usr/local/sbin/gilbom-backup database
 만들고 끝나면 지운다.
 
 **복호화에는 개인키가 필요하다.** 원칙대로라면 반출본을 내려받은 PC에서 돌린다.
-서버에서 돌려야 한다면 임시 `GNUPGHOME`을 쓰고 **끝난 뒤 반드시 지운다.**
+운영 EC2에 복호화 개인키를 올려 Drill하지 않는다. 새 형식의 bundle에는
+`database.content.sha256`, Robot image와 승인 PDF의 DB/Volume hash manifest가
+모두 있어야 한다.
 
 ```sh
-# 최신 volume backup 번들
-bundle="$(sudo ls -1d /opt/gilbom/backups/*-gilbom | tail -n 1)"
-
-sudo GNUPGHOME=/root/.drill-gnupg \
-  TOTP_KEYRING_FILE=/opt/gilbom/secrets/gilbom_mfa_totp_keyring \
-  sh /opt/gilbom/deploy/scripts/restore-drill.sh "$bundle"
-
-sudo rm -rf /root/.drill-gnupg      # 개인키를 서버에 남기지 않는다
+# GPG Private key와 별도 반출한 TOTP keyring이 있는 보안 복원 Runner에서 실행
+export GNUPGHOME=/secure/gilbom-backup-keyring
+export TOTP_KEYRING_FILE=/secure/gilbom_mfa_totp_keyring
+RESTORE_DRILL_OUTPUT_DIR=.artifacts/day10/restore \
+  sh scripts/run-isolated-backup-restore-drill.sh \
+  /secure/backups/<timestamp>-gilbom
+jq . .artifacts/day10/restore/summary.json
 ```
 
 검사 항목:
@@ -314,15 +315,18 @@ sudo rm -rf /root/.drill-gnupg      # 개인키를 서버에 남기지 않는다
 2. dump·volume archive 복호화
 3. 임시 PostgreSQL 기동, 임시 volume 복원
 4. `pg_restore --exit-on-error`
-5. 스키마 9종, Flyway 최신 version과 실패 이력 없음
-6. 계정·역할·로봇·임무·결함·감사 로그·보고서 version 행 수
-7. 승인 PDF 참조 건수, 감사 로그 연속성
-8. TOTP `secret_key_version`이 keyring에 있는지
-9. `storage.robot_image.object_key` ↔ 실제 파일 + SHA-256 전건 일치
-10. MQTT credential 파일 존재
-11. 세션 처리 정책 안내
+5. 애플리케이션 전체 table별 행 수·정규화된 content SHA-256 완전 일치
+6. 스키마 9종, Flyway 최신 version과 실패 이력 없음
+7. 계정·역할·로봇·임무·결함·감사 로그·보고서 version 행 수
+8. 승인 PDF 참조 건수, 감사 로그 연속성
+9. TOTP `secret_key_version`이 keyring에 있는지
+10. `storage.robot_image.object_key` ↔ 복원 파일 + SHA-256 전건 일치
+11. 승인 PDF storage key ↔ 복원 파일 + SHA-256 전건 일치
+12. Robot image·승인 PDF Volume 전체 파일 manifest 완전 일치
+13. MQTT credential 파일 존재와 세션 처리 정책 안내
 
 `--keep`을 붙이면 임시 자원을 남긴다. 실패 원인을 파고들 때 쓴다.
+기본 운영 증거 실행은 wrapper를 사용하고 `--keep`을 사용하지 않는다.
 
 ### 복원된 이미지를 화면에서 확인
 

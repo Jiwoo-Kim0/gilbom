@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "status": "PARTIAL",
+  "recordedAtDate": "2026-08-03",
+  "scope": "day10-stage6-recovery",
+  "checks": {
+    "existingCiResilienceAutomation": "IMPLEMENTED",
+    "isolatedActualBackupRestore": "IMPLEMENTED_PENDING_ACTUAL_BUNDLE_RUN",
+    "stagingServiceRestart": "PENDING_NO_STAGING",
+    "stagingEc2RebootRecovery": "PENDING_NO_STAGING",
+    "stagingCertificateDryRun": "PENDING_NO_STAGING",
+    "stagingRollbackRehearsal": "PENDING_NO_STAGING"
+  },
+  "safety": {
+    "productionDatabaseRestorePerformed": false,
+    "productionEc2RebootPerformed": false,
+    "productionFailureInjectionPerformed": false
+  },
+  "expectedRuntimeEvidence": {
+    "isolatedRestore": ".artifacts/day10/restore/summary.json",
+    "stagingReboot": ".artifacts/day10/staging/reboot-recovery.json",
+    "stagingCertificate": ".artifacts/day10/staging/certbot-dry-run.txt",
+    "stagingRollback": ".artifacts/day10/staging/rollback-rehearsal.json"
+  }
+}

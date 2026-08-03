@@ -28,6 +28,7 @@ fi
 
 sh scripts/verify-certbot-automation.sh
 sh scripts/verify-day8-infrastructure.sh
+sh scripts/verify-day10-observability.sh
 sh scripts/verify-security-tooling-policy.sh
 sh scripts/verify-ci-checkout-contract.sh
 sh scripts/verify-ci-release-contract.sh

@@ -86,7 +86,7 @@
 | B03 | 감사 로그 필수 기록 실패 시 업무 Transaction Rollback, append-only, 민감정보 redaction | 예 | 없음 | CI | `.artifacts/ci-results/security-acceptance.status`, `.artifacts/ci-results/csrf-permission-audit.status`, `.artifacts/ci-results/jenkins-log-secret.status` | 없음 |
 | B04 | MQTT TTL·Replay·Retain·멱등성과 실제 TLS Broker 왕복 | 예 | 없음. 기존 `mqttBrokerE2E`를 DinD TLS Broker와 임시 Robot Credential에 연결하고 종료 시 Credential 삭제를 검증한다. | CI + 격리 Compose | `.artifacts/ci-results/mqtt-broker-e2e.status`, `.artifacts/security-regression/mqtt-broker-e2e.json`, `.artifacts/backend-ci/build/test-results/mqttBrokerE2E/*.xml` | 없음 |
 | B05 | Robot별 MQTT Topic ACL 허용·타 Robot/역방향 Topic 거부 | 예 | 없음. 임시 Robot Credential로 실제 TLS Broker에 허용 publish/subscribe를 먼저 확인한 뒤 타 Robot namespace와 역방향 topic의 publish/subscribe 네 경계를 모두 거부해야 PASS다. | CI + 격리 Compose | `.artifacts/ci-results/mqtt-broker-e2e.status`, `.artifacts/security-regression/mqtt-broker-e2e.json` | 없음 |
-| B06 | 인증·RBAC·Session을 포함한 대용량 데이터와 k6 부하 | 아니오 | 필요. Seed 생성, 로그인/MFA 준비율, 정상/잠금 계정 분리, Role/Scope별 시나리오와 Session cleanup을 구현. 기존 `passwordHashLoadTest`는 Argon2 단일 부하라 이 요구를 대체하지 않는다. | 격리 Compose + 스테이징 EC2 | `(예정) .artifacts/day10/k6/summary.json`, `(예정) .artifacts/day10/k6/thresholds.json` | 운영에서는 실행 금지, 스테이징 자원 부하 |
+| B06 | 인증·RBAC·Session을 포함한 대용량 데이터와 k6 부하 | 아니오 | 추후 별도 성능 검증 단계로 연기했다. 기존 `passwordHashLoadTest`는 Argon2 단일 부하라 이 요구를 대체하지 않으며, 구현 전에는 성능·수용량 PASS를 주장하지 않는다. | 별도 k6 EC2 + 스테이징 EC2 | `(추후) .artifacts/performance/k6/summary.json`, `(추후) .artifacts/performance/k6/thresholds.json` | 운영에서는 실행 금지, 스테이징 자원 부하 |
 
 주요 구현 근거:
 
@@ -117,10 +117,11 @@
 | C03 | EC2 재부팅 후 Docker·Compose·Timer 자동 시작 | 부분 | `restart: unless-stopped`와 복구 검사는 있으나 실제 호스트 reboot 증거가 없다. 스테이징 전용 reboot drill 필요 | 스테이징 EC2 | `(예정) .artifacts/day10/staging/reboot-recovery.json` | 스테이징 중단 발생, 운영 실행 금지 |
 | C04 | 인증서 갱신 Timer·webroot·Nginx reload와 실제 ACME dry-run | 부분 | 정적 계약과 Timer active 검사는 존재한다. 스테이징에서 `certbot renew --dry-run` 결과와 갱신 전후 HTTPS를 보존해야 한다. | CI + 스테이징 EC2 | `.artifacts/ci-results/repository-policy.status`; `(예정) .artifacts/day10/staging/certbot-dry-run.txt` | 스테이징 ACME 요청·Nginx reload 가능 |
 | C05 | S3 최소권한과 Block Public Access | N/A | 현재 저장소는 `local-disk` named volume이다. S3 전환 PR에서 IAM policy, bucket public access와 presigned URL test를 필수로 추가 | 향후 CI + 스테이징 AWS | `(향후) .artifacts/day10/aws/s3-access.json` | 현재 없음 |
-| C06 | DB·이미지·PDF·MQTT Volume 백업 전체 복원 재확인 | 부분 | 백업 checksum, archive 열람과 `pg_restore --list`는 자동화됐다. 격리된 빈 project에 실제 restore 후 DB/파일 hash를 대조하는 drill이 필요 | 격리 Compose | `(예정) .artifacts/day10/restore/summary.json` | 없음. 운영 DB 자동 복원 금지 |
+| C06 | DB·이미지·PDF·MQTT Volume 백업 전체 복원 재확인 | 예 | 구현 완료. 백업 시 DB table별 정규화 SHA-256, Robot image·승인 PDF의 DB 참조/Volume SHA-256을 고정하고 새 내부 Network·DB container·Named Volume 복원본에서 완전 일치시킨다. 새 형식의 실제 암호화 backup과 복호화 키 보관 환경에서 1회 실행 증거를 생성해야 한다. | 격리 Compose | `.artifacts/day10/restore/summary.json`, `.artifacts/day10/restore/restore.log` | 없음. 운영 DB 자동 복원 금지. 새 Volume backup 생성 시 짧은 서비스 quiesce 발생 |
 | C07 | 외부 노출 포트와 AWS Security Group | 부분 | Compose의 Backend/DB 비공개와 EC2 container binding은 검사한다. 호스트 `ss` 결과와 외부 관점 TCP scan, SG 규칙 증거가 없다. | 스테이징 EC2 + 외부 검사 Runner | `(예정) .artifacts/day10/staging/exposed-ports.json`, `(예정) .artifacts/day10/aws/security-groups.json` | read-only scan, 허용 범위 내 네트워크 부하 |
 | C08 | Backend·Frontend dependency와 image Critical/High 취약점 | 예 | 없음 | CI | `.artifacts/source-security/dependency-policy-summary.json`, `.artifacts/image-security/policy-summary.json`, `.artifacts/ci-results/sbom-cve.status` | 없음 |
 | C09 | Cosign으로 release archive 서명과 배포 전 검증 | 예 | 없음. Registry가 아닌 실제 전달물 `images.tar.zst`를 Blob 서명하고 정상·변조·wrong-key를 검사한다. root 승격·preflight·배포·Rollback load가 EC2 고정 공개키로 재검증한다. | CI + EC2 root 승격/배포 | `release/images.tar.zst.sigstore.json`, `.artifacts/cosign/summary.json`, `.artifacts/ci-results/cosign-blob-signature.status`, preflight·Release Manifest의 `artifact.signature` | CI 서명은 없음, EC2 검증은 read-only. 실패 시 배포 차단 |
+| C10 | 스테이징 EC2에서 동일 SHA 배포·장애 감지·Rollback 재훈련 | 부분 | 격리 Compose의 A/B/C Rollback 자동화는 존재한다. 운영과 분리된 스테이징 배포 Job·Artifact 경로·승인 경계와 실제 스테이징 실행 증거가 필요하다. | 스테이징 EC2 | `(예정) .artifacts/day10/staging/rollback-rehearsal.json` | 스테이징 서비스 변경·일시 중단, 운영 영향 없음 |
 
 주요 구현 근거:
 
@@ -146,11 +147,14 @@
 
 ### 새 테스트 로직이 필요한 항목
 
-1. `B06` k6 인증·권한·Session 부하 시나리오
-2. `C06` 격리된 전체 backup restore drill
-3. `C03` 스테이징 EC2 reboot recovery drill
-4. `A10`, `A11`, `C04`, `C07` 실제 외부/호스트 경계 검증
-5. `A04` 스테이징 NTP 상태 증거
+1. `C03` 스테이징 EC2 reboot recovery drill
+2. `A10`, `A11`, `C04`, `C07` 실제 외부/호스트 경계 검증
+3. `A04` 스테이징 NTP 상태 증거
+4. `C10` 운영과 분리된 스테이징 배포·Rollback 실행 경계
+
+`B06` k6는 이번 완료 범위에서 제외하고 별도 성능 검증 단계로 연기했다.
+`C06` 격리 전체 backup restore 로직과 JSON 증거 생성은 구현을 완료했으며,
+새 형식의 실제 backup을 대상으로 한 실행만 남았다.
 
 ### 새 테스트를 만들지 않고 연결만 할 항목
 
@@ -174,10 +178,11 @@
 ## 6. 권장 실행 순서
 
 1. CI 증거 보존과 기존 MQTT/Auth Runner 연결
-2. 격리 Compose backup restore와 k6 기준선
+2. 새 형식의 실제 backup으로 격리 Compose restore
 3. 스테이징 EC2의 CORS/Cookie/포트/인증서/NTP read-only 검사
 4. 스테이징 reboot recovery
-5. 모든 스테이징 증거가 PASS한 뒤 운영에는 외부 HTTPS와 host 상태의
+5. 스테이징 동일 SHA 배포·Rollback 재훈련
+6. 모든 스테이징 증거가 PASS한 뒤 운영에는 외부 HTTPS와 host 상태의
    read-only 재검사만 수행
 
 운영에서 의도적으로 로그인 잠금, 장애, DB 복원, 재부팅 또는 부하를 유발하지
@@ -241,3 +246,30 @@ Private key의 서명 검증에서도 차단된다.
 EC2 root 소유 공개키다. 단일 공개키를 임의로 교체하면 이전 Rollback Artifact가
 검증되지 않으므로 키 회전은 다중 키 정책을 도입하거나 보존 Artifact를 재설계한
 뒤 별도 변경으로 수행한다.
+
+## 9. 6단계 설계·구현 최종 코멘트
+
+기존 복원 스크립트가 이미 운영과 분리된 임시 PostgreSQL·Network·Volume을
+사용했으므로 별도 복원기를 중복 구현하지 않고 검증 강도를 높였다.
+
+- Volume backup은 writer인 Frontend·Backend·MQTT를 quiesce한 동일 시점에
+  애플리케이션 10개 schema의 모든 base table을 행 단위 JSON으로 정규화하고,
+  table별 행 수·SHA-256과 sequence의 `last_value`·`is_called` 상태를
+  `database.content.sha256`에 고정한다.
+- Robot image와 승인 PDF는 DB에 저장된 SHA-256·storage key와 실제 Named
+  Volume 전체 파일 hash를 각각 기록한다. DB가 참조하는 파일이 없거나
+  변조됐다면 backup 단계부터 실패한다.
+- Restore Drill은 새 internal Docker Network, 새 PostgreSQL container와 새
+  Named Volume만 만든다. `pg_restore --exit-on-error` 뒤 같은 DB manifest와
+  file manifest를 재생성해 backup 시점 값과 byte-for-byte로 비교한다.
+- `summary.json`은 단순 exit code만 보지 않고 bundle checksum, DB content,
+  Robot image, 승인 PDF의 필수 PASS marker가 모두 존재해야만 PASS가 된다.
+- 평문 dump와 archive는 임시 작업 디렉터리에만 존재하고 종료 시 제거한다.
+  복호화 Private key는 Git·운영 EC2에 두지 않으며 키 보관 환경에서 Drill한다.
+- 이전 형식 backup은 새 DB/PDF hash manifest가 없으므로 완전한 C06 증거로
+  승격하지 않는다. 배포된 새 backup 스크립트로 만든 실제 bundle을 한 번
+  복원해야 `.artifacts/day10/restore/summary.json`이 최종 PASS가 된다.
+
+현재 확인 가능한 스테이징 EC2가 없으므로 실제 reboot, ACME dry-run과
+스테이징 Rollback은 PASS로 간주하지 않고 `PENDING_NO_STAGING`으로 남긴다.
+운영 DB 복원, 운영 EC2 reboot와 운영 장애 주입은 이번 단계에서 수행하지 않는다.

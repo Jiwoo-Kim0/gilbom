@@ -213,6 +213,15 @@ assert_contains infra/scripts/backup-db.sh \
 assert_contains infra/scripts/backup-volumes.sh \
   'gilbom_backup_record_result' \
   "volume backup 결과가 metric으로 남지 않는다"
+assert_contains infra/scripts/backup-volumes.sh \
+  'database.content.sha256' \
+  "volume backup이 DB content hash manifest를 만들지 않는다"
+assert_contains infra/scripts/backup-volumes.sh \
+  'report_pdf_data.database.sha256' \
+  "volume backup이 승인 PDF DB 참조 hash를 만들지 않는다"
+assert_contains infra/scripts/backup-volumes.sh \
+  'report_pdf_data.volume.sha256' \
+  "volume backup이 승인 PDF file hash를 만들지 않는다"
 assert_contains infra/scripts/backup-common.sh \
   'rm -f "$plain"' \
   "암호화 후 평문 backup이 지워지지 않는다"
@@ -224,16 +233,38 @@ for script in \
   infra/scripts/backup-common.sh \
   infra/scripts/backup-db.sh \
   infra/scripts/backup-volumes.sh \
+  infra/scripts/generate-database-content-manifest.sh \
   infra/scripts/collect-host-metrics.sh \
   infra/scripts/gilbom-backup.sh \
   infra/scripts/install-day10-host.sh \
   infra/scripts/prepare-backup-encryption.sh \
   infra/scripts/record-offhost-export.sh \
-  scripts/restore-drill.sh
+  scripts/restore-drill.sh \
+  scripts/run-isolated-backup-restore-drill.sh
 do
   assert_file "$script" "스크립트가 없다: $script"
   sh -n "$script" || fail "셸 문법 오류: $script"
 done
+
+assert_contains scripts/restore-drill.sh \
+  'DB table content SHA-256' \
+  "복원본 DB content hash 대조가 없다"
+assert_contains scripts/restore-drill.sh \
+  'robot_images restored file SHA-256' \
+  "복원본 image file hash 대조가 없다"
+assert_contains scripts/restore-drill.sh \
+  'report_pdf_data restored file SHA-256' \
+  "복원본 PDF file hash 대조가 없다"
+assert_file scripts/generate-restore-drill-evidence.py \
+  "복원 JSON 증거 생성기가 없다"
+assert_file scripts/test-database-content-manifest.py \
+  "DB content manifest self-test가 없다"
+assert_file scripts/test-restore-drill-evidence.py \
+  "복원 JSON 증거 self-test가 없다"
+python3 scripts/test-database-content-manifest.py \
+  || fail "DB content manifest self-test 실패"
+python3 scripts/test-restore-drill-evidence.py \
+  || fail "복원 JSON 증거 self-test 실패"
 
 for unit in \
   gilbom-db-backup.service \

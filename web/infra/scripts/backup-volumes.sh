@@ -47,6 +47,60 @@ compose() {
   fi
 }
 
+resolve_volume() {
+  logical_name=$1
+  resolved="$(
+    docker volume ls \
+      --filter "label=com.docker.compose.project=$project_name" \
+      --filter "label=com.docker.compose.volume=$logical_name" \
+      --quiet
+  )"
+  [ -n "$resolved" ] \
+    || fail "named volume is missing: $logical_name"
+  [ "$(printf '%s\n' "$resolved" | wc -l | tr -d ' ')" -eq 1 ] \
+    || fail "multiple named volumes matched: $logical_name"
+  printf '%s\n' "$resolved"
+}
+
+write_volume_content_manifest() {
+  logical_name=$1
+  output_name=$2
+  volume_name="$(resolve_volume "$logical_name")"
+  docker run \
+    --rm \
+    --read-only \
+    --mount "type=volume,src=$volume_name,dst=/source,readonly" \
+    --mount "type=bind,src=$bundle,dst=/backup" \
+    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
+    alpine:3.22 \
+    sh -ec '
+      cd /source
+      find . -type f -exec sha256sum {} \; \
+        | sed "s#  \./#  #" \
+        | sort > "/backup/$1"
+      chown "$2:$3" "/backup/$1"
+    ' sh "$output_name" "$(id -u)" "$(id -g)"
+  chmod 0600 "$bundle/$output_name"
+}
+
+verify_reference_coverage() {
+  label=$1
+  database_manifest=$2
+  volume_manifest=$3
+  missing=false
+  while IFS= read -r expected_file
+  do
+    [ -n "$expected_file" ] || continue
+    if ! grep -Fxq "$expected_file" "$volume_manifest"; then
+      printf '%s\n' \
+        "Missing or altered $label file: ${expected_file#*  }" >&2
+      missing=true
+    fi
+  done < "$database_manifest"
+  [ "$missing" = false ] \
+    || fail "$label volume does not cover every database reference"
+}
+
 resume_services() {
   if [ "$QUIESCED" = true ]; then
     compose up \
@@ -103,9 +157,22 @@ done
 compose stop frontend backend mosquitto
 QUIESCED=true
 
-# robot_images가 JPEG의 유일한 사본이므로 DB가 참조하는 모든 AVAILABLE
-# object_key와 hash를 먼저 고정한다. orphan 파일은 복구 가능성을 위해 함께
-# 보존하되, DB가 참조하는 파일이 없거나 변조된 경우에는 backup 성공으로 보지 않는다.
+# 애플리케이션 전체 DB를 table별 정규화된 SHA-256으로 고정한다. 복원 후 같은
+# 스크립트로 다시 생성한 manifest와 byte-for-byte로 같아야 restore PASS다.
+database_content_manifest="$bundle/database.content.sha256"
+compose exec -T db sh -ec '
+  export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+  export PGHOST=127.0.0.1
+  export PGUSER="$POSTGRES_USER"
+  export PGDATABASE="$POSTGRES_DB"
+  exec sh -s
+' < "$SCRIPT_DIR/generate-database-content-manifest.sh" \
+  > "$database_content_manifest"
+chmod 0600 "$database_content_manifest"
+
+# DB가 참조하는 image/PDF의 storage key와 hash를 함께 고정한다. orphan 파일도
+# 복구 가능성을 위해 archive에는 보존하지만, DB 참조 파일이 없거나 변조됐다면
+# backup 성공으로 보지 않는다.
 robot_image_database_manifest="$bundle/robot_images.database.sha256"
 compose exec -T db sh -ec '
   export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
@@ -129,6 +196,43 @@ compose exec -T db sh -ec '
 ' > "$robot_image_database_manifest"
 chmod 0600 "$robot_image_database_manifest"
 
+report_pdf_database_manifest="$bundle/report_pdf_data.database.sha256"
+compose exec -T db sh -ec '
+  export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+  exec psql \
+    --host 127.0.0.1 \
+    --username "$POSTGRES_USER" \
+    --dbname "$POSTGRES_DB" \
+    --no-password \
+    --tuples-only \
+    --no-align \
+    --quiet \
+    --set ON_ERROR_STOP=1 \
+    --command "
+      SELECT encode(approved_pdf_sha256, '\''hex'\'')
+          || '\''  '\'' || approved_pdf_storage_key
+      FROM report.anomaly_report
+      WHERE approved_pdf_storage_key IS NOT NULL
+        AND approved_pdf_sha256 IS NOT NULL
+      ORDER BY approved_pdf_storage_key;
+    "
+' > "$report_pdf_database_manifest"
+chmod 0600 "$report_pdf_database_manifest"
+
+robot_image_volume_manifest="$bundle/robot_images.volume.sha256"
+report_pdf_volume_manifest="$bundle/report_pdf_data.volume.sha256"
+write_volume_content_manifest robot_images robot_images.volume.sha256
+write_volume_content_manifest report_pdf_data report_pdf_data.volume.sha256
+
+verify_reference_coverage \
+  "robot image" \
+  "$robot_image_database_manifest" \
+  "$robot_image_volume_manifest"
+verify_reference_coverage \
+  "report PDF" \
+  "$report_pdf_database_manifest" \
+  "$report_pdf_volume_manifest"
+
 BACKUP_DIR="$bundle" \
 ENV_FILE="$ENV_FILE" \
 RUNTIME_ENV_FILE="$RUNTIME_ENV_FILE" \
@@ -143,12 +247,7 @@ for logical_name in \
   mosquitto_credentials \
   mosquitto_data
 do
-  volume_name="$(docker volume ls \
-    --filter "label=com.docker.compose.project=$project_name" \
-    --filter "label=com.docker.compose.volume=$logical_name" \
-    --quiet)"
-  [ -n "$volume_name" ] \
-    || fail "named volume is missing: $logical_name"
+  volume_name="$(resolve_volume "$logical_name")"
   archive="$bundle/$logical_name.tar.gz"
   docker run \
     --rm \
@@ -167,61 +266,36 @@ do
   gilbom_backup_encrypt_file "$archive" >/dev/null
 done
 
-robot_images_volume="$(
-  docker volume ls \
-    --filter "label=com.docker.compose.project=$project_name" \
-    --filter "label=com.docker.compose.volume=robot_images" \
-    --quiet
-)"
-[ -n "$robot_images_volume" ] \
-  || fail "named volume is missing: robot_images"
-robot_image_volume_manifest="$bundle/robot_images.volume.sha256"
-docker run \
-  --rm \
-  --read-only \
-  --mount "type=volume,src=$robot_images_volume,dst=/source,readonly" \
-  --mount "type=bind,src=$bundle,dst=/backup" \
-  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
-  alpine:3.22 \
-  sh -ec '
-    cd /source
-    find . -type f -name "*.jpg" -exec sha256sum {} \; \
-      | sed "s#  \./#  #" \
-      | sort > /backup/robot_images.volume.sha256
-    chown "$1:$2" /backup/robot_images.volume.sha256
-  ' sh "$(id -u)" "$(id -g)"
-chmod 0600 "$robot_image_volume_manifest"
-
-missing_image=false
-while IFS= read -r expected_image
-do
-  [ -n "$expected_image" ] || continue
-  if ! grep -Fxq "$expected_image" "$robot_image_volume_manifest"; then
-    printf '%s\n' \
-      "Missing or altered robot image: ${expected_image#*  }" >&2
-    missing_image=true
-  fi
-done < "$robot_image_database_manifest"
-[ "$missing_image" = false ] \
-  || fail "robot_images volume does not cover every AVAILABLE database row"
-
 database_image_count="$(wc -l < "$robot_image_database_manifest" | tr -d ' ')"
 volume_image_count="$(wc -l < "$robot_image_volume_manifest" | tr -d ' ')"
 {
   printf 'database_available_images=%s\n' "$database_image_count"
-  printf 'volume_jpeg_files=%s\n' "$volume_image_count"
+  printf 'volume_files=%s\n' "$volume_image_count"
   printf '%s\n' 'database_image_coverage=PASS'
 } > "$bundle/robot_images.summary"
 chmod 0600 "$bundle/robot_images.summary"
 
-# dump와 volume archive는 이미 암호화됐다. robot_images manifest는 hash와 object key뿐이라
-# 로컬 검증에 쓰도록 평문으로 둔다. 번들 전체를 반출할 때는 manifest도 함께 나간다.
+database_pdf_count="$(wc -l < "$report_pdf_database_manifest" | tr -d ' ')"
+volume_pdf_count="$(wc -l < "$report_pdf_volume_manifest" | tr -d ' ')"
+{
+  printf 'database_approved_pdfs=%s\n' "$database_pdf_count"
+  printf 'volume_files=%s\n' "$volume_pdf_count"
+  printf '%s\n' 'database_pdf_coverage=PASS'
+} > "$bundle/report_pdf_data.summary"
+chmod 0600 "$bundle/report_pdf_data.summary"
+
+# dump와 volume archive는 이미 암호화됐다. 아래 manifest는 hash와 논리 경로만
+# 포함하므로 복원 대조용으로 둔다. SHA256SUMS가 manifest 자체의 변조도 막는다.
 (
   cd "$bundle"
   sha256sum \
     ./*.dump.gpg \
     ./*.dump.gpg.sha256 \
     ./*.tar.gz.gpg \
+    ./database.content.sha256 \
+    ./report_pdf_data.database.sha256 \
+    ./report_pdf_data.volume.sha256 \
+    ./report_pdf_data.summary \
     ./robot_images.database.sha256 \
     ./robot_images.volume.sha256 \
     ./robot_images.summary \
@@ -234,7 +308,9 @@ gilbom_backup_write_manifest \
   "$BACKUP_NAME" \
   "$recipient_fingerprint" \
   "$bundle/SHA256SUMS" \
-  "$bundle/robot_images.summary"
+  "$bundle/database.content.sha256" \
+  "$bundle/robot_images.summary" \
+  "$bundle/report_pdf_data.summary"
 
 compose up \
   --detach \
