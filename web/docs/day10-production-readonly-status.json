@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "status": "PARTIAL_AWS_SECURITY_GROUP_RULES_NOT_VERIFIED",
-  "recordedAtUtc": "2026-08-03T07:59:21Z",
+  "status": "COMPLETE_WITH_MANAGED_INFRA_LIMITATION",
+  "recordedAtUtc": "2026-08-03T08:03:34Z",
   "scope": "day10-production-readonly-verification",
   "collector": "/usr/local/sbin/gilbom-production-readonly-evidence",
   "productionEvidence": {
@@ -23,7 +23,8 @@
     "status": "PASS_AFTER_REMEDIATION"
   },
   "awsSecurityGroups": {
-    "status": "NOT_VERIFIED_NO_AWS_API_AUTHENTICATION",
+    "status": "N/A_CONTROL_PLANE_ACCESS_NOT_PROVIDED",
+    "reason": "No project member has AWS control-plane access or AWS API credentials in this managed environment",
     "attachedGroupIds": [
       "sg-00c3357d389d784dd",
       "sg-0a3d457791d4350e9",
@@ -57,7 +58,14 @@
     "CERTIFICATE_REPLACEMENT",
     "SECURITY_GROUP_MUTATION"
   ],
-  "remainingEvidence": [
-    "AWS_SECURITY_GROUP_INBOUND_RULE_SOURCE_AND_CIDR_REVIEW"
-  ]
+  "completionDecision": {
+    "status": "ACCEPTED",
+    "basis": "Effective external TCP reachability was independently verified after remediation; direct Security Group rule inspection is outside the authority provided to the project",
+    "securityGroupClaim": "N/A_NOT_PASS",
+    "reopenCondition": "Reopen direct SG review if AWS control-plane access is later provided"
+  },
+  "acceptedLimitations": [
+    "Security Group source CIDRs, UDP rules, and ICMP rules were not directly inspected"
+  ],
+  "remainingEvidence": []
 }

@@ -99,7 +99,8 @@ Jenkins/DinD 검증은 정상적으로 PASS/FAIL 판정한다.
 
 ## 2026-08-03 운영 실행 결과
 
-- 운영 수집기: `PARTIAL`
+- 운영 수집기 원본: `PARTIAL`
+- 단계 종합 판정: `COMPLETE_WITH_MANAGED_INFRA_LIMITATION`
 - TLS·CORS·Cookie·보안 Header: PASS
 - Release SHA·Manifest·Cosign Blob 검증: PASS
 - Critical 0·High 0 취약점 정책: PASS
@@ -122,10 +123,17 @@ Jenkins/DinD 검증은 정상적으로 PASS/FAIL 판정한다.
   9090, 9093, 29418
 - 예상하지 않은 외부 OPEN port: 없음
 
-따라서 effective TCP 외부 노출 검증은 PASS다. 다만 AWS API 인증이 없어
-IMDSv2로 고정한 실제 연결 SG 3개의 Inbound rule source·CIDR·UDP·ICMP
-원문은 확인하지 못했다. 전체 상태는 이 한 항목 때문에 PARTIAL이며, 이를
-PASS로 바꾸려면 AWS Describe 원문 또는 동등한 제어 영역 증거가 필요하다.
+따라서 effective TCP 외부 노출 검증은 PASS다. 프로젝트 구성원 누구에게도
+AWS 제어 영역 접근권한이나 AWS API 자격증명이 제공되지 않은 관리형
+인프라이므로, IMDSv2로 고정한 실제 연결 SG 3개의 Inbound rule
+source·CIDR·UDP·ICMP 원문 검사는 프로젝트 권한 범위 밖 `N/A_NOT_PASS`로
+분류한다.
+
+원본 수집기의 `PARTIAL`은 누락을 숨기지 않기 위한 기술적 출력으로 유지한다.
+단계 종합 판정은 독립 off-host 실효 접근 검사와 발견 사항 조치까지 포함해
+`COMPLETE_WITH_MANAGED_INFRA_LIMITATION`이다. 향후 프로젝트에 AWS 제어
+영역 접근권한이 제공되면 N/A 판정을 해제하고 direct SG review를 다시
+수행한다.
 
 ## Security Group 정책
 
