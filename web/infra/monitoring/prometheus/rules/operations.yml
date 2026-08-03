@@ -1,0 +1,77 @@
+groups:
+  - name: gilbom-operations
+    interval: 30s
+    rules:
+      # gilbom_backup_* 는 backup 스크립트가 textfile로 기록한다.
+      # 실패는 두 방향에서 잡는다 — 실행했는데 실패한 경우와, 아예 실행되지 않은 경우.
+      - alert: BackupFailed
+        expr: gilbom_backup_last_status == 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.backup }} backup이 실패했다"
+          description: journalctl -u gilbom-{{ $labels.backup }}-backup.service로 원인을 본다.
+
+      - alert: BackupStale
+        expr: >-
+          time() - gilbom_backup_last_success_seconds > 30 * 3600
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.backup }} backup이 30시간 넘게 성공하지 않았다"
+          description: 매일 도는 timer다. timer 자체가 멈췄는지 먼저 확인한다.
+
+      - alert: BackupMissing
+        expr: absent(gilbom_backup_last_success_seconds{backup="postgres"})
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: PostgreSQL backup metric이 아예 없다
+          description: >-
+            한 번도 성공하지 않았거나 textfile 경로가 어긋났다. 백업이 없는 상태이므로
+            복원 계획이 성립하지 않는다.
+
+      - alert: BackupNotExportedOffhost
+        expr: >-
+          time() - gilbom_backup_offhost_exported_seconds > 7 * 24 * 3600
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.backup }} backup을 7일 넘게 반출하지 않았다"
+          description: >-
+            EC2가 통째로 사라지면 로컬 backup도 함께 사라진다. 암호화 번들을
+            SFTP로 내려받고 record-offhost-export를 실행한다.
+
+      - alert: TlsCertificateExpiringSoon
+        expr: >-
+          probe_ssl_earliest_cert_expiry - time() < 14 * 24 * 3600
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: TLS 인증서가 14일 안에 만료된다
+          description: certbot 갱신 timer가 도는지 확인한다.
+
+      - alert: TlsCertificateExpiringCritical
+        expr: >-
+          probe_ssl_earliest_cert_expiry - time() < 5 * 24 * 3600
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: TLS 인증서가 5일 안에 만료된다
+          description: 만료되면 브라우저 접속과 로봇 HTTPS 업로드가 함께 끊긴다.
+
+      - alert: DeployStale
+        expr: >-
+          gilbom_deploy_last_success_seconds > 0
+          and
+          time() - gilbom_deploy_last_success_seconds > 14 * 24 * 3600
+        labels:
+          severity: warning
+        annotations:
+          summary: 마지막 배포가 14일을 넘었다
+          description: >-
+            정상일 수 있다. 다만 배포 경로가 실제로 도는지 시연 전에 한 번은 확인한다.
+            Jenkins 성공·실패 자체는 기존 Mattermost CI/CD 알림이 담당한다.

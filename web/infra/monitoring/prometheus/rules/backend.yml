@@ -1,0 +1,142 @@
+groups:
+  - name: gilbom-backend
+    interval: 30s
+    rules:
+      - alert: BackendDown
+        expr: up{job="backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Backend metric 수집이 2분째 실패한다
+          description: >-
+            container가 죽었거나 app network가 끊겼다. compose ps와
+            /actuator/health/readiness를 먼저 확인한다.
+
+      - alert: HttpsProbeFailed
+        expr: probe_success{job="blackbox-https"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 공개 HTTPS 종단이 5분째 응답하지 않는다
+          description: Nginx·인증서·보안그룹 순으로 확인한다. Backend는 살아 있을 수 있다.
+
+      - alert: StorageReadinessDown
+        expr: gilbom_health_component_status{component="storageReadiness"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 이미지 저장소 readiness가 DOWN이다
+          description: >-
+            robot_images 볼륨이 마운트되지 않았거나 쓰기가 막혔다. 새 결함 이미지가
+            업로드되지 않는다.
+
+      - alert: ReadinessComponentDown
+        expr: >-
+          gilbom_health_component_status{
+            component=~"db|flywayReadiness"
+          } == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "readiness 구성요소 {{ $labels.component }}가 DOWN이다"
+
+      - alert: MqttConnectionDown
+        expr: gilbom_health_component_status{component="mqttConnection"} == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: MQTT broker 연결이 10분째 끊겨 있다
+          description: 로봇 telemetry와 incident가 들어오지 않는다. 화면은 정상으로 보인다.
+
+      - alert: BackendServerErrorsRising
+        expr: >-
+          sum(rate(http_server_requests_seconds_count{job="backend",status=~"5.."}[5m]))
+            > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Backend 5xx 응답이 늘고 있다
+          description: 초당 0.2건을 10분간 넘었다. requestId로 Loki에서 해당 요청을 찾는다.
+
+      - alert: DatabasePoolExhausted
+        expr: hikaricp_connections_pending{job="backend"} > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: DB connection을 5분째 대기하는 요청이 있다
+          description: 느린 질의나 누수 트랜잭션을 의심한다. pool 크기를 먼저 늘리지 않는다.
+
+      - alert: JvmHeapHigh
+        expr: >-
+          sum(jvm_memory_used_bytes{job="backend",area="heap"})
+            / sum(jvm_memory_max_bytes{job="backend",area="heap"}) > 0.9
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: JVM heap 사용률이 90%를 넘는다
+
+      - alert: MqttInboundRejectionSpike
+        expr: sum(rate(gilbom_mqtt_inbound_rejected_total[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: MQTT inbound 거부가 급증했다
+          description: >-
+            reason label로 원인을 나눈다. 계약 위반(MALFORMED)과 재전송 거부(REPLAY)는
+            대응이 다르다.
+
+      - alert: MqttCredentialRegistryDrift
+        expr: gilbom_mqtt_credential_registry_drift_current > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: MQTT credential registry가 broker와 어긋나 있다
+
+      - alert: LoginFailureSpike
+        expr: >-
+          sum(rate(gilbom_security_auth_events_total{action="LOGIN_FAILED"}[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 로그인 실패가 급증했다
+          description: 초당 0.5건을 10분간 넘었다. 대입 시도인지 계정 문제인지 감사 로그로 나눈다.
+
+      - alert: AccountLockSpike
+        expr: >-
+          increase(
+            gilbom_security_auth_events_total{action="ACCOUNT_TEMPORARILY_LOCKED"}[15m]
+          ) > 3
+        labels:
+          severity: warning
+        annotations:
+          summary: 15분 동안 계정 잠금이 3건을 넘었다
+
+      - alert: SecurityDenialSpike
+        expr: sum by (type) (rate(gilbom_security_denials_total[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.type }} 거부가 급증했다"
+          description: >-
+            CSRF는 대개 프론트 배포 불일치이고, AUTHORIZATION은 권한 밖 접근 시도다.
+
+      - alert: ScrapeTargetDown
+        expr: up == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "수집 대상 {{ $labels.job }}/{{ $labels.instance }}가 응답하지 않는다"
+          description: 수집이 멈추면 그 대상의 다른 알람도 함께 조용해진다.

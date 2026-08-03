@@ -1,0 +1,60 @@
+# Mattermost의 incoming webhook은 Slack payload 형식을 그대로 받는다. 그래서
+# 별도 bridge 없이 slack_configs를 쓴다. webhook URL 자체가 비밀이므로 파일로만 주입한다.
+global:
+  resolve_timeout: 5m
+  slack_api_url_file: /run/secrets/alertmanager_mattermost_webhook
+
+route:
+  receiver: mattermost-warning
+  # 같은 원인에서 나온 알람을 한 메시지로 묶는다.
+  group_by:
+    - alertname
+    - severity
+  group_wait: 30s
+  group_interval: 5m
+  # 반복 통지는 보수적으로 둔다. 조용한 실패보다 낫지만 채널이 알람으로 덮이면
+  # 아무도 읽지 않게 된다.
+  repeat_interval: 12h
+  routes:
+    - matchers:
+        - severity = "critical"
+      receiver: mattermost-critical
+      group_wait: 10s
+      repeat_interval: 4h
+
+inhibit_rules:
+  # Backend가 죽으면 그 안의 구성요소 알람도 함께 뜬다. 원인 하나만 남긴다.
+  - source_matchers:
+      - alertname = "BackendDown"
+    target_matchers:
+      - alertname =~ "StorageReadinessDown|ReadinessComponentDown|DatabasePoolExhausted|JvmHeapHigh"
+    equal:
+      - environment
+  # 같은 대상에 critical이 이미 떠 있으면 warning은 보내지 않는다.
+  - source_matchers:
+      - severity = "critical"
+    target_matchers:
+      - severity = "warning"
+    equal:
+      - alertname
+
+receivers:
+  - name: mattermost-warning
+    slack_configs:
+      - channel: "#gilbom-alerts"
+        send_resolved: true
+        title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+        text: >-
+          {{ range .Alerts }}{{ .Annotations.summary }}
+          {{ if .Annotations.description }}{{ .Annotations.description }}
+          {{ end }}{{ end }}
+
+  - name: mattermost-critical
+    slack_configs:
+      - channel: "#gilbom-alerts"
+        send_resolved: true
+        title: '[CRITICAL] {{ .CommonLabels.alertname }}'
+        text: >-
+          {{ range .Alerts }}{{ .Annotations.summary }}
+          {{ if .Annotations.description }}{{ .Annotations.description }}
+          {{ end }}{{ end }}

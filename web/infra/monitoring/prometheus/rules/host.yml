@@ -1,0 +1,109 @@
+groups:
+  - name: gilbom-host
+    interval: 30s
+    rules:
+      - alert: HostCpuSaturated
+        expr: >-
+          100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: EC2 CPU 사용률이 15분째 85%를 넘는다
+          description: 배포·백업이 아닌데 지속되면 요청 폭주나 폭주 프로세스를 확인한다.
+
+      - alert: HostMemoryLow
+        expr: >-
+          node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: EC2 가용 메모리가 10% 미만이다
+          description: Backend heap 상한과 container mem_limit 합을 함께 확인한다.
+
+      - alert: HostMemoryCritical
+        expr: >-
+          node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: EC2 가용 메모리가 5% 미만이다
+          description: OOM killer가 container를 죽이기 직전이다.
+
+      - alert: HostSwapHeavilyUsed
+        expr: >-
+          node_memory_SwapTotal_bytes > 0
+          and
+          (node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes)
+            / node_memory_SwapTotal_bytes > 0.5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: Swap을 절반 넘게 쓰고 있다
+          description: 응답 지연이 함께 늘어나면 메모리 상한을 다시 잡아야 한다.
+
+      - alert: HostLoadHigh
+        expr: >-
+          node_load1 / scalar(count(count by (cpu) (node_cpu_seconds_total))) > 2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: 1분 load가 vCPU 수의 2배를 넘는다
+
+      # 아래 세 metric은 host의 gilbom-host-metrics.timer가 textfile로 써 넣는다.
+      # Alloy에 host 루트 파일시스템을 마운트하지 않기 위한 경로다.
+      - alert: HostDiskLow
+        expr: >-
+          gilbom_filesystem_avail_bytes / gilbom_filesystem_size_bytes < 0.15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.mountpoint }} 여유 공간이 15% 미만이다"
+          description: Docker image·artifact·backup 중 무엇이 늘었는지 대시보드에서 확인한다.
+
+      - alert: HostDiskCritical
+        expr: >-
+          gilbom_filesystem_avail_bytes / gilbom_filesystem_size_bytes < 0.08
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.mountpoint }} 여유 공간이 8% 미만이다"
+          description: PostgreSQL 쓰기와 이미지 업로드가 곧 실패한다.
+
+      - alert: HostDiskFillingUp
+        expr: >-
+          predict_linear(gilbom_filesystem_avail_bytes[6h], 3 * 24 * 3600) < 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.mountpoint }}가 3일 안에 가득 찬다"
+          description: 현재 증가 속도 기준 예측이다. 보존기간 정리를 먼저 확인한다.
+
+      - alert: RobotImagesStorageFillingUp
+        expr: >-
+          predict_linear(gilbom_path_usage_bytes{path="robot_images"}[6h], 7 * 24 * 3600)
+            > scalar(gilbom_filesystem_size_bytes{mountpoint="/"}) * 0.5
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: robot_images가 7일 안에 디스크 절반을 차지한다
+          description: 이미지가 유일한 사본이므로 지우기 전에 볼륨 백업을 먼저 반출한다.
+
+      - alert: HostMetricsStale
+        expr: time() - gilbom_host_metrics_updated_seconds > 600
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: host 파일시스템 metric이 10분 넘게 갱신되지 않았다
+          description: >-
+            gilbom-host-metrics.timer가 멈추면 디스크 알람이 조용히 사라진다.
+            journalctl -u gilbom-host-metrics.service를 확인한다.

@@ -1,0 +1,56 @@
+groups:
+  - name: gilbom-container
+    interval: 30s
+    rules:
+      # gilbom_container_* 는 host의 gilbom-host-metrics.timer가 docker inspect·stats
+      # 결과를 textfile로 써 넣는다. container 안에 Docker socket을 넣지 않기 위한 경로다.
+      # 재시작은 RestartCount와 기동 시각을 함께 본다. container를 새로 만들면
+      # RestartCount가 0으로 돌아가지만 기동 시각은 계속 바뀌기 때문이다.
+      - alert: ContainerRestartLoop
+        expr: >-
+          changes(gilbom_container_started_seconds[30m]) > 3
+          or
+          increase(gilbom_container_restart_count[30m]) > 3
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.name }}가 30분 동안 3회 넘게 재시작했다"
+          description: docker logs로 기동 실패 원인을 먼저 본다. healthcheck 실패일 수 있다.
+
+      - alert: ContainerOomKilled
+        expr: gilbom_container_oom_killed == 1
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.name }}가 OOM으로 종료됐다"
+          description: compose의 mem_limit과 JVM heap 상한을 함께 조정해야 한다.
+
+      - alert: ContainerNotRunning
+        expr: gilbom_container_running == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.name }}가 5분째 실행 중이 아니다"
+
+      - alert: ContainerMemoryNearLimit
+        expr: gilbom_container_memory_percent > 90
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.name }} 메모리가 상한의 90%를 넘었다"
+
+      - alert: DockerStorageFillingUp
+        expr: >-
+          predict_linear(gilbom_path_usage_bytes{path="docker"}[6h], 7 * 24 * 3600)
+            > scalar(gilbom_filesystem_size_bytes{mountpoint="/"}) * 0.5
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: Docker image·volume이 7일 안에 디스크 절반을 차지한다
+          description: >-
+            배포마다 image archive가 쌓인다. 사용하지 않는 release image를
+            먼저 정리하고, 그래도 늘면 artifact 보존기간을 줄인다.
