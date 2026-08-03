@@ -87,6 +87,25 @@ class ProductionReadonlyEvidenceTest(unittest.TestCase):
         self.assertEqual(evidence["externallyReachableTcpPorts"], [80, 443])
         self.assertEqual(evidence["hostBoundButSgBlockedTcpPorts"], [8988])
 
+    def test_no_aws_authentication_is_explicit_partial_evidence(self) -> None:
+        listeners = MODULE.parse_public_listeners(
+            "LISTEN 0 4096 0.0.0.0:80 0.0.0.0:*\n"
+            "LISTEN 0 4096 0.0.0.0:443 0.0.0.0:*\n"
+            "LISTEN 0 4096 0.0.0.0:8988 0.0.0.0:*\n"
+        )
+        host = MODULE.validate_public_listeners(listeners)
+        ports = MODULE.uncorrelated_external_ports(host)
+        groups = MODULE.unverified_security_group_evidence(
+            ["sg-0123456789abcdef0"]
+        )
+        self.assertEqual(ports["status"], "PARTIAL")
+        self.assertIsNone(ports["externallyReachableTcpPorts"])
+        self.assertEqual(groups["status"], "NOT_VERIFIED")
+        self.assertEqual(
+            groups["attachedGroupIds"],
+            ["sg-0123456789abcdef0"],
+        )
+
     def test_restricted_ssh_and_mqtt_security_groups_pass(self) -> None:
         document = security_groups(
             tcp(80, "0.0.0.0/0"),

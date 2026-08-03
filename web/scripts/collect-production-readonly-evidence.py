@@ -320,6 +320,38 @@ def correlate_external_ports(
     return result
 
 
+def unverified_security_group_evidence(
+    attached_group_ids: list[str],
+) -> dict[str, object]:
+    return {
+        "status": "NOT_VERIFIED",
+        "reason": (
+            "EC2 has no AWS API authentication; IMDSv2 exposes attached "
+            "Security Group IDs but not their inbound rules"
+        ),
+        "attachedGroupIds": sorted(attached_group_ids),
+        "rules": None,
+    }
+
+
+def uncorrelated_external_ports(
+    host_evidence: dict[str, object],
+) -> dict[str, object]:
+    result = dict(host_evidence)
+    result.update(
+        {
+            "status": "PARTIAL",
+            "externallyReachableTcpPorts": None,
+            "hostBoundButSgBlockedTcpPorts": None,
+            "reason": (
+                "host wildcard listeners were verified, but effective external "
+                "reachability requires AWS Security Group rules or an off-host probe"
+            ),
+        }
+    )
+    return result
+
+
 def imds_request(path: str, token: str | None = None, method: str = "GET") -> str:
     url = f"http://169.254.169.254/latest/{path.lstrip('/')}"
     headers: dict[str, str] = {}
@@ -682,24 +714,36 @@ def collect(args: argparse.Namespace) -> dict[str, object]:
     tls = tls_evidence(PRODUCTION_HOST)
 
     instance_id, region, group_ids = ec2_identity()
-    security_group_document = fetch_security_groups(
-        args.aws_security_groups,
-        region,
-        group_ids,
-    )
-    aws_security_groups = validate_security_groups(
-        security_group_document,
-        group_ids,
-    )
-    port_evidence = correlate_external_ports(
-        host_port_evidence,
-        aws_security_groups,
-    )
+    if args.skip_aws_security_groups:
+        aws_security_groups = unverified_security_group_evidence(group_ids)
+        port_evidence = uncorrelated_external_ports(host_port_evidence)
+        overall_status = "PARTIAL"
+        unverified_items = [
+            "AWS_SECURITY_GROUP_INBOUND",
+            "EFFECTIVE_EXTERNAL_PORT_REACHABILITY",
+        ]
+    else:
+        security_group_document = fetch_security_groups(
+            args.aws_security_groups,
+            region,
+            group_ids,
+        )
+        aws_security_groups = validate_security_groups(
+            security_group_document,
+            group_ids,
+        )
+        port_evidence = correlate_external_ports(
+            host_port_evidence,
+            aws_security_groups,
+        )
+        overall_status = "PASS"
+        unverified_items = []
 
     captured_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
     return {
         "schemaVersion": 1,
-        "status": "PASS",
+        "status": overall_status,
+        "unverifiedItems": unverified_items,
         "capturedAtUtc": captured_at.isoformat().replace("+00:00", "Z"),
         "mode": "READ_ONLY_NON_DESTRUCTIVE",
         "productionOrigin": PRODUCTION_ORIGIN,
@@ -775,12 +819,21 @@ def collect(args: argparse.Namespace) -> dict[str, object]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
+    security_group_source = parser.add_mutually_exclusive_group()
+    security_group_source.add_argument(
         "--aws-security-groups",
         type=Path,
         help=(
             "Optional AWS describe-security-groups JSON. When omitted, the "
             "collector uses EC2 IMDSv2 and the read-only AWS CLI."
+        ),
+    )
+    security_group_source.add_argument(
+        "--skip-aws-security-groups",
+        action="store_true",
+        help=(
+            "Collect every other check and emit PARTIAL evidence when this EC2 "
+            "has neither AWS API credentials nor supplied Security Group JSON."
         ),
     )
     args = parser.parse_args()

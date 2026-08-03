@@ -73,6 +73,30 @@ jq . /tmp/day10-production-readonly.json
 `status=PASS`여야 완료다. AWS JSON의 Group ID가 IMDSv2에서 읽은 현재 EC2의
 실제 연결 Group과 다르면 실패한다.
 
+### AWS API 인증이 없는 EC2
+
+IAM Instance Profile, AWS CLI 자격증명, 사전 수집한 SG JSON이 모두 없다면
+EC2 내부에서 SG Inbound rule을 읽을 수 없다. IMDSv2는 연결된 SG ID까지만
+제공하며 실제 rule은 제공하지 않는다.
+
+이 경우 나머지 검증을 중단하지 않고 다음 명령으로 수집한다.
+
+```sh
+sudo /usr/local/sbin/gilbom-production-readonly-evidence \
+  --skip-aws-security-groups \
+  > /tmp/day10-production-readonly.json
+jq . /tmp/day10-production-readonly.json
+```
+
+결과는 거짓 PASS가 아닌 `status=PARTIAL`이며 다음 두 항목만
+`unverifiedItems`에 남는다.
+
+- `AWS_SECURITY_GROUP_INBOUND`
+- `EFFECTIVE_EXTERNAL_PORT_REACHABILITY`
+
+나머지 TLS·CORS·Cookie·Header·Release·Cosign·CVE·Backup·Container·
+Jenkins/DinD 검증은 정상적으로 PASS/FAIL 판정한다.
+
 ## Security Group 정책
 
 - 호스트 wildcard listener와 SG Inbound의 교집합만 실제 외부 도달 가능
