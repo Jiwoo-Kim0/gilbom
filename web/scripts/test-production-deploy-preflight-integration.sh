@@ -36,6 +36,7 @@ install -d -o root -g root -m 0700 \
   /opt/gilbom/migration-approvals \
   /opt/gilbom/rollback-approvals \
   /opt/gilbom/secrets \
+  /etc/gilbom \
   /var/lib/gilbom/releases \
   /run/gilbom-deploy \
   "$artifact_dir/sbom" \
@@ -70,6 +71,14 @@ chmod 0600 \
   /opt/gilbom/deploy/image.env
 
 printf 'archive-fixture\n' > "$artifact_dir/images.tar.zst"
+printf '{"fixture":"cosign-bundle"}\n' \
+  > "$artifact_dir/images.tar.zst.sigstore.json"
+printf '%s\n' 'fixture-cosign-public-key' \
+  > /etc/gilbom/cosign-release.pub
+chmod 0444 /etc/gilbom/cosign-release.pub
+cosign_public_key_sha256="$(
+  sha256sum /etc/gilbom/cosign-release.pub | awk '{print $1}'
+)"
 printf '{}\n' > "$artifact_dir/sbom/backend.sbom.json"
 printf '{}\n' > "$artifact_dir/sbom/frontend.sbom.json"
 printf 'backend findings: none\n' \
@@ -94,6 +103,7 @@ jq -n \
   --arg release_sha "$release_sha" \
   --arg backend_id "$backend_id" \
   --arg frontend_id "$frontend_id" \
+  --arg cosign_public_key_sha256 "$cosign_public_key_sha256" \
   '
     {
       schemaVersion: 1,
@@ -106,6 +116,16 @@ jq -n \
         frontend: {
           name: ("gilbom-frontend:" + $release_sha),
           id: $frontend_id
+        }
+      },
+      artifacts: {
+        images: {
+          signature: {
+            mode: "offline-key",
+            cosignVersion: "v3.1.2",
+            publicKeySha256: $cosign_public_key_sha256,
+            bundle: {path: "images.tar.zst.sigstore.json"}
+          }
         }
       },
       flyway: {
@@ -253,7 +273,28 @@ install -o root -g root -m 0755 "$fake_bin/docker" /usr/local/sbin/docker
   printf '%s\n' 'exit 1'
 } > "$fake_bin/zstd"
 install -o root -g root -m 0755 "$fake_bin/zstd" /usr/local/sbin/zstd
+{
+  printf '%s\n' '#!/bin/sh'
+  printf '%s\n' 'set -eu'
+  printf '%s\n' 'case "$1" in'
+  printf '%s\n' \
+    '  version) printf "GitVersion:    v3.1.2\\n"; exit 0 ;;'
+  printf '%s\n' '  verify-blob)'
+  printf '%s\n' \
+    '    [ ! -e /opt/gilbom/cosign-reject ] || exit 1'
+  printf '%s\n' '    exit 0'
+  printf '%s\n' '    ;;'
+  printf '%s\n' 'esac'
+  printf '%s\n' 'exit 1'
+} > "$fake_bin/cosign"
+install -o root -g root -m 0755 "$fake_bin/cosign" /usr/local/bin/cosign
 
+touch /opt/gilbom/cosign-reject
+if sh "$PROJECT_DIR/infra/scripts/gilbom-deploy-preflight.sh" \
+    "$release_sha" >/dev/null 2>&1; then
+  fail "preflight accepted an invalid Cosign signature"
+fi
+rm -f -- /opt/gilbom/cosign-reject
 sh "$PROJECT_DIR/infra/scripts/gilbom-deploy-preflight.sh" \
   "$release_sha" > /var/tmp/deploy-preflight.json
 jq -e \

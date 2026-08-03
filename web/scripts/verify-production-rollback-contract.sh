@@ -44,6 +44,9 @@ assert_contains infra/scripts/gilbom-deploy.sh \
   'ensure_rollback_images "$current_sha"' \
   "missing previous images are not restored from the previous Artifact"
 assert_contains infra/scripts/gilbom-deploy.sh \
+  'verify_release_signature "$target_artifact"' \
+  "rollback image reload is not protected by Cosign verification"
+assert_contains infra/scripts/gilbom-deploy.sh \
   'manual-recovery-required.json' \
   "manual recovery manifest is missing"
 assert_contains infra/scripts/gilbom-deploy.sh \

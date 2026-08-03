@@ -120,7 +120,7 @@
 | C06 | DB·이미지·PDF·MQTT Volume 백업 전체 복원 재확인 | 부분 | 백업 checksum, archive 열람과 `pg_restore --list`는 자동화됐다. 격리된 빈 project에 실제 restore 후 DB/파일 hash를 대조하는 drill이 필요 | 격리 Compose | `(예정) .artifacts/day10/restore/summary.json` | 없음. 운영 DB 자동 복원 금지 |
 | C07 | 외부 노출 포트와 AWS Security Group | 부분 | Compose의 Backend/DB 비공개와 EC2 container binding은 검사한다. 호스트 `ss` 결과와 외부 관점 TCP scan, SG 규칙 증거가 없다. | 스테이징 EC2 + 외부 검사 Runner | `(예정) .artifacts/day10/staging/exposed-ports.json`, `(예정) .artifacts/day10/aws/security-groups.json` | read-only scan, 허용 범위 내 네트워크 부하 |
 | C08 | Backend·Frontend dependency와 image Critical/High 취약점 | 예 | 없음 | CI | `.artifacts/source-security/dependency-policy-summary.json`, `.artifacts/image-security/policy-summary.json`, `.artifacts/ci-results/sbom-cve.status` | 없음 |
-| C09 | Cosign으로 release image/archive 서명과 배포 전 검증 | 아니오 | 필요. CI signer identity/key 정책, 서명 대상 digest, signature bundle, deploy/rollback verify gate를 먼저 설계한다. `verify-day8-signed-image.py`는 URL 서명 검사이며 Cosign 증거가 아니다. | CI + 배포 preflight | `(예정) release/signatures/*.bundle`, `(예정) .artifacts/ci-results/cosign-verify.status` | CI는 없음, 배포 시 read-only 검증 |
+| C09 | Cosign으로 release archive 서명과 배포 전 검증 | 예 | 없음. Registry가 아닌 실제 전달물 `images.tar.zst`를 Blob 서명하고 정상·변조·wrong-key를 검사한다. root 승격·preflight·배포·Rollback load가 EC2 고정 공개키로 재검증한다. | CI + EC2 root 승격/배포 | `release/images.tar.zst.sigstore.json`, `.artifacts/cosign/summary.json`, `.artifacts/ci-results/cosign-blob-signature.status`, preflight·Release Manifest의 `artifact.signature` | CI 서명은 없음, EC2 검증은 read-only. 실패 시 배포 차단 |
 
 주요 구현 근거:
 
@@ -147,11 +147,10 @@
 ### 새 테스트 로직이 필요한 항목
 
 1. `B06` k6 인증·권한·Session 부하 시나리오
-2. `C09` Cosign 서명·검증과 배포 차단 계약
-3. `C06` 격리된 전체 backup restore drill
-4. `C03` 스테이징 EC2 reboot recovery drill
-5. `A10`, `A11`, `C04`, `C07` 실제 외부/호스트 경계 검증
-6. `A04` 스테이징 NTP 상태 증거
+2. `C06` 격리된 전체 backup restore drill
+3. `C03` 스테이징 EC2 reboot recovery drill
+4. `A10`, `A11`, `C04`, `C07` 실제 외부/호스트 경계 검증
+5. `A04` 스테이징 NTP 상태 증거
 
 ### 새 테스트를 만들지 않고 연결만 할 항목
 
@@ -175,11 +174,10 @@
 ## 6. 권장 실행 순서
 
 1. CI 증거 보존과 기존 MQTT/Auth Runner 연결
-2. Cosign release provenance gate
-3. 격리 Compose backup restore와 k6 기준선
-4. 스테이징 EC2의 CORS/Cookie/포트/인증서/NTP read-only 검사
-5. 스테이징 reboot recovery
-6. 모든 스테이징 증거가 PASS한 뒤 운영에는 외부 HTTPS와 host 상태의
+2. 격리 Compose backup restore와 k6 기준선
+3. 스테이징 EC2의 CORS/Cookie/포트/인증서/NTP read-only 검사
+4. 스테이징 reboot recovery
+5. 모든 스테이징 증거가 PASS한 뒤 운영에는 외부 HTTPS와 host 상태의
    read-only 재검사만 수행
 
 운영에서 의도적으로 로그인 잠금, 장애, DB 복원, 재부팅 또는 부하를 유발하지
@@ -215,3 +213,31 @@ Credential과 격리 Compose 자원만 사용하며 운영 시스템에는 접�
 아니므로 `B06` k6 부하 기준선은 별도 단계로 남긴다. 외부 HTTPS 관점의
 CORS·Cookie, NTP와 운영 Profile host 증거 역시 스테이징 read-only 검증으로
 분리한다.
+
+## 8. 4단계 설계·구현 최종 코멘트
+
+이번 단계는 Registry tag가 아니라 EC2에 실제 전달되고 `docker load`되는
+`images.tar.zst`를 서명 대상으로 선택했다. 따라서 전송 형식과 배포 입력이
+일치하며, archive가 전송·보관 중 바뀌면 SHA-256뿐 아니라 Jenkins에만 있는
+Private key의 서명 검증에서도 차단된다.
+
+- Cosign `v3.1.2`와 Linux `amd64`·`arm64` 바이너리 SHA-256을 함께 고정했다.
+- CI는 SBOM·CVE gate 뒤 archive를 생성하고 Jenkins Secret File과 Secret Text
+  Credential을 서명 Stage에서만 사용한다.
+- 정상 서명 확인뿐 아니라 변조 archive와 임시 wrong key가 반드시 거부되는지를
+  같은 Stage에서 부정 테스트한다.
+- Bundle과 공개키 fingerprint를 Build Metadata에 결속하고 Bundle 자체도
+  `SHA256SUMS`와 immutable Artifact에 포함했다.
+- EC2에는 `root:root` 공개키와 검증기만 설치한다. incoming 원자 승격,
+  배포 preflight, root 배포기의 `docker load` 직전, 이전 archive Rollback load
+  직전에 같은 공개키로 다시 검증한다.
+- 검증 실패는 `docker load`, `image.env`, Compose, DB에 손대기 전에
+  fail-closed되며, Release Manifest에는 Secret 없이 Cosign version·공개키
+  fingerprint·Bundle hash만 남긴다.
+
+폐쇄형 key-pair 운영이라 공개 Rekor entry를 요구하지 않는다.
+`--insecure-ignore-tlog`는 transparency log 부재만 허용하며 서명 검증 자체를
+생략하지 않는다. 이 모델의 신뢰 기준은 Jenkins Credential의 Private key와
+EC2 root 소유 공개키다. 단일 공개키를 임의로 교체하면 이전 Rollback Artifact가
+검증되지 않으므로 키 회전은 다중 키 정책을 도입하거나 보존 Artifact를 재설계한
+뒤 별도 변경으로 수행한다.

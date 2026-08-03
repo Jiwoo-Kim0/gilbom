@@ -73,9 +73,14 @@
 - OpenSSH client(`ssh`, `scp`)
 - Python 3(표준 라이브러리 smoke client)
 - SHA-256(`sha256sum`)과 jq
-- Gitleaks 8.29.0, Trivy 0.70.0, zstd 1.5.7
+- Gitleaks 8.29.0, Trivy 0.70.0, zstd 1.5.7, Cosign 3.1.2
 - Redocly CLI 2.40.0은 고정 digest Docker image로 실행
 - `/opt/jenkins/home` 영속 경로
+
+Release archive는 SBOM·CVE gate 뒤 Jenkins Credential의 Private key로 Blob
+서명한다. 정상·변조·wrong-key 검사를 통과한 Bundle만 Artifact에 포함되며,
+Credential 생성과 EC2 공개키 설치 순서는
+[`cosign-blob-signing.md`](cosign-blob-signing.md)를 따른다.
 
 ## SCM checkout와 release identity
 

@@ -20,6 +20,9 @@ ROLLBACK_APPROVAL_ROOT=/opt/gilbom/rollback-approvals
 RELEASE_RECORD_ROOT=/var/lib/gilbom/releases
 CURRENT_SHA_PATH="$RELEASE_RECORD_ROOT/current.sha"
 PREVIOUS_SHA_PATH="$RELEASE_RECORD_ROOT/previous.sha"
+COSIGN_BIN=/usr/local/bin/cosign
+COSIGN_PUBLIC_KEY=/etc/gilbom/cosign-release.pub
+COSIGN_VERSION=v3.1.2
 LOCK_ROOT=/run/gilbom-deploy
 LOCK_PATH="$LOCK_ROOT/deploy.lock"
 HEALTH_TIMEOUT_SECONDS=240
@@ -71,6 +74,7 @@ for variable in \
   DEPLOY_PULL ALLOW_MUTABLE_IMAGE_TAGS SECRET_SCAN_DIR BACKUP_DIR \
   BACKUP_ROOT MIGRATION_APPROVAL_ROOT RELEASE_RECORD_ROOT \
   DEPLOY_APPROVAL_ROOT ROLLBACK_APPROVAL_ROOT \
+  COSIGN_PRIVATE_KEY COSIGN_PASSWORD \
   COMPOSE_PROJECT_NAME DOCKER_HOST DOCKER_CONTEXT
 do
   value="$(printenv "$variable" 2>/dev/null || true)"
@@ -113,6 +117,19 @@ assert_root_file() {
     || fail "fixed file must be root:root: $path"
   [ -z "$(find "$path" -perm /0022 -print -quit)" ] \
     || fail "fixed file must not be group/world writable: $path"
+}
+
+verify_release_signature() {
+  directory="$1"
+  archive="$directory/images.tar.zst"
+  bundle="$directory/images.tar.zst.sigstore.json"
+  [ -f "$archive" ] && [ ! -L "$archive" ] && [ -s "$archive" ] \
+    && [ -f "$bundle" ] && [ ! -L "$bundle" ] && [ -s "$bundle" ] \
+    && "$COSIGN_BIN" verify-blob \
+      --insecure-ignore-tlog \
+      --key "$COSIGN_PUBLIC_KEY" \
+      --bundle "$bundle" \
+      "$archive" >/dev/null
 }
 
 assert_root_readonly_tree() {
@@ -186,6 +203,11 @@ assert_root_file "$COMPOSE_PATH"
 assert_root_file "$RUNTIME_ENV_PATH"
 assert_root_file "$IMAGE_ENV_PATH"
 assert_root_file "$BACKUP_SCRIPT"
+assert_root_file "$COSIGN_BIN"
+assert_root_file "$COSIGN_PUBLIC_KEY"
+"$COSIGN_BIN" version \
+  | grep -Fq "GitVersion:    $COSIGN_VERSION" \
+  || fail "Cosign verifier version differs from $COSIGN_VERSION"
 [ "$(wc -l < "$IMAGE_ENV_PATH" | tr -d ' ')" -eq 2 ] \
   || fail "fixed image.env must contain exactly two lines"
 [ "$(
@@ -202,12 +224,13 @@ assert_root_file "$BACKUP_SCRIPT"
 [ -d "$artifact_dir" ] && [ ! -L "$artifact_dir" ] \
   || fail "promoted release artifact is missing or symlinked"
 assert_root_readonly_tree "$artifact_dir"
-[ "$(find "$artifact_dir" -type f | wc -l | tr -d ' ')" -eq 9 ] \
-  || fail "promoted release artifact must contain exactly nine files"
+[ "$(find "$artifact_dir" -type f | wc -l | tr -d ' ')" -eq 10 ] \
+  || fail "promoted release artifact must contain exactly ten files"
 
 for relative_path in \
   SHA256SUMS \
   images.tar.zst \
+  images.tar.zst.sigstore.json \
   images.tar.zst.sha256 \
   build-metadata.json \
   sbom/backend.sbom.json \
@@ -227,16 +250,22 @@ done
   sha256sum -c SHA256SUMS
   sha256sum -c images.tar.zst.sha256
 ) || fail "promoted release checksum verification failed"
+verify_release_signature "$artifact_dir" \
+  || fail "promoted release Cosign signature verification failed"
 
 metadata="$artifact_dir/build-metadata.json"
 backend_image="gilbom-backend:$release_sha"
 frontend_image="gilbom-frontend:$release_sha"
+cosign_public_key_sha256="$(
+  sha256sum "$COSIGN_PUBLIC_KEY" | awk '{print $1}'
+)"
 
 # 8. metadata의 release SHA, image tag/ID, Flyway 증거를 검증한다.
 jq -e \
   --arg release_sha "$release_sha" \
   --arg backend_image "$backend_image" \
   --arg frontend_image "$frontend_image" \
+  --arg cosign_public_key_sha256 "$cosign_public_key_sha256" \
   '
     .schemaVersion == 1
     and .releaseSha == $release_sha
@@ -245,6 +274,16 @@ jq -e \
     and (.images.backend.id | test("^sha256:[0-9a-f]{64}$"))
     and (.images.frontend.id | test("^sha256:[0-9a-f]{64}$"))
     and (.flyway.latestVersion | test("^V[1-9][0-9]*$"))
+    and .artifacts.images.signature.mode == "offline-key"
+    and .artifacts.images.signature.cosignVersion == "v3.1.2"
+    and (
+      .artifacts.images.signature.publicKeySha256
+      == $cosign_public_key_sha256
+    )
+    and (
+      .artifacts.images.signature.bundle.path
+      == "images.tar.zst.sigstore.json"
+    )
     and (.flyway.migrations | type == "array" and length > 0)
     and all(
       .flyway.migrations[];
@@ -278,7 +317,7 @@ last_metadata_version="$(tail -n 1 "$metadata_migrations" | cut -f1)"
 [ "$latest_version" = "$last_metadata_version" ] \
   || fail "Flyway latestVersion differs from the migration list"
 
-# 9. docker load 전에 압축 stream 전체를 독립 검사한다.
+# 9. Cosign 검증을 통과한 archive의 압축 stream 전체를 독립 검사한다.
 zstd --quiet --test "$artifact_dir/images.tar.zst" \
   || fail "release image archive failed zstd integrity testing"
 
@@ -476,7 +515,8 @@ ensure_rollback_images() {
   [ -z "$(find "$target_artifact" -perm /0222 -print -quit)" ] \
     || return 1
   for relative_path in \
-    SHA256SUMS images.tar.zst images.tar.zst.sha256 build-metadata.json
+    SHA256SUMS images.tar.zst images.tar.zst.sigstore.json \
+    images.tar.zst.sha256 build-metadata.json
   do
     [ -f "$target_artifact/$relative_path" ] \
       && [ ! -L "$target_artifact/$relative_path" ] \
@@ -488,6 +528,8 @@ ensure_rollback_images() {
     sha256sum -c SHA256SUMS >/dev/null
     sha256sum -c images.tar.zst.sha256 >/dev/null
   ) || return 1
+  verify_release_signature "$target_artifact" \
+    || return 1
   jq -e \
     --arg target_sha "$target_sha" \
     --arg target_backend "$target_backend" \
@@ -1193,10 +1235,15 @@ deploy_preflight_sha256="$(sha256sum "$deploy_preflight" | awk '{print $1}')"
 artifact_manifest_sha256="$(
   sha256sum "$artifact_dir/SHA256SUMS" | awk '{print $1}'
 )"
+signature_bundle_sha256="$(
+  sha256sum "$artifact_dir/images.tar.zst.sigstore.json" | awk '{print $1}'
+)"
 jq -e \
   --arg release_sha "$release_sha" \
   --arg current_sha "$current_sha" \
   --arg artifact_manifest_sha256 "$artifact_manifest_sha256" \
+  --arg cosign_public_key_sha256 "$cosign_public_key_sha256" \
+  --arg signature_bundle_sha256 "$signature_bundle_sha256" \
   --arg migration_plan_sha256 "$migration_plan_sha256" \
   --argjson current_version "$current_version" \
   --argjson target_version "$latest_version" \
@@ -1207,6 +1254,16 @@ jq -e \
     and .production.currentSha == $current_sha
     and .production.rollbackTargetSha == $current_sha
     and .artifact.sha256SumsSha256 == $artifact_manifest_sha256
+    and .artifact.signature.status == "PASS"
+    and .artifact.signature.cosignVersion == "v3.1.2"
+    and (
+      .artifact.signature.publicKeySha256
+      == $cosign_public_key_sha256
+    )
+    and (
+      .artifact.signature.bundleSha256
+      == $signature_bundle_sha256
+    )
     and .flyway.currentVersion == $current_version
     and .flyway.targetVersion == $target_version
     and .flyway.migrationPlanSha256 == $migration_plan_sha256
@@ -1426,6 +1483,9 @@ jq -n \
   --arg artifact_manifest_sha256 "$(
     sha256sum "$artifact_dir/SHA256SUMS" | awk '{print $1}'
   )" \
+  --arg cosign_version "$COSIGN_VERSION" \
+  --arg cosign_public_key_sha256 "$cosign_public_key_sha256" \
+  --arg signature_bundle_sha256 "$signature_bundle_sha256" \
   --arg compose_sha256 "$(sha256sum "$COMPOSE_PATH" | awk '{print $1}')" \
   --arg backend_image "$backend_image" \
   --arg backend_image_id "$actual_backend_id" \
@@ -1450,7 +1510,13 @@ jq -n \
       deployedAtUtc: $deployed_at_utc,
       artifact: {
         directory: $artifact_directory,
-        sha256SumsSha256: $artifact_manifest_sha256
+        sha256SumsSha256: $artifact_manifest_sha256,
+        signature: {
+          status: "PASS",
+          cosignVersion: $cosign_version,
+          publicKeySha256: $cosign_public_key_sha256,
+          bundleSha256: $signature_bundle_sha256
+        }
       },
       composeSha256: $compose_sha256,
       images: {

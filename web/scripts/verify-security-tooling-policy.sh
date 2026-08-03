@@ -12,6 +12,8 @@ for file in \
   redocly.yaml \
   infra/security/tool-versions.env \
   infra/security/vulnerability-exceptions.yaml \
+  infra/cosign/version.env \
+  infra/cosign/offline-signing-config.json \
   scripts/security_policy.py \
   scripts/verify-source-security.sh \
   scripts/verify-repository-policy.sh \
@@ -27,6 +29,8 @@ for file in \
   scripts/render-vulnerability-report.py \
   scripts/prepare-release-security-artifacts.sh \
   scripts/create-release-image-archive.sh \
+  scripts/sign-release-image-archive.sh \
+  scripts/verify-cosign-release-signature.sh \
   scripts/generate-build-metadata.py \
   scripts/generate-build-metadata.sh \
   scripts/verify-release-artifacts.sh \
@@ -70,6 +74,7 @@ for file in \
   scripts/verify-external-https-smoke.py \
   infra/scripts/promote-release-artifacts.sh \
   infra/scripts/promote-ci-release-artifacts.sh \
+  infra/scripts/install-cosign-release-verifier.sh \
   infra/scripts/gilbom-deploy.sh \
   infra/scripts/gilbom-approve-migrations.sh \
   infra/scripts/gilbom-deploy-ssh-command.sh \
@@ -83,6 +88,7 @@ for file in \
   infra/scripts/install-production-deploy-job-entrypoints.sh \
   infra/scripts/prepare-production-deploy-account.sh \
   docs/security-tooling-policy.md \
+  docs/cosign-blob-signing.md \
   docs/ci-artifact-promotion.md \
   docs/production-deploy-account.md \
   docs/production-root-deploy.md \
@@ -131,6 +137,15 @@ grep -Fq 'sha256sum -c SHA256SUMS' \
 grep -Fq 'mv -T -- "$incoming" "$destination"' \
   infra/scripts/promote-ci-release-artifacts.sh \
   || fail "CI root promotion is not an atomic same-filesystem rename"
+grep -Fq 'COSIGN_VERSION=3.1.2' infra/cosign/version.env \
+  || fail "Cosign version is not pinned"
+grep -Fq \
+  'COSIGN_LINUX_AMD64_SHA256=f7622ed3cf22e55e1ae6377c080979ff77a22da9981c11df222a2e444991e7cf' \
+  infra/cosign/version.env \
+  || fail "Cosign linux-amd64 Digest is not pinned"
+grep -Fq '"$COSIGN_BIN" verify-blob' \
+  infra/scripts/gilbom-deploy.sh \
+  || fail "root deployer does not verify the Cosign Blob signature"
 
 sh -n \
   scripts/verify-source-security.sh \
@@ -144,6 +159,8 @@ sh -n \
   scripts/record-ci-result.sh \
   scripts/prepare-release-security-artifacts.sh \
   scripts/create-release-image-archive.sh \
+  scripts/sign-release-image-archive.sh \
+  scripts/verify-cosign-release-signature.sh \
   scripts/generate-build-metadata.sh \
   scripts/verify-release-artifacts.sh \
   scripts/verify-ci-release-contract.sh \
@@ -185,6 +202,7 @@ sh -n \
   scripts/verify-production-rollback-drill-evidence.sh \
   infra/scripts/promote-release-artifacts.sh \
   infra/scripts/promote-ci-release-artifacts.sh \
+  infra/scripts/install-cosign-release-verifier.sh \
   infra/scripts/gilbom-deploy.sh \
   infra/scripts/gilbom-approve-migrations.sh \
   infra/scripts/gilbom-deploy-ssh-command.sh \

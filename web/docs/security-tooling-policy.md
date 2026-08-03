@@ -1,6 +1,6 @@
 # 보안 도구·취약점·Artifact 정책
 
-기준일: 2026-08-02
+기준일: 2026-08-03
 
 ## 1. 확정 도구
 
@@ -11,6 +11,7 @@
 | dependency·image·SBOM·CVE | Trivy | 0.70.0 | 아래 취약점 정책 위반 |
 | release archive | zstd | 1.5.7 | 생성 또는 해제 실패 |
 | archive 무결성 | SHA-256 | 시스템 `sha256sum` | 전송 전·후 hash 불일치 |
+| release archive 서명 | Cosign Blob | 3.1.2 | 서명·변조·wrong-key test 또는 EC2 공개키 검증 실패 |
 
 실행 image는 `infra/security/tool-versions.env`에서 tag와 digest를 함께 고정한다.
 Jenkins custom image에는 Gitleaks와 Trivy binary, zstd, OpenSSH client를 포함한다.
@@ -21,9 +22,11 @@ Trivy 0.70.0은 0.69.4 공급망 사고 이후 공개된 버전으로 고정했�
 공식 release와 image digest를 확인하고 이 파일, Jenkins Dockerfile, 버전 검증
 계약을 같은 변경에서 갱신한다.
 
-Cosign은 현재 Registry digest를 배포 단위로 쓰지 않고 local Docker archive만
-전달하므로 필수 gate에 넣지 않는다. Registry를 도입하면 digest reference,
-keyless 또는 KMS 서명, admission 검증 주체를 확정한 뒤 추가한다.
+Registry가 아닌 local Docker archive를 실제 배포 단위로 사용하므로 Cosign
+`sign-blob`으로 `images.tar.zst`를 서명한다. Private key와 Password는 Jenkins
+Credential에만 있고 EC2에는 공개키만 설치한다. Bundle은 Release Artifact와
+`SHA256SUMS`에 포함되며 root 승격·preflight·배포·Rollback archive load 전에
+검증한다. 상세 절차는 `docs/cosign-blob-signing.md`를 따른다.
 
 ## 2. Secret과 OpenAPI 정책
 
@@ -148,7 +151,9 @@ Jenkins가 전송을 자동화하려면 별도 SSH private-key Credential, 검�
 
 CI의 통합 image archive는 기존 EC2 수동 배치 bundle과 별도 경계다. 모든 test와
 보안 검사가 PASS인 full-SHA Backend·Frontend image만 `release/images.tar.zst`로
-FIFO streaming하고 `images.tar.zst.sha256`을 즉시 확인한다. 이어 provenance를
+FIFO streaming하고 `images.tar.zst.sha256`을 즉시 확인한다. 이어 Jenkins
+Credential의 Private key로 archive를 서명하고 정상·변조·wrong-key 검사를 모두
+통과한 Bundle을 만든 뒤, 이 서명 증거를 포함한 provenance를
 `release/build-metadata.json`으로 만들고 `jq empty`로 검사한다.
 
 최종 `release/SHA256SUMS`는 Archive뿐 아니라 metadata, SBOM, 취약점 보고서와

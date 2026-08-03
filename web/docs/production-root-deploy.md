@@ -27,6 +27,8 @@ sudo --non-interactive /usr/local/sbin/gilbom-deploy <40자리-full-sha>
 | DB·Volume backup | `/opt/gilbom/backups` |
 | Release 상태·Manifest | `/var/lib/gilbom/releases` |
 | 동시 실행 lock | `/run/gilbom-deploy/deploy.lock` |
+| Cosign verifier | `/usr/local/bin/cosign` |
+| Release 공개키 | `/etc/gilbom/cosign-release.pub` |
 
 호출자의 `COMPOSE_FILE`, `RUNTIME_ENV_FILE`, `IMAGE_ENV_FILE`, `BACKUP_ROOT`,
 `DOCKER_HOST`, `COMPOSE_PROJECT_NAME` 등 override는 모두 거부한다.
@@ -34,6 +36,9 @@ sudo --non-interactive /usr/local/sbin/gilbom-deploy <40자리-full-sha>
 ## 설치
 
 Stage 10 계정이 준비된 EC2에서 관리자만 실행한다.
+
+먼저 `docs/cosign-blob-signing.md`에 따라 공개키와 고정 Cosign verifier를
+설치한다. Private key는 EC2에 전달하지 않는다.
 
 ```sh
 git -C /opt/gilbom/app-git status --short --branch
@@ -92,8 +97,8 @@ entrypoint는 다음을 순서대로 수행한다.
 
 1. 단일 full SHA와 고정 경로·root 소유권·권한 검증
 2. `flock` 동시 배포 차단
-3. Artifact 전체 checksum과 `zstd -t` 검증
-4. `zstd -dc | docker load`, 두 image tag와 metadata config ID 검증
+3. Artifact 전체 checksum과 고정 공개키 Cosign Blob 서명 검증
+4. 서명 PASS 뒤 `zstd -t`, `zstd -dc | docker load`, 두 image tag와 metadata config ID 검증
 5. 운영 Flyway version 조회, 신규 migration plan 비교와 승인 검사
 6. 기존 DB·PDF·image·MQTT volume backup 및 checksum 재검사
 7. `current.sha`를 `previous.sha`로 기록하고 `image.env` 원자 교체
@@ -129,7 +134,8 @@ DB 자동 복원을 수행하지 않는다.
 /var/lib/gilbom/releases/<release-sha>/release-manifest.json
 ```
 
-Release manifest에는 Artifact manifest hash, 두 image ID, Flyway 전·후 version,
+Release manifest에는 Artifact manifest hash, Cosign version·공개키·Bundle hash,
+두 image ID, Flyway 전·후 version,
 migration 승인, Jenkins 승인자 ID·시간, backup bundle, 네 health 결과가
 기록된다. Secret 값은 기록하지 않는다. Stage 12 설치 이후에는 exact preflight
 hash와 결속된 Jenkins 배포 승인이 없거나 승인 이후 운영 상태가 달라진 경우에도

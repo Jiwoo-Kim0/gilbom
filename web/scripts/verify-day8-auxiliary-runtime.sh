@@ -207,7 +207,7 @@ docker exec "$jenkins_id" /bin/sh -ec '
   [ "$DOCKER_HOST" = tcp://docker-builder:2376 ]
   [ "$DOCKER_TLS_VERIFY" = 1 ]
   [ "$COMPOSE_PARALLEL_LIMIT" = 1 ]
-  for command_name in git gzip zstd ssh scp sha256sum jq
+  for command_name in cosign git gzip zstd ssh scp sha256sum jq
   do
     command -v "$command_name" >/dev/null
   done
@@ -223,6 +223,7 @@ docker exec "$jenkins_id" /bin/sh -ec '
   "$probe"
   docker info >/dev/null
   docker compose version >/dev/null
+  cosign version | grep -Fq "GitVersion:    v3.1.2"
 ' || fail "Jenkins TLS DinD or single-executor policy is not active"
 
 echo "Day 8 monitoring and Jenkins runtime: PASS"

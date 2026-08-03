@@ -120,6 +120,15 @@ assert_contains infra/security/tool-versions.env \
 assert_contains infra/security/tool-versions.env \
   "ZSTD_VERSION=1.5.7" \
   "zstd 1.5.7"
+assert_contains infra/cosign/version.env \
+  "COSIGN_VERSION=3.1.2" \
+  "Cosign 3.1.2"
+assert_contains infra/cosign/version.env \
+  "COSIGN_LINUX_AMD64_SHA256=f7622ed3cf22e55e1ae6377c080979ff77a22da9981c11df222a2e444991e7cf" \
+  "Cosign Linux amd64 immutable Digest"
+assert_contains infra/cosign/version.env \
+  "COSIGN_LINUX_ARM64_SHA256=90e7ae0b5dfd60f20816b52c012addf7fc055ebcc7bea4ce81c428ca8518c302" \
+  "Cosign Linux arm64 immutable Digest"
 assert_contains infra/jenkins/Dockerfile \
   "ghcr.io/gitleaks/gitleaks:v8.29.0@sha256:71d3ee5990f2176f763b438298453fc37e87b119122045e176ca9d44ff00b08b AS gitleaks" \
   "Gitleaks immutable image"
@@ -129,5 +138,8 @@ assert_contains infra/jenkins/Dockerfile \
 assert_contains compose.jenkins.yaml \
   "image: docker:29.6.2-dind-alpine3.24" \
   "Jenkins DinD 29.6.2"
+assert_contains infra/jenkins/Dockerfile \
+  '"https://github.com/sigstore/cosign/releases/download/v$COSIGN_VERSION/$asset"' \
+  "Jenkins pinned Cosign download"
 
 echo "Runtime version pin policy: PASS"

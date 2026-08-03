@@ -34,6 +34,7 @@ REQUIRED_RESULTS = (
     "volume-persistence",
     "image-layer-log-secret",
     "sbom-cve",
+    "cosign-blob-signature",
 )
 
 
@@ -123,6 +124,45 @@ def artifact(path: str) -> dict[str, object]:
     }
 
 
+def signing_evidence() -> dict[str, object]:
+    path = ROOT / ".artifacts/cosign/summary.json"
+    if not path.is_file() or path.stat().st_size == 0:
+        raise SystemExit("Cosign signing evidence is missing or empty")
+    evidence = json.loads(path.read_text(encoding="utf-8"))
+    tests = evidence.get("tests", {})
+    if (
+        evidence.get("schemaVersion") != 1
+        or evidence.get("status") != "PASS"
+        or evidence.get("signingMode") != "offline-key"
+        or evidence.get("transparencyLog") != "disabled"
+        or not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", evidence.get("cosignVersion", ""))
+        or not re.fullmatch(r"[0-9a-f]{64}", evidence.get("publicKeySha256", ""))
+        or tests
+        != {
+            "validSignatureAccepted": True,
+            "tamperedArchiveRejected": True,
+            "wrongPublicKeyRejected": True,
+        }
+    ):
+        raise SystemExit("Cosign signing evidence is not PASS or is malformed")
+    bundle = artifact("images.tar.zst.sigstore.json")
+    if evidence.get("bundle", {}).get("sha256") != bundle["sha256"]:
+        raise SystemExit("Cosign Bundle digest differs from signing evidence")
+    if evidence.get("archive", {}).get("sha256") != sha256(RELEASE / "images.tar.zst"):
+        raise SystemExit("signed archive digest differs from signing evidence")
+    return {
+        "mode": evidence["signingMode"],
+        "cosignVersion": evidence["cosignVersion"],
+        "transparencyLog": evidence["transparencyLog"],
+        "publicKeySha256": evidence["publicKeySha256"],
+        "bundle": bundle,
+        "negativeTests": {
+            "tamperedArchiveRejected": True,
+            "wrongPublicKeyRejected": True,
+        },
+    }
+
+
 def utc(value: str, name: str) -> str:
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", value):
         raise SystemExit(f"{name} must be an RFC3339 UTC second timestamp")
@@ -198,7 +238,10 @@ def main() -> int:
                 "frontend": artifact("vulnerabilities/frontend.txt"),
                 "policy": artifact("vulnerabilities/policy-summary.json"),
             },
-            "images": artifact("images.tar.zst"),
+            "images": {
+                **artifact("images.tar.zst"),
+                "signature": signing_evidence(),
+            },
         },
     }
 

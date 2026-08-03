@@ -94,9 +94,18 @@ assert_contains infra/scripts/promote-ci-release-artifacts.sh \
 assert_contains infra/scripts/promote-ci-release-artifacts.sh \
   'mv -T -- "$incoming" "$destination"' \
   "promotion does not use a same-filesystem atomic rename"
+assert_contains infra/scripts/promote-ci-release-artifacts.sh \
+  'images.tar.zst.sigstore.json' \
+  "Cosign Bundle is not a required promoted Artifact"
+assert_contains infra/scripts/promote-ci-release-artifacts.sh \
+  '"$COSIGN_BIN" verify-blob' \
+  "root promotion does not verify the release Blob signature"
 assert_contains infra/scripts/prepare-day8-host.sh \
   '/opt/gilbom/artifacts/.incoming' \
   "EC2 preparation does not create the incoming boundary"
+assert_contains scripts/verify-ci-artifact-remote-readiness.sh \
+  'cosign_public_key=/etc/gilbom/cosign-release.pub' \
+  "remote readiness does not require the installed release public key"
 
 if grep -Fq 'StrictHostKeyChecking=no' \
   scripts/upload-ci-release-artifacts.sh \

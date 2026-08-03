@@ -8,10 +8,23 @@ fail() {
   exit 1
 }
 
+COSIGN_BIN=/usr/local/bin/cosign
+COSIGN_PUBLIC_KEY=/etc/gilbom/cosign-release.pub
+
 [ "$(id -u)" -eq 0 ] \
   || fail "run this verification as root"
 [ "$#" -eq 0 ] \
   || fail "this verification accepts no arguments"
+
+case "$(uname -m)" in
+  x86_64)
+    expected_cosign_sha256=f7622ed3cf22e55e1ae6377c080979ff77a22da9981c11df222a2e444991e7cf
+    ;;
+  aarch64|arm64)
+    expected_cosign_sha256=90e7ae0b5dfd60f20816b52c012addf7fc055ebcc7bea4ce81c428ca8518c302
+    ;;
+  *) fail "unsupported host architecture for pinned Cosign verifier" ;;
+esac
 
 for file in \
   /usr/local/sbin/gilbom-deploy-preflight \
@@ -28,6 +41,22 @@ do
   [ "$(stat -c '%U:%G:%a' "$file")" = root:root:755 ] \
     || fail "root command ownership or mode is invalid: $file"
 done
+[ -f "$COSIGN_BIN" ] && [ ! -L "$COSIGN_BIN" ] \
+  || fail "pinned Cosign verifier is missing or symlinked"
+[ "$(stat -c '%U:%G:%a' "$COSIGN_BIN")" = root:root:755 ] \
+  || fail "Cosign verifier ownership or mode is invalid"
+[ "$(sha256sum "$COSIGN_BIN" | awk '{print $1}')" \
+    = "$expected_cosign_sha256" ] \
+  || fail "Cosign verifier Digest differs from the pinned release"
+"$COSIGN_BIN" version \
+  | grep -Fq 'GitVersion:    v3.1.2' \
+  || fail "Cosign verifier version differs from v3.1.2"
+[ -f "$COSIGN_PUBLIC_KEY" ] \
+  && [ ! -L "$COSIGN_PUBLIC_KEY" ] \
+  && [ -s "$COSIGN_PUBLIC_KEY" ] \
+  || fail "release verification public key is missing, empty, or symlinked"
+[ "$(stat -c '%U:%G:%a' "$COSIGN_PUBLIC_KEY")" = root:root:444 ] \
+  || fail "release verification public key ownership or mode is invalid"
 [ "$(stat -c '%U:%G:%a' /opt/gilbom/deploy-approvals)" = root:root:700 ] \
   || fail "deployment approval directory ownership or mode is invalid"
 [ "$(stat -c '%U:%G:%a' /opt/gilbom/rollback-approvals)" = root:root:700 ] \

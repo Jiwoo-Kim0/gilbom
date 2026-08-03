@@ -45,6 +45,8 @@ ssh \
    artifact_root=/opt/gilbom/artifacts
    incoming_root="$artifact_root/.incoming"
    promotion_command=/usr/local/sbin/gilbom-promote-ci-release-artifacts
+   cosign_bin=/usr/local/bin/cosign
+   cosign_public_key=/etc/gilbom/cosign-release.pub
    test -d "$artifact_root"
    test ! -L "$artifact_root"
    test -d "$incoming_root"
@@ -54,6 +56,15 @@ ssh \
    test ! -L "$promotion_command"
    test -x "$promotion_command"
    test "$(stat -c "%U:%G:%a" "$promotion_command")" = root:root:755
+   test -f "$cosign_bin"
+   test ! -L "$cosign_bin"
+   test -x "$cosign_bin"
+   test "$(stat -c "%U:%G:%a" "$cosign_bin")" = root:root:755
+   "$cosign_bin" version | grep -Fq "GitVersion:    v3.1.2"
+   test -f "$cosign_public_key"
+   test ! -L "$cosign_public_key"
+   test -s "$cosign_public_key"
+   test "$(stat -c "%U:%G:%a" "$cosign_public_key")" = root:root:444
    sudo --non-interactive --list "$promotion_command" >/dev/null'
 
 echo "CI artifact remote readiness: PASS"

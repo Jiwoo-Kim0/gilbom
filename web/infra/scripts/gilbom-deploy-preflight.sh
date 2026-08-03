@@ -11,6 +11,9 @@ RUNTIME_ENV_PATH="$DEPLOY_ROOT/runtime.env"
 IMAGE_ENV_PATH="$DEPLOY_ROOT/image.env"
 RELEASE_RECORD_ROOT=/var/lib/gilbom/releases
 DEPLOY_APPROVAL_ROOT=/opt/gilbom/deploy-approvals
+COSIGN_BIN=/usr/local/bin/cosign
+COSIGN_PUBLIC_KEY=/etc/gilbom/cosign-release.pub
+COSIGN_VERSION=v3.1.2
 SAFE_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 PATH="$SAFE_PATH"
@@ -109,8 +112,11 @@ for file in \
   "$COMPOSE_PATH" \
   "$RUNTIME_ENV_PATH" \
   "$IMAGE_ENV_PATH" \
+  "$COSIGN_BIN" \
+  "$COSIGN_PUBLIC_KEY" \
   "$artifact_dir/SHA256SUMS" \
   "$artifact_dir/images.tar.zst" \
+  "$artifact_dir/images.tar.zst.sigstore.json" \
   "$artifact_dir/images.tar.zst.sha256" \
   "$metadata" \
   "$policy"
@@ -121,18 +127,31 @@ done
   || fail "artifact directory contains a symlink"
 [ -z "$(find "$artifact_dir" -perm /0222 -print -quit)" ] \
   || fail "artifact directory is not immutable"
-[ "$(find "$artifact_dir" -type f | wc -l | tr -d ' ')" -eq 9 ] \
-  || fail "artifact directory must contain exactly nine files"
+[ "$(find "$artifact_dir" -type f | wc -l | tr -d ' ')" -eq 10 ] \
+  || fail "artifact directory must contain exactly ten files"
 (
   cd "$artifact_dir"
   sha256sum -c SHA256SUMS >/dev/null
   sha256sum -c images.tar.zst.sha256 >/dev/null
 ) || fail "artifact checksum verification failed"
+"$COSIGN_BIN" version \
+  | grep -Fq "GitVersion:    $COSIGN_VERSION" \
+  || fail "Cosign verifier version differs from $COSIGN_VERSION"
+"$COSIGN_BIN" verify-blob \
+  --insecure-ignore-tlog \
+  --key "$COSIGN_PUBLIC_KEY" \
+  --bundle "$artifact_dir/images.tar.zst.sigstore.json" \
+  "$artifact_dir/images.tar.zst" >/dev/null \
+  || fail "release image archive Cosign signature is invalid"
 
+jq_cosign_public_key_sha256="$(
+  sha256sum "$COSIGN_PUBLIC_KEY" | awk '{print $1}'
+)"
 jq -e \
   --arg release_sha "$release_sha" \
   --arg backend_image "gilbom-backend:$release_sha" \
   --arg frontend_image "gilbom-frontend:$release_sha" \
+  --arg cosign_public_key_sha256 "$jq_cosign_public_key_sha256" \
   '
     .schemaVersion == 1
     and .releaseSha == $release_sha
@@ -140,6 +159,16 @@ jq -e \
     and .images.frontend.name == $frontend_image
     and (.images.backend.id | test("^sha256:[0-9a-f]{64}$"))
     and (.images.frontend.id | test("^sha256:[0-9a-f]{64}$"))
+    and .artifacts.images.signature.mode == "offline-key"
+    and .artifacts.images.signature.cosignVersion == "v3.1.2"
+    and (
+      .artifacts.images.signature.publicKeySha256
+      == $cosign_public_key_sha256
+    )
+    and (
+      .artifacts.images.signature.bundle.path
+      == "images.tar.zst.sigstore.json"
+    )
     and (.flyway.latestVersion | test("^V[1-9][0-9]*$"))
     and (.flyway.migrations | type == "array" and length > 0)
     and all(
@@ -171,6 +200,9 @@ archive_sha256="$(
 printf '%s\n' "$archive_sha256" | grep -Eq '^[0-9a-f]{64}$' \
   || fail "archive checksum is invalid"
 sha256_sums_sha256="$(sha256sum "$artifact_dir/SHA256SUMS" | awk '{print $1}')"
+signature_bundle_sha256="$(
+  sha256sum "$artifact_dir/images.tar.zst.sigstore.json" | awk '{print $1}'
+)"
 critical_count="$(jq -r '.criticalCount' "$policy")"
 high_count="$(jq -r '.highCount' "$policy")"
 excepted_high_count="$(jq -r '.exceptedHighCount' "$policy")"
@@ -370,6 +402,9 @@ jq -n -S \
   --arg artifact_directory "$artifact_dir" \
   --arg sha256_sums_sha256 "$sha256_sums_sha256" \
   --arg archive_sha256 "$archive_sha256" \
+  --arg cosign_version "$COSIGN_VERSION" \
+  --arg cosign_public_key_sha256 "$jq_cosign_public_key_sha256" \
+  --arg signature_bundle_sha256 "$signature_bundle_sha256" \
   --arg backend_image "gilbom-backend:$release_sha" \
   --arg backend_image_id "$backend_image_id" \
   --arg frontend_image "gilbom-frontend:$release_sha" \
@@ -394,7 +429,13 @@ jq -n -S \
       artifact: {
         directory: $artifact_directory,
         sha256SumsSha256: $sha256_sums_sha256,
-        archiveSha256: $archive_sha256
+        archiveSha256: $archive_sha256,
+        signature: {
+          status: "PASS",
+          cosignVersion: $cosign_version,
+          publicKeySha256: $cosign_public_key_sha256,
+          bundleSha256: $signature_bundle_sha256
+        }
       },
       images: {
         backend: {

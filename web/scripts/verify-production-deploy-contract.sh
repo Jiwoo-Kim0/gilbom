@@ -11,7 +11,10 @@ for file in \
   infra/scripts/gilbom-deploy.sh \
   infra/scripts/gilbom-approve-migrations.sh \
   infra/scripts/gilbom-deploy-ssh-command.sh \
+  infra/scripts/install-cosign-release-verifier.sh \
   infra/scripts/install-production-deploy-entrypoint.sh \
+  infra/cosign/version.env \
+  infra/cosign/offline-signing-config.json \
   infra/scripts/prepare-production-deploy-account.sh \
   scripts/verify-production-deploy-account.sh \
   scripts/test-production-deploy-boundary.sh \
@@ -91,6 +94,22 @@ grep -Fq \
 grep -Fq 'engineId: $backend_engine_id' \
   infra/scripts/gilbom-deploy.sh \
   || fail "Docker storage-specific Backend engine ID evidence is missing"
+grep -Fq 'verify_release_signature "$artifact_dir"' \
+  infra/scripts/gilbom-deploy.sh \
+  || fail "root deployment does not verify Cosign before docker load"
+signature_line="$(
+  grep -nF 'verify_release_signature "$artifact_dir"' \
+    infra/scripts/gilbom-deploy.sh | cut -d: -f1
+)"
+load_line="$(
+  grep -nF 'gilbom-load "$artifact_dir/images.tar.zst"' \
+    infra/scripts/gilbom-deploy.sh | cut -d: -f1
+)"
+[ "$signature_line" -lt "$load_line" ] \
+  || fail "Cosign verification must happen before docker load"
+grep -Fq 'verify_release_signature "$target_artifact"' \
+  infra/scripts/gilbom-deploy.sh \
+  || fail "automatic rollback archive is not verified with Cosign"
 
 sh scripts/test-production-deploy-boundary.sh
 echo "Production deploy contract verification: PASS"

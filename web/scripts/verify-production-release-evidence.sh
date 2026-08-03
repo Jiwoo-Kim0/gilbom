@@ -34,6 +34,13 @@ jq -e \
     and .images.frontend.id == $preflight[0].images.frontend.id
     and .artifact.sha256SumsSha256
       == $preflight[0].artifact.sha256SumsSha256
+    and .artifact.signature.status == "PASS"
+    and .artifact.signature.cosignVersion
+      == $preflight[0].artifact.signature.cosignVersion
+    and .artifact.signature.publicKeySha256
+      == $preflight[0].artifact.signature.publicKeySha256
+    and .artifact.signature.bundleSha256
+      == $preflight[0].artifact.signature.bundleSha256
     and .approval.approvedBy == $approval[0].approvedBy
     and .approval.approvedAtUtc == $approval[0].approvedAtUtc
     and .approval.preflightSha256 == $approval[0].preflightSha256

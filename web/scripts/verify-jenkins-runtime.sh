@@ -104,7 +104,7 @@ case "$builder_port_bindings" in
 esac
 
 docker exec "$JENKINS_CONTAINER" /bin/sh -ec '
-  for command_name in git gzip zstd ssh scp sha256sum jq
+  for command_name in cosign git gzip zstd ssh scp sha256sum jq
   do
     command -v "$command_name" >/dev/null
   done
@@ -112,6 +112,7 @@ docker exec "$JENKINS_CONTAINER" /bin/sh -ec '
     "{jenkins: true, dockerTls: true}" >/dev/null
   docker info >/dev/null
   docker compose version >/dev/null
+  cosign version | grep -Fq "GitVersion:    v3.1.2"
 ' || fail "Jenkins tools or TLS Docker Builder access are unavailable"
 
 echo "Jenkins runtime verification: PASS"

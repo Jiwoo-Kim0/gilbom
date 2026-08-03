@@ -157,6 +157,11 @@ PIPELINES = {
                 "Release image archive",
                 "sh scripts/create-release-image-archive.sh",
             ),
+            (
+                "cosign-blob-signature",
+                "Cosign Blob signature",
+                "sh scripts/sign-release-image-archive.sh",
+            ),
             ("artifact-checksum", "Release Artifact checksum", "sh scripts/verify-release-artifacts.sh"),
             (
                 "artifact-upload",

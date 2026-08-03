@@ -20,6 +20,7 @@ for path in \
   vulnerabilities/frontend.txt \
   vulnerabilities/policy-summary.json \
   images.tar.zst \
+  images.tar.zst.sigstore.json \
   images.tar.zst.sha256 \
   build-metadata.json \
   SHA256SUMS
@@ -40,6 +41,7 @@ find "$RELEASE_DIR" -type f \
   sha256sum -c images.tar.zst.sha256
 )
 jq empty "$RELEASE_DIR/build-metadata.json"
+jq empty "$RELEASE_DIR/images.tar.zst.sigstore.json"
 jq -e \
   --arg sha "$RELEASE_SHA" \
   --arg backend "$BACKEND_IMAGE" \
@@ -58,6 +60,19 @@ jq -e \
       and (.sha256 | test("^[0-9a-f]{64}$"))
     )
     and .artifacts.images.path == "images.tar.zst"
+    and .artifacts.images.signature.mode == "offline-key"
+    and .artifacts.images.signature.cosignVersion == "v3.1.2"
+    and .artifacts.images.signature.transparencyLog == "disabled"
+    and (
+      .artifacts.images.signature.publicKeySha256
+      | test("^[0-9a-f]{64}$")
+    )
+    and (
+      .artifacts.images.signature.bundle.path
+      == "images.tar.zst.sigstore.json"
+    )
+    and .artifacts.images.signature.negativeTests.tamperedArchiveRejected == true
+    and .artifacts.images.signature.negativeTests.wrongPublicKeyRejected == true
   ' "$RELEASE_DIR/build-metadata.json" >/dev/null \
   || fail "build metadata contract is invalid"
 

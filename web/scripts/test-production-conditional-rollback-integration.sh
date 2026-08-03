@@ -41,6 +41,7 @@ install -d -o root -g root -m 0700 \
   /opt/gilbom/migration-approvals \
   /opt/gilbom/rollback-approvals \
   /opt/gilbom/secrets \
+  /etc/gilbom \
   /var/lib/gilbom/releases \
   /run/gilbom-deploy \
   "$fake_bin" \
@@ -79,6 +80,12 @@ chmod 0600 \
 chmod 0440 \
   /var/lib/gilbom/releases/current.sha \
   /var/lib/gilbom/releases/previous.sha
+printf '%s\n' 'fixture-cosign-public-key' \
+  > /etc/gilbom/cosign-release.pub
+chmod 0444 /etc/gilbom/cosign-release.pub
+cosign_public_key_sha256="$(
+  sha256sum /etc/gilbom/cosign-release.pub | awk '{print $1}'
+)"
 
 create_artifact() {
   release_sha="$1"
@@ -89,6 +96,8 @@ create_artifact() {
   install -d -o root -g root -m 0750 \
     "$artifact_dir/sbom" "$artifact_dir/vulnerabilities"
   printf 'archive-%s\n' "$release_sha" > "$artifact_dir/images.tar.zst"
+  printf '{"fixture":"cosign-bundle","releaseSha":"%s"}\n' "$release_sha" \
+    > "$artifact_dir/images.tar.zst.sigstore.json"
   printf '{}\n' > "$artifact_dir/sbom/backend.sbom.json"
   printf '{}\n' > "$artifact_dir/sbom/frontend.sbom.json"
   printf 'backend findings: none\n' \
@@ -106,6 +115,7 @@ create_artifact() {
     --arg release_sha "$release_sha" \
     --arg backend_character "$backend_character" \
     --arg frontend_character "$frontend_character" \
+    --arg cosign_public_key_sha256 "$cosign_public_key_sha256" \
     --argjson target_version "$target_version" \
     '
       {
@@ -119,6 +129,16 @@ create_artifact() {
           frontend: {
             name: ("gilbom-frontend:" + $release_sha),
             id: ("sha256:" + ($frontend_character * 64))
+          }
+        },
+        artifacts: {
+          images: {
+            signature: {
+              mode: "offline-key",
+              cosignVersion: "v3.1.2",
+              publicKeySha256: $cosign_public_key_sha256,
+              bundle: {path: "images.tar.zst.sigstore.json"}
+            }
           }
         },
         flyway: {
@@ -312,6 +332,16 @@ install -o root -g root -m 0755 "$fake_bin/docker" /usr/local/sbin/docker
   printf '%s\n' 'exit 1'
 } > "$fake_bin/zstd"
 install -o root -g root -m 0755 "$fake_bin/zstd" /usr/local/sbin/zstd
+{
+  printf '%s\n' '#!/bin/sh'
+  printf '%s\n' 'case "$1" in'
+  printf '%s\n' \
+    '  version) printf "GitVersion:    v3.1.2\\n"; exit 0 ;;'
+  printf '%s\n' '  verify-blob) exit 0 ;;'
+  printf '%s\n' 'esac'
+  printf '%s\n' 'exit 1'
+} > "$fake_bin/cosign"
+install -o root -g root -m 0755 "$fake_bin/cosign" /usr/local/bin/cosign
 
 chown -R root:root /opt/gilbom /var/lib/gilbom/releases
 find "/opt/gilbom/artifacts/$previous_sha" \

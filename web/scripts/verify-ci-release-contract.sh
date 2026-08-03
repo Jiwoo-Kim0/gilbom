@@ -55,6 +55,7 @@ for stage in \
   "stage('Security regression baseline evidence')" \
   "stage('Prepare release SBOM and vulnerability artifacts')" \
   "stage('Create release image archive')" \
+  "stage('Sign release image archive with Cosign')" \
   "stage('Build metadata and release integrity')"
 do
   current="$(line_of "$stage")"
@@ -144,6 +145,21 @@ assert_contains scripts/create-release-image-archive.sh \
 assert_contains scripts/create-release-image-archive.sh \
   'sha256sum images.tar.zst > images.tar.zst.sha256' \
   "image archive checksum is missing"
+assert_contains Jenkinsfile \
+  "credentialsId: 'gilbom-cosign-private-key'" \
+  "Cosign private key must come from a Jenkins Secret File credential"
+assert_contains Jenkinsfile \
+  "credentialsId: 'gilbom-cosign-password'" \
+  "Cosign password must come from a Jenkins Secret Text credential"
+assert_contains Jenkinsfile \
+  'sh scripts/sign-release-image-archive.sh' \
+  "release archive is not signed after security validation"
+assert_contains scripts/sign-release-image-archive.sh \
+  'tampered archive was incorrectly accepted' \
+  "Cosign tampered-archive negative test is missing"
+assert_contains scripts/sign-release-image-archive.sh \
+  'wrong public key was incorrectly accepted' \
+  "Cosign wrong-key negative test is missing"
 assert_contains scripts/generate-build-metadata.sh \
   'jq empty "$RELEASE_DIR/build-metadata.json"' \
   "build metadata JSON validation is missing"

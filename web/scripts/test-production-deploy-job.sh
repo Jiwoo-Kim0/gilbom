@@ -32,7 +32,13 @@ jq -n \
       artifact: {
         directory: ("/opt/gilbom/artifacts/" + $release_sha),
         sha256SumsSha256: $digest,
-        archiveSha256: $digest
+        archiveSha256: $digest,
+        signature: {
+          status: "PASS",
+          cosignVersion: "v3.1.2",
+          publicKeySha256: $digest,
+          bundleSha256: $digest
+        }
       },
       images: {
         backend: {
@@ -78,6 +84,9 @@ for label in \
   'Backend Image ID:' \
   'Frontend Image ID:' \
   'Archive SHA-256:' \
+  'Cosign Signature:' \
+  'Cosign Public Key SHA-256:' \
+  'Cosign Bundle SHA-256:' \
   'Critical:' \
   'High:' \
   '적용 예정 Flyway Migration:' \
@@ -119,7 +128,15 @@ jq -n \
       schemaVersion: 1,
       releaseSha: $release_sha,
       previousSha: $current_sha,
-      artifact: {sha256SumsSha256: $digest},
+      artifact: {
+        sha256SumsSha256: $digest,
+        signature: {
+          status: "PASS",
+          cosignVersion: "v3.1.2",
+          publicKeySha256: $digest,
+          bundleSha256: $digest
+        }
+      },
       images: {
         backend: {id: $backend_id},
         frontend: {id: $frontend_id}

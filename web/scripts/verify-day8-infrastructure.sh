@@ -117,7 +117,7 @@ assert_contains infra/jenkins/init.groovy.d/02-temporary-space-monitor.groovy \
 assert_contains infra/jenkins/Dockerfile \
   '02-temporary-space-monitor.groovy' \
   "Jenkins image must install the temporary-space monitor policy"
-for command_package in coreutils git gzip jq openssh-client zstd
+for command_package in coreutils curl git gzip jq openssh-client zstd
 do
   assert_contains infra/jenkins/Dockerfile \
     "$command_package" \

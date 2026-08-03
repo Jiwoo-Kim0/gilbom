@@ -42,6 +42,19 @@ do
   [ -f "$source" ] && [ ! -L "$source" ] && [ -s "$source" ] \
     || fail "required source is missing, empty, or symlinked: $source"
 done
+for verifier_file in \
+  /usr/local/bin/cosign \
+  /etc/gilbom/cosign-release.pub
+do
+  [ -f "$verifier_file" ] \
+    && [ ! -L "$verifier_file" ] \
+    && [ -s "$verifier_file" ] \
+    || fail \
+      "Cosign verifier must be installed before deploy Job commands: $verifier_file"
+done
+/usr/local/bin/cosign version \
+  | grep -Fq 'GitVersion:    v3.1.2' \
+  || fail "installed Cosign verifier must be v3.1.2"
 
 grep -Fxq \
   'deploy ALL=(root) NOPASSWD: /usr/local/sbin/gilbom-deploy' \

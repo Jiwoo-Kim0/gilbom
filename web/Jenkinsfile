@@ -735,6 +735,30 @@ pipeline {
             }
         }
 
+        stage('Sign release image archive with Cosign') {
+            steps {
+                dir(env.APP_DIR) {
+                    withCredentials([
+                        file(
+                                credentialsId: 'gilbom-cosign-private-key',
+                                variable: 'COSIGN_PRIVATE_KEY'
+                        ),
+                        string(
+                                credentialsId: 'gilbom-cosign-password',
+                                variable: 'COSIGN_PASSWORD'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
+                            sh scripts/sign-release-image-archive.sh
+                            sh scripts/record-ci-result.sh cosign-blob-signature
+                        '''
+                    }
+                }
+            }
+        }
+
         stage('Build metadata and release integrity') {
             steps {
                 dir(env.APP_DIR) {

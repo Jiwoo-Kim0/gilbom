@@ -5,6 +5,9 @@ umask 077
 
 ARTIFACT_ROOT=/opt/gilbom/artifacts
 INCOMING_ROOT="$ARTIFACT_ROOT/.incoming"
+COSIGN_BIN=/usr/local/bin/cosign
+COSIGN_PUBLIC_KEY=/etc/gilbom/cosign-release.pub
+COSIGN_VERSION=v3.1.2
 
 fail() {
   echo "CI release artifact promotion failed: $1" >&2
@@ -35,6 +38,7 @@ vulnerabilities/backend.txt
 vulnerabilities/frontend.txt
 vulnerabilities/policy-summary.json
 images.tar.zst
+images.tar.zst.sigstore.json
 images.tar.zst.sha256
 build-metadata.json
 SHA256SUMS
@@ -46,6 +50,7 @@ manifest_files='
 ./vulnerabilities/frontend.txt
 ./vulnerabilities/policy-summary.json
 ./images.tar.zst
+./images.tar.zst.sigstore.json
 ./images.tar.zst.sha256
 ./build-metadata.json
 '
@@ -65,8 +70,8 @@ validate_release_directory() {
     find "$directory" -mindepth 1 \
       ! -type f ! -type d -print -quit
   )" ] || fail "release directory contains an unsupported entry type"
-  [ "$(find "$directory" -type f | wc -l)" -eq 9 ] \
-    || fail "release directory must contain exactly nine files"
+  [ "$(find "$directory" -type f | wc -l)" -eq 10 ] \
+    || fail "release directory must contain exactly ten files"
   [ "$(find "$directory" -mindepth 1 -type d | wc -l)" -eq 2 ] \
     || fail "release directory must contain exactly two subdirectories"
 
@@ -95,14 +100,15 @@ validate_release_directory() {
       ./vulnerabilities/frontend.txt|\
       ./vulnerabilities/policy-summary.json|\
       ./images.tar.zst|\
+      ./images.tar.zst.sigstore.json|\
       ./images.tar.zst.sha256|\
       ./build-metadata.json) ;;
       *) fail "SHA256SUMS contains an unsafe or unexpected path" ;;
     esac
     manifest_count=$((manifest_count + 1))
   done < "$directory/SHA256SUMS"
-  [ "$manifest_count" -eq 8 ] \
-    || fail "SHA256SUMS must contain exactly eight entries"
+  [ "$manifest_count" -eq 9 ] \
+    || fail "SHA256SUMS must contain exactly nine entries"
   for relative_path in $manifest_files
   do
     [ "$(
@@ -131,6 +137,21 @@ validate_release_directory() {
     sha256sum -c SHA256SUMS
     sha256sum -c images.tar.zst.sha256
   ) || fail "artifact SHA-256 verification failed"
+  [ -f "$COSIGN_BIN" ] && [ ! -L "$COSIGN_BIN" ] \
+    || fail "pinned Cosign verifier is missing or symlinked"
+  [ -f "$COSIGN_PUBLIC_KEY" ] \
+    && [ ! -L "$COSIGN_PUBLIC_KEY" ] \
+    && [ -s "$COSIGN_PUBLIC_KEY" ] \
+    || fail "release public key is missing, empty, or symlinked"
+  "$COSIGN_BIN" version \
+    | grep -Fq "GitVersion:    $COSIGN_VERSION" \
+    || fail "Cosign verifier version differs from $COSIGN_VERSION"
+  "$COSIGN_BIN" verify-blob \
+    --insecure-ignore-tlog \
+    --key "$COSIGN_PUBLIC_KEY" \
+    --bundle "$directory/images.tar.zst.sigstore.json" \
+    "$directory/images.tar.zst" >/dev/null \
+    || fail "release image archive signature is invalid"
 }
 
 validate_immutable_destination() {

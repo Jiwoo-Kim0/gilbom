@@ -68,6 +68,9 @@ for label in \
   'Backend Image ID:' \
   'Frontend Image ID:' \
   'Archive SHA-256:' \
+  'Cosign Signature:' \
+  'Cosign Public Key SHA-256:' \
+  'Cosign Bundle SHA-256:' \
   'Critical:' \
   'High:' \
   '적용 예정 Flyway Migration:' \
@@ -101,6 +104,12 @@ assert_contains infra/scripts/gilbom-deploy-preflight.sh \
 assert_contains infra/scripts/gilbom-deploy-preflight.sh \
   'production state changed after immutable deployment approval' \
   "approved preflight cannot be reused safely for a technical retry"
+assert_contains infra/scripts/gilbom-deploy-preflight.sh \
+  '"$COSIGN_BIN" verify-blob' \
+  "deployment preflight does not verify the Cosign Blob signature"
+assert_contains scripts/verify-production-deploy-job-host.sh \
+  'COSIGN_PUBLIC_KEY' \
+  "host contract does not pin the release verification public key"
 assert_contains infra/scripts/gilbom-deploy.sh \
   'Jenkins deployment approval is invalid or stale' \
   "root deploy does not reject stale Jenkins approval"
