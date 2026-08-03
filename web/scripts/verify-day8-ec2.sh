@@ -164,6 +164,9 @@ grep -Eq '^[[:space:]]*/swapfile[[:space:]]+none[[:space:]]+swap[[:space:]]+sw[[
   || fail "vm.swappiness must be 10"
 
 compose config --quiet
+expected_upload_url="https://$DOMAIN/api/v1/images"
+[ "$(env_value GILBOM_STORAGE_UPLOAD_URL)" = "$expected_upload_url" ] \
+  || fail "runtime.env image upload URL must be $expected_upload_url"
 for service in db mosquitto backend frontend
 do
   assert_healthy "$service"
@@ -216,6 +219,9 @@ assert_secret_file MFA_TOTP_KEYRING_SECRET_FILE
 assert_secret_file INITIAL_ADMIN_PASSWORD_SECRET_FILE
 assert_secret_file GILBOM_LLM_API_KEY_SECRET_FILE false
 
+[ "$(compose exec -T backend printenv GILBOM_STORAGE_UPLOAD_URL)" \
+    = "$expected_upload_url" ] \
+  || fail "Backend image upload URL differs from runtime.env"
 compose exec -T backend \
   wget -qO- http://127.0.0.1:8080/actuator/health/liveness \
   | grep -Fq '"status":"UP"' \
