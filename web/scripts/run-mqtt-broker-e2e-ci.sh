@@ -13,6 +13,7 @@ STARTED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 ROBOT_USERNAME="robot-e2e-$(openssl rand -hex 8)"
 ROBOT_PASSWORD=""
 CREDENTIAL_ADDED=false
+ACL_PROBE_PASSED=false
 RESULT=FAIL
 FAILURE_REASON=mqtt_broker_e2e_failed
 
@@ -63,6 +64,16 @@ write_evidence() {
   case "$FAILURE_REASON" in *[!A-Za-z0-9_]* ) return 1 ;; esac
   cleanup_passed=false
   [ "$CREDENTIAL_ADDED" = false ] && cleanup_passed=true
+  acl_cross_robot_publish_denied=false
+  acl_reverse_direction_publish_denied=false
+  acl_cross_robot_subscribe_denied=false
+  acl_reverse_direction_subscribe_denied=false
+  if [ "$ACL_PROBE_PASSED" = true ]; then
+    acl_cross_robot_publish_denied=true
+    acl_reverse_direction_publish_denied=true
+    acl_cross_robot_subscribe_denied=true
+    acl_reverse_direction_subscribe_denied=true
+  fi
   failure_json=null
   [ "$RESULT" = PASS ] || failure_json="\"$FAILURE_REASON\""
   printf '%s\n' \
@@ -73,12 +84,142 @@ write_evidence() {
     "  \"completedAtUtc\": \"$(date -u '+%Y-%m-%dT%H:%M:%SZ')\"," \
     '  "brokerTransport": "TLS",' \
     '  "credentialScope": "temporary",' \
+    '  "aclProbeMode": "real-broker",' \
+    '  "acl": {' \
+    "    \"crossRobotPublishDenied\": $acl_cross_robot_publish_denied," \
+    "    \"reverseDirectionPublishDenied\": $acl_reverse_direction_publish_denied," \
+    "    \"crossRobotSubscribeDenied\": $acl_cross_robot_subscribe_denied," \
+    "    \"reverseDirectionSubscribeDenied\": $acl_reverse_direction_subscribe_denied" \
+    '  },' \
     "  \"resultFiles\": $result_files," \
     "  \"cleanupPassed\": $cleanup_passed," \
     "  \"failureReason\": $failure_json" \
     '}' > "$EVIDENCE_FILE.tmp" || return 1
   mv -f -- "$EVIDENCE_FILE.tmp" "$EVIDENCE_FILE" || return 1
   return "$exit_status"
+}
+
+run_mqtt_acl_probe() {
+  set -- docker run --rm \
+    --network host \
+    --env MQTT_ACL_HOST \
+    --env MQTT_ACL_PORT \
+    --env MQTT_ACL_SERVER_USERNAME \
+    --env MQTT_ACL_SERVER_PASSWORD \
+    --env MQTT_ACL_ROBOT_USERNAME \
+    --env MQTT_ACL_ROBOT_PASSWORD \
+    --volume "$CA_CERTIFICATE:/mqtt-acl/ca.pem:ro"
+  case "$MQTT_ACL_HOST" in
+    127.0.0.1|localhost) ;;
+    *)
+      set -- "$@" --add-host "$MQTT_ACL_HOST:127.0.0.1"
+      ;;
+  esac
+  set -- "$@" eclipse-mosquitto:2.1.2-alpine sh -ec '
+    ca=/mqtt-acl/ca.pem
+    own_prefix="tbs/v2/robots/$MQTT_ACL_ROBOT_USERNAME"
+    other_prefix="tbs/v2/robots/${MQTT_ACL_ROBOT_USERNAME}-other"
+
+    robot_publish() {
+      mosquitto_pub -V mqttv5 \
+        -h "$MQTT_ACL_HOST" -p "$MQTT_ACL_PORT" \
+        --cafile "$ca" \
+        -u "$MQTT_ACL_ROBOT_USERNAME" \
+        -P "$MQTT_ACL_ROBOT_PASSWORD" \
+        -q 1 -t "$1" -m "$2"
+    }
+    server_publish() {
+      mosquitto_pub -V mqttv5 \
+        -h "$MQTT_ACL_HOST" -p "$MQTT_ACL_PORT" \
+        --cafile "$ca" \
+        -u "$MQTT_ACL_SERVER_USERNAME" \
+        -P "$MQTT_ACL_SERVER_PASSWORD" \
+        -q 1 -t "$1" -m "$2"
+    }
+    server_subscribe_once() {
+      mosquitto_sub -V mqttv5 \
+        -h "$MQTT_ACL_HOST" -p "$MQTT_ACL_PORT" \
+        --cafile "$ca" \
+        -u "$MQTT_ACL_SERVER_USERNAME" \
+        -P "$MQTT_ACL_SERVER_PASSWORD" \
+        -q 1 -W "$1" -C 1 -t "$2"
+    }
+    robot_subscribe_once() {
+      mosquitto_sub -V mqttv5 \
+        -h "$MQTT_ACL_HOST" -p "$MQTT_ACL_PORT" \
+        --cafile "$ca" \
+        -u "$MQTT_ACL_ROBOT_USERNAME" \
+        -P "$MQTT_ACL_ROBOT_PASSWORD" \
+        -q 1 -W "$1" -C 1 -t "$2"
+    }
+
+    server_subscribe_once 5 "$own_prefix/telemetry" \
+      > /tmp/allowed-publish 2>/dev/null &
+    allowed_publish_pid=$!
+    sleep 1
+    robot_publish "$own_prefix/telemetry" allowed-publish \
+      >/dev/null 2>&1
+    wait "$allowed_publish_pid"
+    grep -Fxq allowed-publish /tmp/allowed-publish
+
+    robot_subscribe_once 5 "$own_prefix/commands/request" \
+      > /tmp/allowed-subscribe 2>/dev/null &
+    allowed_pid=$!
+    sleep 1
+    server_publish "$own_prefix/commands/request" allowed-subscribe \
+      >/dev/null 2>&1
+    wait "$allowed_pid"
+    grep -Fxq allowed-subscribe /tmp/allowed-subscribe
+
+    server_subscribe_once 3 "$other_prefix/telemetry" \
+      > /tmp/cross-publish 2>/dev/null &
+    cross_publish_pid=$!
+    sleep 1
+    robot_publish "$other_prefix/telemetry" cross-publish-denied \
+      >/dev/null 2>&1 || :
+    if wait "$cross_publish_pid"; then
+      echo "MQTT ACL delivered a cross-robot publish" >&2
+      exit 31
+    fi
+    test ! -s /tmp/cross-publish
+
+    robot_subscribe_once 3 "$own_prefix/commands/request" \
+      > /tmp/reverse-publish 2>/dev/null &
+    reverse_publish_pid=$!
+    sleep 1
+    robot_publish "$own_prefix/commands/request" reverse-publish-denied \
+      >/dev/null 2>&1 || :
+    if wait "$reverse_publish_pid"; then
+      echo "MQTT ACL delivered a reverse-direction publish" >&2
+      exit 32
+    fi
+    test ! -s /tmp/reverse-publish
+
+    robot_subscribe_once 2 "$other_prefix/commands/request" \
+      > /tmp/cross-subscribe 2>/dev/null &
+    cross_pid=$!
+    sleep 1
+    server_publish "$other_prefix/commands/request" cross-subscribe-denied \
+      >/dev/null 2>&1
+    if wait "$cross_pid"; then
+      echo "MQTT ACL delivered a cross-robot subscription" >&2
+      exit 33
+    fi
+    test ! -s /tmp/cross-subscribe
+
+    robot_subscribe_once 2 "$own_prefix/telemetry" \
+      > /tmp/reverse-subscribe 2>/dev/null &
+    reverse_pid=$!
+    sleep 1
+    robot_publish "$own_prefix/telemetry" reverse-subscribe-denied \
+      >/dev/null 2>&1
+    if wait "$reverse_pid"; then
+      echo "MQTT ACL delivered a reverse-direction subscription" >&2
+      exit 34
+    fi
+    test ! -s /tmp/reverse-subscribe
+  '
+  "$@"
 }
 
 remove_robot_credential() {
@@ -121,6 +262,8 @@ on_exit() {
   unset \
     MQTT_E2E_SERVER_PASSWORD \
     MQTT_E2E_ROBOT_PASSWORD \
+    MQTT_ACL_SERVER_PASSWORD \
+    MQTT_ACL_ROBOT_PASSWORD \
     SERVER_PASSWORD \
     ROBOT_PASSWORD
   if ! remove_robot_credential; then
@@ -180,6 +323,15 @@ printf '%s\n' "$ROBOT_PASSWORD" \
 
 # run-local-mosquitto.sh watches the password checksum and HUP-reloads it.
 wait_for_broker_reload "$reload_count" || fail broker_credential_reload
+
+export MQTT_ACL_HOST="$PUBLISHED_HOST"
+export MQTT_ACL_PORT="$mqtt_port"
+export MQTT_ACL_SERVER_USERNAME="$SERVER_USERNAME"
+export MQTT_ACL_SERVER_PASSWORD="$SERVER_PASSWORD"
+export MQTT_ACL_ROBOT_USERNAME="$ROBOT_USERNAME"
+export MQTT_ACL_ROBOT_PASSWORD="$ROBOT_PASSWORD"
+run_mqtt_acl_probe || fail mqtt_acl_probe
+ACL_PROBE_PASSED=true
 
 export MQTT_E2E_BROKER="ssl://$PUBLISHED_HOST:$mqtt_port"
 export MQTT_E2E_CA_CERTIFICATE_HOST="$CA_CERTIFICATE"

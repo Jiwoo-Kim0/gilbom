@@ -437,6 +437,8 @@ pipeline {
                         jq -e '
                             .status == "PASS"
                             and .checkCount > 0
+                            and (.checks | index("stale_csrf_after_session_rotation")) != null
+                            and (.checks | index("tampered_csrf")) != null
                             and .isolation.backendRemoved == true
                             and .isolation.databaseRemoved == true
                         ' .artifacts/security-regression/auth-security-integration.json \
@@ -457,6 +459,11 @@ pipeline {
                         jq -e '
                             .status == "PASS"
                             and .brokerTransport == "TLS"
+                            and .aclProbeMode == "real-broker"
+                            and .acl.crossRobotPublishDenied == true
+                            and .acl.reverseDirectionPublishDenied == true
+                            and .acl.crossRobotSubscribeDenied == true
+                            and .acl.reverseDirectionSubscribeDenied == true
                             and .resultFiles > 0
                             and .cleanupPassed == true
                         ' .artifacts/security-regression/mqtt-broker-e2e.json \
@@ -467,7 +474,7 @@ pipeline {
             }
         }
 
-        stage('Flyway V1-V39') {
+        stage('Flyway V1-V40') {
             steps {
                 dir(env.APP_DIR) {
                     sh '''
@@ -477,15 +484,15 @@ pipeline {
                             psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
                                 --no-password --tuples-only --no-align --command "
                                     SELECT (
-                                        COUNT(*) = 39
+                                        COUNT(*) = 40
                                         AND MIN(version::INTEGER) = 1
-                                        AND MAX(version::INTEGER) = 39
+                                        AND MAX(version::INTEGER) = 40
                                         AND BOOL_AND(success)
                                     )::int
                                     FROM flyway_history.flyway_schema_history;
                                 "
                         ' | grep -qx 1
-                        sh scripts/record-ci-result.sh flyway-v1-v39
+                        sh scripts/record-ci-result.sh flyway-v1-v40
                     '''
                 }
             }

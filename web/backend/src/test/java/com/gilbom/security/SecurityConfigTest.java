@@ -34,6 +34,7 @@ import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gilbom.api.HealthController;
 import com.gilbom.audit.SecurityAuditService;
 import com.gilbom.auth.password.PasswordHashingConfiguration;
@@ -72,6 +73,9 @@ class SecurityConfigTest {
 
     @Autowired
     private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @MockitoBean
     private SessionSecurityStateRepository sessionStateRepository;
@@ -198,6 +202,32 @@ class SecurityConfigTest {
                         .with(csrf().asHeader()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result", is("changed")));
+    }
+
+    @Test
+    void stateChangingRequestsRejectATamperedCsrfHeader() throws Exception {
+        var issuedTokenResult =
+                mockMvc.perform(get("/api/v1/auth/csrf-token"))
+                        .andExpect(status().isOk())
+                        .andReturn();
+        MockHttpSession session = (MockHttpSession)
+                issuedTokenResult.getRequest().getSession(false);
+        String issuedToken = objectMapper.readTree(
+                issuedTokenResult.getResponse().getContentAsString()
+        ).get("token").asText();
+        String tamperedToken =
+                (issuedToken.startsWith("A") ? "B" : "A")
+                        + issuedToken.substring(1);
+
+        mockMvc.perform(post("/test/security/mutate")
+                        .session(session)
+                        .with(user(USER_ID.toString()))
+                        .header("X-CSRF-TOKEN", tamperedToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")))
+                .andExpect(jsonPath("$.message", is("요청 검증에 실패했습니다.")));
+
+        verify(securityAuditService).recordCsrfFailed(any(), any());
     }
 
     @Test

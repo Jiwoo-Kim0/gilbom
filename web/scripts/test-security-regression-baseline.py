@@ -45,6 +45,10 @@ class SecurityRegressionBaselineTest(unittest.TestCase):
             "auth-security-integration.json": {
                 "status": "PASS",
                 "checkCount": 17,
+                "checks": [
+                    "stale_csrf_after_session_rotation",
+                    "tampered_csrf",
+                ],
                 "isolation": {
                     "backendRemoved": True,
                     "databaseRemoved": True,
@@ -53,6 +57,13 @@ class SecurityRegressionBaselineTest(unittest.TestCase):
             "mqtt-broker-e2e.json": {
                 "status": "PASS",
                 "brokerTransport": "TLS",
+                "aclProbeMode": "real-broker",
+                "acl": {
+                    "crossRobotPublishDenied": True,
+                    "reverseDirectionPublishDenied": True,
+                    "crossRobotSubscribeDenied": True,
+                    "reverseDirectionSubscribeDenied": True,
+                },
                 "resultFiles": 2,
                 "cleanupPassed": True,
             },
@@ -133,6 +144,44 @@ class SecurityRegressionBaselineTest(unittest.TestCase):
             item
             for item in self.summary()["gates"]
             if item["id"] == "mqtt-tls-and-credential-cleanup-evidence"
+        )
+        self.assertEqual(gate["status"], "FAIL")
+
+    def test_mqtt_acl_failure_fails_closed(self) -> None:
+        evidence = (
+            self.project
+            / ".artifacts"
+            / "security-regression"
+            / "mqtt-broker-e2e.json"
+        )
+        payload = json.loads(evidence.read_text(encoding="utf-8"))
+        payload["acl"]["crossRobotPublishDenied"] = False
+        evidence.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+
+        self.assertEqual(self.run_generator(), 1)
+        gate = next(
+            item
+            for item in self.summary()["gates"]
+            if item["id"] == "mqtt-tls-and-credential-cleanup-evidence"
+        )
+        self.assertEqual(gate["status"], "FAIL")
+
+    def test_missing_csrf_boundary_evidence_fails_closed(self) -> None:
+        evidence = (
+            self.project
+            / ".artifacts"
+            / "security-regression"
+            / "auth-security-integration.json"
+        )
+        payload = json.loads(evidence.read_text(encoding="utf-8"))
+        payload["checks"].remove("tampered_csrf")
+        evidence.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+
+        self.assertEqual(self.run_generator(), 1)
+        gate = next(
+            item
+            for item in self.summary()["gates"]
+            if item["id"] == "authentication-isolation-evidence"
         )
         self.assertEqual(gate["status"], "FAIL")
 

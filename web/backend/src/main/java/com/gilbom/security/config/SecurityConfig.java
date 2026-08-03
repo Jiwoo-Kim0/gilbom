@@ -22,7 +22,6 @@ import org.springframework.security.web.csrf.CsrfException;
 import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestHandler;
-import org.springframework.security.web.csrf.XorCsrfTokenRequestAttributeHandler;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -173,7 +172,7 @@ public class SecurityConfig {
     @Bean
     public CsrfTokenRequestHandler csrfTokenRequestHandler() {
         // JSON으로 토큰을 전달해도 Spring Security 6의 BREACH 완화 마스킹은 유지한다.
-        return new XorCsrfTokenRequestAttributeHandler();
+        return new SafeXorCsrfTokenRequestHandler();
     }
 
     @Bean

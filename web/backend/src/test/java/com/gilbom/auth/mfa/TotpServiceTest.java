@@ -29,17 +29,49 @@ class TotpServiceTest {
     }
 
     @Test
-    void acceptsOneAdjacentStepButRejectsAReusedStep() {
+    void acceptsOnlyThePreviousCurrentAndNextTimeSteps() {
+        byte[] secret =
+                "12345678901234567890".getBytes(StandardCharsets.US_ASCII);
+        Instant currentTime = Instant.ofEpochSecond(100 * 30);
+
+        assertThat(service.verify(
+                secret,
+                service.codeForTimeStep(secret, 99),
+                currentTime,
+                null
+        )).hasValue(99);
+        assertThat(service.verify(
+                secret,
+                service.codeForTimeStep(secret, 100),
+                currentTime,
+                null
+        )).hasValue(100);
+        assertThat(service.verify(
+                secret,
+                service.codeForTimeStep(secret, 101),
+                currentTime,
+                null
+        )).hasValue(101);
+        assertThat(service.verify(
+                secret,
+                service.codeForTimeStep(secret, 98),
+                currentTime,
+                null
+        )).isEmpty();
+        assertThat(service.verify(
+                secret,
+                service.codeForTimeStep(secret, 102),
+                currentTime,
+                null
+        )).isEmpty();
+    }
+
+    @Test
+    void rejectsAReusedTimeStep() {
         byte[] secret =
                 "12345678901234567890".getBytes(StandardCharsets.US_ASCII);
         String previousStepCode = service.codeForTimeStep(secret, 99);
 
-        assertThat(service.verify(
-                secret,
-                previousStepCode,
-                Instant.ofEpochSecond(100 * 30),
-                null
-        )).hasValue(99);
         assertThat(service.verify(
                 secret,
                 previousStepCode,

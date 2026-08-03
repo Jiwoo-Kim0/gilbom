@@ -646,8 +646,40 @@ def run_integration(base_url: str, db_container: str, database: str) -> list[str
         "AUTH_UNAUTHENTICATED",
         "old_pre_auth_session_replay",
     )
+    first.csrf_token = old_csrf
+    expect_error(
+        first.request(
+            "POST",
+            "/api/v1/auth/logout",
+            csrf=True,
+        ),
+        403,
+        "AUTH_FORBIDDEN",
+        "stale_csrf_after_session_rotation",
+    )
+    tampered_csrf = (
+        ("A" if rotated_csrf[0] != "A" else "B")
+        + rotated_csrf[1:]
+    )
+    first.csrf_token = tampered_csrf
+    expect_error(
+        first.request(
+            "POST",
+            "/api/v1/auth/logout",
+            csrf=True,
+        ),
+        403,
+        "AUTH_FORBIDDEN",
+        "tampered_csrf",
+    )
+    first.csrf_token = rotated_csrf
     ensure(first.request("GET", "/api/v1/auth/me").status == 200, "mfa_promoted")
-    checks.extend(["mfa_gate", "session_and_csrf_rotation"])
+    checks.extend([
+        "mfa_gate",
+        "session_and_csrf_rotation",
+        "stale_csrf_after_session_rotation",
+        "tampered_csrf",
+    ])
 
     second = ApiClient(base_url, "198.51.100.31")
     login(second, email, old_password, "MFA_REQUIRED")
@@ -957,6 +989,7 @@ def run_integration(base_url: str, db_container: str, database: str) -> list[str
         manual_key,
         old_csrf,
         rotated_csrf,
+        tampered_csrf,
         old_session_cookie,
         rotated_session_cookie,
         logout_cookie,

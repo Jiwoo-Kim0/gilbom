@@ -80,11 +80,15 @@ def json_gate(
 def valid_authentication_evidence(payload: dict[str, object]) -> bool:
     isolation = payload.get("isolation")
     check_count = payload.get("checkCount")
+    checks = payload.get("checks")
     return (
         payload.get("status") == "PASS"
         and isinstance(check_count, int)
         and not isinstance(check_count, bool)
         and check_count > 0
+        and isinstance(checks, list)
+        and "stale_csrf_after_session_rotation" in checks
+        and "tampered_csrf" in checks
         and isinstance(isolation, dict)
         and isolation.get("backendRemoved") is True
         and isolation.get("databaseRemoved") is True
@@ -93,9 +97,16 @@ def valid_authentication_evidence(payload: dict[str, object]) -> bool:
 
 def valid_mqtt_evidence(payload: dict[str, object]) -> bool:
     result_files = payload.get("resultFiles")
+    acl = payload.get("acl")
     return (
         payload.get("status") == "PASS"
         and payload.get("brokerTransport") == "TLS"
+        and payload.get("aclProbeMode") == "real-broker"
+        and isinstance(acl, dict)
+        and acl.get("crossRobotPublishDenied") is True
+        and acl.get("reverseDirectionPublishDenied") is True
+        and acl.get("crossRobotSubscribeDenied") is True
+        and acl.get("reverseDirectionSubscribeDenied") is True
         and isinstance(result_files, int)
         and not isinstance(result_files, bool)
         and result_files > 0

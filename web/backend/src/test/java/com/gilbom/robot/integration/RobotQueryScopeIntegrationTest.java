@@ -5,7 +5,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.verify;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -20,6 +23,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -162,6 +166,73 @@ class RobotQueryScopeIntegrationTest {
                 100,
                 null);
         assertThat(adminList.totalElements()).isEqualTo(2);
+    }
+
+    @Test
+    @Tag("security-acceptance")
+    @Transactional
+    void preservesScopeAndIdorBoundariesAcrossMultipleLargeResultPages() {
+        Set<UUID> visibleRobotIds = new HashSet<>();
+        Set<UUID> hiddenRobotIds = new HashSet<>();
+        visibleRobotIds.add(ASSIGNED_ROBOT_ID);
+
+        for (int index = 0; index < 120; index++) {
+            UUID visibleRobotId = deterministicRobotId("visible", index);
+            UUID hiddenRobotId = deterministicRobotId("hidden", index);
+            visibleRobotIds.add(visibleRobotId);
+            hiddenRobotIds.add(hiddenRobotId);
+
+            createRobot(
+                    visibleRobotId,
+                    "RBT-" + (500000 + index),
+                    "Bulk visible " + index);
+            createCurrentState(
+                    visibleRobotId,
+                    127.10 + (index * 0.0001),
+                    37.10 + (index * 0.0001));
+            assignRobot(VIEWER_USER_ID, visibleRobotId, "VIEWER");
+
+            createRobot(
+                    hiddenRobotId,
+                    "RBT-" + (600000 + index),
+                    "Bulk hidden " + index);
+            createCurrentState(
+                    hiddenRobotId,
+                    127.20 + (index * 0.0001),
+                    37.20 + (index * 0.0001));
+        }
+
+        Set<UUID> pagedRobotIds = new HashSet<>();
+        for (int page = 0; page < 3; page++) {
+            var result = queryService.findRobots(
+                    VIEWER_USER_ID,
+                    page,
+                    50,
+                    null);
+            assertThat(result.totalElements()).isEqualTo(121);
+            result.content().forEach(item ->
+                    pagedRobotIds.add(item.robotId()));
+        }
+
+        assertThat(pagedRobotIds).containsExactlyInAnyOrderElementsOf(
+                visibleRobotIds);
+        assertThat(pagedRobotIds)
+                .doesNotContainAnyElementsOf(hiddenRobotIds);
+        assertThat(queryService.summarize(VIEWER_USER_ID).totalRobots())
+                .isEqualTo(121);
+        assertThat(queryService.findMapRobots(VIEWER_USER_ID).robots())
+                .extracting(marker -> marker.robotId())
+                .containsExactlyInAnyOrderElementsOf(visibleRobotIds)
+                .doesNotContainAnyElementsOf(hiddenRobotIds);
+
+        UUID representativeHiddenId = hiddenRobotIds.iterator().next();
+        assertThatThrownBy(() -> queryService.findRobot(
+                VIEWER_USER_ID,
+                representativeHiddenId))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(ErrorCode.ROBOT_NOT_FOUND));
     }
 
     @Test
@@ -319,6 +390,12 @@ class RobotQueryScopeIntegrationTest {
                 "{argon2}$argon2id$integration-test-" + suffix,
                 "Robot query " + suffix,
                 suffix.toLowerCase() + "@example.invalid");
+    }
+
+    private UUID deterministicRobotId(String scope, int index) {
+        return UUID.nameUUIDFromBytes(
+                ("robot-query-bulk-" + scope + "-" + index)
+                        .getBytes(StandardCharsets.UTF_8));
     }
 
     private void assignAdminRole(UUID userId) {

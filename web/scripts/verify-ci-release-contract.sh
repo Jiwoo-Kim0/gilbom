@@ -44,7 +44,7 @@ for stage in \
   "stage('Start integration stack')" \
   "stage('Authentication temporary DB integration')" \
   "stage('Actual TLS MQTT Broker E2E')" \
-  "stage('Flyway V1-V39')" \
+  "stage('Flyway V1-V40')" \
   "stage('PostGIS RBAC and Spring Session')" \
   "stage('CSRF permission and append-only audit')" \
   "stage('Integration smoke')" \
@@ -94,11 +94,11 @@ assert_contains Jenkinsfile \
   'MQTT_PUBLIC_HOSTNAME=docker-builder' \
   "MQTT Broker certificate SAN must include the DinD access hostname"
 assert_contains Jenkinsfile \
-  'COUNT(*) = 39' \
-  "Flyway history gate must require all 39 migrations"
+  'COUNT(*) = 40' \
+  "Flyway history gate must require all 40 migrations"
 assert_contains Jenkinsfile \
-  'MAX(version::INTEGER) = 39' \
-  "Flyway history gate must require V39 as the maximum migration"
+  'MAX(version::INTEGER) = 40' \
+  "Flyway history gate must require V40 as the maximum migration"
 assert_contains Jenkinsfile \
   '.artifacts/security-regression/**' \
   "security regression evidence must be archived"
@@ -108,9 +108,21 @@ assert_contains Jenkinsfile \
 assert_contains scripts/run-backend-ci-task.sh \
   'test|securityAcceptanceTest|mqttBrokerE2E' \
   "Backend CI runner must allow the dedicated MQTT Broker E2E task"
+assert_contains scripts/run-backend-ci-task.sh \
+  'ssl://127.0.0.1:*|ssl://localhost:*' \
+  "local MQTT Broker E2E must preserve the certificate hostname through host networking"
 assert_contains scripts/run-mqtt-broker-e2e-ci.sh \
   'MQTT_E2E_CA_CERTIFICATE_HOST="$CA_CERTIFICATE"' \
   "MQTT Broker E2E must mount the generated TLS CA into the test runner"
+assert_contains scripts/run-mqtt-broker-e2e-ci.sh \
+  'run_mqtt_acl_probe' \
+  "MQTT Broker E2E must exercise the real Broker ACL"
+assert_contains Jenkinsfile \
+  '.acl.crossRobotPublishDenied == true' \
+  "MQTT Broker E2E gate must require cross-robot publish denial"
+assert_contains Jenkinsfile \
+  '.acl.reverseDirectionSubscribeDenied == true' \
+  "MQTT Broker E2E gate must require reverse-direction subscribe denial"
 assert_contains backend/build.gradle \
   'MQTT Broker E2E must execute without skipped tests' \
   "MQTT Broker E2E must fail closed when no real test executes"
