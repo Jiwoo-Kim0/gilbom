@@ -1039,6 +1039,10 @@ def main() -> int:
             f"MQTT_CLIENT_ID={container_name}",
             "-e",
             "INITIAL_ADMIN_BOOTSTRAP_ENABLED=false",
+            "-e",
+            "MFA_TOTP_SECRET_ENCRYPTION_ENABLED=true",
+            "-e",
+            "MFA_TOTP_SECRET_ACTIVE_KEY_VERSION=1",
             "backend",
         )
         backend_started = True

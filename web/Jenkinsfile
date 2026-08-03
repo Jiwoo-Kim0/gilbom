@@ -1,6 +1,13 @@
 pipeline {
     agent any
 
+    environment {
+        // CI는 gitignore된 로컬 .env에 의존하지 않는다. 임시 keyring을 사용하는
+        // 인증·MFA 회귀에서도 운영과 같은 TOTP 암호화 경계를 명시적으로 강제한다.
+        MFA_TOTP_SECRET_ENCRYPTION_ENABLED = 'true'
+        MFA_TOTP_SECRET_ACTIVE_KEY_VERSION = '1'
+    }
+
     // Stage 15: source 변경 감지는 CI Job에만 둔다. 운영 배포·Rollback은
     // full SHA 입력과 인증 사용자 승인 없이는 시작되지 않는다.
     triggers {

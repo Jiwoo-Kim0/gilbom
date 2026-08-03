@@ -76,6 +76,18 @@ assert_contains Jenkinsfile \
   'GILBOM_SECURITY_TEST_PUBLISHED_HOST=docker-builder' \
   "authentication integration must reach published DinD ports through docker-builder"
 assert_contains Jenkinsfile \
+  "MFA_TOTP_SECRET_ENCRYPTION_ENABLED = 'true'" \
+  "CI must enable TOTP encryption without relying on an ignored local .env"
+assert_contains Jenkinsfile \
+  "MFA_TOTP_SECRET_ACTIVE_KEY_VERSION = '1'" \
+  "CI must select the generated TOTP keyring version explicitly"
+assert_contains scripts/auth-security-integration-test.py \
+  '"MFA_TOTP_SECRET_ENCRYPTION_ENABLED=true"' \
+  "authentication integration runner must fail closed with TOTP encryption enabled"
+assert_contains scripts/auth-security-integration-test.py \
+  '"MFA_TOTP_SECRET_ACTIVE_KEY_VERSION=1"' \
+  "authentication integration runner must select its mounted keyring version"
+assert_contains Jenkinsfile \
   'MQTT_E2E_PUBLISHED_HOST=docker-builder' \
   "MQTT Broker E2E must reach the TLS DinD broker through docker-builder"
 assert_contains Jenkinsfile \
