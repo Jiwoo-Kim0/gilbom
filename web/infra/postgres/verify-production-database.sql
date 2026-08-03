@@ -10,12 +10,12 @@ SELECT (
         WHERE extname = 'postgis'
     )
     AND (
-        SELECT COUNT(*) = 39
+        SELECT COUNT(*) = 40
                AND COUNT(*) FILTER (WHERE NOT success) = 0
                AND COUNT(*) FILTER (
-                   WHERE version::INTEGER BETWEEN 1 AND 39
+                   WHERE version::INTEGER BETWEEN 1 AND 40
                      AND success
-               ) = 39
+               ) = 40
         FROM flyway_history.flyway_schema_history
     )
     AND (
@@ -87,6 +87,23 @@ SELECT (
         SELECT 1
         FROM auth.mfa_factor
         WHERE user_id = '39000000-0000-4000-8000-000000000001'
+    )
+    AND NOT EXISTS (
+        SELECT 1
+        FROM robot.robot robot
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM auth.user_robot_assignment assignment
+            WHERE assignment.user_id =
+                  '39000000-0000-4000-8000-000000000001'
+              AND assignment.robot_id = robot.robot_id
+              AND assignment.assignment_type = 'OWNER'
+              AND assignment.is_active = TRUE
+              AND (
+                  assignment.expires_at IS NULL
+                  OR assignment.expires_at > CURRENT_TIMESTAMP
+              )
+        )
     )
     AND NOT HAS_SCHEMA_PRIVILEGE(:'application_role', 'flyway_history', 'USAGE')
     AND NOT HAS_SCHEMA_PRIVILEGE(:'application_role', 'auth', 'CREATE')

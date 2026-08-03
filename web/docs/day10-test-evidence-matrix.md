@@ -41,21 +41,21 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | A01 | 로그인 성공·실패·임시 잠금·동일 오류 계약 | 예 | 없음 | CI | `.artifacts/ci-results/backend-test.status`, `.artifacts/backend-ci/build/test-results/test/*.xml` | 없음 |
 | A02 | MFA 등록·성공·실패·복구 코드·복구 코드 중복 사용 | 예 | 없음 | CI | A01과 동일 | 없음 |
-| A03 | TOTP 인접 time-step 허용과 같은 time-step 재사용 차단 | 예 | 없음 | CI | A01과 동일 | 없음 |
+| A03 | TOTP 이전·현재·다음 time-step만 허용, 범위 밖과 같은 step 재사용 차단 | 예 | 없음. `TotpServiceTest`가 기준 step의 `-1/0/+1` 허용과 `-2/+2` 거부를 각각 명시한다. | CI | A01과 동일 | 없음 |
 | A04 | 호스트 시간 오차·NTP 이상 상태에서 TOTP 허용 범위 확인 | 아니오 | 필요. 애플리케이션 시계를 임의 변경하지 말고 주입 가능한 Clock 기반 테스트와 스테이징 NTP 상태 증거를 추가한다. | CI + 스테이징 EC2 | `(예정) .artifacts/day10/totp-clock-drift.json` | CI는 없음, 스테이징은 read-only 시간 조회 |
 | A05 | 로그아웃·idle/absolute 만료·Session ID와 CSRF 교체·이전 Session 재사용 차단 | 예 | 없음. 기존 HTTP/DB Runner를 원격 DinD 포트와 전용 DB 격리에 연결했다. | CI + 격리 Compose | `.artifacts/ci-results/auth-security-integration.status`, `.artifacts/security-regression/auth-security-integration.json` | 없음 |
-| A06 | 동시 세션 제한·비밀번호/권한/Scope 변경 시 기존 세션 즉시 폐기 | 예 | 없음 | CI | `.artifacts/ci-results/backend-test.status`, `.artifacts/ci-results/security-acceptance.status` | 없음 |
+| A06 | 동시 세션 제한·비밀번호/권한/Scope 변경 시 기존 세션과 SSE 즉시 폐기 | 예 | 없음. DB 권한 변경의 Session 삭제와 SSE의 다음 publish/heartbeat 선행 Session 재검사를 함께 검증한다. | CI | `.artifacts/ci-results/backend-test.status`, `.artifacts/ci-results/security-acceptance.status` | 없음 |
 | A07 | 역할별 401·403, ALLOW-DENY 우선순위, 만료 권한, 마지막 ADMIN 보호 | 예 | 없음 | CI | `.artifacts/ci-results/security-acceptance.status`, `.artifacts/backend-ci/build/test-results/securityAcceptanceTest/*.xml` | 없음 |
-| A08 | 객체 Scope, 목록·상세·지도·요약 IDOR, SSE 구독 중 Scope/Session 재검사 | 예 | 없음 | CI | A07과 동일 | 없음 |
-| A09 | CSRF 누락·이전 Token·만료 Session의 CSRF 재사용 차단 | 부분 | 누락과 Session/CSRF 교체 전 Token 재사용은 검증한다. 유효 Session의 Token 한 글자 변조를 명시적으로 검증하는 MockMvc와 HTTP 통합 case를 추가한다. | CI + 격리 Compose | `.artifacts/ci-results/backend-test.status`, `.artifacts/ci-results/csrf-permission-audit.status`; `(예정) .artifacts/day10/csrf-tamper.json` | 없음 |
+| A08 | 객체 Scope, 목록·상세·지도·요약 IDOR, SSE 재검사와 다중 Page 대량 결과 Scope | 예 | 없음. 240개 추가 Robot을 섞은 3 Page 회귀에서 허용 121개만 목록·요약·지도에 나타나고 비허용 상세는 404인지 검증한다. | CI + 격리 Compose | A07과 동일 | 없음 |
+| A09 | CSRF 누락·Session 회전 전 Token·한 글자 변조 Token 차단 | 예 | 없음. MockMvc 변조 case와 임시 DB HTTP Runner의 구 Token/변조 Token case를 모두 추가했다. | CI + 격리 Compose | `.artifacts/ci-results/backend-test.status`, `.artifacts/ci-results/auth-security-integration.status`, `.artifacts/security-regression/auth-security-integration.json` | 없음 |
 | A10 | 운영 CORS exact allowlist와 Credential preflight | 부분 | 단위 테스트는 존재한다. 실제 HTTPS 경계에서 허용 Origin 1개와 비허용 Origin 1개를 확인하는 smoke가 필요 | CI + 스테이징 EC2 | `.artifacts/ci-results/backend-test.status`; `(예정) .artifacts/day10/staging/cors-smoke.json` | 스테이징 read-only HTTP |
 | A11 | 운영 Cookie의 `Secure`, `HttpOnly`, `SameSite`, Path와 로그아웃 만료 | 부분 | 운영 Profile 단위 테스트는 존재한다. 실제 HTTPS `Set-Cookie` 증거 수집이 필요 | CI + 스테이징 EC2 | `.artifacts/ci-results/backend-test.status`; `(예정) .artifacts/day10/staging/cookie-smoke.json` | 스테이징 Session·감사 행 생성 가능, 운영 없음 |
 | A12 | HSTS·CSP·nosniff·frame·referrer·permissions 등 보안 응답 Header | 예 | 테스트 로직 추가 없음. `scripts/verify-day8-ec2.sh`의 Header 결과를 파일로 보존하도록 실행 wrapper만 필요 | CI + 운영 read-only | `.artifacts/ci-results/frontend-runtime-image.status`; `(예정) .artifacts/day10/production/security-headers.json` | 운영 read-only HTTPS |
 | A13 | 악성 HTML·Script를 실행 가능한 DOM으로 렌더링하지 않음 | 예 | 없음 | CI | `.artifacts/ci-results/frontend-test.status` | 없음 |
 | A14 | 과도한 Body/Image, 잘못된 기간, 미래 시각, Page size와 Pagination 경계 | 예 | 없음 | CI | `.artifacts/ci-results/backend-test.status`, `.artifacts/ci-results/frontend-test.status` | 없음 |
-| A15 | 멱등 키의 동일 Body replay와 상이 Body 충돌, 동시 요청 단일 처리 | 예 | 없음 | CI | `.artifacts/ci-results/backend-test.status`, `.artifacts/ci-results/frontend-test.status` | 없음 |
+| A15 | 멱등 키의 동일 Body replay와 상이 Body 충돌, 동시 요청 단일 처리 | 예 | 없음. `ReportDomainServiceIntegrationTest`가 같은 Key/다른 Body의 `IDEMPOTENCY_KEY_REUSED` 거부를 이미 검증한다. | CI | `.artifacts/ci-results/backend-test.status`, `.artifacts/ci-results/frontend-test.status` | 없음 |
 | A16 | 확장자·Content-Type이 아니라 실제 JPEG byte 형식으로 이미지 검증 | 예 | 없음 | CI | `.artifacts/ci-results/backend-test.status` | 없음 |
-| A17 | 필수 운영 Secret·DB 설정 오류 시 fail-fast/fail-closed | 예 | 없음 | CI + 격리 Compose | `.artifacts/ci-results/backend-test.status`, `.artifacts/ci-results/report-llm-fallback.status` | 없음 |
+| A17 | 운영 Profile의 CORS·Cookie와 필수 Secret·DB 설정 오류 fail-fast/fail-closed | 예 | 없음. Profile 단위 CORS exact allowlist, 운영 Cookie 속성, 암호화·rate-limit 필수 설정의 Context 기동 실패를 기존 테스트로 재사용한다. 실제 외부 HTTPS 검증은 A10·A11의 스테이징 경계로 별도 유지한다. | CI + 격리 Compose | `.artifacts/ci-results/backend-test.status`, `.artifacts/ci-results/report-llm-fallback.status` | 없음 |
 
 주요 구현 근거:
 
@@ -85,7 +85,7 @@
 | B02 | 보고서 생성·수정·검토 요청·반려·승인, 자기 승인 차단, 승인본 변경 차단 | 예 | 없음 | CI + 격리 Compose | B01과 동일 | 없음 |
 | B03 | 감사 로그 필수 기록 실패 시 업무 Transaction Rollback, append-only, 민감정보 redaction | 예 | 없음 | CI | `.artifacts/ci-results/security-acceptance.status`, `.artifacts/ci-results/csrf-permission-audit.status`, `.artifacts/ci-results/jenkins-log-secret.status` | 없음 |
 | B04 | MQTT TTL·Replay·Retain·멱등성과 실제 TLS Broker 왕복 | 예 | 없음. 기존 `mqttBrokerE2E`를 DinD TLS Broker와 임시 Robot Credential에 연결하고 종료 시 Credential 삭제를 검증한다. | CI + 격리 Compose | `.artifacts/ci-results/mqtt-broker-e2e.status`, `.artifacts/security-regression/mqtt-broker-e2e.json`, `.artifacts/backend-ci/build/test-results/mqttBrokerE2E/*.xml` | 없음 |
-| B05 | Robot별 MQTT Topic ACL 허용·타 Robot/역방향 Topic 거부 | 부분 | ACL 설정과 수동 부정 테스트 Runbook은 존재하지만 자동 PASS 판정이 없다. 격리 Broker에 두 Robot Credential을 발급해 허용/거부를 함께 확인하는 자동 테스트가 필요 | 격리 Compose | `(예정) .artifacts/day10/mqtt-acl/summary.json` | 없음 |
+| B05 | Robot별 MQTT Topic ACL 허용·타 Robot/역방향 Topic 거부 | 예 | 없음. 임시 Robot Credential로 실제 TLS Broker에 허용 publish/subscribe를 먼저 확인한 뒤 타 Robot namespace와 역방향 topic의 publish/subscribe 네 경계를 모두 거부해야 PASS다. | CI + 격리 Compose | `.artifacts/ci-results/mqtt-broker-e2e.status`, `.artifacts/security-regression/mqtt-broker-e2e.json` | 없음 |
 | B06 | 인증·RBAC·Session을 포함한 대용량 데이터와 k6 부하 | 아니오 | 필요. Seed 생성, 로그인/MFA 준비율, 정상/잠금 계정 분리, Role/Scope별 시나리오와 Session cleanup을 구현. 기존 `passwordHashLoadTest`는 Argon2 단일 부하라 이 요구를 대체하지 않는다. | 격리 Compose + 스테이징 EC2 | `(예정) .artifacts/day10/k6/summary.json`, `(예정) .artifacts/day10/k6/thresholds.json` | 운영에서는 실행 금지, 스테이징 자원 부하 |
 
 주요 구현 근거:
@@ -102,8 +102,9 @@
   `backend/src/test/java/com/gilbom/audit/integration/AuditLogIntegrationTest.java`
 - MQTT 실제 Broker E2E:
   `backend/src/test/java/com/gilbom/robot/mqtt/client/MqttPublisherBrokerE2E.java`,
-  `backend/src/test/java/com/gilbom/robot/mqtt/client/MqttInboundBrokerE2E.java`
-- MQTT ACL과 현재 수동 부정 절차:
+  `backend/src/test/java/com/gilbom/robot/mqtt/client/MqttInboundBrokerE2E.java`,
+  `scripts/run-mqtt-broker-e2e-ci.sh`
+- MQTT ACL:
   `infra/mosquitto/acl`,
   `infra/mosquitto/README.md`
 
@@ -149,15 +150,14 @@
 2. `C09` Cosign 서명·검증과 배포 차단 계약
 3. `C06` 격리된 전체 backup restore drill
 4. `C03` 스테이징 EC2 reboot recovery drill
-5. `B05` Robot별 MQTT ACL 자동 부정 테스트
-6. `A09`의 명시적인 CSRF Token 변조 case
-7. `A10`, `A11`, `C04`, `C07` 실제 외부/호스트 경계 검증
-8. `A04` 애플리케이션 Clock과 스테이징 NTP 증거
+5. `A10`, `A11`, `C04`, `C07` 실제 외부/호스트 경계 검증
+6. `A04` 스테이징 NTP 상태 증거
 
 ### 새 테스트를 만들지 않고 연결만 할 항목
 
-`B04` TLS MQTT Stage, `A05` 인증 임시 DB Stage와 Backend JUnit archive 연결은
-2026-08-03에 완료했다. 남은 연결 작업은 다음과 같다.
+`B04` TLS MQTT Stage, `B05` 실제 ACL 부정 테스트, `A05` 인증 임시 DB Stage,
+`A09` CSRF 변조·구 Token과 Backend JUnit archive 연결은 2026-08-03에
+완료했다. 남은 연결 작업은 다음과 같다.
 
 1. Frontend TAP 결과를
    JUnit 또는 JSON으로 변환해 보존한다.
@@ -166,7 +166,7 @@
 
 ### 현재 중복 구현하지 않을 항목
 
-로그인·잠금·MFA·복구 코드, TOTP time-step 재사용, Session·CSRF 교체와 만료,
+로그인·잠금·MFA·복구 코드, Session 만료,
 동시 Session·권한 변경 폐기, RBAC·DENY·마지막 ADMIN, 객체·SSE Scope,
 입력 제한, XSS 렌더링, LLM fallback, Report Workflow, 감사 Transaction,
 이미지 byte 검사, Rollback A/B/C, Volume 보존, Critical/High 검사는 기존
@@ -185,3 +185,33 @@
 운영에서 의도적으로 로그인 잠금, 장애, DB 복원, 재부팅 또는 부하를 유발하지
 않는다. 운영 변경이 필요한 검증은 기존 수동 승인 배포·Rollback Job의 범위를
 넘기지 않는다.
+
+## 7. 3단계 설계·구현 최종 코멘트
+
+이번 단계는 기존 회귀 테스트와 실제로 겹치지 않는 경계만 추가했다.
+
+- TOTP는 허용 window를 이전·현재·다음 step으로 고정하고, 그 바깥인
+  `-2`, `+2` step은 명시적으로 거부한다.
+- CSRF는 단위 수준의 변조 검사와 임시 DB·Backend를 사용한 실제 HTTP 검사를
+  함께 수행한다. Session ID가 교체된 뒤의 이전 token과 형식이 변조된 token은
+  모두 `403`이어야 한다. 변조 token decode 오류가 `500`으로 전파되던 경로는
+  일반 CSRF 불일치로 안전하게 처리하도록 수정했다.
+- 권한 변경 뒤 SSE는 다음 event를 보내기 직전에 Scope를 다시 조회하고,
+  권한이 사라졌다면 payload를 전송하지 않고 subscription을 즉시 제거한다.
+- Robot Scope/IDOR는 240개 추가 객체를 여러 page로 조회해 허용 객체의 누락,
+  숨겨진 객체의 섞임, summary·map·detail 간 Scope 불일치를 함께 검사한다.
+- MQTT ACL은 CLI exit code만 신뢰하지 않는다. 실제 TLS Broker에서 정상
+  publish/subscribe 전달을 positive control로 확인한 뒤, 타 Robot namespace와
+  역방향 topic의 publish/subscribe가 실제로 전달되지 않는지를 검증한다.
+- 동일 멱등 key에 다른 body를 보내는 경우와 운영 Profile의
+  CORS·Cookie·필수 Secret fail-fast는 기존 자동 테스트가 이미 해당 경계를
+  검증하므로 새 테스트를 중복 추가하지 않았다.
+- Jenkins 증거 집계는 CSRF 두 경계와 실제 Broker ACL 네 경계가 모두
+  `true`인 경우에만 PASS하도록 fail-closed 조건을 추가했다.
+
+모든 동적 검사는 로컬 Docker/DinD 호환 Runner에서 임시 DB, 임시 MQTT
+Credential과 격리 Compose 자원만 사용하며 운영 시스템에는 접근하거나
+변경하지 않는다. 대량 객체 Scope 회귀는 권한 정확성 검사이지 성능 시험은
+아니므로 `B06` k6 부하 기준선은 별도 단계로 남긴다. 외부 HTTPS 관점의
+CORS·Cookie, NTP와 운영 Profile host 증거 역시 스테이징 read-only 검증으로
+분리한다.

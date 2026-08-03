@@ -1,6 +1,7 @@
 package com.gilbom.robot.realtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -70,6 +71,26 @@ class RobotSseServiceTest {
 
         service.heartbeat();
 
+        assertThat(service.subscriptionCount()).isZero();
+    }
+
+    @Test
+    void blocksTheNextEventImmediatelyAfterAuthorizationRevokesTheSession() {
+        RobotSseService service = new RobotSseService(
+                scopeService,
+                sessionStateRepository,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        service.subscribe(USER_ID, SESSION_ID);
+        when(sessionStateRepository.findBySessionId(SESSION_ID))
+                .thenReturn(Optional.empty());
+
+        service.publish(RobotRealtimeEvent.telemetryUpdated(
+                ROBOT_ID,
+                "RBT-013",
+                NOW));
+
+        verify(sessionStateRepository).findBySessionId(SESSION_ID);
+        verify(scopeService, never()).canView(USER_ID, ROBOT_ID);
         assertThat(service.subscriptionCount()).isZero();
     }
 

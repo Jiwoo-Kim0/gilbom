@@ -47,6 +47,14 @@ if [ "$TASK" = mqttBrokerE2E ]; then
   esac
   test -f "$MQTT_E2E_CA_CERTIFICATE_HOST"
   test -r "$MQTT_E2E_CA_CERTIFICATE_HOST"
+  case "$MQTT_E2E_BROKER" in
+    ssl://127.0.0.1:*|ssl://localhost:*)
+      # 로컬 Broker 인증서는 127.0.0.1/localhost SAN만 포함한다.
+      # 별도 test container에서도 그 이름을 유지해 실제 TLS hostname
+      # 검증을 우회하지 않고 host의 published port에 연결한다.
+      set -- "$@" --network host
+      ;;
+  esac
   set -- "$@" \
     --env MQTT_E2E_BROKER \
     --env MQTT_E2E_SERVER_USERNAME \
