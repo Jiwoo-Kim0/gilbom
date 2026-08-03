@@ -166,6 +166,7 @@ Nginx worker는 host CPU 전체를 따라가는 `auto` 대신 2개로 고정했�
 - 운영 Compose의 `build:` 부재와 CI 전용 `compose.build.yaml`
 - Frontend 8080·8443, ACME webroot·인증서 read-only mount
 - DB/MQTT health → Backend readiness → Frontend 순서
+- Jetson에 전달할 외부 이미지 업로드 URL의 HTTPS 사용과 localhost 금지
 - internal `app`·`data` network
 - named volume 6개
 - CPU·memory·PID·log 상한

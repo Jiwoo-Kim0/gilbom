@@ -170,6 +170,12 @@ assert_contains "$CHECK_DIR/backend.yaml" "condition: service_healthy" \
 assert_contains "$CHECK_DIR/backend.yaml" \
   "GILBOM_HEALTH_READINESS_COMPONENTS: readinessState,db,flywayReadiness,storageReadiness" \
   "Backend readiness must include DB, Flyway, and writable storage"
+assert_contains "$CHECK_DIR/backend.yaml" \
+  "GILBOM_STORAGE_UPLOAD_URL: https://" \
+  "Backend must receive the public HTTPS image upload URL"
+assert_not_contains "$CHECK_DIR/backend.yaml" \
+  "GILBOM_STORAGE_UPLOAD_URL: http://localhost" \
+  "Production image upload URL must not point Jetson to localhost"
 for llm_runtime_setting in \
   GILBOM_LLM_CONNECT_TIMEOUT \
   GILBOM_LLM_READ_TIMEOUT \
