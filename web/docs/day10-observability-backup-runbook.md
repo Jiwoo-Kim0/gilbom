@@ -56,6 +56,77 @@ DB 계정과 broker 계정이 하나씩 더 생기는데, 그만큼 얻는 것�
 
 ## 1. Host 준비
 
+### 먼저 — `/opt/gilbom/deploy`를 Day 10 revision으로 올린다
+
+**CI·CD가 성공해도 이 디렉터리는 갱신되지 않는다.** `gilbom-deploy.sh`는 여기를 읽기만
+하고, 배포가 실제로 바꾸는 것은 container image와 `image.env` 한 줄뿐이다. 이 단계를
+건너뛰면 아래 설치 명령이 `No such file`로 멈춘다.
+
+`/opt/gilbom`과 `/var/lib/gilbom`은 root 전용이라 확인 명령에도 `sudo`가 필요하다.
+
+```sh
+release_sha="$(sudo cat /var/lib/gilbom/releases/current.sha)"
+sudo ls "/opt/gilbom/artifacts/$release_sha"
+```
+
+목록에 `gilbom-web-<sha>.tar.zst`가 **있는지 없는지로 경로가 갈린다.**
+
+**(가) 소스 archive가 있는 경우** — 수동으로 승격한 release다. 그대로 푼다.
+
+```sh
+sudo sh -c '
+  sha="$(cat /var/lib/gilbom/releases/current.sha)"
+  cd "/opt/gilbom/artifacts/$sha"
+  sha256sum -c SHA256SUMS
+  zstd -dc "gilbom-web-$sha.tar.zst" \
+    | tar --extract --file - --directory /opt/gilbom/deploy --no-same-owner
+'
+```
+
+**(나) 없는 경우** — Jenkins 배포다. `promote-ci-release-artifacts.sh`의 허용 목록에
+소스 archive가 없어서 host에 존재하지 않는다. 배포된 SHA로 로컬에서 같은 archive를 만들어
+SFTP로 옮긴다. `build-release-artifacts.sh`와 같은 방식이라 내용은 공식 archive와 같다.
+
+```sh
+# 로컬 (저장소 root)
+sha=<current.sha 값>
+git archive --format=tar "$sha:web" | gzip -9 > "/tmp/gilbom-web-$sha.tar.gz"
+
+# 운영 상태 파일이 섞이지 않았는지 — Day 8과 같은 검사
+tar -tzf "/tmp/gilbom-web-$sha.tar.gz" \
+  | grep -E '(^|/)(runtime\.env|image\.env)$|(^|/)secrets/[^/]+$' \
+  | grep -Ev '(^|/)secrets/\.gitignore$' \
+  && echo "운영 상태가 섞여 있다. 전송하지 않는다." || echo "안전"
+
+sha256sum "/tmp/gilbom-web-$sha.tar.gz"
+```
+
+SFTP로 `/home/ubuntu`에 올린 뒤 EC2에서 checksum을 대조하고 푼다.
+
+```sh
+sha256sum "gilbom-web-$sha.tar.gz"          # 로컬 값과 일치해야 한다
+sudo tar --extract --gzip --file "gilbom-web-$sha.tar.gz" \
+  --directory /opt/gilbom/deploy --no-same-owner
+rm -f "gilbom-web-$sha.tar.gz"
+```
+
+> **(나)는 우회다.** 감사 흔적이 남는 정공법은 CI 승격 목록에 소스 archive를 포함시키는
+> 것이고, 그건 배포 파이프라인 소유자의 몫이다.
+
+어느 쪽이든 archive에는 Git이 추적하는 파일만 들어 있어 `runtime.env`, `image.env`,
+`/opt/gilbom/secrets`, named volume은 보존된다. 푼 뒤 확인한다.
+
+```sh
+cd /opt/gilbom/deploy
+test -f infra/scripts/install-day10-host.sh \
+  || echo "이 release에는 Day 10이 없다. master 기준으로 CI를 다시 돌려야 한다."
+sh scripts/verify-day10-observability.sh
+sudo docker compose --env-file runtime.env --env-file image.env \
+  -f compose.prod.yaml config --quiet && echo "운영 compose 정상"
+```
+
+### 설치
+
 ```sh
 cd /opt/gilbom/deploy
 sudo sh infra/scripts/install-day10-host.sh
@@ -76,7 +147,7 @@ sudo diff /opt/gilbom/monitoring/monitoring.env \
   /opt/gilbom/deploy/infra/monitoring/monitoring.env.example
 ```
 
-새로 필요한 항목은 넷이다.
+새로 필요한 항목은 다섯이다.
 
 ```
 ALERTMANAGER_PORT=9093
@@ -101,7 +172,9 @@ docker network ls --filter name=_app --format '{{.Name}}'
 
 > **`monitoring.env`를 갱신하기 전에는 Day 8 보조 검사가 실패한다.**
 > `verify-day8-auxiliary-runtime.sh`가 이 env 파일로 `docker compose config`를 돌리는데,
-> `ALERTMANAGER_WEBHOOK_SECRET_FILE`이 없으면 필수 변수 누락으로 멈춘다. 위 네 줄을 먼저 넣는다.
+> `ALERTMANAGER_WEBHOOK_SECRET_FILE`이 없으면 필수 변수 누락으로 멈춘다. 위 다섯 줄을 먼저 넣는다.
+> 이 스크립트는 Monitoring만 보지 않는다. Jenkins와 DinD도 함께 검사하므로 Jenkins가
+> 내려가 있으면 Monitoring이 정상이어도 실패한다.
 
 Mattermost webhook을 Secret 파일로 넣는다. 값은 저장소에 남기지 않는다.
 
@@ -153,10 +226,32 @@ sudo docker compose \
 ```
 
 Backend는 새 image가 필요하다(Micrometer registry가 들어갔다). Day 8 배포 절차로
-새 revision을 올린 뒤 아래를 확인한다.
+새 revision을 올린다.
+
+### 첫 검사 전에 metric을 한 번씩 만들어 둔다
+
+timer는 주기가 와야 처음 돈다. 그전에 검사하면 **정상인데도 실패한다.**
+
+```sh
+# host metric을 즉시 한 번 생성 (timer의 첫 주기를 기다리지 않는다)
+sudo systemctl start gilbom-host-metrics.service
+
+# backup metric도 한 번 실행해야 생긴다
+sudo /usr/local/sbin/gilbom-backup database
+```
+
+volume backup은 Frontend·Backend·Mosquitto를 잠시 멈춘다. **시연 시간에는 실행하지 않는다.**
+유지보수 시간에 따로 돌린다. 그전까지는 검사에서 `backup volumes` 항목이 실패하는 것이 정상이다.
+
+```sh
+sudo /usr/local/sbin/gilbom-backup volumes
+```
+
+### 검사
 
 ```sh
 cd /opt/gilbom/deploy
+sudo sh scripts/verify-day8-auxiliary-runtime.sh
 sudo sh scripts/verify-day10-runtime.sh
 ```
 
