@@ -52,7 +52,7 @@
         {
           "refId": "A",
           "legendFormat": "{{backup}}",
-          "expr": "gilbom_backup_last_success_seconds * 1000",
+          "expr": "max by (backup) (gilbom_backup_last_success_seconds) * 1000",
           "instant": true,
           "range": false
         }
@@ -111,7 +111,7 @@
         {
           "refId": "A",
           "legendFormat": "{{backup}}",
-          "expr": "gilbom_backup_last_status",
+          "expr": "max by (backup) (gilbom_backup_last_status)",
           "instant": true,
           "range": false
         }
@@ -154,7 +154,7 @@
         {
           "refId": "A",
           "legendFormat": "{{backup}}",
-          "expr": "gilbom_backup_offhost_exported_seconds * 1000",
+          "expr": "max by (backup) (gilbom_backup_offhost_exported_seconds) * 1000",
           "instant": true,
           "range": false
         }
@@ -211,7 +211,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "probe_ssl_earliest_cert_expiry - time()",
+          "expr": "min(probe_ssl_earliest_cert_expiry - time())",
           "instant": true,
           "range": false
         }
@@ -252,7 +252,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "gilbom_deploy_last_success_seconds * 1000",
+          "expr": "max(gilbom_deploy_last_success_seconds) * 1000",
           "instant": true,
           "range": false
         }
@@ -292,7 +292,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "gilbom_path_usage_bytes{path=\"backups\"}",
+          "expr": "max(gilbom_path_usage_bytes{path=\"backups\"})",
           "instant": true,
           "range": false
         }

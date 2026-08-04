@@ -66,7 +66,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "up{job=\"backend\"}",
+          "expr": "max(up{job=\"backend\"})",
           "instant": true,
           "range": false
         }
@@ -126,7 +126,7 @@
         {
           "refId": "A",
           "legendFormat": "{{component}}",
-          "expr": "gilbom_health_component_status",
+          "expr": "max by (component) (gilbom_health_component_status)",
           "instant": true,
           "range": false
         }
@@ -183,7 +183,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "probe_success{job=\"blackbox-https\"}",
+          "expr": "max(probe_success{job=\"blackbox-https\"})",
           "instant": true,
           "range": false
         }
@@ -237,7 +237,7 @@
     {
       "id": 5,
       "type": "timeseries",
-      "title": "응답 시간 p95",
+      "title": "응답 시간 (p95 · 최대)",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -274,10 +274,16 @@
       "targets": [
         {
           "refId": "A",
-          "legendFormat": "{{uri}}",
-          "expr": "topk(5, histogram_quantile(0.95, sum by (uri, le) (rate(http_server_requests_seconds_bucket{job=\"backend\"}[5m]))))"
+          "legendFormat": "p95 {{uri}}",
+          "expr": "topk(5, http_server_requests_seconds{job=\"backend\",quantile=\"0.95\"})"
+        },
+        {
+          "refId": "B",
+          "legendFormat": "최대 {{uri}}",
+          "expr": "topk(5, max by (uri) (http_server_requests_seconds_max{job=\"backend\"}))"
         }
-      ]
+      ],
+      "description": "p95는 95%의 요청이 그보다 빨랐다는 뜻이다. 평균이 감추는 느린 꼬리를 본다. p95는 Backend 재배포 후부터 값이 들어온다."
     },
     {
       "id": 6,

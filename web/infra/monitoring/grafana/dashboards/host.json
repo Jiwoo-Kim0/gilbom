@@ -127,7 +127,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes",
+          "expr": "avg(node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)",
           "instant": true,
           "range": false
         }
@@ -186,7 +186,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "gilbom_filesystem_avail_bytes{mountpoint=\"/\"} / gilbom_filesystem_size_bytes{mountpoint=\"/\"}",
+          "expr": "max(gilbom_filesystem_avail_bytes{mountpoint=\"/\"} / gilbom_filesystem_size_bytes{mountpoint=\"/\"})",
           "instant": true,
           "range": false
         }
@@ -226,7 +226,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "gilbom_path_usage_bytes{path=\"robot_images\"}",
+          "expr": "max(gilbom_path_usage_bytes{path=\"robot_images\"})",
           "instant": true,
           "range": false
         }
