@@ -198,15 +198,6 @@ Mattermost webhook을 Secret 파일로 넣는다. 값은 저장소에 남기지 
 이미 다른 운영자가 연동한 비어 있지 않은 파일은 덮어쓰지 않고 그대로 사용한다.
 
 ```sh
-<<<<<<< HEAD
-sudo install -d -m 0700 /opt/gilbom/secrets
-sudo sh -c 'umask 077; printf "%s\n" "<Mattermost incoming webhook URL>" \
-  > /opt/gilbom/secrets/alertmanager_mattermost_webhook'
-
-# Alertmanager container는 nobody(65534)로 돈다. root 소유 0400이면 읽지 못하고,
-# 그 상태에서도 Alertmanager는 정상으로 보인다. 알람만 조용히 사라진다.
-sudo chown 65534:65534 /opt/gilbom/secrets/alertmanager_mattermost_webhook
-=======
 sudo install -d -o root -g root -m 0700 /opt/gilbom/secrets
 if sudo test -s /opt/gilbom/secrets/alertmanager_mattermost_webhook; then
   echo "기존 Mattermost webhook을 보존한다."
@@ -218,17 +209,22 @@ else
   unset webhook_url
 fi
 sudo chown root:root /opt/gilbom/secrets/alertmanager_mattermost_webhook
->>>>>>> 252a717efd57afc1cfaaa6df398ffe0d9ee01080
 sudo chmod 0400 /opt/gilbom/secrets/alertmanager_mattermost_webhook
 sudo stat -c '%a %U:%G' /opt/gilbom/secrets/alertmanager_mattermost_webhook
 ```
 
-`400 nobody:nogroup`이 나와야 한다. 명령 이력에 URL을 남기지 않으려면 첫 줄 앞에
-공백을 하나 넣는다.
+`400 root:root`가 나와야 한다. `read -s`를 쓰므로 URL은 화면에도 명령 이력에도 남지 않는다.
 
-> **0444로 여는 방식은 쓰지 않는다.** Grafana 비밀번호 파일이 그렇게 돼 있지만,
-> 그러면 host의 모든 사용자가 webhook URL을 읽을 수 있다. 소유자를 container 사용자로
-> 바꾸고 0400을 유지하는 쪽이 더 좁다.
+> **Alertmanager는 UID 0으로 돈다.** 이 image의 기본 사용자는 `nobody`인데, 그러면 root
+> 소유 `0400` secret을 읽지 못한다. 실제로 그 상태에서 알람이 한 번도 전달되지 않은 적이
+> 있고, Prometheus·Alertmanager 화면은 정상으로 보여서 알아채기 어려웠다.
+>
+> host 파일 소유자를 container 사용자로 맞추는 방법은 보안 정리가 지나갈 때마다 무너진다.
+> Compose는 파일 secret의 `uid`·`gid`·`mode`를 무시한다. `0444`로 여는 것은 host의 모든
+> 사용자에게 webhook URL을 주는 것이라 더 나쁘다.
+>
+> 그래서 UID 0으로 돌리되 `cap_drop: ALL`과 read-only rootfs를 유지한다. 이 container는
+> secret 파일 하나와 자기 데이터 volume 외에는 아무것도 마운트하지 않는다.
 
 ---
 
@@ -236,7 +232,10 @@ sudo stat -c '%a %U:%G' /opt/gilbom/secrets/alertmanager_mattermost_webhook
 
 **개인키는 이 서버에 두지 않는다.** EC2가 통째로 털려도 반출본을 열 수 없어야 한다.
 
-키 보관자의 PC에서 (한 번만):
+**보관자는 최소 두 명이다.** 한 명만 두면 그 사람이 빠질 때 모든 backup을 열 수 없다.
+각자 자기 키를 만들고 **공개키만** 보내며, 개인키는 서로 오가지 않는다.
+
+각 보관자의 PC에서 (한 번만):
 
 ```sh
 gpg --full-generate-key            # RSA 4096 또는 ed25519
