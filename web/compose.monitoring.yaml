@@ -49,6 +49,12 @@ services:
   alertmanager:
     image: prom/alertmanager:v0.28.1
     restart: unless-stopped
+    # 이 image는 기본이 nobody(65534)인데, webhook secret은 host에서 root 소유 0400으로
+    # 유지된다. 보안 정리가 지나갈 때마다 소유자가 root로 돌아오므로 chown으로 맞추는
+    # 방식은 무너진다. Compose는 파일 secret의 uid/gid/mode를 무시해서 그 경로도 없다.
+    # 0444로 여는 것은 host의 모든 사용자에게 webhook URL을 주는 것이라 더 나쁘다.
+    # 그래서 UID 0으로 돌리되 capability는 전부 빼고 rootfs도 read_only로 둔다.
+    user: "0:0"
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager
