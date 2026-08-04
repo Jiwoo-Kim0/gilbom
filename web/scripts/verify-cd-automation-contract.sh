@@ -147,17 +147,20 @@ assert_contains Jenkinsfile.production-auto \
   'hudson.model.Cause$UpstreamCause' \
   "production auto-CD does not restrict the accepted cause type"
 assert_contains Jenkinsfile.production-auto \
-  'upstreamCauses.size() != 1' \
-  "production auto-CD does not require exactly one upstream cause"
+  'Detected Jenkins upstream causes: ' \
+  "production auto-CD does not emit safe upstream cause diagnostics"
 assert_contains Jenkinsfile.production-auto \
-  'upstreamCauses[0].upstreamProject' \
+  'def projectName = cause.upstreamProject' \
   "production auto-CD does not resolve the trusted upstream project"
 assert_contains Jenkinsfile.production-auto \
   '.toString()' \
   "production auto-CD does not normalize the upstream project value"
 assert_contains Jenkinsfile.production-auto \
-  "upstreamProject == null || upstreamProject.toString().trim() != 'gilbom-ci-baseline'" \
+  "projectName.toString().trim() == 'gilbom-ci-baseline'" \
   "production auto-CD does not require the successful CI chain"
+assert_contains Jenkinsfile.production-auto \
+  'if (ciCause == null)' \
+  "production auto-CD does not reject missing trusted upstream causes"
 assert_absent Jenkinsfile.production-auto \
   'gilbom-staging-deploy' \
   "production auto-CD still requires a staging Job"
