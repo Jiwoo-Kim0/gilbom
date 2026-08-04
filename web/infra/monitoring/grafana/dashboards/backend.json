@@ -275,15 +275,15 @@
         {
           "refId": "A",
           "legendFormat": "p95 {{uri}}",
-          "expr": "topk(5, http_server_requests_seconds{job=\"backend\",quantile=\"0.95\"})"
+          "expr": "topk(5, http_server_requests_seconds{job=\"backend\",uri=~\"/api/.*\",uri!~\"/api/v1/stream/.*\",quantile=\"0.95\"})"
         },
         {
           "refId": "B",
           "legendFormat": "최대 {{uri}}",
-          "expr": "topk(5, max by (uri) (http_server_requests_seconds_max{job=\"backend\"}))"
+          "expr": "topk(5, max by (uri) (http_server_requests_seconds_max{job=\"backend\",uri=~\"/api/.*\",uri!~\"/api/v1/stream/.*\"}))"
         }
       ],
-      "description": "p95는 95%의 요청이 그보다 빨랐다는 뜻이다. 평균이 감추는 느린 꼬리를 본다. p95는 Backend 재배포 후부터 값이 들어온다."
+      "description": "p95는 95%의 요청이 그보다 빨랐다는 뜻이다. 평균이 감추는 느린 꼬리를 본다. /api/ 요청만 본다 — SSE 스트림은 연결을 오래 유지하는 것이 정상이고, SSE 클라이언트가 끊을 때 생기는 IOException은 /error에 수십 초로 잡힌다. 둘 다 포함하면 실제 API가 바닥에 눌려 아무것도 읽히지 않는다. p95는 Backend 재배포 후부터 값이 들어온다."
     },
     {
       "id": 6,
