@@ -183,6 +183,12 @@ assert_contains Jenkinsfile.production-auto \
   '.compose.path == "compose.prod.yaml"' \
   "production auto-CD does not bind evidence to the signed Compose"
 assert_contains Jenkinsfile.production-auto \
+  '.source.archive' \
+  "production auto-CD does not require signed source archive evidence"
+assert_contains Jenkinsfile.production-auto \
+  '.source.activeTreeMarker' \
+  "production auto-CD does not verify the active source tree marker"
+assert_contains Jenkinsfile.production-auto \
   '.vulnerabilities.critical == 0' \
   "production auto-CD does not require Critical 0"
 assert_contains Jenkinsfile.production-auto \
@@ -201,6 +207,9 @@ assert_contains infra/scripts/gilbom-deploy-preflight.sh \
 assert_contains infra/scripts/gilbom-deploy-preflight.sh \
   'signed release Compose configuration is invalid or runtime.env is incomplete' \
   "preflight does not validate the candidate Compose with host runtime.env"
+assert_contains infra/scripts/gilbom-deploy-preflight.sh \
+  '.artifacts.source.sha256 == $source_archive_sha256' \
+  "preflight does not bind source archive content to release metadata"
 assert_contains infra/scripts/gilbom-deploy.sh \
   'flock --nonblock 9' \
   "root deploy does not acquire a non-blocking deployment lock"
@@ -219,6 +228,12 @@ assert_contains infra/scripts/gilbom-deploy.sh \
 assert_contains infra/scripts/gilbom-deploy.sh \
   'previous-compose.prod.yaml' \
   "root deploy does not preserve Compose rollback state"
+assert_contains infra/scripts/gilbom-deploy.sh \
+  'activate_release_source_tree' \
+  "root deploy does not activate the signed release source tree"
+assert_contains infra/scripts/gilbom-deploy.sh \
+  'restore_deploy_source_tree' \
+  "root deploy cannot restore the previous source tree"
 assert_contains Jenkinsfile \
   'sh scripts/sign-release-manifest.sh' \
   "CI does not sign the complete release manifest"

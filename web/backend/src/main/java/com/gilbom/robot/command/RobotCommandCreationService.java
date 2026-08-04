@@ -138,6 +138,8 @@ public class RobotCommandCreationService {
         MissionCommandTarget missionTarget = resolveMissionTarget(
                 robotId,
                 request);
+        RobotCommandCreateRequest.Parameters commandParameters =
+                commandParameters(request, missionTarget);
 
         jdbcTemplate.update("""
                 INSERT INTO robot.robot_command (
@@ -173,7 +175,7 @@ public class RobotCommandCreationService {
                 missionTarget == null ? null : missionTarget.missionId(),
                 missionTarget == null ? null : missionTarget.patrolAreaId(),
                 request.commandType().name(),
-                serialize(request.parameters()),
+                serialize(commandParameters),
                 actorUserId,
                 utc(issuedAt),
                 utc(expiresAt));
@@ -245,6 +247,7 @@ public class RobotCommandCreationService {
         MissionCommandTarget target = jdbcTemplate.query("""
                         SELECT
                             m.mission_id,
+                            m.mission_code,
                             m.patrol_area_id,
                             a.area_code
                         FROM robot.mission m
@@ -260,6 +263,7 @@ public class RobotCommandCreationService {
                                 resultSet.getObject(
                                         "mission_id",
                                         UUID.class),
+                                resultSet.getString("mission_code"),
                                 resultSet.getObject(
                                         "patrol_area_id",
                                         UUID.class),
@@ -296,6 +300,7 @@ public class RobotCommandCreationService {
         MissionCommandTarget target = jdbcTemplate.query("""
                         SELECT
                             m.mission_id,
+                            m.mission_code,
                             m.patrol_area_id,
                             a.area_code
                         FROM robot.mission m
@@ -312,6 +317,7 @@ public class RobotCommandCreationService {
                                 resultSet.getObject(
                                         "mission_id",
                                         UUID.class),
+                                resultSet.getString("mission_code"),
                                 resultSet.getObject(
                                         "patrol_area_id",
                                         UUID.class),
@@ -347,6 +353,24 @@ public class RobotCommandCreationService {
             throw new BusinessException(ErrorCode.MISSION_NOT_FOUND);
         }
         return target;
+    }
+
+    private static RobotCommandCreateRequest.Parameters commandParameters(
+            RobotCommandCreateRequest request,
+            MissionCommandTarget missionTarget
+    ) {
+        if (request.commandType()
+                != CommandRequestPayload.CommandType.CANCEL_MISSION) {
+            return request.parameters();
+        }
+        if (missionTarget == null) {
+            throw new IllegalStateException(
+                    "CANCEL_MISSION target was not resolved");
+        }
+        return new RobotCommandCreateRequest.Parameters(
+                missionTarget.missionCode(),
+                null,
+                request.parameters().reason());
     }
 
     private static String missionStateConflictMessage(
@@ -528,6 +552,7 @@ public class RobotCommandCreationService {
 
     private record MissionCommandTarget(
             UUID missionId,
+            String missionCode,
             UUID patrolAreaId,
             String areaCode
     ) {

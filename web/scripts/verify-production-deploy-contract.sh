@@ -122,6 +122,15 @@ grep -Fq 'verify_release_signature "$target_artifact"' \
 grep -Fq 'install_compose_file "$candidate_compose_path"' \
   infra/scripts/gilbom-deploy.sh \
   || fail "signed candidate Compose is not atomically installed"
+grep -Fq 'prepare_release_source_tree' \
+  infra/scripts/gilbom-deploy.sh \
+  || fail "signed source archive is not safely staged"
+grep -Fq 'activate_release_source_tree' \
+  infra/scripts/gilbom-deploy.sh \
+  || fail "signed source tree is not activated"
+grep -Fq 'restore_deploy_source_tree' \
+  infra/scripts/gilbom-deploy.sh \
+  || fail "source tree activation is not rollback-safe"
 grep -Fq 'previous-compose.prod.yaml' \
   infra/scripts/gilbom-deploy.sh \
   || fail "previous Compose snapshot and rollback are missing"

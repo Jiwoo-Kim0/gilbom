@@ -396,8 +396,10 @@ public class IncidentEventIngestionService
                 : payload.incident().attributes().damageRatio();
         DefectRiskAssessment.Result risk =
                 DefectRiskAssessment.calculate(damageRatio, calculatedAt);
+        Double confidence = payload.incident().confidence();
         boolean reviewRequired = risk.reviewRequired()
-                || payload.incident().confidence() < 0.7;
+                || confidence == null
+                || confidence < 0.7;
         return jdbcTemplate.queryForObject("""
                 INSERT INTO defect.defect (
                     incident_code,
@@ -452,7 +454,7 @@ public class IncidentEventIngestionService
                 context.patrolRouteId(),
                 utc(payload.occurredAt()),
                 utc(payload.occurredAt()),
-                payload.incident().confidence(),
+                confidence,
                 reviewRequired);
     }
 
@@ -596,7 +598,9 @@ public class IncidentEventIngestionService
                 utc(payload.evidence().capturedAt()),
                 payload.evidence().imageWidth(),
                 payload.evidence().imageHeight(),
-                json(payload.evidence().bboxNorm()),
+                payload.evidence().bboxNorm() == null
+                        ? null
+                        : json(payload.evidence().bboxNorm()),
                 payload.model().name(),
                 payload.model().version(),
                 representative,
@@ -615,18 +619,20 @@ public class IncidentEventIngestionService
                 UPDATE defect.defect
                 SET observation_count = observation_count + 1,
                     latest_confidence = CASE
-                        WHEN ? >= last_seen_at THEN ?
+                        WHEN ? >= last_seen_at AND ? IS NOT NULL THEN ?
                         ELSE latest_confidence
                     END,
                     last_seen_at = GREATEST(last_seen_at, ?),
-                    review_required = review_required OR ?,
+                    review_required = review_required OR ? IS NULL OR ? < 0.7,
                     updated_at = NOW()
                 WHERE defect_id = ?
                 """,
                 utc(payload.occurredAt()),
                 payload.incident().confidence(),
+                payload.incident().confidence(),
                 utc(payload.occurredAt()),
-                payload.incident().confidence() < 0.7,
+                payload.incident().confidence(),
+                payload.incident().confidence(),
                 defectId);
         if (updated != 1) {
             throw new IllegalStateException(

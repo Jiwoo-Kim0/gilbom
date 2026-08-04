@@ -11,7 +11,7 @@ DinD에서 격리하고, 배포는 기존 root 소유 진입점을 그대로 재
 master SCM Polling
   → 전체 CI/Test/Security
   → SBOM/CVE 정책
-  → images.tar.zst + compose.prod.yaml 릴리스 생성
+  → images.tar.zst + compose.prod.yaml + exact-commit source archive 생성
   → image와 전체 SHA256SUMS Cosign 서명·부정 테스트
   → 운영 Artifact host immutable promotion
   → Jenkins console Secret scan
@@ -77,17 +77,17 @@ Job 설정에 반영되기 전이라 최초 upstream build가 parameter bootstra
 릴리스는 기존 `gilbom-deploy` 수동 승인 Job으로 배포하고, DB version이 반영된
 다음 무마이그레이션 릴리스부터 자동 CD가 다시 진행된다.
 
-현재 운영에 V41이 이미 반영됐다면 Release Manifest의
-`flyway.afterVersion == 41`을 확인한다. 아직 V40이면 V41 릴리스는 기존 수동
+현재 운영에 V42가 이미 반영됐다면 Release Manifest의
+`flyway.afterVersion == 42`를 확인한다. 아직 V41이면 V42 릴리스는 기존 수동
 승인 Job으로 한 번 반영해야 한다.
 
 ```sh
 release_sha="$(sudo cat /var/lib/gilbom/releases/current.sha)"
 sudo jq -e --arg sha "$release_sha" \
-  '.releaseSha == $sha and .flyway.afterVersion == 41' \
+  '.releaseSha == $sha and .flyway.afterVersion == 42' \
   "/var/lib/gilbom/releases/$release_sha/release-manifest.json" \
   >/dev/null \
-  && echo "Production Flyway V41: PASS"
+  && echo "Production Flyway V42: PASS"
 ```
 
 ## 재사용하는 root 보안 경계
@@ -95,8 +95,9 @@ sudo jq -e --arg sha "$release_sha" \
 자동 Job은 기존 root 배포기를 호출하므로 다음 검증은 Pipeline 문자열이 아니라
 EC2 root 경계에서 다시 수행된다.
 
-- Artifact 디렉터리 root 소유·불변 mode·정확히 열두 개 파일
+- Artifact 디렉터리 root 소유·불변 mode·정확히 열세 개 파일
 - 전체 `SHA256SUMS` 서명과 `images.tar.zst.sha256`
+- `gilbom-web-<SHA>.tar.zst`의 checksum·metadata 일치와 안전한 staging
 - 고정 Cosign `v3.1.2`, 고정 공개키, image/manifest Blob Bundle
 - 서명된 `compose.prod.yaml`과 서버 전용 `runtime.env`의 완전한 렌더링
 - image name·ID와 full SHA
@@ -106,6 +107,7 @@ EC2 root 경계에서 다시 수행된다.
 - 배포 직전 암호화 DB·Volume backup
 - `docker compose up --detach --no-build`
 - Backend·Frontend·MQTT·내부 HTTPS health
+- 성공 경계의 `/opt/gilbom/deploy` source tree 교체와 `.release-source.sha`
 - Release Manifest, `current.sha`, `previous.sha`
 
 Cosign, checksum 또는 후보 Compose 렌더링이 실패하면 `docker load`와 서비스
@@ -120,11 +122,19 @@ migration `0`만 허용하므로 정상 자동 CD 경로의 Health 실패는 이
 Rollback 대상이다. 이때 이전 image뿐 아니라 배포 직전
 `previous-compose.prod.yaml` snapshot도 함께 복원한다.
 
+소스 archive는 image와 Compose의 runtime 검증이 모두 끝난 뒤 sibling staging
+directory에서 `/opt/gilbom/deploy`로 교체한다. `runtime.env`와 `image.env`는
+host 상태이므로 새 tree에 복사해 보존한다. source 교체 뒤 Release Manifest 또는
+`current.sha` 기록이 실패하면 이전 source tree를 먼저 복원한 뒤 기존 container
+Rollback 경로를 수행한다. 세부 신뢰 경계와 실패 모델은
+[`release-source-deployment.md`](release-source-deployment.md)에 정리한다.
+
 ## 새 Artifact 형식 최초 반영
 
 새 CI를 실행하기 전에 EC2의 root 승격 helper와 배포 entrypoint를 먼저 갱신한다.
-구 helper는 열두 파일 형식을 알지 못하므로 이 순서를 바꾸면 promotion이
-fail-closed된다.
+구 helper는 열두 파일 계약만 허용하고 구 deploy entrypoint는 source tree를
+교체하지 않는다. 새 CI가 열세 파일을 보내기 전에 아래 순서로 두 경계를 함께
+올리지 않으면 promotion이 fail-closed된다.
 
 ```sh
 cd /opt/gilbom/app-git/web
@@ -180,6 +190,8 @@ Release Manifest에는 다음 증거가 있어야 한다.
 - `flyway.migrationCount == 0`
 - `flyway.approvalRequired == false`
 - `artifact.signature.status == "PASS"`
+- `source.sha256`이 preflight와 일치하고
+  `/opt/gilbom/deploy/.release-source.sha`가 같은 release SHA
 - 네 health 결과가 모두 `PASS`
 
 자동 배포가 실패하면 Jenkins console, 보관된 preflight·Manifest,

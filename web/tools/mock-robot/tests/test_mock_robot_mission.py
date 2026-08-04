@@ -257,7 +257,10 @@ class MockRobotMissionTest(unittest.TestCase):
             )
         )
         self.robot.handle_command(
-            command("CANCEL_MISSION", {"reason": "mock cancel"})
+            command("CANCEL_MISSION", {
+                "mission_id": mission_id,
+                "reason": "mock cancel",
+            })
         )
 
         event = self.published_json("/events/mission")[-1]
@@ -360,7 +363,10 @@ class MockRobotMissionTest(unittest.TestCase):
         )
 
         self.robot.handle_command(
-            command("CANCEL_MISSION", {"reason": "operator cancel"})
+            command("CANCEL_MISSION", {
+                "mission_id": mission_id,
+                "reason": "operator cancel",
+            })
         )
 
         self.assertIsNone(self.robot.mission_id)
@@ -370,6 +376,25 @@ class MockRobotMissionTest(unittest.TestCase):
         event = self.published_json("/events/mission")[-1]
         self.assertEqual(event["event_type"], "MISSION_CANCELLED")
         self.assertEqual(event["mission_id"], mission_id)
+
+    def test_cancel_recovers_backend_target_when_local_mission_is_missing(self) -> None:
+        mission_id = "MIS-MOCK-E2E-ZOMBIE"
+
+        self.robot.handle_command(
+            command("CANCEL_MISSION", {
+                "mission_id": mission_id,
+                "reason": "operator recovery",
+            })
+        )
+
+        event = self.published_json("/events/mission")[-1]
+        self.assertEqual(event["event_type"], "MISSION_CANCELLED")
+        self.assertEqual(event["mission_id"], mission_id)
+        self.assertEqual(event["result"]["duration_sec"], 0)
+        self.assertIsNone(self.robot.mission_id)
+        results = self.published_json("/commands/result")
+        self.assertEqual(results[-1]["status"], "COMPLETED")
+        self.assertEqual(results[-1]["reason_code"], "OK")
 
     def test_periodic_event_payloads_cover_all_event_families(self) -> None:
         safety_events = [self.robot.safety_event_payload() for _ in range(4)]

@@ -56,6 +56,8 @@ printf 'frontend-vulnerabilities\n' \
 printf '{"status":"PASS"}\n' \
   > "$RELEASE_DIR/vulnerabilities/policy-summary.json"
 printf 'images\n' > "$RELEASE_DIR/images.tar.zst"
+printf 'source\n' \
+  > "$RELEASE_DIR/gilbom-web-$RELEASE_SHA.tar.zst"
 printf '{"fixture":"cosign-bundle"}\n' \
   > "$RELEASE_DIR/images.tar.zst.sigstore.json"
 printf '{"releaseSha":"%s"}\n' "$RELEASE_SHA" \

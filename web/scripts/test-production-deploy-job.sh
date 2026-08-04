@@ -41,6 +41,10 @@ jq -n \
           manifestBundleSha256: $digest
         }
       },
+      source: {
+        archive: ("gilbom-web-" + $release_sha + ".tar.zst"),
+        sha256: $digest
+      },
       compose: {
         path: "compose.prod.yaml",
         sha256: $digest
@@ -93,6 +97,7 @@ for label in \
   'Cosign Public Key SHA-256:' \
   'Cosign Image Bundle SHA-256:' \
   'Cosign Manifest Bundle SHA-256:' \
+  'Source Archive SHA-256:' \
   'Compose SHA-256:' \
   'Critical:' \
   'High:' \
@@ -144,6 +149,11 @@ jq -n \
           bundleSha256: $digest,
           manifestBundleSha256: $digest
         }
+      },
+      source: {
+        archive: ("gilbom-web-" + $release_sha + ".tar.zst"),
+        sha256: $digest,
+        activeTreeMarker: "/opt/gilbom/deploy/.release-source.sha"
       },
       composeSha256: $digest,
       compose: {

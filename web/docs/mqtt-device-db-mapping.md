@@ -114,7 +114,7 @@ MQTT에 보이는 식별자와 DB PK를 동일한 값으로 취급하면 안 된
 | 1 | `tbs/v1/robots/{robot_id}/presence` | 로봇 → 서버 | 1 | O | 즉시 가능 | `robot_boot_session`, `robot_current_state`, `robot` |
 | 2 | `tbs/v1/robots/{robot_id}/state` | 로봇 → 서버 | 1 | O | MVP 가능, 일부 health는 제한 | `robot_current_state` |
 | 3 | `tbs/v1/robots/{robot_id}/telemetry` | 로봇 → 서버 | 0 | X | 센서 장착 여부에 따라 조건부 | `robot_telemetry`, `robot_current_state` |
-| 4 | `tbs/v1/robots/{robot_id}/events/incident` | 로봇 → 서버 | 1 | X | `DAMAGED` MVP 가능 | `robot_event`, `defect_observation`, `defect`, `robot_image` |
+| 4 | `tbs/v1/robots/{robot_id}/events/incident` | 로봇 → 서버 | 1 | X | `DAMAGED`, `MISSING` 가능 | `robot_event`, `defect_observation`, `defect`, `robot_image` |
 | 5 | `tbs/v1/robots/{robot_id}/events/battery` | 로봇 → 서버 | 1 | X | 잔량 회로 또는 추정 정책 확정 후 | `robot_event`, `robot_battery_event` |
 | 6 | `tbs/v1/robots/{robot_id}/events/safety` | 로봇 → 서버 | 1 | X | 장애물·경계 소실 MVP 가능 | `robot_event`, `robot_safety_event` |
 | 7 | `tbs/v1/robots/{robot_id}/events/mission` | 로봇 → 서버 | 1 | X | Mission 상태머신 구현 후 가능 | `robot_event`, `robot_mission_event`, `mission_status_history` |
@@ -149,7 +149,7 @@ tbs/v1/robots/{자기 robot_id}/ingest/receipt    # 심화
 |---|---|---|
 | Jetson Orin Nano | 부팅 ID, seq, 로봇 모드, 소프트웨어 health, Jetson 최고 열 존 온도 | `tj-thermal` 읽기 구현 필요 |
 | YDLidar X2 | 장애물 거리, 장애물 정지·해제, 경계 소실, LiDAR health | 5~10도 하향 설치와 통제 코스 기준 |
-| 하향 카메라 | 점자블록 LINEAR/DOT, DAMAGED, confidence, bbox, 대표 JPEG | 오염·융기·침범·설치 오류는 MVP 아님 |
+| 하향 카메라 | 점자블록 LINEAR/DOT, DAMAGED/MISSING 판정, confidence, bbox, 대표 JPEG | MISSING은 판정 점수와 예상 영역이 없으면 confidence·bbox가 null일 수 있음 |
 | YOLO + TensorRT | 모델명·버전, confidence, block type, damage 판정 | 트랙 확정·쿨다운 로직 필요 |
 | GPS NEO-M8N | 위도·경도, fix 유효 여부, accuracy 추정, course 기반 heading | GPS는 waypoint 항법이 아니라 사건 위치 태깅용이다. 장착 여부 우선 확인 |
 | 온습도 센서 | 외기 온도·습도 | 실제 장착·드라이버 완료 시에만 발행 |
@@ -378,7 +378,9 @@ events/incident
 | `evidence.bbox_norm` | `bbox_norm` JSONB |
 | `model.name/version` | `model_name`, `model_version` |
 
-MVP 실제 발행 유형은 `DAMAGED` 하나다. `INSTALLATION_INVALID`, `UNKNOWN_ANOMALY`는 DB와 enum에만 예약하며, 로봇이 아니라 관리자가 결함 수정에서 지정한다.
+Robot 실제 발행 유형은 `DAMAGED`, `MISSING`이다. `INSTALLATION_INVALID`,
+`UNKNOWN_ANOMALY`는 DB와 관리자 수정에만 사용한다. `MISSING`도 JPEG를 먼저
+업로드하고 반환받은 `image_id`를 Incident에 넣어 관측과 연결한다.
 
 이 Topic에서 B와 C의 경계는 다음과 같다.
 
@@ -489,7 +491,7 @@ QoS 1 / Retain 절대 금지
 | `PAUSE_MISSION` | O | 30초 | 안전 정지 후 일시중지 |
 | `RESUME_MISSION` | O | 30초 | 안전 조건 확인 후 재개 |
 | `COMPLETE_MISSION` | O | 30초 | 현재 임무를 정상 완료 |
-| `CANCEL_MISSION` | O | 30초 | 현재 임무 취소 |
+| `CANCEL_MISSION` | O | 30초 | `mission_id`, `reason`으로 대상 임무를 확정하고 `MISSION_CANCELLED` 보고 후 로컬 연결 해제 |
 | `EMERGENCY_STOP` | O | 10초 | 즉시 구동 정지 |
 | `CLEAR_EMERGENCY_STOP` | O | 30초 | 안전 조건 확인 후 해제 |
 | `RETURN_TO_CHARGE` | 2차 | - | 충전소 복귀 |
@@ -921,7 +923,7 @@ Spring MQTT Properties·Connection Config·Contract Test
 5. 이미지 원본은 HTTPS로 업로드하고 MQTT에는 `image_id`만 넣는다.
 6. MQTT의 `robot_id`, `mission_id`, `actor_id` 코드는 DB 내부 UUID로 변환한다.
 7. Current State는 `sampled_at`이 더 최신일 때만 갱신하고 잘못된 GPS가 마지막 유효 위치를 덮지 않게 한다.
-8. 임베디드 MVP의 실제 결함 유형은 `DAMAGED`이며 나머지는 예약값이다.
+8. 임베디드의 실제 결함 유형은 `DAMAGED`, `MISSING`이며 나머지는 관리자 수정용이다.
 9. 0.5초 안전 정지는 로컬 LiDAR 프로세스가 담당하고 MQTT는 사후 보고와 관리자 명령에 사용한다.
 10. B의 최종 테이블은 DDL에 있으나 현재 Flyway에는 없으므로 별도 Version Migration이 필요하다.
 11. DB는 Bootstrap, Flyway, Runtime Role을 분리하고 Runtime에는 최소 DML만 부여한다.

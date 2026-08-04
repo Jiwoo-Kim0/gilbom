@@ -1,0 +1,52 @@
+# Python 버전: 3.10.12 고정 (.python-version) — 젯슨 실기 확정 (2026-07-29 캡처).
+#   보드: Jetson Orin Nano / JetPack L4T R36.4.7 (aarch64), 시스템 파이썬 3.10.12.
+#   개발 PC 도 3.10.x 로 맞출 것. 버전이 다르면 wheel 호환 문제가 난다.
+#   venv: python3.10 -m venv .venv --system-site-packages
+#   ※ TensorRT·pycuda 는 JetPack 이 시스템 파이썬(3.10)용으로 설치한다.
+#     시스템 파이썬과 동일 버전이므로 --system-site-packages 로 import 가능 —
+#     추론 붙일 때 보드에서 `python3.10 -c "import tensorrt"` 로 확인만 할 것.
+#   보드 JetPack 확인: `cat /etc/nv_tegra_release` 또는 `apt-cache show nvidia-jetpack`
+
+# 버전 고정 기준: 2026-07-29 젯슨 보드(segTest 구동 환경) pip freeze 캡처.
+#   캡처에 없는 패키지(보드 미설치)는 고정하지 않고 주석으로 표시한다.
+
+# --- 통신 / 설정 ---
+paho-mqtt==2.1.0 # MQTT v2 Presence·State·Telemetry·명령·Outbox.
+                 # MQTT5·CallbackAPIVersion.VERSION2 를 쓸 예정이므로 1.x 로 내리면
+                 # 콜백 시그니처부터 깨진다. ※ 보드 캡처에 없음 — pip install 필요.
+PyYAML==6.0.2    # config.yaml 로드 (main.load_config) — 보드 캡처에 없음, 설치 필요
+requests         # 증거 이미지 HTTPS 업로드 (comms/uploader.py)
+pyserial         # GPS NMEA 시리얼 (scripts/gps_reader.py) — 보드 캡처에 없음
+
+# --- 비전 / 추론 (보드 캡처 버전) ---
+ultralytics==8.4.95      # YOLO 추론 (perception/segmentation.py·perception/braille.py)
+opencv-python==5.0.0.93  # 카메라 캡처 (perception/camera.py, scripts/web_test.py)
+numpy==1.26.4
+pillow==9.0.1
+onnx==1.22.0             # .onnx 모델 로드/변환
+onnxruntime==1.23.2      # .onnx 모델 추론 백엔드
+
+# --- Jetson 전용 빌드 (NVIDIA Jetson wheel index, PyPI 설치 불가) ---
+#   런타임에 CUDA 라이브러리 경로(LD_LIBRARY_PATH) 설정 필요 — segTest run.sh 참고.
+# torch==2.5.0a0+872d972e41.nv24.8
+# torchvision==0.20.0a0+afc54f7
+
+# --- 하드웨어 제어 (I2C 모터/서보 보드, 센서, GPIO — 보드 캡처 버전) ---
+smbus2==0.6.1                          # I2C 제어 (PCA9685 / MotorHat)
+Adafruit-Blinka==9.1.0                 # CircuitPython 호환 계층 (board/busio)
+adafruit-circuitpython-pca9685==3.4.22 # PWM 드라이버 (hardware/jetson/drive_motor.py)
+adafruit-circuitpython-servokit==1.3.24
+adafruit-circuitpython-motor==3.4.20
+adafruit-circuitpython-busdevice==5.2.17
+adafruit-circuitpython-register==1.11.3
+Adafruit-PlatformDetect==3.89.1
+Adafruit-PureIO==1.1.11
+Jetson.GPIO==2.1.9
+
+# --- 웹 테스트 도구 (scripts/web_test.py — 야외 관제 대시보드) ---
+#   보드 캡처에 없으므로 버전을 고정하지 않는다. 없으면 scripts/webtest.sh 만 죽고
+#   main.py 실주행에는 영향이 없다.
+fastapi          # 대시보드 HTTP API (scripts/web_test.py)
+uvicorn          # 위 앱 실행 ASGI 서버
+
+# TensorRT · pycuda 는 JetPack 기본 제공 — pip 설치 대상 아님

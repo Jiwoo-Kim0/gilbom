@@ -125,6 +125,12 @@ pipeline {
                                     .artifact.signature.manifestBundleSha256
                                     | test("^[0-9a-f]{64}$")
                                   )
+                                  and .source.archive
+                                    == ("gilbom-web-" + $sha + ".tar.zst")
+                                  and (
+                                    .source.sha256
+                                    | test("^[0-9a-f]{64}$")
+                                  )
                                   and .compose.path == "compose.prod.yaml"
                                   and (
                                     .compose.sha256
@@ -286,6 +292,14 @@ pipeline {
                                     .artifact.signature.manifestBundleSha256
                                     | test("^[0-9a-f]{64}$")
                                   )
+                                  and .source.archive
+                                    == ("gilbom-web-" + $sha + ".tar.zst")
+                                  and (
+                                    .source.sha256
+                                    | test("^[0-9a-f]{64}$")
+                                  )
+                                  and .source.activeTreeMarker
+                                    == "/opt/gilbom/deploy/.release-source.sha"
                                   and .compose.path == "compose.prod.yaml"
                                   and .compose.sha256 == .composeSha256
                                   and .health.backendReadiness == "PASS"

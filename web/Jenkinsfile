@@ -475,7 +475,7 @@ pipeline {
             }
         }
 
-        stage('Flyway V1-V41') {
+        stage('Flyway V1-V42') {
             steps {
                 dir(env.APP_DIR) {
                     sh '''
@@ -485,15 +485,15 @@ pipeline {
                             psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
                                 --no-password --tuples-only --no-align --command "
                                     SELECT (
-                                        COUNT(*) = 41
+                                        COUNT(*) = 42
                                         AND MIN(version::INTEGER) = 1
-                                        AND MAX(version::INTEGER) = 41
+                                        AND MAX(version::INTEGER) = 42
                                         AND BOOL_AND(success)
                                     )::int
                                     FROM flyway_history.flyway_schema_history;
                                 "
                         ' | grep -qx 1
-                        sh scripts/record-ci-result.sh flyway-v1-v41
+                        sh scripts/record-ci-result.sh flyway-v1-v42
                     '''
                 }
             }
@@ -756,6 +756,17 @@ pipeline {
                             sh scripts/record-ci-result.sh cosign-blob-signature
                         '''
                     }
+                }
+            }
+        }
+
+        stage('Create release source archive') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        sh scripts/create-release-source-archive.sh
+                    '''
                 }
             }
         }

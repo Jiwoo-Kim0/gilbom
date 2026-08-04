@@ -704,7 +704,7 @@ tbs/v2/robots/{mqtt_id}/events/incident
 | 발행 | Tracking·Cooldown을 통과해 결함 관측을 확정했을 때 1회 |
 | 서버 사용처 | 결함 관측 저장, 기존 결함 병합, 이미지 연결 |
 
-### 8.2 권장 JSON
+### 8.2 파손 권장 JSON
 
 ```json
 {
@@ -753,6 +753,27 @@ tbs/v2/robots/{mqtt_id}/events/incident
 }
 ```
 
+미설치는 같은 Topic과 Event Type을 사용하고 판정 유형과 선택 정보만 다르게 보낸다.
+이미지는 Incident보다 먼저 업로드해 받은 `image_id`를 사용한다.
+
+```json
+{
+  "incident": {
+    "asset_type": "BRAILLE_BLOCK",
+    "block_type": "UNKNOWN",
+    "defect_type": "MISSING",
+    "confidence": null
+  },
+  "evidence": {
+    "image_id": "9d1b7e54-2c30-4c6a-b0f1-8e5a6d2c7f91",
+    "captured_at": "2026-08-04T05:12:33.480Z",
+    "image_width": 1280,
+    "image_height": 720,
+    "bbox_norm": null
+  }
+}
+```
+
 ### 8.3 멤버
 
 | 멤버 | 타입 | 필수 | 값·용도 |
@@ -764,14 +785,14 @@ tbs/v2/robots/{mqtt_id}/events/incident
 | `location.zone_id` | String 또는 Null | O | START_MISSION으로 받은 순찰 구역 코드를 해석하지 않고 그대로 echo |
 | `incident.asset_type` | Enum String | O | `BRAILLE_BLOCK` |
 | `incident.block_type` | Enum String | O | `LINEAR`, `DOT`, `UNKNOWN` |
-| `incident.defect_type` | Enum String | O | MVP `DAMAGED` |
-| `incident.confidence` | Number | O | `0.0~1.0` |
+| `incident.defect_type` | Enum String | O | `DAMAGED`(파손), `MISSING`(미설치) |
+| `incident.confidence` | Number 또는 Null | X | 제공 시 `0.0~1.0`; 생략하거나 `null`이면 관리자 재검토 대상 |
 | `incident.attributes.damage_ratio` | Number 또는 Null | 조건부 | 손상 비율 `0.0~1.0` |
 | `evidence.image_id` | UUID String 또는 Null | O | 사전 업로드 이미지 식별자 |
 | `evidence.captured_at` | Date-time String | O | 원본 프레임 촬영 시각 |
 | `evidence.image_width` | Integer | O | 원본 이미지 너비 |
 | `evidence.image_height` | Integer | O | 원본 이미지 높이 |
-| `evidence.bbox_norm` | Number Array | O | `[x_min, y_min, x_max, y_max]`, 각 값 `0.0~1.0` |
+| `evidence.bbox_norm` | Number Array 또는 Null | X | 제공 시 `[x_min, y_min, x_max, y_max]`; 생략하거나 영역이 없으면 `null` |
 | `model.name` | String | O | AI 모델 이름 |
 | `model.version` | String | O | AI 모델 버전 |
 
@@ -783,7 +804,8 @@ tbs/v2/robots/{mqtt_id}/events/incident
     "UNKNOWN"
   ],
   "defect_type": [
-    "DAMAGED"
+    "DAMAGED",
+    "MISSING"
   ],
   "reserved_defect_type": [
     "INSTALLATION_INVALID",
@@ -810,6 +832,11 @@ GPS 위치가 무효여도 결함 Event 자체는 발행할 수 있다.
 대체해 결함을 만들거나 공간 병합하지 않는다.
 
 이미지 업로드가 실패하면 `image_id`만 `null`로 보내고 Event 발행을 계속한다.
+`MISSING` 이미지도 같은 선업로드·소유 Robot·`event_id` 검증을 거쳐
+`defect_observation.image_id`에 연결한다. `confidence` 또는 `bbox_norm`이 `null`이면
+관리자 재검토 대상으로 저장하며, 이미지 원본과 결함 연결은 유지한다.
+두 필드는 `DAMAGED`와 `MISSING` 모두 선택 사항이다. 키가 생략되어도 Backend에서는
+`null`로 처리하며, 값이 제공된 경우에만 숫자 범위·bbox 길이와 좌표 순서를 검증한다.
 
 ---
 
@@ -1169,7 +1196,27 @@ tbs/v2/robots/{mqtt_id}/commands/request
 }
 ```
 
-### 12.4 멤버
+### 12.4 CANCEL_MISSION JSON
+
+```json
+{
+  "schema_version": "2.0",
+  "command_id": "3a2d2677-9261-41fd-92ab-951f990dcb09",
+  "command_type": "CANCEL_MISSION",
+  "issued_at": "2026-08-04T08:00:00.000Z",
+  "expires_at": "2026-08-04T08:00:30.000Z",
+  "requested_by": {
+    "actor_type": "ADMIN",
+    "actor_id": "ADM-0042"
+  },
+  "parameters": {
+    "mission_id": "MIS-20260804-001",
+    "reason": "operator_request"
+  }
+}
+```
+
+### 12.5 멤버
 
 | 멤버 | 타입 | 필수 | 값·용도 |
 |---|---|:---:|---|
@@ -1182,7 +1229,7 @@ tbs/v2/robots/{mqtt_id}/commands/request
 | `requested_by.actor_id` | String | O | 관리자·시스템 식별자 |
 | `parameters` | Object | O | 명령별 파라미터 |
 
-### 12.5 명령과 Parameters
+### 12.6 명령과 Parameters
 
 | `command_type` | `parameters` | 권장 TTL |
 |---|---|---:|
@@ -1190,7 +1237,7 @@ tbs/v2/robots/{mqtt_id}/commands/request
 | `PAUSE_MISSION` | `reason` | 30초 |
 | `RESUME_MISSION` | 빈 Object | 30초 |
 | `COMPLETE_MISSION` | 빈 Object | 30초 |
-| `CANCEL_MISSION` | `reason` | 30초 |
+| `CANCEL_MISSION` | `mission_id`, `reason` | 30초 |
 | `EMERGENCY_STOP` | `reason` | 10초 |
 | `CLEAR_EMERGENCY_STOP` | `reason` | 30초 |
 
@@ -1208,7 +1255,9 @@ Mission이 있으면 `mode=PAUSED`, `mission.state=PAUSED`를 유지하고, 관�
 `mode=SAFE_STOP`에서는 거부하며, 긴급정지는 해제 후 명시적으로 재개한 다음 정상
 완료해야 한다. `CANCEL_MISSION`은 `READY`·`RUNNING`·`PAUSED`에서 허용하고,
 `SAFE_STOP` 중 취소하더라도 Mission만 `CANCELLED`로 종료하며 로봇의 안전 정지는
-해제하지 않는다.
+해제하지 않는다. Backend는 취소 대상의 Wire `mission_id`를 반드시 함께 보내며,
+Robot의 로컬 Mission 보관함이 유실됐더라도 해당 ID로 `MISSION_CANCELLED` Event를
+발행한 뒤 로컬 Mission 연결을 비운다.
 
 예약 명령은 v1의 이름을 유지하지만 MVP에서는 발행하지 않는다.
 

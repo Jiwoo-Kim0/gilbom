@@ -269,7 +269,7 @@ network 삭제만 실패하고 나머지는 정상 진행된다(다음 `up`이 �
 `compose.monitoring.yaml`·`infra/` 대부분이 A의 Day 8 산출물이다. Day 8 게이트를 깨지 않는
 것을 제약으로 두고 작업했다. 아래는 **A에게 반드시 알려야 하는 것들**이다.
 
-**A의 파일을 직접 고친 것 2개**
+**A의 파일을 직접 고친 것 3개**
 
 - `scripts/verify-day8-infrastructure.sh` — `docker compose config` 호출에
   `ALERTMANAGER_WEBHOOK_SECRET_FILE=/dev/null` 추가. **고치지 않으면 Day 8 게이트가 깨진다.**
@@ -278,6 +278,9 @@ network 삭제만 실패하고 나머지는 정상 진행된다(다음 `up`이 �
   (일부러 지워서 실제로 잡히는 것까지 확인).
 - `compose.prod.yaml` — logging `labels` 옵션 추가. Loki가 Docker socket 없이 container를
   구분하는 유일한 경로다.
+- `compose.monitoring.yaml` — 발행 경로 전용 `loopback-publish` bridge 추가.
+  monitoring 격리 network는 `internal: true`로 유지하면서 Docker 28+에서도
+  `127.0.0.1` port publication이 생성되게 한다.
 
 **운영 절차가 바뀐 것 2개**
 
@@ -287,15 +290,15 @@ network 삭제만 실패하고 나머지는 정상 진행된다(다음 `up`이 �
 - Prometheus가 `gilbom_app` network에 external로 참여해 **운영 stack이 먼저 떠 있어야**
   monitoring stack이 뜬다. 운영 stack `down` 시 network 삭제만 실패하고 나머지는 정상이다.
 
-**A가 판단해야 하는 것 2개 (8/4 추가)**
+**A가 확인하고 반영한 것 2개 (8/4 추가)**
 
-- **CI 승격 목록에 소스 archive가 없다.** `build-release-artifacts.sh`는
-  `gilbom-web-<sha>.tar.zst`를 만들지만 `promote-ci-release-artifacts.sh`가 허용하는 것은
-  images 계열뿐이다. 그래서 **Jenkins로 배포해도 `/opt/gilbom/deploy`가 갱신되지 않는다.**
-  이번에는 배포된 SHA로 같은 archive를 만들어 손으로 옮겼다. 우회다 (§7.1)
+- **CI source archive 승격 누락을 해소했다.** Jenkins release에 exact commit의
+  `gilbom-web-<sha>.tar.zst`를 추가하고 전체 manifest 서명·SFTP·root 승격·배포
+  preflight를 같은 열세 파일 계약으로 묶었다. 성공한 운영 배포는 host 상태 파일을
+  보존한 채 `/opt/gilbom/deploy` source tree와 `.release-source.sha`도 갱신한다 (§7.1).
 - **Docker 28+에서 internal network 단독 구성은 port를 열지 못한다.** Day 8이 설계한
-  `monitoring` 단독 구성이 그대로 걸렸다(§7.2). `compose.jenkins.yaml`도 같은 구조라면
-  같은 증상이 있을 수 있어 확인이 필요하다
+  `monitoring` 단독 구성이 그대로 걸렸다(§7.2). `compose.jenkins.yaml`은
+  `internal: true`가 없는 일반 `ci` bridge라 같은 조건에 해당하지 않는 것도 확인했다.
 
 **문서 정책 갱신 1개**
 
@@ -313,24 +316,30 @@ network 삭제만 실패하고 나머지는 정상 진행된다(다음 `up`이 �
 
 돌려보지 않았으면 시연 때까지 몰랐을 것들이다. 정적 검사로는 어느 것도 드러나지 않았다.
 
-### 7.1 CI·CD가 성공해도 `/opt/gilbom/deploy`는 갱신되지 않는다
+### 7.1 CI·CD source archive 누락과 해소
 
 `install-day10-host.sh`를 실행했더니 `No such file`이 났다. 배포는 분명히 성공한 뒤였다.
 
-`gilbom-deploy.sh`는 그 디렉터리를 **읽기만** 하고, 배포가 실제로 바꾸는 것은 container
-image와 `image.env` 한 줄뿐이다. 소스 트리는 release source archive를 사람이 풀어야
-갱신된다. Day 8 runbook 3절에 그 절차가 있지만 Day 10 runbook은 그것을 전제로만 두고
-적지 않았다. 내 문서의 구멍이었다.
+당시 `gilbom-deploy.sh`는 서명된 `compose.prod.yaml`과 `image.env`, container만
+바꾸고 나머지 source tree는 갱신하지 않았다. Day 8 runbook 3절에 수동 source
+archive 절차가 있었지만 Day 10 runbook은 그것을 전제로만 두고 적지 않았다.
 
 **더 큰 문제는 그 archive가 host에 없다는 것이었다.** Jenkins가 쓰는
 `promote-ci-release-artifacts.sh`의 허용 목록에는 `images.tar.zst` 계열과 metadata·sbom만
 있다. 수동 승격 경로(`promote-release-artifacts.sh` → `/opt/gilbom/artifacts/releases/<sha>`)와
 Jenkins 경로(`/opt/gilbom/artifacts/<sha>`)는 목적지도 내용도 다르다.
 
-그래서 배포된 SHA로 `git archive <sha>:web`을 떠서 SFTP로 옮겼다. `build-release-artifacts.sh`와
-같은 방식이라 내용은 공식 archive와 동일하고, 운영 상태 파일(`runtime.env`·`image.env`·
-`secrets/*`)이 섞이지 않았는지도 Day 8과 같은 검사로 확인했다. **다만 이것은 우회다.**
-정공법은 CI 승격 목록에 소스 archive를 넣는 것이고 그건 배포 파이프라인 소유자 몫이다.
+첫 반영은 배포된 SHA로 `git archive <sha>:web`을 만들어 SFTP로 옮겨 복구했다.
+이후 정공법을 구현했다. Jenkins가 checked-out HEAD와 같은 SHA에서 archive를 만들고,
+tracked `runtime.env`·`image.env`·Secret payload를 거부한다. archive checksum은
+`build-metadata.json`과 Cosign 서명된 `SHA256SUMS` 양쪽에 결속된다.
+
+운영에서는 root 배포기가 archive를 `/opt/gilbom` 아래 sibling directory에 먼저
+전개해 필수 파일·symlink·mode·Secret·독립 서명된 Compose 일치를 검사한다. 모든
+runtime health가 성공한 뒤에만 source tree를 교체하며, `runtime.env`·`image.env`는
+host 상태로 보존한다. 교체 이후 Manifest나 `current.sha` 기록이 실패하면 이전
+source tree를 먼저 복원하고 기존 container rollback으로 이어진다. 따라서 새
+release부터 수동 SFTP 우회는 사용하지 않는다.
 
 ### 7.2 Docker 28+는 internal network 단독 container의 port를 열지 않는다
 

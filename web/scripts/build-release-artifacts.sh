@@ -65,7 +65,7 @@ else
     HEAD
 fi
 zstd --quiet --threads=0 -19 \
-  --output "$RELEASE_DIR/gilbom-web-$RELEASE_SHA.tar.zst" \
+  -o "$RELEASE_DIR/gilbom-web-$RELEASE_SHA.tar.zst" \
   "$source_tar"
 
 for entry in \
@@ -81,7 +81,7 @@ do
     || fail "$role image is unavailable: $image"
   docker image save --output "$image_tar" "$image"
   zstd --quiet --threads=0 -19 \
-    --output "$RELEASE_DIR/gilbom-$role-$RELEASE_SHA.tar.zst" \
+    -o "$RELEASE_DIR/gilbom-$role-$RELEASE_SHA.tar.zst" \
     "$image_tar"
   rm -f "$image_tar"
 done

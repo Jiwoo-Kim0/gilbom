@@ -150,7 +150,7 @@ class ReportGenerationDataRepositoryIntegrationTest {
         assertThat(snapshot.aggregate().observationCount())
                 .isEqualTo(1);
         assertThat(snapshot.statusCounts()).hasSize(6);
-        assertThat(snapshot.typeCounts()).hasSize(3);
+        assertThat(snapshot.typeCounts()).hasSize(4);
         assertThat(snapshot.riskCounts()).hasSize(4);
         assertThat(snapshot.evidence()).singleElement()
                 .satisfies(evidence -> {

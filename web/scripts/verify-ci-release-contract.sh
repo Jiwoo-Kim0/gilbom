@@ -44,7 +44,7 @@ for stage in \
   "stage('Start integration stack')" \
   "stage('Authentication temporary DB integration')" \
   "stage('Actual TLS MQTT Broker E2E')" \
-  "stage('Flyway V1-V41')" \
+  "stage('Flyway V1-V42')" \
   "stage('PostGIS RBAC and Spring Session')" \
   "stage('CSRF permission and append-only audit')" \
   "stage('Integration smoke')" \
@@ -56,6 +56,7 @@ for stage in \
   "stage('Prepare release SBOM and vulnerability artifacts')" \
   "stage('Create release image archive')" \
   "stage('Sign release image archive with Cosign')" \
+  "stage('Create release source archive')" \
   "stage('Build metadata and release integrity')"
 do
   current="$(line_of "$stage")"
@@ -95,11 +96,11 @@ assert_contains Jenkinsfile \
   'MQTT_PUBLIC_HOSTNAME=docker-builder' \
   "MQTT Broker certificate SAN must include the DinD access hostname"
 assert_contains Jenkinsfile \
-  'COUNT(*) = 41' \
-  "Flyway history gate must require all 41 migrations"
+  'COUNT(*) = 42' \
+  "Flyway history gate must require all 42 migrations"
 assert_contains Jenkinsfile \
-  'MAX(version::INTEGER) = 41' \
-  "Flyway history gate must require V41 as the maximum migration"
+  'MAX(version::INTEGER) = 42' \
+  "Flyway history gate must require V42 as the maximum migration"
 assert_contains Jenkinsfile \
   '.artifacts/security-regression/**' \
   "security regression evidence must be archived"
@@ -145,6 +146,15 @@ assert_contains scripts/create-release-image-archive.sh \
 assert_contains scripts/create-release-image-archive.sh \
   'sha256sum images.tar.zst > images.tar.zst.sha256' \
   "image archive checksum is missing"
+assert_contains scripts/create-release-source-archive.sh \
+  '"$RELEASE_SHA:$PROJECT_PREFIX"' \
+  "source archive must be built from the exact release SHA and project tree"
+assert_contains scripts/create-release-source-archive.sh \
+  'runtime[.]env|image[.]env' \
+  "source archive does not reject tracked runtime state"
+assert_contains Jenkinsfile \
+  'sh scripts/create-release-source-archive.sh' \
+  "release source archive is not created before complete manifest signing"
 assert_contains Jenkinsfile \
   "credentialsId: 'gilbom-cosign-private-key'" \
   "Cosign private key must come from a Jenkins Secret File credential"
@@ -175,4 +185,5 @@ if grep -Eiq \
   fail "release scripts contain a forbidden local, latest, or short-SHA image tag"
 fi
 
+sh scripts/test-create-release-source-archive.sh
 echo "CI stages 4-8 release contract: PASS"

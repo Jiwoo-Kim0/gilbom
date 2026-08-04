@@ -43,7 +43,11 @@ public record CommandRequestPayload(
                     parameters.missionId == null
                             && parameters.zoneId == null
                             && parameters.reason == null;
-            case PAUSE_MISSION, CANCEL_MISSION, EMERGENCY_STOP, CLEAR_EMERGENCY_STOP ->
+            case CANCEL_MISSION ->
+                    hasText(parameters.missionId)
+                            && parameters.zoneId == null
+                            && hasText(parameters.reason);
+            case PAUSE_MISSION, EMERGENCY_STOP, CLEAR_EMERGENCY_STOP ->
                     parameters.missionId == null
                             && parameters.zoneId == null
                             && hasText(parameters.reason);

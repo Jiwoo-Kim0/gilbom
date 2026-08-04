@@ -1,0 +1,543 @@
+"""MQTT 접속·발행·구독 — paho-mqtt.  [F-006]
+
+topic 문자열·payload 조립은 여기서 하지 말고 전부 topics.py·factory.py 에서 가져온다.
+기준 문서: web/docs/final-mqtt-topic-schema-v2.md
+"""
+
+from __future__ import annotations
+
+import logging
+import queue
+import re
+import ssl
+import threading
+import uuid
+from datetime import datetime, timedelta, timezone
+
+import paho.mqtt.client as mqtt
+from paho.mqtt.packettypes import PacketTypes
+from paho.mqtt.properties import Properties
+
+from . import codec
+from .config import CA_SYSTEM, MqttConfig
+from .factory import MessageFactory
+from .outbox import Outbox, OutboxRecord
+from .topics import EVENT_KINDS, PUBLISH_POLICY, SUBSCRIBE_QOS, TopicKind
+
+log = logging.getLogger(__name__)
+
+
+RECONNECT_MIN_DELAY_SEC = 1
+RECONNECT_MAX_DELAY_SEC = 30
+RESEND_INTERVAL_SEC = 30.0
+SENT_RETENTION_DAYS = 7
+_RECEIPT_STATUSES = frozenset({"STORED", "MERGED", "DUPLICATE", "REJECTED"})
+_INCIDENT_ID_PATTERN = re.compile(r"^INC-[0-9]{8}-[0-9]{6}$")
+_RECEIPT_FIELDS = frozenset(
+    {"schema_version", "event_id", "ingest_status", "incident_id", "received_at"}
+)
+#: 등록보다 PUBACK 이 먼저 도착하는 경우를 대비한 짧은 기억. 크기는 넉넉하다.
+_EARLY_ACK_LIMIT = 256
+
+
+def _is_failure(reason_code) -> bool:
+    """ReasonCode 든 int 든 실패인지 판정한다.
+
+    paho 2.x VERSION2 는 ReasonCode 객체를 넘기지만, 가짜 클라이언트나 예전
+    콜백 시그니처는 int 를 넘긴다. 둘 다 견뎌야 한다.
+    """
+    if reason_code is None:
+        return False
+    return bool(getattr(reason_code, "is_failure", reason_code != 0))
+
+
+class MqttClient:
+    """tbs/v2 발행·구독 클라이언트.
+
+    수명: start() → (자동 재접속) → shutdown()
+    presence 는 세 갈래로 나간다.
+      LWT      OFFLINE / UNGRACEFUL_DISCONNECT — CONNECT 시 등록, 비정상 종료 시 브로커가 발행
+      birth    ONLINE                          — 접속 성공 직후
+      shutdown OFFLINE / GRACEFUL_SHUTDOWN     — 정상 종료 시 직접 발행
+    """
+
+    def __init__(
+        self,
+        config: MqttConfig,
+        *,
+        factory: MessageFactory = None,
+        outbox: Outbox = None,
+        command_queue: "queue.Queue" = None,
+        client_factory=None,
+        resend_interval_sec: float = RESEND_INTERVAL_SEC,
+        on_connected=None,
+    ) -> None:
+        self.config = config
+        self.messages = factory or MessageFactory(config.robot_id)
+        if self.messages.robot_id != config.robot_id:
+            raise ValueError("factory.robot_id must match config.robot_id")
+        self.topics = self.messages.topics
+        self.outbox = outbox or Outbox(
+            config.outbox_path, receipt_required=config.receipt_required
+        )
+        if hasattr(self.outbox, "receipt_required"):
+            self.outbox.receipt_required = config.receipt_required
+        #: main.py 가 pop 해서 실행한다. 이 클래스는 명령을 해석하지 않는다.
+        self.commands = command_queue or queue.Queue()
+        #: 접속(재접속 포함) 직후 부르는 훅. main.py 가 "현재 state 발행" 을 건다.
+        #: 이 클래스는 로봇 상태를 모른다 — 훅만 제공한다.
+        self.on_connected = on_connected
+
+        self._resend_interval = resend_interval_sec
+        self._connected = threading.Event()
+        self._stopping = threading.Event()
+        self._wakeup = threading.Event()
+        self._resender = None
+
+        self._ack_lock = threading.Lock()
+        self._inflight = {}  # mid -> event_id
+        self._early_acks = []  # mid, 최근 것부터 (_EARLY_ACK_LIMIT 로 제한)
+        self._subscribe_mids = {}  # mid -> topic (SUBACK 이 올 때까지)
+        self._subscribe_topic = None  # SUBACK 이 등록보다 빠를 때의 대비책
+        #: 마지막 SUBACK 결과 — 진단용. 계약 payload 에는 싣지 않는다.
+        #: None=아직 모름, True=구독됨, False=브로커가 거부(명령 수신 불가).
+        self.subscribed = None
+        self.subscribe_reason_codes = []
+        self.subscription_status = {}
+        self.subscription_reason_codes = {}
+
+        self._client = (client_factory or _build_paho_client)(config)
+        self._client.on_connect = self._on_connect
+        self._client.on_disconnect = self._on_disconnect
+        self._client.on_message = self._on_message
+        self._client.on_publish = self._on_publish
+        self._client.on_subscribe = self._on_subscribe
+
+    # -- 수명 ------------------------------------------------------------
+
+    @property
+    def connected(self) -> bool:
+        return self._connected.is_set()
+
+    def start(self) -> None:
+        """비동기 접속 시작. 접속을 기다리지 않고 즉시 돌아온다."""
+        self._register_will()
+        self._client.reconnect_delay_set(
+            min_delay=RECONNECT_MIN_DELAY_SEC, max_delay=RECONNECT_MAX_DELAY_SEC
+        )
+        self.outbox.prune_sent(
+            codec.to_iso(
+                datetime.now(timezone.utc) - timedelta(days=SENT_RETENTION_DAYS)
+            )
+        )
+        self._resender = threading.Thread(
+            target=self._resend_loop, name="mqtt-outbox", daemon=True
+        )
+        self._resender.start()
+        # connect_async + loop_start: 브로커가 죽어 있어도 기동을 막지 않는다.
+        # 재접속은 paho 가 1→2→4→…→30초 백오프로 반복한다.
+        # CLEAN_START_FIRST_ONLY: 첫 접속은 새 세션, 재접속은 세션을 이어받아
+        # 구독과 미수신 명령을 지킨다.
+        self._client.connect_async(
+            self.config.host,
+            self.config.port,
+            keepalive=self.config.keepalive,
+            clean_start=mqtt.MQTT_CLEAN_START_FIRST_ONLY,
+            properties=_connect_properties(),
+        )
+        self._client.loop_start()
+
+    def wait_until_connected(self, timeout: float = None) -> bool:
+        return self._connected.wait(timeout)
+
+    def shutdown(self, timeout: float = 2.0) -> None:
+        """presence OFFLINE(GRACEFUL_SHUTDOWN) 을 보내고 끊는다.
+
+        disconnect() 로 정상 종료하면 브로커가 LWT 를 버리므로
+        UNGRACEFUL_DISCONNECT 는 발행되지 않는다.
+        """
+        self._stopping.set()
+        self._wakeup.set()
+        if self._connected.is_set():
+            try:
+                info = self._publish_direct(
+                    TopicKind.PRESENCE,
+                    self.messages.presence_offline("GRACEFUL_SHUTDOWN"),
+                )
+                if info is not None:
+                    info.wait_for_publish(timeout)
+            except Exception:  # 종료 경로에서 예외로 프로세스를 막지 않는다.
+                log.warning("failed to publish graceful presence", exc_info=True)
+        self._client.disconnect()
+        self._client.loop_stop()
+        if self._resender is not None:
+            self._resender.join(timeout=timeout)
+        self.outbox.close()
+
+    def _register_will(self) -> None:
+        payload = self.messages.presence_offline("UNGRACEFUL_DISCONNECT")
+        policy = PUBLISH_POLICY[TopicKind.PRESENCE]
+        self._client.will_set(
+            self.topics.of(TopicKind.PRESENCE),
+            codec.encode(payload),
+            qos=policy.qos,
+            retain=policy.retain,
+        )
+
+    # -- 발행 ------------------------------------------------------------
+
+    def publish(self, kind: TopicKind, payload: dict, *, wait_sec: float = None) -> bool:
+        """topic 종류에 맞는 QoS·retain 으로 발행한다.
+
+        events 4종은 Outbox 를 거친다 — 저장 → 발행 → PUBACK 시 sent.
+        접속이 끊겨 있으면 저장만 하고 재접속 후 자동 재발행한다.
+
+        반환값은 '지금 paho 로 넘겼는지' 다. event 가 False 여도 유실이 아니라
+        Outbox 에 남아 있다는 뜻이다. 서버 수신 확인은 PUBACK 시점에 이뤄진다.
+
+        `wait_sec` 을 주면 소켓에 실릴 때까지 기다린다. 종료 직전처럼 곧바로
+        disconnect 가 뒤따라서 큐에 남은 메시지가 버려지는 경로에서만 쓴다.
+        """
+        kind = TopicKind(kind)
+        if kind not in PUBLISH_POLICY:
+            raise ValueError(f"{kind} is not a publish topic")
+        if kind in EVENT_KINDS:
+            return self.publish_event(kind, payload)
+        info = self._publish_direct(kind, payload)
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            return False
+        if wait_sec is not None:
+            info.wait_for_publish(wait_sec)
+        return True
+
+    def publish_event(self, kind: TopicKind, payload: dict) -> bool:
+        """event 를 Outbox 에 적고, 접속돼 있으면 바로 발행한다."""
+        kind = TopicKind(kind)
+        if kind not in EVENT_KINDS:
+            raise ValueError(f"{kind} is not an event topic")
+        event_id = payload.get("event_id")
+        if not event_id:
+            raise ValueError("event payload must carry event_id")
+        self.outbox.enqueue(event_id, kind, payload)
+        if not self._connected.is_set():
+            log.info("offline: %s queued in outbox (event_id=%s)", kind.value, event_id)
+            return False
+        return self._send_stored(OutboxRecord(event_id, kind, payload))
+
+    def _publish_direct(self, kind: TopicKind, payload: dict):
+        policy = PUBLISH_POLICY[kind]
+        return self._client.publish(
+            self.topics.of(kind),
+            codec.encode(payload),
+            qos=policy.qos,
+            retain=policy.retain,
+        )
+
+    def _send_stored(self, record: OutboxRecord) -> bool:
+        """저장된 event 를 발행한다. sent_at 만 현재 시각으로 갱신한다."""
+        payload = dict(record.payload)
+        payload["sent_at"] = codec.utc_now()
+        self.outbox.mark_attempted(record.event_id)
+        info = self._publish_direct(record.kind, payload)
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            log.warning(
+                "publish failed rc=%s, kept in outbox (event_id=%s)",
+                info.rc,
+                record.event_id,
+            )
+            return False
+        # publish() 가 돌아온 뒤에 등록한다. paho 는 PUBACK 처리 중 내부 락을 쥐고
+        # on_publish 를 부르므로, 여기서 _ack_lock 을 쥔 채 publish 하면 교착된다.
+        acked_early = False
+        with self._ack_lock:
+            # 같은 event 의 이전 시도가 남아 있으면 정리한다 (PUBACK 없이 재전송한 경우).
+            for stale in [
+                mid for mid, eid in self._inflight.items() if eid == record.event_id
+            ]:
+                del self._inflight[stale]
+            if info.mid in self._early_acks:
+                self._early_acks.remove(info.mid)
+                acked_early = True
+            else:
+                self._inflight[info.mid] = record.event_id
+        if acked_early:
+            self.outbox.mark_sent(record.event_id)
+        return True
+
+    # -- 재전송 ----------------------------------------------------------
+
+    def _resend_loop(self) -> None:
+        while not self._stopping.is_set():
+            self._wakeup.wait(self._resend_interval)
+            self._wakeup.clear()
+            if self._stopping.is_set():
+                break
+            if not self._connected.is_set():
+                continue
+            try:
+                self.flush_outbox()
+            except Exception:  # 재전송 실패가 스레드를 죽이지 않게 한다.
+                log.exception("outbox flush failed")
+
+    def flush_outbox(self) -> int:
+        """미전송 event 재발행. event_id·occurred_at 은 유지된다."""
+        if not self._connected.is_set():
+            return 0
+        return self._drain_outbox()
+
+    def _drain_outbox(self) -> int:
+        """접속 절차 중에도 부를 수 있는 알맹이 — `connected` 를 보지 않는다.
+
+        끊긴 채로 부르면 paho 가 rc 로 알려 주고(_send_stored 가 False), 그 event 는
+        Outbox 에 pending 으로 남는다. 그래서 별도 방어가 필요 없다.
+        """
+        cutoff = codec.to_iso(
+            datetime.now(timezone.utc) - timedelta(seconds=self._resend_interval)
+        )
+        records = self.outbox.pending(attempted_before=cutoff)
+        sent = 0
+        for record in records:
+            if self._stopping.is_set():
+                break
+            if self._send_stored(record):
+                sent += 1
+        if sent:
+            log.info("resent %d pending event(s) from outbox", sent)
+        return sent
+
+    # -- paho 콜백 -------------------------------------------------------
+
+    def _on_connect(self, client, userdata, flags, reason_code, properties=None):
+        """접속 절차 — 순서가 계약이다.
+
+        presence → 구독 → 밀린 event → state(훅) 순으로 내보낸 **뒤에야**
+        `connected` 를 켠다. seq 는 payload 를 만드는 순간 매겨지는데, 서버는 새
+        boot 의 첫 메시지가 seq==1 이 아니거나 이미 본 seq 이하면 조용히 버린다
+        (§3.5). 끊긴 동안 Outbox 에 쌓인 event 는 더 낮은 seq 를 들고 있으므로
+        메인 루프가 새 state·telemetry 를 내기 전에 먼저 나가야 한다 —
+        `connected` 가 곧 '메인 루프야 이제 발행해도 된다' 는 신호다.
+        """
+        if _is_failure(reason_code):
+            log.error("connect refused: %s", reason_code)
+            return
+        log.info("connected to %s:%s", self.config.host, self.config.port)
+        try:
+            # birth — 재접속 때마다 다시 발행해서 retain 된 OFFLINE 을 덮는다.
+            self._publish_direct(TopicKind.PRESENCE, self.messages.presence_online())
+            self._subscribe_inbound(client)
+            try:
+                # 소켓은 이미 살아 있다. 발행은 큐에 넣는 일이라 네트워크 루프를
+                # 오래 잡지 않는다.
+                self._drain_outbox()
+            except Exception:
+                log.exception("outbox flush on connect failed")
+            # 훅에서 예외가 올라오면 paho 네트워크 스레드가 죽으므로 여기서 삼킨다.
+            callback = self.on_connected
+            if callback is not None:
+                try:
+                    callback()
+                except Exception:
+                    log.exception("on_connected hook failed")
+        finally:
+            # 무슨 일이 있어도 켠다 — 여기서 빠지면 소켓은 살아 있는데 로봇이
+            # 영영 오프라인이라고 믿는 상태가 된다.
+            self._connected.set()
+
+    def _subscribe_inbound(self, client) -> None:
+        """Command와 Backend DB Receipt를 각각 QoS 1로 구독한다."""
+        topics = (
+            self.topics.of(TopicKind.COMMAND_REQUEST),
+            self.topics.of(TopicKind.INGEST_RECEIPT),
+        )
+        with self._ack_lock:
+            self.subscribed = None
+            self.subscription_status = {topic: None for topic in topics}
+            self.subscription_reason_codes = {topic: [] for topic in topics}
+        for topic in topics:
+            with self._ack_lock:
+                self._subscribe_topic = topic
+            result = client.subscribe(topic, qos=SUBSCRIBE_QOS)
+            # paho 는 (rc, mid) 를 돌려준다. 그 밖의 반환값은 mid 없이 넘어간다.
+            if isinstance(result, tuple) and len(result) == 2:
+                with self._ack_lock:
+                    self._subscribe_mids[result[1]] = topic
+        with self._ack_lock:
+            self._subscribe_topic = None
+
+    def _on_subscribe(
+        self, client, userdata, mid, reason_code_list=None, properties=None
+    ):
+        """SUBACK. 거부를 놓치면 '멀쩡해 보이는데 명령을 못 받는 로봇' 이 된다.
+
+        VERSION2 는 두 번째 인자로 ReasonCode 리스트를 넘긴다.
+        """
+        codes = (
+            list(reason_code_list)
+            if isinstance(reason_code_list, (list, tuple))
+            else [reason_code_list]
+        )
+        with self._ack_lock:
+            topic = self._subscribe_mids.pop(mid, None) or self._subscribe_topic
+        failures = [code for code in codes if _is_failure(code)]
+        self.subscribe_reason_codes = codes
+        if topic is not None:
+            self.subscription_status[topic] = not failures
+            self.subscription_reason_codes[topic] = codes
+        statuses = list(self.subscription_status.values())
+        self.subscribed = (
+            False if any(status is False for status in statuses)
+            else True if statuses and all(status is True for status in statuses)
+            else None
+        )
+        if failures:
+            # ACL 로 읽기가 막힌 경우가 대표적이다. 조용히 지나가면
+            # 서버 명령이 영원히 도착하지 않는데도 아무 단서가 없다.
+            log.error(
+                "subscribe refused for %s: %s",
+                topic,
+                ", ".join(str(code) for code in failures),
+            )
+        else:
+            log.info("subscribed to %s", topic)
+
+    def _on_disconnect(self, client, userdata, *args):
+        self._connected.clear()
+        with self._ack_lock:
+            # 미확인 mid 는 버린다. 해당 event 는 outbox 에 pending 으로 남아 있다.
+            self._inflight.clear()
+            self._early_acks.clear()
+            self._subscribe_mids.clear()
+            self.subscribed = None
+            self.subscription_status = {
+                topic: None for topic in self.subscription_status
+            }
+        if not self._stopping.is_set():
+            # 이유코드가 없으면 client_id 충돌(session taken over) 같은 원인을
+            # 브로커 로그를 봐야만 알 수 있다.
+            log.warning(
+                "disconnected (reason=%s), retrying with backoff",
+                _disconnect_reason(args),
+            )
+
+    def _on_publish(self, client, userdata, mid, reason_code=None, properties=None):
+        # MQTT5 PUBACK 의 이유코드가 여기로 온다 (0x87 Not authorized 등).
+        # 실패를 성공으로 처리하면 브로커가 버린 event 가 Outbox 에서도 지워진다.
+        failed = _is_failure(reason_code)
+        with self._ack_lock:
+            event_id = self._inflight.pop(mid, None)
+            if event_id is None and not failed:
+                # PUBACK 이 등록보다 빨랐거나, event 가 아닌 발행이다.
+                self._early_acks.append(mid)
+                del self._early_acks[:-_EARLY_ACK_LIMIT]
+        if failed:
+            # mark_sent 하지 않는다 → Outbox 에 pending 으로 남아 재전송된다.
+            log.error(
+                "publish rejected by broker: reason=%s (mid=%s, event_id=%s),"
+                " kept in outbox",
+                reason_code,
+                mid,
+                event_id,
+            )
+            return
+        if event_id is not None:
+            self.outbox.mark_sent(event_id)
+
+    def _on_message(self, client, userdata, message):
+        command_topic = self.topics.of(TopicKind.COMMAND_REQUEST)
+        receipt_topic = self.topics.of(TopicKind.INGEST_RECEIPT)
+        if message.topic not in {command_topic, receipt_topic}:
+            log.warning("ignoring message on unexpected topic %s", message.topic)
+            return
+        try:
+            payload = codec.decode(message.payload)
+        except (ValueError, UnicodeDecodeError) as exc:
+            # 앞부분을 같이 남긴다. 이게 없으면 "왜 못 받았지" 를 브로커부터 다시
+            # 파야 한다 — 실제로 서버가 JSON 대신 Map.toString() 을 보낸 적이 있다.
+            log.warning(
+                "dropping malformed inbound payload (%s): %.120s", exc, message.payload
+            )
+            return
+        if message.topic == receipt_topic:
+            self._handle_ingest_receipt(payload)
+            return
+        # 검증·실행·중복 제거는 main.py 몫이다. 여기서는 큐에 넣기만 한다.
+        self.commands.put(payload)
+
+    def _handle_ingest_receipt(self, receipt) -> bool:
+        """Backend DB 처리 결과를 검증해 Outbox Event와 연결한다."""
+        if not isinstance(receipt, dict) or set(receipt) != _RECEIPT_FIELDS:
+            log.warning("dropping malformed ingest receipt fields")
+            return False
+        if receipt.get("schema_version") != "2.0":
+            log.warning("dropping ingest receipt with schema_version=%r",
+                        receipt.get("schema_version"))
+            return False
+        try:
+            event_id = str(uuid.UUID(str(receipt.get("event_id"))))
+            datetime.fromisoformat(str(receipt.get("received_at")).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            log.warning("dropping ingest receipt with invalid id or received_at")
+            return False
+        status = receipt.get("ingest_status")
+        incident_id = receipt.get("incident_id")
+        if status not in _RECEIPT_STATUSES:
+            log.warning("dropping ingest receipt with status=%r", status)
+            return False
+        if incident_id is not None and not (
+            isinstance(incident_id, str) and _INCIDENT_ID_PATTERN.fullmatch(incident_id)
+        ):
+            log.warning("dropping ingest receipt with incident_id=%r", incident_id)
+            return False
+        recorded = self.outbox.record_receipt(
+            event_id, status, incident_id=incident_id, at=receipt["received_at"]
+        )
+        if not recorded:
+            log.info("ingest receipt for unknown/pruned event_id=%s", event_id)
+        elif status == "REJECTED":
+            log.error("Backend rejected event_id=%s; preserved in outbox", event_id)
+        return recorded
+
+
+def _disconnect_reason(args):
+    """on_disconnect 의 가변 인자에서 이유코드를 꺼낸다.
+
+    paho 2.x VERSION2 는 (disconnect_flags, reason_code, properties) 로 부르고,
+    옛 시그니처는 (rc,) 만 준다. 둘 다 견딘다.
+    """
+    if len(args) >= 3:
+        return args[1]
+    if args:
+        return args[0]
+    return None
+
+
+def _build_paho_client(config: MqttConfig) -> mqtt.Client:
+    client = mqtt.Client(
+        mqtt.CallbackAPIVersion.VERSION2,
+        # username 은 ACL 때문에 robot_id 여야 하지만 client_id 는 달라도 된다.
+        # 같은 client_id 로 두 번 붙으면 브로커가 먼저 붙은 쪽을 끊는다.
+        client_id=config.client_id or config.robot_id,
+        protocol=mqtt.MQTTv5,
+    )
+    if config.username:
+        client.username_pw_set(config.username, config.password)
+    if config.tls_enabled:
+        # ca_certs=None 이면 paho 가 OS 신뢰 저장소를 쓴다 — Let's Encrypt 운영 브로커는
+        # CA 파일이 필요 없고, 예전 사설 CA 파일을 주면 오히려 검증에 실패한다.
+        client.tls_set(
+            ca_certs=None if config.ca_cert == CA_SYSTEM else config.ca_cert,
+            tls_version=ssl.PROTOCOL_TLS_CLIENT,
+        )
+    else:
+        log.warning("ca_cert is not set — connecting without TLS (local test only)")
+    return client
+
+
+#: 재접속 사이에 브로커가 세션(구독·미수신 명령)을 얼마나 들고 있을지.
+SESSION_EXPIRY_SEC = 3600
+
+
+def _connect_properties() -> Properties:
+    properties = Properties(PacketTypes.CONNECT)
+    properties.SessionExpiryInterval = SESSION_EXPIRY_SEC
+    return properties

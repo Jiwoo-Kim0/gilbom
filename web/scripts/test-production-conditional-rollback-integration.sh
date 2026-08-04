@@ -94,13 +94,36 @@ create_artifact() {
   backend_character="$3"
   frontend_character="$4"
   artifact_dir="/opt/gilbom/artifacts/$release_sha"
+  source_archive_name="gilbom-web-$release_sha.tar.zst"
+  source_fixture="/var/tmp/gilbom-source-fixture-$release_sha"
+  rm -rf -- "$source_fixture"
   install -d -o root -g root -m 0750 \
     "$artifact_dir/sbom" "$artifact_dir/vulnerabilities"
+  install -d -o root -g root -m 0750 \
+    "$source_fixture/infra/scripts"
   printf 'archive-%s\n' "$release_sha" > "$artifact_dir/images.tar.zst"
   printf '{"fixture":"cosign-bundle","releaseSha":"%s"}\n' "$release_sha" \
     > "$artifact_dir/images.tar.zst.sigstore.json"
   printf 'services: {}\n# signed release %s\n' "$release_sha" \
     > "$artifact_dir/compose.prod.yaml"
+  cp "$artifact_dir/compose.prod.yaml" \
+    "$source_fixture/compose.prod.yaml"
+  printf 'services: {}\n# monitoring fixture %s\n' "$release_sha" \
+    > "$source_fixture/compose.monitoring.yaml"
+  {
+    printf '%s\n' '#!/bin/sh'
+    printf '%s\n' 'set -eu'
+    printf 'printf "day10 fixture %s\\n"\n' "$release_sha"
+  } > "$source_fixture/infra/scripts/install-day10-host.sh"
+  {
+    printf '%s\n' '#!/bin/sh'
+    printf '%s\n' 'set -eu'
+    printf '%s\n' \
+      'printf "Backup bundle: /opt/gilbom/backups/fixture-bundle\\n"'
+  } > "$source_fixture/infra/scripts/backup-volumes.sh"
+  chmod 0750 "$source_fixture/infra/scripts/"*.sh
+  tar -cf "$artifact_dir/$source_archive_name" \
+    -C "$source_fixture" .
   printf '{}\n' > "$artifact_dir/sbom/backend.sbom.json"
   printf '{}\n' > "$artifact_dir/sbom/frontend.sbom.json"
   printf 'backend findings: none\n' \
@@ -121,6 +144,10 @@ create_artifact() {
     --arg cosign_public_key_sha256 "$cosign_public_key_sha256" \
     --arg compose_sha256 "$(
       sha256sum "$artifact_dir/compose.prod.yaml" | awk '{print $1}'
+    )" \
+    --arg source_archive_name "$source_archive_name" \
+    --arg source_sha256 "$(
+      sha256sum "$artifact_dir/$source_archive_name" | awk '{print $1}'
     )" \
     --argjson target_version "$target_version" \
     '
@@ -149,6 +176,10 @@ create_artifact() {
           compose: {
             path: "compose.prod.yaml",
             sha256: $compose_sha256
+          },
+          source: {
+            path: $source_archive_name,
+            sha256: $source_sha256
           }
         },
         flyway: {
@@ -176,6 +207,7 @@ create_artifact() {
   )
   printf '{"fixture":"manifest-cosign-bundle","releaseSha":"%s"}\n' \
     "$release_sha" > "$artifact_dir/SHA256SUMS.sigstore.json"
+  rm -rf -- "$source_fixture"
 }
 
 create_artifact "$previous_sha" 35 e f
@@ -412,6 +444,8 @@ case "$scenario" in
     grep -Fq '# active previous compose' \
       /opt/gilbom/deploy/compose.prod.yaml \
       || fail "automatic rollback did not restore previous Compose"
+    [ ! -e /opt/gilbom/deploy/.release-source.sha ] \
+      || fail "failed release source tree was activated before health success"
     [ ! -e "$failed_record_dir/manual-recovery-required.json" ] \
       || fail "automatic rollback incorrectly requested manual recovery"
     echo "Conditional rollback A integration: PASS"
@@ -442,6 +476,8 @@ case "$scenario" in
     grep -Fq "# signed release $failed_sha" \
       /opt/gilbom/deploy/compose.prod.yaml \
       || fail "manual containment did not preserve the failed release Compose"
+    [ ! -e /opt/gilbom/deploy/.release-source.sha ] \
+      || fail "failed release source tree was activated before health success"
     [ -f "$fake_state/frontend-stopped" ] \
       || fail "manual containment did not stop Frontend"
     [ ! -e "$failed_record_dir/rollback-manifest.json" ] \

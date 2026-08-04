@@ -101,6 +101,9 @@ assert_contains infra/scripts/promote-ci-release-artifacts.sh \
   'compose.prod.yaml' \
   "production Compose is not a required promoted Artifact"
 assert_contains infra/scripts/promote-ci-release-artifacts.sh \
+  'gilbom-web-$release_sha.tar.zst' \
+  "release source archive is not a required promoted Artifact"
+assert_contains infra/scripts/promote-ci-release-artifacts.sh \
   'SHA256SUMS.sigstore.json' \
   "complete release manifest Cosign Bundle is not required"
 assert_contains infra/scripts/promote-ci-release-artifacts.sh \
