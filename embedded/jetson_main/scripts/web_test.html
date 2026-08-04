@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>robot · 주행 테스트</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1e2128; --border: #2e323b;
+    --text: #e6e8ec; --muted: #8b919c;
+    --accent: #4c8dff; --rec: #ff4d4f; --ok: #35c26a; --warn2: #ffc94d;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text);
+         font-family: 'Pretendard', 'Noto Sans KR', system-ui, sans-serif; padding: 20px; }
+  h1 { font-size: 18px; font-weight: 700; margin-bottom: 16px; }
+  h1 .sub { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 8px; }
+  h1 .mode { font-size: 13px; margin-left: 8px; font-weight: 700; }
+  h1 .mode.live { color: var(--rec); } h1 .mode.dry { color: var(--ok); }
+
+  .layout { display: grid; grid-template-columns: 1fr 300px; gap: 16px; max-width: 1400px; }
+  @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }
+
+  .cams { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 760px) { .cams { grid-template-columns: 1fr; } }
+  .cam { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .cam header { display: flex; justify-content: space-between; align-items: center;
+                padding: 8px 12px; font-size: 13px; color: var(--muted); }
+  .cam img { width: 100%; display: block; aspect-ratio: 4/3; background: #000; object-fit: contain; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #555; display: inline-block; }
+  .dot.on { background: var(--ok); }
+
+  .panel { background: var(--panel); border: 1px solid var(--border);
+           border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+  .panel h2 { font-size: 12px; font-weight: 600; color: var(--muted);
+              text-transform: uppercase; letter-spacing: .06em; margin-bottom: 12px; }
+
+  .state-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+                 gap: 8px; margin-top: 12px; }
+  .state-strip .cell { background: #171a20; border: 1px solid var(--border);
+                       border-radius: 8px; padding: 8px 10px; }
+  .state-strip .lbl { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+  .state-strip .big { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .big.st-CRUISE, .big.st-TRACE { color: var(--ok); } .big.st-ESTOP { color: var(--rec); }
+  .big.st-AVOID, .big.st-INSPECT, .big.st-SLOPE, .big.st-TURN,
+  .big.st-DEAD_END { color: var(--warn2); }
+  /* ESCAPE는 차도 이탈 선회 — 정지는 아니지만 가장 급한 기동이라 빨강 계열로 뗀다 */
+  .big.st-ESCAPE { color: var(--rec); }
+  .big.st-MANUAL { color: var(--accent); }
+
+  button { width: 100%; padding: 14px; font-size: 16px; font-weight: 700;
+           border: none; border-radius: 8px; cursor: pointer; color: #fff;
+           transition: filter .15s; margin-bottom: 8px; }
+  button:active { filter: brightness(1.3); }
+  #startBtn { background: var(--ok); }
+  #estopBtn { background: var(--rec); font-size: 18px; }
+  #releaseBtn { background: #3a3d45; outline: 2px solid var(--rec); margin-bottom: 0; }
+  #modeBtn { background: var(--accent); }
+  #modeBtn.manual { background: #3a3d45; outline: 2px solid var(--accent); }
+  .rec-info { margin-top: 10px; font-size: 13px; color: var(--muted); line-height: 1.7; }
+  .rec-info b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .blink { animation: blink 1s step-end infinite; color: var(--rec); }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .row { display: flex; justify-content: space-between; font-size: 13px;
+         padding: 5px 0; border-bottom: 1px solid var(--border); }
+  .row:last-child { border-bottom: none; }
+  .row .k { color: var(--muted); }
+  .row .v { font-variant-numeric: tabular-nums; text-align: right; }
+  .v.warn { color: var(--rec); font-weight: 600; }
+  .v.good { color: var(--ok); }
+  .v.mid { color: var(--warn2); font-weight: 600; }
+
+  .bar-wrap { margin: 6px 0 12px; }
+  .bar-label { display: flex; justify-content: space-between; font-size: 12px;
+               color: var(--muted); margin-bottom: 4px; }
+  .bar { position: relative; height: 10px; background: #2a2d35; border-radius: 5px; }
+  .bar .fill { position: absolute; top: 0; bottom: 0; background: var(--accent); border-radius: 5px; }
+  .bar .center-tick { position: absolute; left: 50%; top: -2px; bottom: -2px;
+                      width: 2px; background: var(--muted); }
+</style>
+</head>
+<body>
+  <h1>🤖 주행 테스트 <span class="sub">robot · 인도 추종 야외 테스트</span>
+      <span class="mode dry" id="modeTag">dry-run</span></h1>
+  <div id="connLost" style="display:none; background:var(--rec); color:#fff; font-weight:700;
+       padding:10px 14px; border-radius:8px; margin-bottom:12px;">
+    ⚠ 서버 연결 끊김 — 아래 값은 마지막 수신 상태입니다 (Wi-Fi·서버 확인)</div>
+
+  <div class="layout">
+    <div>
+      <div class="cams">
+        <div class="cam">
+          <header><span>주행 카메라 (세그 오버레이 · 노란 상자 = 진행 코리도 · 초록 곡선 = 중심선, 원 = 조향 목표)</span><span class="dot" id="dot-nav"></span></header>
+          <img src="/stream/nav" alt="nav camera">
+        </div>
+        <div class="cam">
+          <header><span>검사 카메라 (Brio 100 · INSPECT 판정 입력)</span><span class="dot" id="dot-inspect"></span></header>
+          <img src="/stream/inspect" alt="inspect camera">
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:12px">
+        <h2>주행 상태</h2>
+        <div class="state-strip" style="margin-top:0">
+          <div class="cell"><span class="lbl">FSM 상태</span><span class="big" id="bigState">–</span></div>
+          <div class="cell"><span class="lbl">루프</span><span class="big" id="bigLoop">–</span></div>
+          <div class="cell"><span class="lbl">인도</span><span class="big" id="bigSidewalk">–</span></div>
+          <div class="cell"><span class="lbl">점자블록</span><span class="big" id="bigBraille">–</span></div>
+          <div class="cell"><span class="lbl" id="tempLbl">보드 온도</span><span class="big" id="bigTemp">–</span></div>
+        </div>
+        <div class="rec-info" id="reasonInfo">상태 확인 중…</div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>주행 제어</h2>
+        <button id="startBtn">▶ 시작</button>
+        <button id="estopBtn">■ 비상 정지</button>
+        <button id="releaseBtn">ESTOP 해제</button>
+        <div class="row"><span class="k">터치센서 (시작)</span><span class="v" id="touchState">–</span></div>
+        <div class="rec-info" id="ctrlInfo"></div>
+      </div>
+
+      <div class="panel" id="commsPanel" style="display:none">
+        <h2>서버 통신 (MQTT)</h2>
+        <div class="row"><span class="k">브로커</span><span class="v" id="cmConn">–</span></div>
+        <div class="row"><span class="k">서버가 보는 상태</span><span class="v" id="cmMode">–</span></div>
+        <div class="row"><span class="k">미션</span><span class="v" id="cmMission">–</span></div>
+        <div class="rec-info">서버가 보낸 명령 (최신순)</div>
+        <div id="cmLog" class="rec-info" style="font-family:monospace;white-space:pre-line">–</div>
+      </div>
+
+      <div class="panel">
+        <h2>컨트롤러 (Xbox)</h2>
+        <button id="modeBtn">🎮 수동 모드 전환</button>
+        <div class="row"><span class="k">연결</span><span class="v" id="jsConn">–</span></div>
+        <div class="row"><span class="k">모드 (A 버튼 토글)</span><span class="v" id="jsMode">–</span></div>
+        <div class="row"><span class="k">최대 스로틀 (X−/Y+)</span><span class="v" id="jsCap">–</span></div>
+        <div class="row"><span class="k">수동 비상정지 (B)</span><span class="v" id="jsEstop">–</span></div>
+      </div>
+
+      <div class="panel">
+        <h2>주행 명령</h2>
+        <div class="bar-wrap">
+          <div class="bar-label"><span>조향</span><span id="angleVal">–</span></div>
+          <div class="bar"><div class="center-tick"></div><div class="fill" id="steerFill"></div></div>
+        </div>
+        <div class="bar-wrap">
+          <div class="bar-label"><span>스로틀</span><span id="speedVal">–</span></div>
+          <div class="bar"><div class="fill" id="throttleFill" style="left:0"></div></div>
+        </div>
+        <div class="row"><span class="k">브레이크</span><span class="v" id="brakeVal">–</span></div>
+      </div>
+
+      <div class="panel">
+        <h2>인지 (세그멘테이션)</h2>
+        <div class="row"><span class="k">인도 경계</span><span class="v" id="pSidewalk">–</span></div>
+        <div class="row"><span class="k">중심 오차</span><span class="v" id="pCenter">–</span></div>
+        <div class="row"><span class="k">차도</span><span class="v" id="pRoadway">–</span></div>
+        <div class="row"><span class="k">차단 장애물</span><span class="v" id="pObstacle">–</span></div>
+        <div class="row"><span class="k">점자블록 근접도</span><span class="v" id="pBraille">–</span></div>
+        <div class="row"><span class="k">횡단보도</span><span class="v" id="pCrosswalk">–</span></div>
+      </div>
+
+      <div class="panel">
+        <h2>점자블록 판별 (실시간 · 모드 무관)</h2>
+        <div class="row"><span class="k">화면 내 블록</span><span class="v" id="lvBlock">–</span></div>
+        <div class="row"><span class="k">판정</span><span class="v" id="lvVerdict">–</span></div>
+        <div class="row"><span class="k">판별 속도</span><span class="v" id="lvHz">–</span></div>
+        <div class="rec-info" id="inspectInfo">INSPECT 정차 판정: 아직 없음</div>
+      </div>
+
+      <div class="panel">
+        <h2>추종 커버리지 (TRACE)</h2>
+        <div class="row"><span class="k">세션</span><span class="v" id="trActive">–</span></div>
+        <div class="row"><span class="k">탐지 실행</span><span class="v" id="trDetect">–</span></div>
+        <div class="row"><span class="k">파손 후보</span><span class="v" id="trDefect">–</span></div>
+        <div class="rec-info" id="trLast">직전 세션: 아직 없음</div>
+      </div>
+
+      <div class="panel">
+        <h2>GPS</h2>
+        <div class="row"><span class="k">상태</span><span class="v" id="gpsFix">–</span></div>
+        <div class="row"><span class="k">위도</span><span class="v" id="gpsLat">–</span></div>
+        <div class="row"><span class="k">경도</span><span class="v" id="gpsLon">–</span></div>
+        <div class="row"><span class="k">속도</span><span class="v" id="gpsSpd">–</span></div>
+        <div class="row"><span class="k">진행 방향</span><span class="v" id="gpsCrs">–</span></div>
+        <div class="row"><span class="k">고도</span><span class="v" id="gpsAlt">–</span></div>
+        <div class="row"><span class="k">위성 / HDOP</span><span class="v" id="gpsSat">–</span></div>
+      </div>
+
+      <div class="panel">
+        <h2>마지막 전이</h2>
+        <div class="rec-info" id="transitionInfo">없음</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+for (const [id, path] of [['startBtn','start'], ['estopBtn','estop'], ['releaseBtn','estop_release']])
+  $(id).addEventListener('click', async () => {
+    await fetch('/api/' + path, { method: 'POST' });
+    await refresh();
+  });
+
+let manualMode = false;
+$('modeBtn').addEventListener('click', async () => {
+  await fetch('/api/mode/' + (manualMode ? 'auto' : 'manual'), { method: 'POST' });
+  await refresh();
+});
+
+const OX = flag => flag ? 'O' : 'X';
+const COMPASS = ['북', '북동', '동', '남동', '남', '남서', '서', '북서'];
+
+let missedPolls = 0;   // 연속 실패 수 — 2회(1초) 넘게 끊기면 화면에 표시
+
+async function refresh() {
+  try {
+    const st = await (await fetch('/api/status')).json();
+    missedPolls = 0;
+    $('connLost').style.display = 'none';
+
+    // mode + cameras
+    const mode = $('modeTag');
+    mode.textContent = st.live ? 'LIVE — 실구동' : 'dry-run';
+    mode.className = 'mode ' + (st.live ? 'live' : 'dry');
+    for (const name of ['nav', 'inspect'])
+      $('dot-' + name).classList.toggle('on', st.cameras?.[name]?.alive);
+
+    // 서버 통신 — --comms-config 를 준 경우에만 패널을 띄운다
+    const cm = st.comms ?? {};
+    $('commsPanel').style.display = cm.enabled ? '' : 'none';
+    if (cm.enabled) {
+      $('cmConn').textContent = cm.connected ? '연결됨' : '끊김 — 재접속 중';
+      $('cmConn').className = 'v ' + (cm.connected ? 'good' : 'warn');
+      $('cmMode').textContent = cm.mode + (cm.reason_code ? ` (${cm.reason_code})` : '');
+      // 서버가 보는 상태와 실제 FSM 이 어긋나면 그 자체가 이상 신호다
+      const stopped = cm.mode === 'SAFE_STOP' || cm.mode === 'ERROR';
+      $('cmMode').className = 'v ' + (stopped ? 'warn' : 'good');
+      $('cmMission').textContent = cm.mission_id
+        ? `${cm.mission_id} · ${cm.mission_state}` : '없음';
+      const log = (cm.recent ?? []);
+      $('cmLog').textContent = log.length === 0 ? '(아직 없음)'
+        : log.map(r => `${(r.at ?? '').slice(11, 19)}  ${r.command_type}  ${r.status}`
+                     + (r.reason_code && r.reason_code !== 'OK' ? `  ${r.reason_code}` : ''))
+             .join('\n');
+    }
+
+    // controller + mode
+    manualMode = !!st.manual_mode;
+    const modeBtn = $('modeBtn');
+    modeBtn.textContent = manualMode ? '🤖 자동 모드 복귀' : '🎮 수동 모드 전환';
+    modeBtn.classList.toggle('manual', manualMode);
+    const js = st.controller ?? {};
+    $('jsConn').textContent = js.connected ? '연결됨' : '끊김';
+    $('jsConn').className = 'v ' + (js.connected ? 'good' : 'warn');
+    $('jsMode').textContent = manualMode ? '수동 (Xbox)' : '자동 (FSM)';
+    $('jsMode').className = 'v ' + (manualMode ? 'mid' : 'good');
+    $('jsCap').textContent = js.throttle_cap != null ? js.throttle_cap.toFixed(0) + '%' : '–';
+    $('jsEstop').textContent = js.estop ? '작동! (스로틀 놓으면 해제)' : '해제';
+    $('jsEstop').className = 'v ' + (js.estop ? 'warn' : '');
+
+    // 터치센서 — 누름 직후 3초간 강조. 폴링 주기가 있어 짧은 탭도 여기서 보인다
+    const tc = st.touch ?? {};
+    const touchEl = $('touchState');
+    if (!tc.connected) {
+      touchEl.textContent = '미연결 (config hardware.touch.pin)';
+      touchEl.className = 'v warn';
+    } else if (st.start_pending) {
+      touchEl.textContent = '시작 요청 대기 — 인도 미확인 (카메라를 인도로)';
+      touchEl.className = 'v mid';
+    } else if (tc.ago_sec != null && tc.ago_sec < 3) {
+      touchEl.textContent = `눌림! (${tc.ago_sec.toFixed(1)}초 전 → 시작 요청)`;
+      touchEl.className = 'v good';
+    } else {
+      touchEl.textContent = tc.ago_sec == null
+        ? '대기 (누름 없음)' : `대기 (마지막 누름 ${tc.ago_sec.toFixed(0)}초 전)`;
+      touchEl.className = 'v';
+    }
+
+    // state strip
+    const stateEl = $('bigState');
+    stateEl.textContent = st.state;
+    stateEl.className = 'big st-' + st.state;
+    $('bigLoop').textContent = st.loop_hz + ' Hz';
+    const p = st.perception;
+    $('bigSidewalk').textContent = p ? OX(p.sidewalk_detected) : '–';
+    $('bigSidewalk').className = 'big ' + (p?.sidewalk_detected ? 'st-CRUISE' : '');
+    $('bigBraille').textContent = p?.braille_detected ? p.braille_proximity.toFixed(2) : '–';
+    // 보드 온도 — tj(다이 최고 접점, 스로틀링 기준)를 대표로, CPU·GPU는 라벨에
+    const bt = st.board_temp ?? {};
+    if (bt.tj != null) {
+      $('bigTemp').textContent = bt.tj.toFixed(0) + '°C';
+      $('bigTemp').className = 'big ' + (bt.tj >= 85 ? 'st-ESTOP' : bt.tj >= 70 ? 'st-AVOID' : '');
+      $('tempLbl').textContent = `보드 온도 · CPU ${bt.cpu?.toFixed(0) ?? '–'}° GPU ${bt.gpu?.toFixed(0) ?? '–'}°`;
+    }
+    $('reasonInfo').innerHTML = st.fatal_error
+      ? `<span class="blink">●</span> 루프 중단: <b>${st.fatal_error}</b>`
+      : `전이 사유: <b>${st.reason || '–'}</b>`;
+
+    // command bars (center-out steering fill, DataRecorder 방식)
+    const c = st.command;
+    if (c) {
+      $('angleVal').textContent = c.steering_offset_deg.toFixed(1) + '°'
+        + (c.steering_offset_deg < 0 ? ' (좌)' : c.steering_offset_deg > 0 ? ' (우)' : '');
+      const span = Math.max(c.steer_left_limit, c.steer_right_limit);
+      const norm = Math.max(-1, Math.min(1, c.steering_offset_deg / span));
+      const fill = $('steerFill');
+      if (norm >= 0) { fill.style.left = '50%'; fill.style.width = (norm * 50) + '%'; }
+      else { fill.style.left = (50 + norm * 50) + '%'; fill.style.width = (-norm * 50) + '%'; }
+      $('speedVal').textContent = c.throttle_pct.toFixed(0) + '%'
+        + (c.throttle_pct < 0 ? ' (후진)' : '');
+      $('throttleFill').style.width = Math.abs(c.throttle_pct) + '%';
+      $('brakeVal').textContent = c.brake ? '숏브레이크' : '해제';
+      $('brakeVal').className = 'v ' + (c.brake ? 'mid' : '');
+    }
+
+    // perception rows
+    if (p) {
+      $('pSidewalk').textContent = p.sidewalk_detected ? '보임' : '소실';
+      $('pSidewalk').className = 'v ' + (p.sidewalk_detected ? 'good' : 'warn');
+      $('pCenter').textContent = (p.center_offset >= 0 ? '+' : '') + p.center_offset.toFixed(2);
+      // 차도는 두 단계다: 위험 = 선회 이탈(ESCAPE), 덮임 = 즉시 ESTOP.
+      // 실외 보정 중 '왜 이렇게 움직였나'가 이 한 줄로 갈린다
+      $('pRoadway').textContent = p.roadway_critical ? '덮임 → ESTOP'
+        : p.roadway_risk ? '위험 → 선회 이탈' : '없음';
+      $('pRoadway').className = 'v ' + (p.roadway_critical ? 'warn'
+        : p.roadway_risk ? 'mid' : '');
+      // 횡단보도 미설치 판정 — 보고(reports/events.jsonl)로 나가는 그 판정이다
+      $('pCrosswalk').textContent = !p.crosswalk_ahead ? '미발견'
+        : p.braille_missing_at_crosswalk ? '블록 미설치!' : '블록 있음';
+      $('pCrosswalk').className = 'v ' + (!p.crosswalk_ahead ? ''
+        : p.braille_missing_at_crosswalk ? 'warn' : 'good');
+      $('pObstacle').textContent = p.blocking_obstacle ? '있음' : '없음';
+      $('pObstacle').className = 'v ' + (p.blocking_obstacle ? 'mid' : '');
+      $('pBraille').textContent = p.braille_detected ? p.braille_proximity.toFixed(2) : '미발견';
+    }
+
+    // live braille verdict (실시간 — 모드 무관)
+    const lv = st.live_verdict ?? {};
+    if (lv.available) {
+      $('lvBlock').textContent = lv.block_visible ? `보임 (띠 ${lv.band_count})` : '없음';
+      $('lvBlock').className = 'v ' + (lv.block_visible ? 'good' : '');
+      if (!lv.block_visible) {
+        $('lvVerdict').textContent = '–';
+        $('lvVerdict').className = 'v';
+      } else {
+        $('lvVerdict').textContent = (lv.is_defect ? '불량 — ' : '정상 — ') + lv.reason;
+        $('lvVerdict').className = 'v ' + (lv.is_defect ? 'warn' : 'good');
+      }
+      $('lvHz').textContent = lv.hz + ' Hz (지연 ' + lv.age_sec + 's)';
+    }
+
+    // INSPECT 정차 판정 (자동 모드에서 블록 앞 정지했을 때의 공식 기록)
+    const insp = st.last_inspection;
+    if (insp) {
+      $('inspectInfo').innerHTML = 'INSPECT 정차 판정: ' + (insp.error
+        ? `<span class="blink">●</span> ${insp.error}`
+        : (insp.is_defect ? '<b style="color:var(--rec)">불량</b>' : '<b style="color:var(--ok)">정상</b>')
+          + ` — ${insp.reason} (띠 ${insp.band_count} · 불량 ${insp.defect_band_count}`
+          + ` · 국소 ${insp.partial_count})`);
+    }
+
+    // 추종 커버리지 — '탐지가 돌았는가'를 주행 중에 눈으로 확인하는 창.
+    // 숫자는 탐지 실행 횟수이지 블록 개수가 아니다 (오도메트리가 없다)
+    const tr = st.trace ?? {};
+    $('trActive').textContent = tr.active ? `진행 중 (${tr.elapsed_sec}초)` : '없음';
+    $('trActive').className = 'v ' + (tr.active ? 'good' : '');
+    $('trDetect').textContent = tr.active || tr.detections ? `${tr.detections}회` : '–';
+    $('trDefect').textContent = tr.active || tr.detections ? `${tr.defect_candidates}회` : '–';
+    $('trDefect').className = 'v ' + (tr.defect_candidates ? 'warn' : '');
+    const ls = tr.last_session;
+    if (ls) $('trLast').textContent = `직전 세션: ${ls.duration_sec}초 · 탐지 `
+      + `${ls.detections}회 · 후보 ${ls.defect_candidates}회 · 종료 ${ls.exit_state}`
+      + ` (${ls.exit_reason})`;
+
+    // gps (DataRecorder와 같은 표기)
+    const g = st.gps ?? {};
+    $('gpsFix').textContent = !g.connected ? '연결 안 됨'
+                            : (g.fix ? `Fix (${g.sats}위성)` : `위성 검색 중 (${g.sats})`);
+    $('gpsFix').className = 'v ' + (!g.connected ? 'warn' : (g.fix ? 'good' : ''));
+    $('gpsLat').textContent = g.lat != null ? g.lat.toFixed(6) + '°' : '–';
+    $('gpsLon').textContent = g.lon != null ? g.lon.toFixed(6) + '°' : '–';
+    $('gpsSpd').textContent = g.speed_kmh != null ? g.speed_kmh.toFixed(1) + ' km/h' : '–';
+    $('gpsCrs').textContent = g.course != null
+      ? `${g.course.toFixed(0)}° ${COMPASS[Math.round(g.course / 45) % 8]}` : '–';
+    $('gpsAlt').textContent = g.alt_m != null ? g.alt_m.toFixed(1) + ' m' : '–';
+    $('gpsSat').textContent = `${g.sats ?? 0} / ${g.hdop != null ? g.hdop.toFixed(1) : '–'}`;
+
+    // transition
+    if (st.last_transition)
+      $('transitionInfo').innerHTML =
+        `<b>${st.last_transition.prev} → ${st.last_transition.new}</b><br>${st.last_transition.reason}`;
+  } catch (e) {
+    // 서버 무응답 (Wi-Fi 이탈·서버 다운) — 굳은 화면을 최신인 척 두지 않는다
+    if (++missedPolls >= 2) $('connLost').style.display = 'block';
+  }
+}
+
+refresh();
+setInterval(refresh, 500);
+</script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+# 통신 Credential·런타임 저장소
+comms.env
+comms.env.example
+scripts/orincar.env
+var/
+
+# Python 런타임
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 인증서
+gilbom-mqtt-ca.crt
+
+# 모델들
+models/
+
+
+# 기타
+.claude/
+.pytest_cache/
+__pycache__/
+CLAUDE.md
