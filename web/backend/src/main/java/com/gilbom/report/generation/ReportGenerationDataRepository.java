@@ -199,8 +199,9 @@ public class ReportGenerationDataRepository {
             type_values(value, ordinal) AS (
                 VALUES
                     ('DAMAGED', 1),
-                    ('INSTALLATION_INVALID', 2),
-                    ('UNKNOWN_ANOMALY', 3)
+                    ('MISSING', 2),
+                    ('INSTALLATION_INVALID', 3),
+                    ('UNKNOWN_ANOMALY', 4)
             ),
             type_counts AS (
                 SELECT

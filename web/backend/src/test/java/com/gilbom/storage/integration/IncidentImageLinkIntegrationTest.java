@@ -194,6 +194,61 @@ class IncidentImageLinkIntegrationTest {
     }
 
     @Test
+    void linksAMissingImageWithoutConfidenceOrBoundingBox() {
+        assignAdminRole(ADMIN_ID);
+        UUID eventId = UUID.fromString(
+                "24000000-0000-4000-8000-000000000109");
+        byte[] content = jpeg(320, 240);
+        UUID imageId = upload(eventId, content);
+
+        IncidentIngestionResult result = ingest(
+                missingIncident(eventId, 1, imageId));
+
+        assertThat(result.observationInserted()).isTrue();
+        assertThat(observationImageId(eventId)).isEqualTo(imageId);
+        assertThat(jdbcTemplate.queryForMap("""
+                        SELECT
+                            detected_defect_type,
+                            confidence,
+                            bbox_norm IS NULL AS bbox_missing
+                        FROM defect.defect_observation
+                        WHERE event_id = ?
+                        """,
+                eventId))
+                .containsEntry("detected_defect_type", "MISSING")
+                .containsEntry("confidence", null)
+                .containsEntry("bbox_missing", true);
+        assertThat(jdbcTemplate.queryForMap("""
+                        SELECT defect_type, latest_confidence, review_required
+                        FROM defect.defect
+                        WHERE defect_id = ?
+                        """,
+                result.defectId()))
+                .containsEntry("defect_type", "MISSING")
+                .containsEntry("latest_confidence", null)
+                .containsEntry("review_required", true);
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT image_status
+                        FROM storage.robot_image
+                        WHERE image_id = ?
+                        """,
+                String.class,
+                imageId))
+                .isEqualTo("AVAILABLE");
+
+        assertThat(reportImageService.findReportImagesForDefect(
+                ADMIN_ID,
+                result.defectId()))
+                .singleElement()
+                .satisfies(image -> {
+                    assertThat(image.defectType()).isEqualTo("MISSING");
+                    assertThat(image.content()).isEqualTo(content);
+                    assertThat(image.width()).isEqualTo(320);
+                    assertThat(image.height()).isEqualTo(240);
+                });
+    }
+
+    @Test
     void rejectsAnIncidentWhoseEventIdDiffersFromTheUploadedImage() {
         UUID uploadEventId = UUID.fromString(
                 "24000000-0000-4000-8000-000000000102");
@@ -524,6 +579,45 @@ class IncidentImageLinkIntegrationTest {
                 new IncidentEventPayload.Model(
                         "tbs-braille-yolo",
                         "1.0.0"));
+    }
+
+    private static IncidentEventPayload missingIncident(
+            UUID eventId,
+            long sequence,
+            UUID imageId
+    ) {
+        IncidentEventPayload base = newIncident(
+                eventId,
+                sequence,
+                imageId,
+                37.497900,
+                127.027600);
+        return new IncidentEventPayload(
+                base.schemaVersion(),
+                base.eventId(),
+                base.eventType(),
+                base.mqttId(),
+                base.bootId(),
+                base.seq(),
+                base.sourceComponent(),
+                base.occurredAt(),
+                base.sentAt(),
+                base.ttlSec(),
+                base.missionId(),
+                base.location(),
+                new IncidentEventPayload.Incident(
+                        IncidentEventPayload.AssetType.BRAILLE_BLOCK,
+                        IncidentEventPayload.BlockType.UNKNOWN,
+                        IncidentEventPayload.DefectType.MISSING,
+                        null,
+                        null),
+                new IncidentEventPayload.Evidence(
+                        imageId,
+                        base.evidence().capturedAt(),
+                        base.evidence().imageWidth(),
+                        base.evidence().imageHeight(),
+                        null),
+                base.model());
     }
 
     private static byte[] jpeg(int width, int height) {

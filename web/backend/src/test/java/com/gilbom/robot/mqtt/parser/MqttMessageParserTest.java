@@ -141,6 +141,55 @@ class MqttMessageParserTest {
     }
 
     @Test
+    void acceptsMissingIncidentWithoutConfidenceOrBoundingBox() {
+        String payload = validIncident()
+                .replace(
+                        "\"defect_type\": \"DAMAGED\"",
+                        "\"defect_type\": \"MISSING\"")
+                .replace(
+                        "\"confidence\": 0.87",
+                        "\"confidence\": null")
+                .replace(
+                        "\"bbox_norm\": [0.16, 0.42, 0.81, 0.95]",
+                        "\"bbox_norm\": null");
+
+        ParsedMqttMessage parsed = parser.parse(message(
+                "tbs/v2/robots/RBT-001/events/incident",
+                1,
+                payload
+        ));
+
+        IncidentEventPayload incident = (IncidentEventPayload) parsed.payload();
+        assertThat(incident.incident().defectType())
+                .isEqualTo(IncidentEventPayload.DefectType.MISSING);
+        assertThat(incident.incident().confidence()).isNull();
+        assertThat(incident.evidence().bboxNorm()).isNull();
+    }
+
+    @Test
+    void acceptsDamagedIncidentWithOmittedConfidenceAndBoundingBox() {
+        String payload = validIncident()
+                .replaceFirst(
+                        ",\\s*\"confidence\": 0\\.87",
+                        "")
+                .replaceFirst(
+                        ",\\s*\"bbox_norm\": \\[0\\.16, 0\\.42, 0\\.81, 0\\.95]",
+                        "");
+
+        ParsedMqttMessage parsed = parser.parse(message(
+                "tbs/v2/robots/RBT-001/events/incident",
+                1,
+                payload
+        ));
+
+        IncidentEventPayload incident = (IncidentEventPayload) parsed.payload();
+        assertThat(incident.incident().defectType())
+                .isEqualTo(IncidentEventPayload.DefectType.DAMAGED);
+        assertThat(incident.incident().confidence()).isNull();
+        assertThat(incident.evidence().bboxNorm()).isNull();
+    }
+
+    @Test
     void rejectsMqttIdAndQosMismatchesWithBusinessErrorCodes() {
         assertErrorCode(
                 () -> parser.parse(message(

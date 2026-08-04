@@ -14,13 +14,6 @@ const orderedBoundaryCoordinates = [
   [128.4160, 36.1080],
 ] as const
 
-const clickedCoordinates = [
-  orderedBoundaryCoordinates[2],
-  orderedBoundaryCoordinates[0],
-  orderedBoundaryCoordinates[3],
-  orderedBoundaryCoordinates[1],
-] as const
-
 const createdArea = {
   patrolAreaId: AREA_ID,
   areaCode: 'DEMO-ZONE-01',
@@ -90,7 +83,7 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
   let missionCreatePayload: Record<string, unknown> | null = null
   const areaCodeAvailabilityRequests: string[] = []
 
-  await page.addInitScript((coordinates) => {
+  await page.addInitScript(() => {
     type FakeMapInteractionOptions = {
       draggable?: boolean
       pinchZoom?: boolean
@@ -103,12 +96,24 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
       maxZoom?: number
       zoom?: number
       zoomControl?: boolean
+      zoomControlOptions?: {
+        position?: number
+        style?: number
+      }
+    }
+    type FakeMapListener = (event?: { coord: FakeLatLng }) => void
+    type FakeMapEventHandle = {
+      map: FakeMap
+      eventName: string
+      listener: FakeMapListener
+      clickHandler: ((event: MouseEvent) => void) | null
     }
     const previewState = {
       centers: [] as Array<[longitude: number, latitude: number]>,
       mapOptions: [] as FakeMapInteractionOptions[],
       setZoomCallCount: 0,
       fitBoundsCallCount: 0,
+      dragMapBy: null as ((x: number, y: number) => void) | null,
       fittedBounds: [] as Array<[
         southWest: [longitude: number, latitude: number],
         northEast: [longitude: number, latitude: number],
@@ -146,14 +151,27 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
 
     class FakeMap {
       readonly element: HTMLElement
-      clickIndex = 0
+      readonly overlayLayer = document.createElement('div')
+      private readonly listeners = new Map<string, Set<FakeMapListener>>()
+      private offsetX = 0
+      private offsetY = 0
 
       constructor(
         element: HTMLElement,
         options: FakeMapInteractionOptions,
       ) {
         this.element = element
+        this.overlayLayer.dataset.fakeMapPane = 'overlay'
+        this.overlayLayer.style.position = 'absolute'
+        this.overlayLayer.style.width = '100%'
+        this.overlayLayer.style.height = '0px'
+        this.overlayLayer.style.top = '0'
+        this.overlayLayer.style.left = '0'
+        this.element.appendChild(this.overlayLayer)
         previewState.mapOptions.push({ ...options })
+        if (previewState.dragMapBy === null) {
+          previewState.dragMapBy = (x, y) => this.dragBy(x, y)
+        }
       }
 
       setCenter(position: FakeLatLng) {
@@ -173,19 +191,89 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
 
       getProjection() {
         return {
-          fromCoordToOffset(position: FakeLatLng) {
+          fromCoordToOffset: (position: FakeLatLng) => {
             return new FakePoint(
-              (position.lng() - 128.415) * 100_000,
-              (36.109 - position.lat()) * 100_000,
+              (position.lng() - 128.415) * 100_000 + this.offsetX,
+              (36.109 - position.lat()) * 100_000 + this.offsetY,
             )
           },
         }
       }
-      destroy() {}
+
+      getPanes() {
+        return { overlayLayer: this.overlayLayer }
+      }
+
+      coordinateAt(x: number, y: number) {
+        return new FakeLatLng(
+          36.109 - (y - this.offsetY) / 100_000,
+          128.415 + (x - this.offsetX) / 100_000,
+        )
+      }
+
+      addListener(eventName: string, listener: FakeMapListener) {
+        const listeners = this.listeners.get(eventName) ?? new Set()
+        listeners.add(listener)
+        this.listeners.set(eventName, listeners)
+      }
+
+      removeListener(eventName: string, listener: FakeMapListener) {
+        this.listeners.get(eventName)?.delete(listener)
+      }
+
+      dragBy(x: number, y: number) {
+        this.offsetX += x
+        this.offsetY += y
+        ;['drag', 'panning', 'bounds_changed', 'dragend', 'idle']
+          .forEach((eventName) => {
+            this.listeners.get(eventName)?.forEach((listener) => listener())
+          })
+      }
+
+      destroy() {
+        this.overlayLayer.remove()
+      }
     }
 
     class FakeOverlay {
       setMap() {}
+    }
+
+    class FakeOverlayView {
+      private map: FakeMap | null = null
+
+      setMap(map: FakeMap | null) {
+        if (this.map !== null) {
+          this.onRemove()
+        }
+        this.map = map
+        if (this.map !== null) {
+          this.onAdd()
+          this.draw()
+        }
+      }
+
+      getMap() {
+        return this.map
+      }
+
+      getPanes() {
+        if (this.map === null) {
+          throw new Error('Overlay is not attached to a map')
+        }
+        return this.map.getPanes()
+      }
+
+      getProjection() {
+        if (this.map === null) {
+          throw new Error('Overlay is not attached to a map')
+        }
+        return this.map.getProjection()
+      }
+
+      onAdd() {}
+      draw() {}
+      onRemove() {}
     }
 
     class FakeEventSource {
@@ -194,11 +282,6 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
 
       addEventListener() {}
       close() {}
-    }
-
-    type ClickHandle = {
-      element: HTMLElement
-      handler: (() => void) | null
     }
 
     Object.defineProperty(window, 'EventSource', {
@@ -216,43 +299,49 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
           LatLng: FakeLatLng,
           LatLngBounds: FakeLatLngBounds,
           Map: FakeMap,
+          OverlayView: FakeOverlayView,
           Polygon: FakeOverlay,
           Polyline: FakeOverlay,
           Marker: FakeOverlay,
           Size: class FakeSize {},
           Point: FakePoint,
           Position: { TOP_RIGHT: 1 },
+          ZoomControlStyle: { SMALL: 1 },
           Event: {
             addListener(
               map: FakeMap,
               eventName: string,
-              listener: (event: { coord: FakeLatLng }) => void,
-            ): ClickHandle {
-              if (eventName !== 'click') {
-                return { element: map.element, handler: null }
+              listener: FakeMapListener,
+            ): FakeMapEventHandle {
+              map.addListener(eventName, listener)
+              let clickHandler: ((event: MouseEvent) => void) | null = null
+              if (eventName === 'click') {
+                clickHandler = (event) => {
+                  listener({
+                    coord: map.coordinateAt(
+                      event.offsetX,
+                      event.offsetY,
+                    ),
+                  })
+                }
+                map.element.addEventListener('click', clickHandler)
               }
-              const handler = () => {
-                const coordinate = coordinates[
-                  Math.min(map.clickIndex, coordinates.length - 1)
-                ]
-                map.clickIndex += 1
-                listener({
-                  coord: new FakeLatLng(coordinate[1], coordinate[0]),
-                })
-              }
-              map.element.addEventListener('click', handler)
-              return { element: map.element, handler }
+              return { map, eventName, listener, clickHandler }
             },
-            removeListener(handle: ClickHandle) {
-              if (handle.handler !== null) {
-                handle.element.removeEventListener('click', handle.handler)
+            removeListener(handle: FakeMapEventHandle) {
+              handle.map.removeListener(handle.eventName, handle.listener)
+              if (handle.clickHandler !== null) {
+                handle.map.element.removeEventListener(
+                  'click',
+                  handle.clickHandler,
+                )
               }
             },
           },
         },
       },
     })
-  }, clickedCoordinates)
+  })
 
   await page.route('**/api/v1/**', async (route) => {
     const request = route.request()
@@ -452,6 +541,10 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
             maxZoom?: number
             zoom?: number
             zoomControl?: boolean
+            zoomControlOptions?: {
+              position?: number
+              style?: number
+            }
           }>
         }
       }
@@ -459,37 +552,80 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
     return state.mapOptions.at(0)
   })).toMatchObject({
     zoom: 17,
-    minZoom: 17,
-    maxZoom: 17,
+    minZoom: 10,
+    maxZoom: 21,
     pinchZoom: false,
     scrollWheel: false,
     keyboardShortcuts: false,
     disableDoubleClickZoom: true,
     disableDoubleTapZoom: true,
     disableTwoFingerTapZoom: true,
-    zoomControl: false,
+    zoomControl: true,
+    zoomControlOptions: {
+      position: 1,
+      style: 1,
+    },
   })
 
-  await map.click({ position: { x: 80, y: 80 } })
-  await map.click({ position: { x: 180, y: 80 } })
-  await map.click({ position: { x: 180, y: 180 } })
-  await map.click({ position: { x: 80, y: 180 } })
+  await page.evaluate(() => {
+    const state = (
+      window as typeof window & {
+        __patrolAreaPreviewState: {
+          dragMapBy: ((x: number, y: number) => void) | null
+        }
+      }
+    ).__patrolAreaPreviewState
+    state.dragMapBy?.(40, 30)
+  })
+
+  await map.click({ position: { x: 240, y: 130 } })
+  const projectedOverlay = editor.getByTestId(
+    'patrol-boundary-projected-overlay',
+  )
+  await expect(projectedOverlay.locator('xpath=..')).toHaveAttribute(
+    'data-fake-map-pane',
+    'overlay',
+  )
+  await expect(projectedOverlay).toHaveCSS('height', '360px')
+  const firstClickedPoint = projectedOverlay.locator(
+    '[data-longitude="128.417"][data-latitude="36.108"]',
+  )
+  await expect(firstClickedPoint).toHaveCount(1)
+  await expect(firstClickedPoint.locator('circle')).toHaveAttribute('cx', '240')
+  await expect(firstClickedPoint.locator('circle')).toHaveAttribute('cy', '130')
+
+  await map.click({ position: { x: 140, y: 230 } })
+  await map.click({ position: { x: 140, y: 130 } })
+  await map.click({ position: { x: 240, y: 230 } })
   await expect(
     editor.getByText('교차 없이 자동 정렬된 Polygon입니다.'),
   ).toBeVisible()
   await expect(editor.getByText('4/100개 점')).toBeVisible()
-  const projectedOverlay = editor.getByTestId(
-    'patrol-boundary-projected-overlay',
-  )
   await expect(projectedOverlay.locator('polygon')).toHaveAttribute(
     'points',
-    '100,200 200,200 200,100 100,100',
+    '140,230 240,230 240,130 140,130',
   )
   await expect(projectedOverlay.locator('polygon')).toHaveCSS(
     'fill-opacity',
     '0.1',
   )
   await expect(projectedOverlay.locator('circle')).toHaveCount(4)
+  await page.evaluate(() => {
+    const state = (
+      window as typeof window & {
+        __patrolAreaPreviewState: {
+          dragMapBy: ((x: number, y: number) => void) | null
+        }
+      }
+    ).__patrolAreaPreviewState
+    state.dragMapBy?.(20, -10)
+  })
+  await expect(projectedOverlay.locator('polygon')).toHaveAttribute(
+    'points',
+    '160,220 260,220 260,120 160,120',
+  )
+  await expect(firstClickedPoint.locator('circle')).toHaveAttribute('cx', '260')
+  await expect(firstClickedPoint.locator('circle')).toHaveAttribute('cy', '120')
   await expect.poll(() => page.evaluate(() => {
     const state = (
       window as typeof window & {

@@ -65,7 +65,7 @@ public record IncidentEventPayload(
             @NotNull AssetType assetType,
             @NotNull BlockType blockType,
             @NotNull DefectType defectType,
-            @NotNull @DecimalMin("0.0") @DecimalMax("1.0") Double confidence,
+            @DecimalMin("0.0") @DecimalMax("1.0") Double confidence,
             @Valid Attributes attributes
     ) {
     }
@@ -80,7 +80,7 @@ public record IncidentEventPayload(
             @NotNull Instant capturedAt,
             @NotNull @Positive Integer imageWidth,
             @NotNull @Positive Integer imageHeight,
-            @NotNull @Size(min = 4, max = 4)
+            @Size(min = 4, max = 4)
             List<@NotNull @DecimalMin("0.0") @DecimalMax("1.0") Double> bboxNorm
     ) {
 
@@ -117,6 +117,7 @@ public record IncidentEventPayload(
     }
 
     public enum DefectType {
-        DAMAGED
+        DAMAGED,
+        MISSING
     }
 }

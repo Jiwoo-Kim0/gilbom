@@ -58,7 +58,7 @@ REST→DB→TLS Broker→Mock→Result→DB→SSE→React를 통과했다. Broke
 | `PAUSE_MISSION` | O | O | `reason` |
 | `RESUME_MISSION` | O | O | 없음 또는 계약 기본값 |
 | `COMPLETE_MISSION` | O | O | 없음(정상 완료) |
-| `CANCEL_MISSION` | O | O | `reason` |
+| `CANCEL_MISSION` | O | O | `mission_id`, `reason` |
 | `EMERGENCY_STOP` | O | O | `reason` |
 | `CLEAR_EMERGENCY_STOP` | O | O | 없음 |
 | `RETURN_TO_CHARGE` | X | X | 현재 범위 제외 |

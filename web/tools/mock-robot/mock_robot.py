@@ -1056,11 +1056,16 @@ class MockRobot:
             with self.state_lock:
                 mission_id_after = self.mission_id
                 mission_state_after = self.mission_state
-            mission_id = (
-                mission_id_before
-                if command_type in ("COMPLETE_MISSION", "CANCEL_MISSION")
-                else mission_id_after
-            )
+            if command_type == "CANCEL_MISSION":
+                mission_id = mission_id_before or command.get(
+                    "parameters", {}
+                ).get("mission_id")
+            else:
+                mission_id = (
+                    mission_id_before
+                    if command_type == "COMPLETE_MISSION"
+                    else mission_id_after
+                )
             event_type = {
                 "START_MISSION": "MISSION_STARTED",
                 "PAUSE_MISSION": "MISSION_PAUSED",
@@ -1185,8 +1190,17 @@ class MockRobot:
                 return "COMPLETED", "OK"
 
             if command_type == "CANCEL_MISSION":
-                if self.mission_id is None:
-                    return "FAILED", "NO_ACTIVE_MISSION"
+                mission_id = parameters.get("mission_id")
+                reason = parameters.get("reason")
+                if (
+                    not isinstance(mission_id, str)
+                    or not mission_id.strip()
+                    or not isinstance(reason, str)
+                    or not reason.strip()
+                ):
+                    return "REJECTED", "INVALID_PARAMETERS"
+                if self.mission_id is not None and self.mission_id != mission_id:
+                    return "REJECTED", "ALREADY_IN_STATE"
                 self.mission_id = None
                 self.mission_state = None
                 self.mission_started_at = None

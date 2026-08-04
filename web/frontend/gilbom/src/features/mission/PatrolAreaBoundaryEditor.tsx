@@ -18,6 +18,8 @@ import './patrol-area-boundary-editor.css'
 const NAVER_MAP_CLIENT_ID = import.meta.env.VITE_NAVER_MAP_CLIENT_ID
 const MAX_BOUNDARY_POINTS = 100
 const BOUNDARY_EDITOR_ZOOM = 17
+const BOUNDARY_EDITOR_MIN_ZOOM = 10
+const BOUNDARY_EDITOR_MAX_ZOOM = 21
 const DEFAULT_CENTER = {
   latitude: 36.1195,
   longitude: 128.3446,
@@ -32,29 +34,161 @@ type PatrolAreaBoundaryEditorProps = {
   onRequestFallback: () => void
 }
 
-type ProjectedBoundaryPoint = {
-  x: number
-  y: number
+type PatrolAreaBoundaryOverlay = naver.maps.OverlayView & {
+  setPoints(points: GeoJsonCoordinate[]): void
 }
 
 function roundCoordinate(value: number): number {
   return Number(value.toFixed(7))
 }
 
-function projectBoundaryPoints(
-  map: naver.maps.Map,
-  points: GeoJsonCoordinate[],
-): ProjectedBoundaryPoint[] {
-  const projection = map.getProjection()
-  return points.map(([longitude, latitude]) => {
-    const offset = projection.fromCoordToOffset(
-      new naver.maps.LatLng(latitude, longitude),
+function createPatrolAreaBoundaryOverlay(
+  maps: typeof naver.maps,
+  mapElement: HTMLElement,
+  initialPoints: GeoJsonCoordinate[],
+): PatrolAreaBoundaryOverlay {
+  class MapAttachedBoundaryOverlay extends maps.OverlayView {
+    private points = initialPoints
+    private readonly element = document.createElementNS(
+      'http://www.w3.org/2000/svg',
+      'svg',
     )
-    return {
-      x: Number(offset.x.toFixed(2)),
-      y: Number(offset.y.toFixed(2)),
+    private shape: SVGPolygonElement | SVGPolylineElement | null = null
+    private pointGroups: SVGGElement[] = []
+    private pointCircles: SVGCircleElement[] = []
+    private pointLabels: SVGTextElement[] = []
+
+    constructor() {
+      super()
+      this.element.classList.add('patrol-boundary-projected-overlay')
+      this.element.setAttribute('overflow', 'visible')
+      this.element.setAttribute('aria-hidden', 'true')
+      this.element.setAttribute(
+        'data-testid',
+        'patrol-boundary-projected-overlay',
+      )
+      this.syncElements()
     }
-  })
+
+    setPoints(nextPoints: GeoJsonCoordinate[]) {
+      this.points = nextPoints
+      this.syncElements()
+      if (this.getMap() !== null) {
+        this.draw()
+      }
+    }
+
+    onAdd() {
+      this.getPanes().overlayLayer.appendChild(this.element)
+      this.draw()
+    }
+
+    draw() {
+      if (this.getMap() === null) {
+        return
+      }
+      const projection = this.getProjection()
+      const width = mapElement.clientWidth
+      const height = mapElement.clientHeight
+      this.element.setAttribute('width', String(width))
+      this.element.setAttribute('height', String(height))
+      this.element.setAttribute('viewBox', `0 0 ${width} ${height}`)
+
+      const projectedPoints = this.points.map(([longitude, latitude]) => {
+        const offset = projection.fromCoordToOffset(
+          new maps.LatLng(latitude, longitude),
+        )
+        return {
+          x: Number(offset.x.toFixed(2)),
+          y: Number(offset.y.toFixed(2)),
+        }
+      })
+      this.shape?.setAttribute(
+        'points',
+        projectedPoints.map(({ x, y }) => `${x},${y}`).join(' '),
+      )
+      projectedPoints.forEach(({ x, y }, index) => {
+        const [longitude, latitude] = this.points[index]
+        this.pointGroups[index].setAttribute(
+          'data-longitude',
+          String(longitude),
+        )
+        this.pointGroups[index].setAttribute(
+          'data-latitude',
+          String(latitude),
+        )
+        this.pointCircles[index].setAttribute('cx', String(x))
+        this.pointCircles[index].setAttribute('cy', String(y))
+        this.pointLabels[index].setAttribute('x', String(x))
+        this.pointLabels[index].setAttribute('y', String(y))
+        this.pointLabels[index].textContent = String(index + 1)
+      })
+    }
+
+    onRemove() {
+      this.element.remove()
+    }
+
+    private syncElements() {
+      const requiredShape = this.points.length >= 3
+        ? 'polygon'
+        : this.points.length === 2
+          ? 'polyline'
+          : null
+      if (
+        requiredShape === null
+        || this.shape?.tagName.toLowerCase() !== requiredShape
+      ) {
+        this.shape?.remove()
+        this.shape = null
+      }
+      if (requiredShape !== null && this.shape === null) {
+        this.shape = document.createElementNS(
+          'http://www.w3.org/2000/svg',
+          requiredShape,
+        )
+        this.shape.classList.add(
+          requiredShape === 'polygon'
+            ? 'patrol-boundary-projected-polygon'
+            : 'patrol-boundary-projected-line',
+        )
+      }
+
+      while (this.pointGroups.length < this.points.length) {
+        const group = document.createElementNS(
+          'http://www.w3.org/2000/svg',
+          'g',
+        )
+        group.classList.add('patrol-boundary-projected-point')
+        const circle = document.createElementNS(
+          'http://www.w3.org/2000/svg',
+          'circle',
+        )
+        circle.classList.add('patrol-boundary-projected-marker')
+        circle.setAttribute('r', '14')
+        const label = document.createElementNS(
+          'http://www.w3.org/2000/svg',
+          'text',
+        )
+        label.classList.add('patrol-boundary-projected-label')
+        group.append(circle, label)
+        this.pointGroups.push(group)
+        this.pointCircles.push(circle)
+        this.pointLabels.push(label)
+      }
+      this.pointGroups.splice(this.points.length).forEach((group) => {
+        group.remove()
+      })
+      this.pointCircles.splice(this.points.length)
+      this.pointLabels.splice(this.points.length)
+      this.element.replaceChildren(
+        ...(this.shape === null ? [] : [this.shape]),
+        ...this.pointGroups,
+      )
+    }
+  }
+
+  return new MapAttachedBoundaryOverlay()
 }
 
 export function PatrolAreaBoundaryEditor({
@@ -65,22 +199,17 @@ export function PatrolAreaBoundaryEditor({
 }: PatrolAreaBoundaryEditorProps) {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<naver.maps.Map | null>(null)
+  const boundaryOverlayRef = useRef<PatrolAreaBoundaryOverlay | null>(null)
   const pointsRef = useRef(points)
   const onChangeRef = useRef(onChange)
   const disabledRef = useRef(disabled)
   const [status, setStatus] = useState<BoundaryEditorStatus>(
     NAVER_MAP_CLIENT_ID ? 'loading' : 'fallback',
   )
-  const [projectedPoints, setProjectedPoints] = useState<
-    ProjectedBoundaryPoint[]
-  >([])
   const orderedPoints = useMemo(
     () => orderBoundaryPointsForPolygon(points),
     [points],
   )
-  const projectedPointList = projectedPoints
-    .map(({ x, y }) => `${x},${y}`)
-    .join(' ')
 
   useEffect(() => {
     pointsRef.current = points
@@ -116,27 +245,34 @@ export function PatrolAreaBoundaryEditor({
             DEFAULT_CENTER.longitude,
           ),
           zoom: BOUNDARY_EDITOR_ZOOM,
-          minZoom: BOUNDARY_EDITOR_ZOOM,
-          maxZoom: BOUNDARY_EDITOR_ZOOM,
+          minZoom: BOUNDARY_EDITOR_MIN_ZOOM,
+          maxZoom: BOUNDARY_EDITOR_MAX_ZOOM,
           pinchZoom: false,
           scrollWheel: false,
           keyboardShortcuts: false,
           disableDoubleClickZoom: true,
           disableDoubleTapZoom: true,
           disableTwoFingerTapZoom: true,
-          zoomControl: false,
+          zoomControl: true,
+          zoomControlOptions: {
+            position: maps.Position.TOP_RIGHT,
+            style: maps.ZoomControlStyle.SMALL,
+          },
         })
         mapRef.current = map
+        boundaryOverlayRef.current = createPatrolAreaBoundaryOverlay(
+          maps,
+          mapElementRef.current,
+          orderBoundaryPointsForPolygon(pointsRef.current),
+        )
+        boundaryOverlayRef.current.setMap(map)
         const scheduleProjection = () => {
           if (projectionFrame !== null) {
             return
           }
           projectionFrame = window.requestAnimationFrame(() => {
             projectionFrame = null
-            setProjectedPoints(projectBoundaryPoints(
-              map,
-              orderBoundaryPointsForPolygon(pointsRef.current),
-            ))
+            boundaryOverlayRef.current?.draw()
           })
         }
         clickListener = maps.Event.addListener(map, 'click', (event) => {
@@ -157,12 +293,26 @@ export function PatrolAreaBoundaryEditor({
           ))) {
             return
           }
-          onChangeRef.current([...currentPoints, nextPoint])
+          const nextPoints = [...currentPoints, nextPoint]
+          pointsRef.current = nextPoints
+          boundaryOverlayRef.current?.setPoints(
+            orderBoundaryPointsForPolygon(nextPoints),
+          )
+          onChangeRef.current(nextPoints)
         })
-        viewportListeners.push(
-          maps.Event.addListener(map, 'bounds_changed', scheduleProjection),
-          maps.Event.addListener(map, 'size_changed', scheduleProjection),
-        )
+        const viewportEvents = [
+          'drag',
+          'panning',
+          'zooming',
+          'bounds_changed',
+          'size_changed',
+          'zoom_changed',
+          'dragend',
+          'idle',
+        ] as const
+        viewportListeners.push(...viewportEvents.map((eventName) => (
+          maps.Event.addListener(map, eventName, scheduleProjection)
+        )))
         setStatus('ready')
       })
       .catch(() => {
@@ -184,17 +334,18 @@ export function PatrolAreaBoundaryEditor({
       if (projectionFrame !== null) {
         window.cancelAnimationFrame(projectionFrame)
       }
+      boundaryOverlayRef.current?.setMap(null)
+      boundaryOverlayRef.current = null
       mapRef.current?.destroy()
       mapRef.current = null
     }
   }, [])
 
   useEffect(() => {
-    if (status !== 'ready' || mapRef.current === null || !window.naver) {
-      setProjectedPoints([])
+    if (status !== 'ready') {
       return
     }
-    setProjectedPoints(projectBoundaryPoints(mapRef.current, orderedPoints))
+    boundaryOverlayRef.current?.setPoints(orderedPoints)
   }, [orderedPoints, status])
 
   function removePoint(target: GeoJsonCoordinate) {
@@ -252,42 +403,6 @@ export function PatrolAreaBoundaryEditor({
             aria-label="순찰 구역 경계 편집 지도"
             data-testid="patrol-boundary-naver-map"
           />
-          {status === 'ready' && projectedPoints.length > 0 ? (
-            <svg
-              className="patrol-boundary-projected-overlay"
-              data-testid="patrol-boundary-projected-overlay"
-              aria-hidden="true"
-            >
-              {projectedPoints.length >= 3 ? (
-                <polygon
-                  className="patrol-boundary-projected-polygon"
-                  points={projectedPointList}
-                />
-              ) : projectedPoints.length === 2 ? (
-                <polyline
-                  className="patrol-boundary-projected-line"
-                  points={projectedPointList}
-                />
-              ) : null}
-              {projectedPoints.map(({ x, y }, index) => (
-                <g key={`${x}-${y}-${index}`}>
-                  <circle
-                    className="patrol-boundary-projected-marker"
-                    cx={x}
-                    cy={y}
-                    r="14"
-                  />
-                  <text
-                    className="patrol-boundary-projected-label"
-                    x={x}
-                    y={y}
-                  >
-                    {index + 1}
-                  </text>
-                </g>
-              ))}
-            </svg>
-          ) : null}
           {status === 'loading' ? (
             <div className="patrol-boundary-map-loading" role="status">
               <span className="loading-spinner" aria-hidden="true" />
