@@ -79,19 +79,24 @@ sibling directory에 검증·전개하고 모든 runtime health가 성공한 뒤
 `/opt/gilbom/deploy`를 교체한다. `runtime.env`와 `image.env`는 host 상태로
 따로 보존된다.
 
-`/opt/gilbom`과 `/var/lib/gilbom`은 root 전용이라 확인 명령에도 `sudo`가 필요하다.
+`/opt/gilbom`과 `/var/lib/gilbom`은 root 전용이다. 일반 운영 계정은
+`/opt/gilbom/deploy`로 `cd`할 수 없으므로 아래 명령은 현재 directory에 의존하지
+않는 절대 경로와 `sudo`를 사용한다. `cd` 실패 뒤 상대 경로 검사를 계속하면 배포
+tree가 아니라 checkout tree를 검사해 거짓 `PASS`가 날 수 있다.
 
 ```sh
-cd /opt/gilbom/deploy
 release_sha="$(sudo cat /var/lib/gilbom/releases/current.sha)"
-test "$(sudo cat .release-source.sha)" = "$release_sha"
-test -f \
+sudo test "$(sudo cat /opt/gilbom/deploy/.release-source.sha)" = "$release_sha"
+sudo test -f \
   "/opt/gilbom/artifacts/$release_sha/gilbom-web-$release_sha.tar.zst"
-test -f infra/scripts/install-day10-host.sh \
+sudo test -f /opt/gilbom/deploy/infra/scripts/install-day10-host.sh \
   || echo "이 release에는 Day 10이 없다. master 기준으로 CI를 다시 돌려야 한다."
-sh scripts/verify-day10-observability.sh
-sudo docker compose --env-file runtime.env --env-file image.env \
-  -f compose.prod.yaml config --quiet && echo "운영 compose 정상"
+sudo sh /opt/gilbom/deploy/scripts/verify-day10-observability.sh
+sudo docker compose --project-directory /opt/gilbom/deploy \
+  --env-file /opt/gilbom/deploy/runtime.env \
+  --env-file /opt/gilbom/deploy/image.env \
+  -f /opt/gilbom/deploy/compose.prod.yaml \
+  config --quiet && echo "운영 compose 정상"
 ```
 
 `.release-source.sha`가 없으면 구 열두 파일 배포기가 아직 설치된 host다. source
@@ -102,8 +107,7 @@ archive를 임의로 풀지 말고 [`cd-automation.md`](cd-automation.md)의
 ### 설치
 
 ```sh
-cd /opt/gilbom/deploy
-sudo sh infra/scripts/install-day10-host.sh
+sudo sh /opt/gilbom/deploy/infra/scripts/install-day10-host.sh
 ```
 
 이 스크립트가 하는 일:
@@ -151,11 +155,20 @@ docker network ls --filter name=_app --format '{{.Name}}'
 > 내려가 있으면 Monitoring이 정상이어도 실패한다.
 
 Mattermost webhook을 Secret 파일로 넣는다. 값은 저장소에 남기지 않는다.
+이미 다른 운영자가 연동한 비어 있지 않은 파일은 덮어쓰지 않고 그대로 사용한다.
 
 ```sh
-sudo install -d -m 0700 /opt/gilbom/secrets
-printf '%s\n' '<Mattermost incoming webhook URL>' \
-  | sudo tee /opt/gilbom/secrets/alertmanager_mattermost_webhook >/dev/null
+sudo install -d -o root -g root -m 0700 /opt/gilbom/secrets
+if sudo test -s /opt/gilbom/secrets/alertmanager_mattermost_webhook; then
+  echo "기존 Mattermost webhook을 보존한다."
+else
+  read -r -s -p 'Mattermost webhook URL: ' webhook_url
+  printf '\n'
+  printf '%s\n' "$webhook_url" \
+    | sudo tee /opt/gilbom/secrets/alertmanager_mattermost_webhook >/dev/null
+  unset webhook_url
+fi
+sudo chown root:root /opt/gilbom/secrets/alertmanager_mattermost_webhook
 sudo chmod 0400 /opt/gilbom/secrets/alertmanager_mattermost_webhook
 ```
 
@@ -175,8 +188,8 @@ gpg --armor --export <키 ID> > backup-recipient-public.asc
 공개키만 서버로 올려 등록한다.
 
 ```sh
-cd /opt/gilbom/deploy
-sudo sh infra/scripts/prepare-backup-encryption.sh ~/backup-recipient-public.asc
+sudo sh /opt/gilbom/deploy/infra/scripts/prepare-backup-encryption.sh \
+  /home/ubuntu/backup-recipient-public.asc
 ```
 
 출력된 지문을 **키 보관자와 육성으로 대조한다.** 지문이 다르면 아무도 열 수 없는 backup만
@@ -191,11 +204,11 @@ sudo sh infra/scripts/prepare-backup-encryption.sh ~/backup-recipient-public.asc
 ## 3. Monitoring stack 재기동과 확인
 
 ```sh
-cd /opt/gilbom/deploy
 sudo docker compose \
   --project-name gilbom-monitoring \
   --env-file /opt/gilbom/monitoring/monitoring.env \
-  -f compose.monitoring.yaml \
+  --project-directory /opt/gilbom/deploy \
+  -f /opt/gilbom/deploy/compose.monitoring.yaml \
   up --detach --wait --wait-timeout 180
 ```
 
@@ -224,9 +237,8 @@ sudo /usr/local/sbin/gilbom-backup volumes
 ### 검사
 
 ```sh
-cd /opt/gilbom/deploy
-sudo sh scripts/verify-day8-auxiliary-runtime.sh
-sudo sh scripts/verify-day10-runtime.sh
+sudo sh /opt/gilbom/deploy/scripts/verify-day8-auxiliary-runtime.sh
+sudo sh /opt/gilbom/deploy/scripts/verify-day10-runtime.sh
 ```
 
 수집 대상 전부 up, alert rule 20개 이상, Alertmanager ready, Loki에 `compose_service`
@@ -300,12 +312,15 @@ done
 ### 5.1 Backend Down
 
 ```sh
-cd /opt/gilbom/deploy
-sudo docker compose --env-file runtime.env --env-file image.env \
-  -f compose.prod.yaml stop backend
+sudo docker compose --project-directory /opt/gilbom/deploy \
+  --env-file /opt/gilbom/deploy/runtime.env \
+  --env-file /opt/gilbom/deploy/image.env \
+  -f /opt/gilbom/deploy/compose.prod.yaml stop backend
 # 2분 뒤 BackendDown critical 수신 확인
-sudo docker compose --env-file runtime.env --env-file image.env \
-  -f compose.prod.yaml start backend
+sudo docker compose --project-directory /opt/gilbom/deploy \
+  --env-file /opt/gilbom/deploy/runtime.env \
+  --env-file /opt/gilbom/deploy/image.env \
+  -f /opt/gilbom/deploy/compose.prod.yaml start backend
 # 해제 메시지(send_resolved)까지 확인
 ```
 
