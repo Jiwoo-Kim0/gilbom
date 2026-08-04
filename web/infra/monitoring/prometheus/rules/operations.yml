@@ -43,6 +43,22 @@ groups:
             EC2가 통째로 사라지면 로컬 backup도 함께 사라진다. 암호화 번들을
             SFTP로 내려받고 record-offhost-export를 실행한다.
 
+      # 알람이 떠도 전달되지 않으면 아무 일도 없는 것과 같다. 실제로 webhook secret
+      # 권한 때문에 한 번도 전달되지 않은 채로 정상처럼 보인 적이 있다.
+      # 이 알람 자체도 같은 경로로 나가므로 채널에 못 올 수 있다. 그때는
+      # Prometheus 알람 화면과 운영 대시보드에 남는 것이 유일한 신호다.
+      - alert: AlertDeliveryFailing
+        expr: sum(increase(alertmanager_notifications_failed_total[15m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 알람 전달 자체가 실패하고 있다
+          description: >-
+            Alertmanager가 통지를 보내지 못하고 있다. webhook secret 파일 권한,
+            URL 유효성, egress 경로 순으로 확인한다.
+            docker logs로 "Notify for alerts failed"를 찾으면 원인이 그대로 나온다.
+
       - alert: TlsCertificateExpiringSoon
         expr: >-
           probe_ssl_earliest_cert_expiry - time() < 14 * 24 * 3600

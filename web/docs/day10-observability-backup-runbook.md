@@ -61,6 +61,15 @@ loopback port가 전부 닫혔다.
 `verify-day10-observability.sh`가 "port를 발행하는 service는 비-internal network를 가진다"를
 검사하므로 같은 실수가 다시 나면 정적 검사에서 걸린다.
 
+### textfile은 파일이 달라도 metric 이름이 같으면 HELP·TYPE이 일치해야 한다
+
+두 파일이 같은 metric 이름을 선언하는데 `# HELP`·`# TYPE` 문구가 다르면(한쪽이 아예
+없는 경우 포함) **collector가 한쪽 시계열을 통째로 버린다.** 더 나쁜 것은
+`node_textfile_scrape_error`가 **0으로 남는다**는 점이다. 오류 표시 없이 값만 사라진다.
+
+`backup-common.sh`가 두 backup 종류의 metric을 같은 함수로 찍는 것은 이 때문이다.
+새 textfile을 손으로 추가할 때는 기존 파일의 HELP·TYPE 문구를 그대로 복사한다.
+
 ### PostgreSQL·Mosquitto Exporter를 쓰지 않는다
 
 connection pool은 Micrometer의 HikariCP metric으로 이미 보인다. MQTT는
@@ -195,10 +204,22 @@ Mattermost webhook을 Secret 파일로 넣는다. 값은 저장소에 남기지 
 
 ```sh
 sudo install -d -m 0700 /opt/gilbom/secrets
-printf '%s\n' '<Mattermost incoming webhook URL>' \
-  | sudo tee /opt/gilbom/secrets/alertmanager_mattermost_webhook >/dev/null
+sudo sh -c 'umask 077; printf "%s\n" "<Mattermost incoming webhook URL>" \
+  > /opt/gilbom/secrets/alertmanager_mattermost_webhook'
+
+# Alertmanager container는 nobody(65534)로 돈다. root 소유 0400이면 읽지 못하고,
+# 그 상태에서도 Alertmanager는 정상으로 보인다. 알람만 조용히 사라진다.
+sudo chown 65534:65534 /opt/gilbom/secrets/alertmanager_mattermost_webhook
 sudo chmod 0400 /opt/gilbom/secrets/alertmanager_mattermost_webhook
+sudo stat -c '%a %U:%G' /opt/gilbom/secrets/alertmanager_mattermost_webhook
 ```
+
+`400 nobody:nogroup`이 나와야 한다. 명령 이력에 URL을 남기지 않으려면 첫 줄 앞에
+공백을 하나 넣는다.
+
+> **0444로 여는 방식은 쓰지 않는다.** Grafana 비밀번호 파일이 그렇게 돼 있지만,
+> 그러면 host의 모든 사용자가 webhook URL을 읽을 수 있다. 소유자를 container 사용자로
+> 바꾸고 0400을 유지하는 쪽이 더 좁다.
 
 ---
 
