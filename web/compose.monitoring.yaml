@@ -41,6 +41,9 @@ services:
       # 두 network 모두 internal이라 여기서 egress가 생기지는 않는다.
       - monitoring
       - app
+      # Docker 28+는 internal network만 가진 container의 port 발행을 적용하지 않는다.
+      # loopback publish 경로를 얻으려고 붙인다. bind 주소는 여전히 127.0.0.1이다.
+      - loopback-publish
     logging: *monitoring-logging
 
   alertmanager:
@@ -129,6 +132,9 @@ services:
     pids_limit: ${LOKI_PIDS_LIMIT:-128}
     networks:
       - monitoring
+      # Docker 28+는 internal network만 가진 container의 port 발행을 적용하지 않는다.
+      # loopback publish 경로를 얻으려고 붙인다. bind 주소는 여전히 127.0.0.1이다.
+      - loopback-publish
     logging: *monitoring-logging
 
   grafana:
@@ -172,6 +178,9 @@ services:
     pids_limit: ${GRAFANA_PIDS_LIMIT:-128}
     networks:
       - monitoring
+      # Docker 28+는 internal network만 가진 container의 port 발행을 적용하지 않는다.
+      # loopback publish 경로를 얻으려고 붙인다. bind 주소는 여전히 127.0.0.1이다.
+      - loopback-publish
     logging: *monitoring-logging
 
   alloy-data-init:
@@ -246,6 +255,9 @@ services:
     pids_limit: ${ALLOY_PIDS_LIMIT:-128}
     networks:
       - monitoring
+      # Docker 28+는 internal network만 가진 container의 port 발행을 적용하지 않는다.
+      # loopback publish 경로를 얻으려고 붙인다. bind 주소는 여전히 127.0.0.1이다.
+      - loopback-publish
     logging: *monitoring-logging
 
   alloy-logs:
@@ -315,4 +327,8 @@ networks:
   probe-egress:
     driver: bridge
   alert-egress:
+    driver: bridge
+  # 발행된 port를 host loopback에 실제로 열기 위한 경로다. 이 network에 있다고
+  # 해서 외부에서 닿지는 않는다. 노출 경계는 여전히 127.0.0.1 bind다.
+  loopback-publish:
     driver: bridge
