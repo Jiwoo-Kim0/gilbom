@@ -196,6 +196,7 @@
           "type": "string",
           "enum": [
             "DAMAGED",
+            "MISSING",
             "INSTALLATION_INVALID",
             "UNKNOWN_ANOMALY"
           ]
@@ -231,6 +232,7 @@
           "type": "string",
           "enum": [
             "DAMAGED",
+            "MISSING",
             "INSTALLATION_INVALID",
             "UNKNOWN_ANOMALY"
           ]

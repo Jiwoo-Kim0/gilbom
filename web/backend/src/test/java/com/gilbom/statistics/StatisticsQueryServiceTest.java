@@ -225,6 +225,8 @@ class StatisticsQueryServiceTest {
                         org.assertj.core.groups.Tuple.tuple(
                                 DefectType.DAMAGED, 2L),
                         org.assertj.core.groups.Tuple.tuple(
+                                DefectType.MISSING, 0L),
+                        org.assertj.core.groups.Tuple.tuple(
                                 DefectType.INSTALLATION_INVALID, 0L),
                         org.assertj.core.groups.Tuple.tuple(
                                 DefectType.UNKNOWN_ANOMALY, 1L));
