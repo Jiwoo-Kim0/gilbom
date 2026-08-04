@@ -144,8 +144,11 @@ assert_contains Jenkinsfile.production-auto \
   'currentBuild.getBuildCauses(' \
   "production auto-CD does not verify an upstream cause"
 assert_contains Jenkinsfile.production-auto \
+  'build.BuildUpstreamCause' \
+  "production auto-CD does not require the Pipeline build-step cause"
+assert_absent Jenkinsfile.production-auto \
   'hudson.model.Cause$UpstreamCause' \
-  "production auto-CD does not restrict the accepted cause type"
+  "production auto-CD incorrectly filters on the BuildUpstreamCause superclass"
 assert_contains Jenkinsfile.production-auto \
   'Detected Jenkins upstream causes: ' \
   "production auto-CD does not emit safe upstream cause diagnostics"

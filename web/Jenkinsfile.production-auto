@@ -67,7 +67,7 @@ pipeline {
                         error('Production automatic CD is disabled')
                     }
                     def upstreamCauses = currentBuild.getBuildCauses(
-                            'hudson.model.Cause$UpstreamCause'
+                            'org.jenkinsci.plugins.workflow.support.steps.build.BuildUpstreamCause'
                     )
                     echo(
                             'Detected Jenkins upstream causes: '
