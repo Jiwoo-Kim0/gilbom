@@ -70,7 +70,9 @@ for label in \
   'Archive SHA-256:' \
   'Cosign Signature:' \
   'Cosign Public Key SHA-256:' \
-  'Cosign Bundle SHA-256:' \
+  'Cosign Image Bundle SHA-256:' \
+  'Cosign Manifest Bundle SHA-256:' \
+  'Compose SHA-256:' \
   'Critical:' \
   'High:' \
   '적용 예정 Flyway Migration:' \

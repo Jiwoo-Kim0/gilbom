@@ -95,6 +95,7 @@ for result_id in \
   openapi-lint \
   backend-dependency-scan \
   frontend-dependency-scan \
+  cosign-release-manifest \
   artifact-checksum \
   jenkins-log-secret
 do

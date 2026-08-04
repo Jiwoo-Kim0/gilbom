@@ -28,6 +28,20 @@ pipeline {
                 deleteDir()
                 checkout scm
                 script {
+                    def requestedSha =
+                            params.FULL_COMMIT_SHA
+                                    ? params.FULL_COMMIT_SHA.trim()
+                                    : ''
+                    if (!(requestedSha ==~ /^[0-9a-f]{40}$/)) {
+                        error(
+                                'FULL_COMMIT_SHA is missing or invalid. '
+                                        + 'For a newly created Pipeline Job, '
+                                        + 'the first build only seeds the '
+                                        + 'Declarative parameter; rerun the '
+                                        + 'upstream gilbom-ci-baseline Job.'
+                        )
+                    }
+                    env.FULL_COMMIT_SHA = requestedSha
                     env.APP_DIR = fileExists(
                             'web/Jenkinsfile.production-auto'
                     ) ? 'web' : '.'
@@ -35,8 +49,7 @@ pipeline {
                 dir(env.APP_DIR) {
                     sh '''
                         set -eu
-                        printf '%s\\n' "$FULL_COMMIT_SHA" \
-                            | grep -Eq '^[0-9a-f]{40}$'
+                        test -n "$FULL_COMMIT_SHA"
                         test "$(git rev-parse --is-shallow-repository)" = false
                         git cat-file -e "$FULL_COMMIT_SHA^{commit}"
                         git merge-base --is-ancestor \
@@ -100,6 +113,15 @@ pipeline {
                                   and .artifact.directory
                                     == ("/opt/gilbom/artifacts/" + $sha)
                                   and .artifact.signature.status == "PASS"
+                                  and (
+                                    .artifact.signature.manifestBundleSha256
+                                    | test("^[0-9a-f]{64}$")
+                                  )
+                                  and .compose.path == "compose.prod.yaml"
+                                  and (
+                                    .compose.sha256
+                                    | test("^[0-9a-f]{64}$")
+                                  )
                                   and .vulnerabilities.critical == 0
                                   and .vulnerabilities.unapprovedHigh == 0
                                   and .flyway.compatibility
@@ -252,6 +274,12 @@ pipeline {
                                   and .flyway.migrationCount == 0
                                   and .flyway.approvalRequired == false
                                   and .artifact.signature.status == "PASS"
+                                  and (
+                                    .artifact.signature.manifestBundleSha256
+                                    | test("^[0-9a-f]{64}$")
+                                  )
+                                  and .compose.path == "compose.prod.yaml"
+                                  and .compose.sha256 == .composeSha256
                                   and .health.backendReadiness == "PASS"
                                   and .health.frontend == "PASS"
                                   and .health.frontendToBackend == "PASS"

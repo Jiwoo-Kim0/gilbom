@@ -242,6 +242,7 @@ def main() -> int:
                 **artifact("images.tar.zst"),
                 "signature": signing_evidence(),
             },
+            "compose": artifact("compose.prod.yaml"),
         },
     }
 

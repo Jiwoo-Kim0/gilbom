@@ -56,8 +56,10 @@ vulnerabilities/policy-summary.json
 images.tar.zst
 images.tar.zst.sigstore.json
 images.tar.zst.sha256
+compose.prod.yaml
 build-metadata.json
 SHA256SUMS
+SHA256SUMS.sigstore.json
 '
 
 for relative_path in $expected_files
@@ -66,8 +68,8 @@ do
   [ -f "$artifact" ] && [ ! -L "$artifact" ] && [ -s "$artifact" ] \
     || fail "required release artifact is missing, empty, or unsafe: $relative_path"
 done
-[ "$(find "$RELEASE_DIR" -type f | wc -l)" -eq 10 ] \
-  || fail "release directory must contain exactly ten regular files"
+[ "$(find "$RELEASE_DIR" -type f | wc -l)" -eq 12 ] \
+  || fail "release directory must contain exactly twelve regular files"
 [ -z "$(find "$RELEASE_DIR" -type l -print -quit)" ] \
   || fail "release directory must not contain symlinks"
 [ -z "$(
@@ -137,15 +139,17 @@ scp_options="
   -P $SSH_PORT
 "
 
-# OpenSSH scp uses SFTP by default. Only the ten prevalidated regular files
+# OpenSSH scp uses SFTP by default. Only the twelve prevalidated regular files
 # are copied, and the remote directory was created without replacement above.
 # shellcheck disable=SC2086
 scp $scp_options -- \
   "$RELEASE_DIR/images.tar.zst" \
   "$RELEASE_DIR/images.tar.zst.sigstore.json" \
   "$RELEASE_DIR/images.tar.zst.sha256" \
+  "$RELEASE_DIR/compose.prod.yaml" \
   "$RELEASE_DIR/build-metadata.json" \
   "$RELEASE_DIR/SHA256SUMS" \
+  "$RELEASE_DIR/SHA256SUMS.sigstore.json" \
   "$DESTINATION:$REMOTE_INCOMING_DIR/"
 # shellcheck disable=SC2086
 scp $scp_options -- \

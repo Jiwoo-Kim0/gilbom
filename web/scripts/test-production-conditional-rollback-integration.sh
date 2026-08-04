@@ -49,7 +49,8 @@ install -d -o root -g root -m 0700 \
   "$fake_image_save/previous" \
   "$fake_image_save/failed"
 
-printf 'services: {}\n' > /opt/gilbom/deploy/compose.prod.yaml
+printf 'services: {}\n# active previous compose\n' \
+  > /opt/gilbom/deploy/compose.prod.yaml
 printf 'RUNTIME=value\n' > /opt/gilbom/deploy/runtime.env
 {
   printf 'BACKEND_IMAGE=gilbom-backend:%s\n' "$previous_sha"
@@ -98,6 +99,8 @@ create_artifact() {
   printf 'archive-%s\n' "$release_sha" > "$artifact_dir/images.tar.zst"
   printf '{"fixture":"cosign-bundle","releaseSha":"%s"}\n' "$release_sha" \
     > "$artifact_dir/images.tar.zst.sigstore.json"
+  printf 'services: {}\n# signed release %s\n' "$release_sha" \
+    > "$artifact_dir/compose.prod.yaml"
   printf '{}\n' > "$artifact_dir/sbom/backend.sbom.json"
   printf '{}\n' > "$artifact_dir/sbom/frontend.sbom.json"
   printf 'backend findings: none\n' \
@@ -116,6 +119,9 @@ create_artifact() {
     --arg backend_character "$backend_character" \
     --arg frontend_character "$frontend_character" \
     --arg cosign_public_key_sha256 "$cosign_public_key_sha256" \
+    --arg compose_sha256 "$(
+      sha256sum "$artifact_dir/compose.prod.yaml" | awk '{print $1}'
+    )" \
     --argjson target_version "$target_version" \
     '
       {
@@ -139,6 +145,10 @@ create_artifact() {
               publicKeySha256: $cosign_public_key_sha256,
               bundle: {path: "images.tar.zst.sigstore.json"}
             }
+          },
+          compose: {
+            path: "compose.prod.yaml",
+            sha256: $compose_sha256
           }
         },
         flyway: {
@@ -164,6 +174,8 @@ create_artifact() {
       | LC_ALL=C sort \
       | xargs sha256sum > SHA256SUMS
   )
+  printf '{"fixture":"manifest-cosign-bundle","releaseSha":"%s"}\n' \
+    "$release_sha" > "$artifact_dir/SHA256SUMS.sigstore.json"
 }
 
 create_artifact "$previous_sha" 35 e f
@@ -397,6 +409,9 @@ case "$scenario" in
     [ "$(sed -n 's/^BACKEND_IMAGE=gilbom-backend://p' \
       /opt/gilbom/deploy/image.env)" = "$previous_sha" ] \
       || fail "automatic rollback did not restore image.env"
+    grep -Fq '# active previous compose' \
+      /opt/gilbom/deploy/compose.prod.yaml \
+      || fail "automatic rollback did not restore previous Compose"
     [ ! -e "$failed_record_dir/manual-recovery-required.json" ] \
       || fail "automatic rollback incorrectly requested manual recovery"
     echo "Conditional rollback A integration: PASS"
@@ -424,6 +439,9 @@ case "$scenario" in
     [ "$(sed -n 's/^BACKEND_IMAGE=gilbom-backend://p' \
       /opt/gilbom/deploy/image.env)" = "$failed_sha" ] \
       || fail "manual containment replaced the failed Backend"
+    grep -Fq "# signed release $failed_sha" \
+      /opt/gilbom/deploy/compose.prod.yaml \
+      || fail "manual containment did not preserve the failed release Compose"
     [ -f "$fake_state/frontend-stopped" ] \
       || fail "manual containment did not stop Frontend"
     [ ! -e "$failed_record_dir/rollback-manifest.json" ] \
@@ -464,6 +482,9 @@ case "$scenario" in
     [ "$(sed -n 's/^BACKEND_IMAGE=gilbom-backend://p' \
       /opt/gilbom/deploy/image.env)" = "$previous_sha" ] \
       || fail "approved rollback did not restore previous image.env"
+    grep -Fq '# active previous compose' \
+      /opt/gilbom/deploy/compose.prod.yaml \
+      || fail "approved rollback did not restore previous Compose"
     jq -e \
       --arg failed_sha "$failed_sha" \
       --arg previous_sha "$previous_sha" \

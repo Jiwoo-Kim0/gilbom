@@ -94,6 +94,7 @@ compose() {
 }
 
 artifact_dir="$ARTIFACT_ROOT/$release_sha"
+candidate_compose_path="$artifact_dir/compose.prod.yaml"
 metadata="$artifact_dir/build-metadata.json"
 policy="$artifact_dir/vulnerabilities/policy-summary.json"
 release_record_dir="$RELEASE_RECORD_ROOT/$release_sha"
@@ -115,6 +116,8 @@ for file in \
   "$COSIGN_BIN" \
   "$COSIGN_PUBLIC_KEY" \
   "$artifact_dir/SHA256SUMS" \
+  "$artifact_dir/SHA256SUMS.sigstore.json" \
+  "$candidate_compose_path" \
   "$artifact_dir/images.tar.zst" \
   "$artifact_dir/images.tar.zst.sigstore.json" \
   "$artifact_dir/images.tar.zst.sha256" \
@@ -127,16 +130,22 @@ done
   || fail "artifact directory contains a symlink"
 [ -z "$(find "$artifact_dir" -perm /0222 -print -quit)" ] \
   || fail "artifact directory is not immutable"
-[ "$(find "$artifact_dir" -type f | wc -l | tr -d ' ')" -eq 10 ] \
-  || fail "artifact directory must contain exactly ten files"
+[ "$(find "$artifact_dir" -type f | wc -l | tr -d ' ')" -eq 12 ] \
+  || fail "artifact directory must contain exactly twelve files"
+"$COSIGN_BIN" version \
+  | grep -Fq "GitVersion:    $COSIGN_VERSION" \
+  || fail "Cosign verifier version differs from $COSIGN_VERSION"
+"$COSIGN_BIN" verify-blob \
+  --insecure-ignore-tlog \
+  --key "$COSIGN_PUBLIC_KEY" \
+  --bundle "$artifact_dir/SHA256SUMS.sigstore.json" \
+  "$artifact_dir/SHA256SUMS" >/dev/null \
+  || fail "complete release manifest Cosign signature is invalid"
 (
   cd "$artifact_dir"
   sha256sum -c SHA256SUMS >/dev/null
   sha256sum -c images.tar.zst.sha256 >/dev/null
 ) || fail "artifact checksum verification failed"
-"$COSIGN_BIN" version \
-  | grep -Fq "GitVersion:    $COSIGN_VERSION" \
-  || fail "Cosign verifier version differs from $COSIGN_VERSION"
 "$COSIGN_BIN" verify-blob \
   --insecure-ignore-tlog \
   --key "$COSIGN_PUBLIC_KEY" \
@@ -147,11 +156,15 @@ done
 jq_cosign_public_key_sha256="$(
   sha256sum "$COSIGN_PUBLIC_KEY" | awk '{print $1}'
 )"
+candidate_compose_sha256="$(
+  sha256sum "$candidate_compose_path" | awk '{print $1}'
+)"
 jq -e \
   --arg release_sha "$release_sha" \
   --arg backend_image "gilbom-backend:$release_sha" \
   --arg frontend_image "gilbom-frontend:$release_sha" \
   --arg cosign_public_key_sha256 "$jq_cosign_public_key_sha256" \
+  --arg compose_sha256 "$candidate_compose_sha256" \
   '
     .schemaVersion == 1
     and .releaseSha == $release_sha
@@ -169,6 +182,8 @@ jq -e \
       .artifacts.images.signature.bundle.path
       == "images.tar.zst.sigstore.json"
     )
+    and .artifacts.compose.path == "compose.prod.yaml"
+    and .artifacts.compose.sha256 == $compose_sha256
     and (.flyway.latestVersion | test("^V[1-9][0-9]*$"))
     and (.flyway.migrations | type == "array" and length > 0)
     and all(
@@ -190,6 +205,15 @@ jq -e \
   ' "$policy" >/dev/null \
   || fail "release vulnerability policy is not deployable"
 
+BACKEND_IMAGE="gilbom-backend:$release_sha" \
+FRONTEND_IMAGE="gilbom-frontend:$release_sha" \
+docker compose \
+  --env-file "$RUNTIME_ENV_PATH" \
+  --env-file "$IMAGE_ENV_PATH" \
+  --file "$candidate_compose_path" \
+  config --quiet \
+  || fail "signed release Compose configuration is invalid or runtime.env is incomplete"
+
 backend_image_id="$(jq -r '.images.backend.id' "$metadata")"
 frontend_image_id="$(jq -r '.images.frontend.id' "$metadata")"
 archive_sha256="$(
@@ -202,6 +226,9 @@ printf '%s\n' "$archive_sha256" | grep -Eq '^[0-9a-f]{64}$' \
 sha256_sums_sha256="$(sha256sum "$artifact_dir/SHA256SUMS" | awk '{print $1}')"
 signature_bundle_sha256="$(
   sha256sum "$artifact_dir/images.tar.zst.sigstore.json" | awk '{print $1}'
+)"
+manifest_signature_bundle_sha256="$(
+  sha256sum "$artifact_dir/SHA256SUMS.sigstore.json" | awk '{print $1}'
 )"
 critical_count="$(jq -r '.criticalCount' "$policy")"
 high_count="$(jq -r '.highCount' "$policy")"
@@ -405,6 +432,9 @@ jq -n -S \
   --arg cosign_version "$COSIGN_VERSION" \
   --arg cosign_public_key_sha256 "$jq_cosign_public_key_sha256" \
   --arg signature_bundle_sha256 "$signature_bundle_sha256" \
+  --arg manifest_signature_bundle_sha256 \
+    "$manifest_signature_bundle_sha256" \
+  --arg compose_sha256 "$candidate_compose_sha256" \
   --arg backend_image "gilbom-backend:$release_sha" \
   --arg backend_image_id "$backend_image_id" \
   --arg frontend_image "gilbom-frontend:$release_sha" \
@@ -434,8 +464,13 @@ jq -n -S \
           status: "PASS",
           cosignVersion: $cosign_version,
           publicKeySha256: $cosign_public_key_sha256,
-          bundleSha256: $signature_bundle_sha256
+          bundleSha256: $signature_bundle_sha256,
+          manifestBundleSha256: $manifest_signature_bundle_sha256
         }
+      },
+      compose: {
+        path: "compose.prod.yaml",
+        sha256: $compose_sha256
       },
       images: {
         backend: {

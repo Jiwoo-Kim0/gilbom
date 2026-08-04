@@ -12,6 +12,7 @@ for file in \
   Jenkinsfile.production-auto \
   infra/scripts/gilbom-deploy-preflight.sh \
   infra/scripts/gilbom-deploy.sh \
+  scripts/sign-release-manifest.sh \
   scripts/generate-cicd-notification.py \
   docs/cd-automation.md
 do
@@ -52,6 +53,18 @@ fi
 assert_contains Jenkinsfile.production-auto \
   "name: 'FULL_COMMIT_SHA'" \
   "full SHA parameter is missing"
+assert_contains Jenkinsfile.production-auto \
+  'params.FULL_COMMIT_SHA.trim()' \
+  "full SHA parameter is not explicitly resolved before shell execution"
+assert_contains Jenkinsfile.production-auto \
+  'env.FULL_COMMIT_SHA = requestedSha' \
+  "validated full SHA is not exported to the deployment stages"
+assert_contains Jenkinsfile.production-auto \
+  'the first build only seeds the ' \
+  "first-build parameter bootstrap failure is not explained"
+assert_absent Jenkinsfile.production-auto \
+  'printf '\''%s\\\\n'\'' "$FULL_COMMIT_SHA" \\' \
+  "full SHA validation still relies on an unset shell parameter"
 assert_contains Jenkinsfile.production-auto \
   'git merge-base --is-ancestor' \
   "master ancestry verification is missing"
@@ -140,6 +153,12 @@ assert_contains Jenkinsfile.production-auto \
   '.artifact.signature.status == "PASS"' \
   "production auto-CD does not require a valid Cosign signature"
 assert_contains Jenkinsfile.production-auto \
+  '.artifact.signature.manifestBundleSha256' \
+  "production auto-CD does not require complete manifest signature evidence"
+assert_contains Jenkinsfile.production-auto \
+  '.compose.path == "compose.prod.yaml"' \
+  "production auto-CD does not bind evidence to the signed Compose"
+assert_contains Jenkinsfile.production-auto \
   '.vulnerabilities.critical == 0' \
   "production auto-CD does not require Critical 0"
 assert_contains Jenkinsfile.production-auto \
@@ -152,6 +171,12 @@ assert_contains Jenkinsfile.production-auto \
 assert_contains infra/scripts/gilbom-deploy-preflight.sh \
   '"$COSIGN_BIN" verify-blob' \
   "preflight does not verify the Cosign Blob signature"
+assert_contains infra/scripts/gilbom-deploy-preflight.sh \
+  'SHA256SUMS.sigstore.json' \
+  "preflight does not require the signed complete release manifest"
+assert_contains infra/scripts/gilbom-deploy-preflight.sh \
+  'signed release Compose configuration is invalid or runtime.env is incomplete' \
+  "preflight does not validate the candidate Compose with host runtime.env"
 assert_contains infra/scripts/gilbom-deploy.sh \
   'flock --nonblock 9' \
   "root deploy does not acquire a non-blocking deployment lock"
@@ -164,6 +189,15 @@ assert_contains infra/scripts/gilbom-deploy.sh \
 assert_contains infra/scripts/gilbom-deploy.sh \
   'status: "MANUAL_RECOVERY_REQUIRED"' \
   "migration-changing failure does not enter manual recovery"
+assert_contains infra/scripts/gilbom-deploy.sh \
+  'install_compose_file "$candidate_compose_path"' \
+  "root deploy does not install the signed candidate Compose"
+assert_contains infra/scripts/gilbom-deploy.sh \
+  'previous-compose.prod.yaml' \
+  "root deploy does not preserve Compose rollback state"
+assert_contains Jenkinsfile \
+  'sh scripts/sign-release-manifest.sh' \
+  "CI does not sign the complete release manifest"
 
 assert_contains docs/cd-automation.md \
   'GILBOM_PRODUCTION_AUTO_CD_ENABLED=true' \

@@ -24,6 +24,12 @@ jq -e \
     and .artifact.signature.cosignVersion == "v3.1.2"
     and (.artifact.signature.publicKeySha256 | test("^[0-9a-f]{64}$"))
     and (.artifact.signature.bundleSha256 | test("^[0-9a-f]{64}$"))
+    and (
+      .artifact.signature.manifestBundleSha256
+      | test("^[0-9a-f]{64}$")
+    )
+    and .compose.path == "compose.prod.yaml"
+    and (.compose.sha256 | test("^[0-9a-f]{64}$"))
     and (.production.currentSha | test("^[0-9a-f]{40}$"))
     and (.production.rollbackTargetSha | test("^[0-9a-f]{40}$"))
     and (.flyway.pendingMigrations | type == "array")
@@ -51,7 +57,9 @@ Frontend Image ID: $(jq -r '.images.frontend.id' "$preflight")
 Archive SHA-256: $(jq -r '.artifact.archiveSha256' "$preflight")
 Cosign Signature: $(jq -r '.artifact.signature.status' "$preflight") ($(jq -r '.artifact.signature.cosignVersion' "$preflight"))
 Cosign Public Key SHA-256: $(jq -r '.artifact.signature.publicKeySha256' "$preflight")
-Cosign Bundle SHA-256: $(jq -r '.artifact.signature.bundleSha256' "$preflight")
+Cosign Image Bundle SHA-256: $(jq -r '.artifact.signature.bundleSha256' "$preflight")
+Cosign Manifest Bundle SHA-256: $(jq -r '.artifact.signature.manifestBundleSha256' "$preflight")
+Compose SHA-256: $(jq -r '.compose.sha256' "$preflight")
 Critical: $(jq -r '.vulnerabilities.critical' "$preflight")
 High: $(jq -r '.vulnerabilities.high' "$preflight") (승인 예외 $(jq -r '.vulnerabilities.exceptedHigh' "$preflight"), 미승인 $(jq -r '.vulnerabilities.unapprovedHigh' "$preflight"))
 현재 운영 SHA: $(jq -r '.production.currentSha' "$preflight")

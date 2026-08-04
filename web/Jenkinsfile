@@ -766,6 +766,26 @@ pipeline {
                     sh '''
                         set -eu
                         sh scripts/generate-build-metadata.sh
+                    '''
+                    withCredentials([
+                        file(
+                                credentialsId: 'gilbom-cosign-private-key',
+                                variable: 'COSIGN_PRIVATE_KEY'
+                        ),
+                        string(
+                                credentialsId: 'gilbom-cosign-password',
+                                variable: 'COSIGN_PASSWORD'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
+                            sh scripts/sign-release-manifest.sh
+                            sh scripts/record-ci-result.sh cosign-release-manifest
+                        '''
+                    }
+                    sh '''
+                        set -eu
                         sh scripts/verify-release-artifacts.sh
                         sh scripts/record-ci-result.sh artifact-checksum
                     '''

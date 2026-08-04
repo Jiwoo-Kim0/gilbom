@@ -11,7 +11,8 @@ DinD에서 격리하고, 배포는 기존 root 소유 진입점을 그대로 재
 master SCM Polling
   → 전체 CI/Test/Security
   → SBOM/CVE 정책
-  → images.tar.zst 생성·Cosign 서명·부정 테스트
+  → images.tar.zst + compose.prod.yaml 릴리스 생성
+  → image와 전체 SHA256SUMS Cosign 서명·부정 테스트
   → 운영 Artifact host immutable promotion
   → Jenkins console Secret scan
   → gilbom-production-auto-deploy 비동기 예약
@@ -53,6 +54,12 @@ GILBOM_PRODUCTION_AUTO_CD_ENABLED=true
 Job의 일반 사용자 `Build` 권한을 제거한다. 수동으로 실행하면 upstream cause
 검증에서 fail-closed된다.
 
+Job을 처음 만든 직후에는 Declarative `FULL_COMMIT_SHA` parameter가 아직 Jenkins
+Job 설정에 반영되기 전이라 최초 upstream build가 parameter bootstrap 용도로 한
+번 실패할 수 있다. 첫 실행이 parameter를 등록하므로 코드를 바꾸거나 수동 운영
+배포를 실행하지 말고 `gilbom-ci-baseline`을 같은 master 상태로 한 번 다시
+실행한다. 이후 호출부터 검증된 `FULL_COMMIT_SHA`가 명시적으로 환경에 고정된다.
+
 ## Migration 경계
 
 신규 Flyway migration은 자동 운영 배포 대상이 아니다. preflight가 migration을
@@ -78,9 +85,10 @@ sudo jq -e --arg sha "$release_sha" \
 자동 Job은 기존 root 배포기를 호출하므로 다음 검증은 Pipeline 문자열이 아니라
 EC2 root 경계에서 다시 수행된다.
 
-- Artifact 디렉터리 root 소유·불변 mode·정확히 열 개 파일
-- `SHA256SUMS`와 `images.tar.zst.sha256`
-- 고정 Cosign `v3.1.2`, 고정 공개키, Blob Bundle
+- Artifact 디렉터리 root 소유·불변 mode·정확히 열두 개 파일
+- 전체 `SHA256SUMS` 서명과 `images.tar.zst.sha256`
+- 고정 Cosign `v3.1.2`, 고정 공개키, image/manifest Blob Bundle
+- 서명된 `compose.prod.yaml`과 서버 전용 `runtime.env`의 완전한 렌더링
 - image name·ID와 full SHA
 - Critical 및 미승인 High 정책
 - exact preflight·현재 SHA·migration plan에 결속된 자동 승인
@@ -90,13 +98,37 @@ EC2 root 경계에서 다시 수행된다.
 - Backend·Frontend·MQTT·내부 HTTPS health
 - Release Manifest, `current.sha`, `previous.sha`
 
-Cosign 또는 checksum이 실패하면 `docker load`와 서비스 변경 전에 차단된다.
+Cosign, checksum 또는 후보 Compose 렌더링이 실패하면 `docker load`와 서비스
+변경 전에 차단된다. `runtime.env`와 Docker Secret은 Artifact에 포함하지 않으며
+EC2 root 소유 파일로 유지한다. 저장소 Compose에 `${NAME:?…}` 필수 변수가
+추가됐는데 운영 `runtime.env`에 값이 없으면 preflight가 자동 배포를 차단한다.
 
 Health 실패 시 Flyway version 변화가 없을 때만 이전 서명 Artifact로 자동
 Rollback한다. version 변화 또는 확인 불가 상태면 Frontend를 차단하고 backup과
 장애 증거를 보존한 `MANUAL_RECOVERY_REQUIRED` 상태로 전환한다. 운영 자동 Job은
 migration `0`만 허용하므로 정상 자동 CD 경로의 Health 실패는 이전 release 자동
-Rollback 대상이다.
+Rollback 대상이다. 이때 이전 image뿐 아니라 배포 직전
+`previous-compose.prod.yaml` snapshot도 함께 복원한다.
+
+## 새 Artifact 형식 최초 반영
+
+새 CI를 실행하기 전에 EC2의 root 승격 helper와 배포 entrypoint를 먼저 갱신한다.
+구 helper는 열두 파일 형식을 알지 못하므로 이 순서를 바꾸면 promotion이
+fail-closed된다.
+
+```sh
+cd /opt/gilbom/app-git/web
+git pull --ff-only
+
+sudo install -o root -g root -m 0755 \
+  infra/scripts/promote-ci-release-artifacts.sh \
+  /usr/local/sbin/gilbom-promote-ci-release-artifacts
+
+sudo sh infra/scripts/install-production-deploy-entrypoint.sh
+sudo sh infra/scripts/install-production-deploy-job-entrypoints.sh
+```
+
+설치 완료 뒤 master를 push해 CI → promotion → 자동 운영 배포를 실행한다.
 
 ## Jenkins Job
 

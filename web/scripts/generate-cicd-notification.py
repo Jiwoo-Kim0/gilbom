@@ -162,6 +162,11 @@ PIPELINES = {
                 "Cosign Blob signature",
                 "sh scripts/sign-release-image-archive.sh",
             ),
+            (
+                "cosign-release-manifest",
+                "Cosign complete release manifest",
+                "sh scripts/sign-release-manifest.sh",
+            ),
             ("artifact-checksum", "Release Artifact checksum", "sh scripts/verify-release-artifacts.sh"),
             (
                 "artifact-upload",

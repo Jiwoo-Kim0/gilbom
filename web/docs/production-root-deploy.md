@@ -17,7 +17,8 @@ sudo --non-interactive /usr/local/sbin/gilbom-deploy <40자리-full-sha>
 | 용도 | 고정 경로 |
 |---|---|
 | 승격 Artifact | `/opt/gilbom/artifacts/<release-sha>` |
-| Compose | `/opt/gilbom/deploy/compose.prod.yaml` |
+| 현재 활성 Compose | `/opt/gilbom/deploy/compose.prod.yaml` |
+| 서명된 후보 Compose | `/opt/gilbom/artifacts/<release-sha>/compose.prod.yaml` |
 | 공개 Runtime 설정 | `/opt/gilbom/deploy/runtime.env` |
 | Image 설정 | `/opt/gilbom/deploy/image.env` |
 | Secret root | `/opt/gilbom/secrets` |
@@ -97,15 +98,19 @@ entrypoint는 다음을 순서대로 수행한다.
 
 1. 단일 full SHA와 고정 경로·root 소유권·권한 검증
 2. `flock` 동시 배포 차단
-3. Artifact 전체 checksum과 고정 공개키 Cosign Blob 서명 검증
-4. 서명 PASS 뒤 `zstd -t`, `zstd -dc | docker load`, 두 image tag와 metadata config ID 검증
-5. 운영 Flyway version 조회, 신규 migration plan 비교와 승인 검사
-6. 기존 DB·PDF·image·MQTT volume backup 및 checksum 재검사
-7. `current.sha`를 `previous.sha`로 기록하고 `image.env` 원자 교체
-8. `docker compose up -d --no-build`
-9. Backend readiness, Frontend health, Frontend→Backend, MQTT health 검사
-10. 적용 후 Flyway version·script 재검사와 release manifest 기록
-11. 모든 단계가 성공한 경우에만 `current.sha` 원자 갱신
+3. 전체 `SHA256SUMS` Cosign 서명, Artifact checksum, image archive 서명 검증
+4. 서명 PASS 뒤 후보 Compose를 서버 `runtime.env`와 target image 값으로 렌더링
+   하여 필수 변수·문법 검증
+5. `zstd -t`, `zstd -dc | docker load`, 두 image tag와 metadata config ID 검증
+6. 운영 Flyway version 조회, 신규 migration plan 비교와 승인 검사
+7. 기존 DB·PDF·image·MQTT volume backup 및 checksum 재검사
+8. 활성 Compose를 release record에 snapshot하고 `current.sha`를
+   `previous.sha`로 기록
+9. 서명된 후보 Compose와 `image.env`를 각각 원자 교체
+10. `docker compose up -d --no-build`
+11. Backend readiness, Frontend health, Frontend→Backend, MQTT health 검사
+12. 적용 후 Flyway version·script 재검사와 release manifest 기록
+13. 모든 단계가 성공한 경우에만 `current.sha` 원자 갱신
 
 Image ID 검증은 Docker 저장소 모드에 따라 의미가 달라질 수 있는
 `docker image inspect .Id`를 metadata와 직접 비교하지 않는다. 로드된 tag를
@@ -113,9 +118,10 @@ Image ID 검증은 Docker 저장소 모드에 따라 의미가 달라질 수 있
 digest를 비교한다. Release Manifest의 `images.*.id`에는 이 portable config
 ID를, `images.*.engineId`에는 EC2 Docker가 노출한 로컬 engine ID를 기록한다.
 
-`image.env` 전환 뒤 실패하면 root 배포기는 배포 직전과 실패 직후 Flyway version을
-다시 비교한다. 변화가 없을 때만 이전 image를 자동 복원하고 Backend readiness,
-Frontend health와 내부 HTTPS smoke 뒤 `rollback-manifest.json`을 기록한다.
+Compose·`image.env` 전환 뒤 실패하면 root 배포기는 배포 직전과 실패 직후 Flyway
+version을 다시 비교한다. 변화가 없을 때만 이전 Compose snapshot과 이전 image를
+함께 자동 복원하고 Backend readiness, Frontend health와 내부 HTTPS smoke 뒤
+`rollback-manifest.json`을 기록한다.
 Flyway가 변했거나 재조회할 수 없으면 Frontend만 중지하고 신규 Backend·DB,
 Artifact, backup과 container log를 보존한
 `manual-recovery-required.json`을 기록한다. 이 경우 별도 Jenkins 호환성 승인
@@ -131,11 +137,12 @@ DB 자동 복원을 수행하지 않는다.
 /var/lib/gilbom/releases/previous.sha
 /var/lib/gilbom/releases/<release-sha>/migration-plan.json
 /var/lib/gilbom/releases/<release-sha>/migration-plan.sha256
+/var/lib/gilbom/releases/<release-sha>/previous-compose.prod.yaml
 /var/lib/gilbom/releases/<release-sha>/release-manifest.json
 ```
 
-Release manifest에는 Artifact manifest hash, Cosign version·공개키·Bundle hash,
-두 image ID, Flyway 전·후 version,
+Release manifest에는 Artifact manifest hash, 두 Cosign Bundle hash,
+Compose hash·이전 snapshot, 두 image ID, Flyway 전·후 version,
 migration 승인, Jenkins 승인자 ID·시간, backup bundle, 네 health 결과가
 기록된다. Secret 값은 기록하지 않는다. Stage 12 설치 이후에는 exact preflight
 hash와 결속된 Jenkins 배포 승인이 없거나 승인 이후 운영 상태가 달라진 경우에도

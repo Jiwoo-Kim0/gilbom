@@ -104,6 +104,12 @@ grep -Fq 'atomic_line "$PREVIOUS_SHA_PATH"' "$DEPLOY_SCRIPT" \
   || fail "previous SHA atomic recording is missing"
 grep -Fq 'compose up --detach --no-build' "$DEPLOY_SCRIPT" \
   || fail "offline production Compose update is missing"
+grep -Fq 'verify_release_manifest_signature "$artifact_dir"' "$DEPLOY_SCRIPT" \
+  || fail "complete release manifest signature verification is missing"
+grep -Fq 'install_compose_file "$candidate_compose_path"' "$DEPLOY_SCRIPT" \
+  || fail "signed production Compose installation is missing"
+grep -Fq 'previous-compose.prod.yaml' "$DEPLOY_SCRIPT" \
+  || fail "production Compose rollback snapshot is missing"
 for evidence in \
   'Backend readiness is not UP' \
   'Frontend health check failed' \
