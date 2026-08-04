@@ -50,6 +50,12 @@ if grep -Eq \
   fail "production auto-CD Job must not define an independent trigger"
 fi
 
+if grep -Eq \
+    '^[[:space:]]*(&&|\|\|)' \
+    Jenkinsfile.production-auto; then
+  fail "production auto-CD contains an invalid line-leading Groovy operator"
+fi
+
 assert_contains Jenkinsfile.production-auto \
   "name: 'FULL_COMMIT_SHA'" \
   "full SHA parameter is missing"
@@ -141,13 +147,16 @@ assert_contains Jenkinsfile.production-auto \
   'hudson.model.Cause$UpstreamCause' \
   "production auto-CD does not restrict the accepted cause type"
 assert_contains Jenkinsfile.production-auto \
-  'it.upstreamProject != null' \
-  "production auto-CD does not reject an absent upstream project"
+  'upstreamCauses.size() != 1' \
+  "production auto-CD does not require exactly one upstream cause"
+assert_contains Jenkinsfile.production-auto \
+  'upstreamCauses[0].upstreamProject' \
+  "production auto-CD does not resolve the trusted upstream project"
 assert_contains Jenkinsfile.production-auto \
   '.toString()' \
   "production auto-CD does not normalize the upstream project value"
 assert_contains Jenkinsfile.production-auto \
-  ".trim() == 'gilbom-ci-baseline'" \
+  "upstreamProject == null || upstreamProject.toString().trim() != 'gilbom-ci-baseline'" \
   "production auto-CD does not require the successful CI chain"
 assert_absent Jenkinsfile.production-auto \
   'gilbom-staging-deploy' \

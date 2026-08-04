@@ -69,13 +69,14 @@ pipeline {
                     def upstreamCauses = currentBuild.getBuildCauses(
                             'hudson.model.Cause$UpstreamCause'
                     )
-                    def ciCause = upstreamCauses.find {
-                        it.upstreamProject != null
-                                && it.upstreamProject
-                                        .toString()
-                                        .trim() == 'gilbom-ci-baseline'
+                    if (upstreamCauses.size() != 1) {
+                        error(
+                                'Production automatic CD requires exactly one '
+                                        + 'upstream CI cause'
+                        )
                     }
-                    if (ciCause == null) {
+                    def upstreamProject = upstreamCauses[0].upstreamProject
+                    if (upstreamProject == null || upstreamProject.toString().trim() != 'gilbom-ci-baseline') {
                         error(
                                 'Production automatic CD accepts only an '
                                         + 'upstream gilbom-ci-baseline build'
