@@ -200,7 +200,11 @@ services:
       - -ec
     command:
       - |
-        chown -R 473:473 /var/lib/alloy/data /var/lib/alloy/log-data
+        chown -R 473:473 /var/lib/alloy/data
+        # log 수집기는 Docker log 디렉터리를 읽으려고 UID 0으로 돈다. 다만 capability를
+        # 전부 뺐기 때문에 DAC_OVERRIDE가 없어 남의 소유 디렉터리에 쓰지 못한다.
+        # 소유자를 맞춰 주지 않으면 위치 파일을 못 써서 재시작마다 로그를 잃는다.
+        chown -R 0:0 /var/lib/alloy/log-data
         chmod 0700 /var/lib/alloy/data
         chmod 0700 /var/lib/alloy/log-data
     volumes:
