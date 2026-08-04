@@ -74,6 +74,16 @@ server:
       enabled: false
 
 management:
+  metrics:
+    distribution:
+      # Spring은 기본적으로 요청 시간의 count·sum·max만 낸다. 평균은 대부분 빠르고
+      # 몇 건만 느린 상황을 감추므로 백분위가 필요하다.
+      #
+      # histogram bucket 대신 백분위를 직접 계산하게 한다. bucket은 endpoint 수만큼
+      # 시계열을 곱해 늘리는데, 인스턴스가 하나뿐이라 집계할 일이 없어 그 비용을
+      # 치를 이유가 없다. 인스턴스가 늘어나면 percentiles-histogram으로 바꾼다.
+      percentiles:
+        "[http.server.requests]": 0.95, 0.99
   endpoints:
     web:
       exposure:
