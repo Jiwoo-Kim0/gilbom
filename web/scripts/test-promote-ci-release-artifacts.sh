@@ -65,6 +65,8 @@ docker run --rm \
         > "$directory/images.tar.zst.sigstore.json"
       printf "{\"releaseSha\":\"%s\",\"marker\":\"%s\"}\n" \
         "$sha" "$marker" > "$directory/build-metadata.json"
+      printf "services:\n  backend:\n    image: gilbom-backend:%s\n" \
+        "$sha" > "$directory/compose.prod.yaml"
       (
         cd "$directory"
         sha256sum images.tar.zst > images.tar.zst.sha256
@@ -72,6 +74,8 @@ docker run --rm \
           | LC_ALL=C sort \
           | xargs sha256sum > SHA256SUMS
       )
+      printf "{\"fixture\":\"manifest-bundle\",\"marker\":\"%s\"}\n" \
+        "$marker" > "$directory/SHA256SUMS.sigstore.json"
     }
 
     mkdir -p "$root/.incoming"

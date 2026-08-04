@@ -73,11 +73,16 @@ chmod 0600 \
 printf 'archive-fixture\n' > "$artifact_dir/images.tar.zst"
 printf '{"fixture":"cosign-bundle"}\n' \
   > "$artifact_dir/images.tar.zst.sigstore.json"
+printf 'services: {}\n# signed release %s\n' "$release_sha" \
+  > "$artifact_dir/compose.prod.yaml"
 printf '%s\n' 'fixture-cosign-public-key' \
   > /etc/gilbom/cosign-release.pub
 chmod 0444 /etc/gilbom/cosign-release.pub
 cosign_public_key_sha256="$(
   sha256sum /etc/gilbom/cosign-release.pub | awk '{print $1}'
+)"
+compose_sha256="$(
+  sha256sum "$artifact_dir/compose.prod.yaml" | awk '{print $1}'
 )"
 printf '{}\n' > "$artifact_dir/sbom/backend.sbom.json"
 printf '{}\n' > "$artifact_dir/sbom/frontend.sbom.json"
@@ -104,6 +109,7 @@ jq -n \
   --arg backend_id "$backend_id" \
   --arg frontend_id "$frontend_id" \
   --arg cosign_public_key_sha256 "$cosign_public_key_sha256" \
+  --arg compose_sha256 "$compose_sha256" \
   '
     {
       schemaVersion: 1,
@@ -126,6 +132,10 @@ jq -n \
             publicKeySha256: $cosign_public_key_sha256,
             bundle: {path: "images.tar.zst.sigstore.json"}
           }
+        },
+        compose: {
+          path: "compose.prod.yaml",
+          sha256: $compose_sha256
         }
       },
       flyway: {
@@ -152,6 +162,8 @@ jq -n \
     | LC_ALL=C sort \
     | xargs sha256sum > SHA256SUMS
 )
+printf '{"fixture":"manifest-cosign-bundle"}\n' \
+  > "$artifact_dir/SHA256SUMS.sigstore.json"
 chown -R root:root /opt/gilbom /var/lib/gilbom/releases
 # Artifact upload root is intentionally root:<upload-group>:0710. The
 # immutable per-SHA destination remains entirely root:root and read-only.
@@ -380,6 +392,11 @@ grep -Fq "Production deploy boundary: PASS ($release_sha)" \
   || fail "successful deployment did not update current.sha"
 [ "$(cat /var/lib/gilbom/releases/previous.sha)" = "$current_sha" ] \
   || fail "successful deployment did not retain the rollback target"
+cmp -s "$artifact_dir/compose.prod.yaml" /opt/gilbom/deploy/compose.prod.yaml \
+  || fail "successful deployment did not install signed release Compose"
+grep -Fq 'services: {}' \
+  "$release_record_dir/previous-compose.prod.yaml" \
+  || fail "successful deployment did not preserve the prior Compose snapshot"
 jq -e \
   --arg release_sha "$release_sha" \
   '
@@ -399,6 +416,12 @@ jq -e \
     and .health.frontend == "PASS"
     and .health.frontendToBackend == "PASS"
     and .health.mqtt == "PASS"
+    and .compose.path == "compose.prod.yaml"
+    and .compose.sha256 == .composeSha256
+    and (
+      .artifact.signature.manifestBundleSha256
+      | test("^[0-9a-f]{64}$")
+    )
   ' "$release_record_dir/release-manifest.json" >/dev/null \
   || fail "release manifest does not contain approval and health evidence"
 

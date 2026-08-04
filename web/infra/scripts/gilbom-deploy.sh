@@ -132,6 +132,19 @@ verify_release_signature() {
       "$archive" >/dev/null
 }
 
+verify_release_manifest_signature() {
+  directory="$1"
+  manifest="$directory/SHA256SUMS"
+  bundle="$directory/SHA256SUMS.sigstore.json"
+  [ -f "$manifest" ] && [ ! -L "$manifest" ] && [ -s "$manifest" ] \
+    && [ -f "$bundle" ] && [ ! -L "$bundle" ] && [ -s "$bundle" ] \
+    && "$COSIGN_BIN" verify-blob \
+      --insecure-ignore-tlog \
+      --key "$COSIGN_PUBLIC_KEY" \
+      --bundle "$bundle" \
+      "$manifest" >/dev/null
+}
+
 assert_root_readonly_tree() {
   path="$1"
   [ -z "$(find "$path" -type l -print -quit)" ] \
@@ -190,6 +203,7 @@ trap cleanup EXIT HUP INT TERM
 # 4-6. 입력 SHA에서 Artifact 경로를 내부 생성하고 모든 고정 입력 경계를
 # 검증한다.
 artifact_dir="$ARTIFACT_ROOT/$release_sha"
+candidate_compose_path="$artifact_dir/compose.prod.yaml"
 assert_root_directory "$DEPLOY_ROOT"
 assert_root_directory "$SECRET_ROOT"
 assert_root_directory "$BACKUP_ROOT"
@@ -224,11 +238,13 @@ assert_root_file "$COSIGN_PUBLIC_KEY"
 [ -d "$artifact_dir" ] && [ ! -L "$artifact_dir" ] \
   || fail "promoted release artifact is missing or symlinked"
 assert_root_readonly_tree "$artifact_dir"
-[ "$(find "$artifact_dir" -type f | wc -l | tr -d ' ')" -eq 10 ] \
-  || fail "promoted release artifact must contain exactly ten files"
+[ "$(find "$artifact_dir" -type f | wc -l | tr -d ' ')" -eq 12 ] \
+  || fail "promoted release artifact must contain exactly twelve files"
 
 for relative_path in \
   SHA256SUMS \
+  SHA256SUMS.sigstore.json \
+  compose.prod.yaml \
   images.tar.zst \
   images.tar.zst.sigstore.json \
   images.tar.zst.sha256 \
@@ -244,7 +260,10 @@ do
     || fail "required promoted artifact is missing, empty, or unsafe: $relative_path"
 done
 
-# 7. 승격 디렉터리 전체와 image archive 전용 checksum을 모두 검사한다.
+# 7. 서명된 전체 manifest를 먼저 검증한 뒤 디렉터리 전체와 image archive
+# 전용 checksum을 모두 검사한다.
+verify_release_manifest_signature "$artifact_dir" \
+  || fail "promoted complete release manifest signature verification failed"
 (
   cd "$artifact_dir"
   sha256sum -c SHA256SUMS
@@ -259,6 +278,9 @@ frontend_image="gilbom-frontend:$release_sha"
 cosign_public_key_sha256="$(
   sha256sum "$COSIGN_PUBLIC_KEY" | awk '{print $1}'
 )"
+candidate_compose_sha256="$(
+  sha256sum "$candidate_compose_path" | awk '{print $1}'
+)"
 
 # 8. metadata의 release SHA, image tag/ID, Flyway 증거를 검증한다.
 jq -e \
@@ -266,6 +288,7 @@ jq -e \
   --arg backend_image "$backend_image" \
   --arg frontend_image "$frontend_image" \
   --arg cosign_public_key_sha256 "$cosign_public_key_sha256" \
+  --arg compose_sha256 "$candidate_compose_sha256" \
   '
     .schemaVersion == 1
     and .releaseSha == $release_sha
@@ -284,6 +307,8 @@ jq -e \
       .artifacts.images.signature.bundle.path
       == "images.tar.zst.sigstore.json"
     )
+    and .artifacts.compose.path == "compose.prod.yaml"
+    and .artifacts.compose.sha256 == $compose_sha256
     and (.flyway.migrations | type == "array" and length > 0)
     and all(
       .flyway.migrations[];
@@ -296,6 +321,18 @@ jq -e \
 jq -e '.status == "PASS"' \
   "$artifact_dir/vulnerabilities/policy-summary.json" >/dev/null \
   || fail "release vulnerability policy is not PASS"
+
+# 후보 Compose는 현재 운영 파일을 건드리기 전에 서버 전용 runtime.env와
+# target full-SHA image 값을 사용해 완전히 렌더링되어야 한다. 필수 runtime
+# 변수가 빠졌거나 Compose가 손상되었으면 image load 전 여기서 차단한다.
+BACKEND_IMAGE="$backend_image" \
+FRONTEND_IMAGE="$frontend_image" \
+docker compose \
+  --env-file "$RUNTIME_ENV_PATH" \
+  --env-file "$IMAGE_ENV_PATH" \
+  --file "$candidate_compose_path" \
+  config --quiet \
+  || fail "signed release Compose configuration is invalid or runtime.env is incomplete"
 
 metadata_migrations="$work_dir/metadata-migrations.tsv"
 jq -r \
@@ -482,6 +519,33 @@ write_image_env() {
     && mv -T -- "$target_temp" "$IMAGE_ENV_PATH"
 }
 
+install_compose_file() {
+  source="$1"
+  [ -f "$source" ] && [ ! -L "$source" ] && [ -s "$source" ] \
+    || return 1
+  target_temp="$(mktemp "$DEPLOY_ROOT/.compose.prod.yaml.XXXXXX")" \
+    || return 1
+  cp -- "$source" "$target_temp" \
+    && chown root:root "$target_temp" \
+    && chmod 0644 "$target_temp" \
+    && mv -T -- "$target_temp" "$COMPOSE_PATH"
+}
+
+snapshot_compose_file() {
+  destination="$1"
+  if [ -e "$destination" ]; then
+    assert_root_file "$destination"
+    cmp -s "$COMPOSE_PATH" "$destination"
+    return
+  fi
+  snapshot_temp="$(mktemp "$(dirname -- "$destination")/.compose-snapshot.XXXXXX")" \
+    || return 1
+  cp -- "$COMPOSE_PATH" "$snapshot_temp" \
+    && chown root:root "$snapshot_temp" \
+    && chmod 0440 "$snapshot_temp" \
+    && mv -T -- "$snapshot_temp" "$destination"
+}
+
 capture_failure_logs() {
   destination="$release_record_dir/deploy-failure-logs.txt"
   [ ! -e "$destination" ] || return 0
@@ -523,6 +587,10 @@ ensure_rollback_images() {
       && [ -s "$target_artifact/$relative_path" ] \
       || return 1
   done
+  if [ -e "$target_artifact/SHA256SUMS.sigstore.json" ]; then
+    verify_release_manifest_signature "$target_artifact" \
+      || return 1
+  fi
   (
     cd "$target_artifact"
     sha256sum -c SHA256SUMS >/dev/null
@@ -740,6 +808,8 @@ automatic_rollback_without_migration() {
   flyway_after="$2"
   compose stop frontend >/dev/null 2>&1 || true
   ensure_rollback_images "$current_sha" || return 1
+  install_compose_file "$release_record_dir/previous-compose.prod.yaml" \
+    || return 1
   write_image_env "$current_sha" || return 1
   compose config --quiet || return 1
   compose up --detach --no-build --no-deps backend || return 1
@@ -835,6 +905,13 @@ perform_approved_manual_rollback() {
   approved_rollback_armed=true
   compose stop frontend \
     || fail "could not stop Frontend before approved rollback"
+  rollback_compose_snapshot="$failed_record_dir/previous-compose.prod.yaml"
+  [ -f "$rollback_compose_snapshot" ] \
+    && [ ! -L "$rollback_compose_snapshot" ] \
+    && [ -s "$rollback_compose_snapshot" ] \
+    || fail "approved rollback Compose snapshot is missing or unsafe"
+  install_compose_file "$rollback_compose_snapshot" \
+    || fail "could not restore approved rollback Compose"
   write_image_env "$release_sha" \
     || fail "could not restore approved rollback image.env"
   compose config --quiet \
@@ -1238,12 +1315,18 @@ artifact_manifest_sha256="$(
 signature_bundle_sha256="$(
   sha256sum "$artifact_dir/images.tar.zst.sigstore.json" | awk '{print $1}'
 )"
+manifest_signature_bundle_sha256="$(
+  sha256sum "$artifact_dir/SHA256SUMS.sigstore.json" | awk '{print $1}'
+)"
 jq -e \
   --arg release_sha "$release_sha" \
   --arg current_sha "$current_sha" \
   --arg artifact_manifest_sha256 "$artifact_manifest_sha256" \
   --arg cosign_public_key_sha256 "$cosign_public_key_sha256" \
   --arg signature_bundle_sha256 "$signature_bundle_sha256" \
+  --arg manifest_signature_bundle_sha256 \
+    "$manifest_signature_bundle_sha256" \
+  --arg compose_sha256 "$candidate_compose_sha256" \
   --arg migration_plan_sha256 "$migration_plan_sha256" \
   --argjson current_version "$current_version" \
   --argjson target_version "$latest_version" \
@@ -1264,6 +1347,12 @@ jq -e \
       .artifact.signature.bundleSha256
       == $signature_bundle_sha256
     )
+    and (
+      .artifact.signature.manifestBundleSha256
+      == $manifest_signature_bundle_sha256
+    )
+    and .compose.path == "compose.prod.yaml"
+    and .compose.sha256 == $compose_sha256
     and .flyway.currentVersion == $current_version
     and .flyway.targetVersion == $target_version
     and .flyway.migrationPlanSha256 == $migration_plan_sha256
@@ -1363,6 +1452,13 @@ flyway_before_transition="$(query_flyway_version)" \
   || fail "Flyway changed before the approved image transition"
 current_version="$flyway_before_transition"
 
+# 서명된 후보 Compose로 전환하기 직전에 현재 운영 Compose를 immutable
+# release record에 보관한다. 자동/수동 rollback은 image.env와 이 snapshot을
+# 같은 경계에서 함께 복원한다.
+previous_compose_snapshot="$release_record_dir/previous-compose.prod.yaml"
+snapshot_compose_file "$previous_compose_snapshot" \
+  || fail "could not create immutable previous production Compose snapshot"
+
 # 17. 승인 때 고정한 current.sha를 previous.sha로 원자 기록한다. 기존 설치의
 # bootstrap state도 이 시점에만 생성한다.
 if [ "$current_sha_bootstrap" = true ]; then
@@ -1372,10 +1468,13 @@ if [ "$current_sha_bootstrap" = true ]; then
 fi
 atomic_line "$PREVIOUS_SHA_PATH" "$current_sha" 0440
 
-# 18. 새 full-SHA image.env를 같은 filesystem에서 원자 교체한다.
+# 18. 서명된 후보 Compose와 새 full-SHA image.env를 각각 같은 filesystem에서
+# 원자 교체한다.
 # 이 지점부터 실패하면 배포 직전/실패 직후 Flyway를 비교하여 A 또는 C
 # 정책을 반드시 실행한다.
 rollback_armed=true
+install_compose_file "$candidate_compose_path" \
+  || fail "could not atomically install signed production Compose"
 image_env_temp="$(mktemp "$DEPLOY_ROOT/.image.env.XXXXXX")"
 {
   printf 'BACKEND_IMAGE=%s\n' "$backend_image"
@@ -1486,6 +1585,8 @@ jq -n \
   --arg cosign_version "$COSIGN_VERSION" \
   --arg cosign_public_key_sha256 "$cosign_public_key_sha256" \
   --arg signature_bundle_sha256 "$signature_bundle_sha256" \
+  --arg manifest_signature_bundle_sha256 \
+    "$manifest_signature_bundle_sha256" \
   --arg compose_sha256 "$(sha256sum "$COMPOSE_PATH" | awk '{print $1}')" \
   --arg backend_image "$backend_image" \
   --arg backend_image_id "$actual_backend_id" \
@@ -1515,10 +1616,16 @@ jq -n \
           status: "PASS",
           cosignVersion: $cosign_version,
           publicKeySha256: $cosign_public_key_sha256,
-          bundleSha256: $signature_bundle_sha256
+          bundleSha256: $signature_bundle_sha256,
+          manifestBundleSha256: $manifest_signature_bundle_sha256
         }
       },
       composeSha256: $compose_sha256,
+      compose: {
+        path: "compose.prod.yaml",
+        sha256: $compose_sha256,
+        previousSnapshot: "previous-compose.prod.yaml"
+      },
       images: {
         backend: {
           name: $backend_image,

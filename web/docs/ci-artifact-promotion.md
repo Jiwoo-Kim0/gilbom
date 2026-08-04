@@ -84,12 +84,14 @@ CI 전송 스크립트의 절대경로 검증은 이 Jenkins 관리형 `@tmp` �
 2. 동일 SHA의 root-owned immutable Artifact가 이미 있으면 이를 재사용한다.
 3. 그렇지 않으면 `Upload release artifacts to incoming`이 로컬 Checksum을
    확인한다.
-4. SSH host key를 강제 검증하고 Cosign Bundle을 포함한 열 개의 파일만
+4. SSH host key를 강제 검증하고 `compose.prod.yaml`, 이미지 Bundle, 전체
+   manifest Bundle을 포함한 열두 개의 파일만
    SCP/SFTP로 전송한다.
 5. EC2 incoming 디렉터리에서 Checksum을 다시 확인한다.
 6. `Promote release artifact automatically`가 제한된 root 명령을 즉시 실행한다.
-7. root 명령이 구조·파일 형식·Checksum·Cosign 서명·기존 SHA 충돌을 검사하고
-   원자적으로 rename한 뒤 전체 write bit가 제거됐는지 확인한다.
+7. root 명령이 구조·파일 형식·전체 manifest Cosign 서명·Checksum·이미지
+   Cosign 서명·기존 SHA 충돌을 검사하고 원자적으로 rename한 뒤 전체 write
+   bit가 제거됐는지 확인한다.
 
 이 자동 승격은 운영 Compose나 `current.sha`를 변경하지 않는다. 실제 운영 배포와
 조건부 Rollback의 Jenkins 인증 사용자 승인은 별도로 유지한다. 전송 도중 CI가

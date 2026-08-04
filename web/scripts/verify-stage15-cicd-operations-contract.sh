@@ -10,6 +10,7 @@ fail() {
 for file in \
   Jenkinsfile \
   Jenkinsfile.deploy \
+  Jenkinsfile.production-auto \
   Jenkinsfile.rollback \
   Jenkinsfile.rollback-drill \
   scripts/generate-cicd-notification.py \
@@ -35,17 +36,19 @@ assert_contains() {
   || fail "CI must define the exact SCM polling schedule once"
 for pipeline in \
   Jenkinsfile.deploy \
+  Jenkinsfile.production-auto \
   Jenkinsfile.rollback \
   Jenkinsfile.rollback-drill
 do
   if grep -Eq 'pollSCM|^[[:space:]]*triggers[[:space:]]*[{]' "$pipeline"; then
-    fail "manual deployment/rollback Job must not define a trigger: $pipeline"
+    fail "downstream deployment/rollback Job must not define a trigger: $pipeline"
   fi
 done
 
 for pipeline in \
   Jenkinsfile \
   Jenkinsfile.deploy \
+  Jenkinsfile.production-auto \
   Jenkinsfile.rollback \
   Jenkinsfile.rollback-drill
 do
@@ -92,6 +95,7 @@ for result_id in \
   openapi-lint \
   backend-dependency-scan \
   frontend-dependency-scan \
+  cosign-release-manifest \
   artifact-checksum \
   jenkins-log-secret
 do

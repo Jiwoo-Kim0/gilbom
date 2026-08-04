@@ -20,6 +20,7 @@ REQUIRED_CI_RESULTS = {
     "frontend-dependency-scan": "Frontend Dependency Scan PASS",
     "sha-image-build": "Full SHA Image Tag",
     "integration-smoke": "통합 docker compose up --no-build",
+    "cosign-release-manifest": "Compose 포함 전체 Release Manifest 서명 PASS",
     "artifact-checksum": "Artifact Checksum PASS",
     "jenkins-log-secret": "Jenkins 로그 Secret Scan PASS",
 }

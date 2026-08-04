@@ -98,6 +98,15 @@ assert_contains infra/scripts/promote-ci-release-artifacts.sh \
   'images.tar.zst.sigstore.json' \
   "Cosign Bundle is not a required promoted Artifact"
 assert_contains infra/scripts/promote-ci-release-artifacts.sh \
+  'compose.prod.yaml' \
+  "production Compose is not a required promoted Artifact"
+assert_contains infra/scripts/promote-ci-release-artifacts.sh \
+  'SHA256SUMS.sigstore.json' \
+  "complete release manifest Cosign Bundle is not required"
+assert_contains infra/scripts/promote-ci-release-artifacts.sh \
+  '--bundle "$directory/SHA256SUMS.sigstore.json"' \
+  "root promotion does not verify the complete signed release manifest"
+assert_contains infra/scripts/promote-ci-release-artifacts.sh \
   '"$COSIGN_BIN" verify-blob' \
   "root promotion does not verify the release Blob signature"
 assert_contains infra/scripts/prepare-day8-host.sh \

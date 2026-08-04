@@ -22,6 +22,7 @@ RESULTS = (
     "frontend-dependency-scan",
     "sha-image-build",
     "integration-smoke",
+    "cosign-release-manifest",
     "artifact-checksum",
     "jenkins-log-secret",
 )

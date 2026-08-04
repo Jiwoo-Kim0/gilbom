@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -30,7 +31,12 @@ class CicdNotificationTest(unittest.TestCase):
         specification.loader.exec_module(module)
         return module
 
-    def run_generator(self, result: str, output: Path) -> dict[str, object]:
+    def run_generator(
+        self,
+        result: str,
+        output: Path,
+        pipeline: str = "ci",
+    ) -> dict[str, object]:
         environment = os.environ.copy()
         environment.update(
             {
@@ -45,7 +51,7 @@ class CicdNotificationTest(unittest.TestCase):
                 sys.executable,
                 str(SCRIPT),
                 "--pipeline",
-                "ci",
+                pipeline,
                 "--result",
                 result,
                 "--output",
@@ -98,6 +104,51 @@ class CicdNotificationTest(unittest.TestCase):
             self.assertEqual(suspected, "PostGIS/RBAC/Session")
             self.assertIn("Flyway V1-V41", passed)
             self.assertNotIn("Flyway V1-V35", passed)
+
+    def test_automatic_cd_pipeline_labels_and_artifact_roots(self) -> None:
+        generator = self.load_generator_module()
+        self.assertEqual(
+            generator.PIPELINES["production-auto-deploy"]["artifact_root"],
+            ".artifacts/production-auto-deploy",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            summary = self.run_generator(
+                "FAILURE",
+                Path(temporary),
+                pipeline="production-auto-deploy",
+            )
+            self.assertEqual(summary["pipelineLabel"], "운영 자동 배포")
+
+    def test_production_auto_trigger_gate_follows_kill_switch(self) -> None:
+        generator = self.load_generator_module()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            results = root / ".artifacts/ci-results"
+            results.mkdir(parents=True)
+            for result_id, _, _ in generator.PIPELINES["ci"]["ordered_gates"]:
+                if result_id == "production-auto-deploy-trigger":
+                    continue
+                (results / f"{result_id}.status").write_text(
+                    "PASS\n",
+                    encoding="utf-8",
+                )
+
+            with mock.patch.dict(
+                os.environ,
+                {"GILBOM_PRODUCTION_AUTO_CD_ENABLED": "false"},
+            ):
+                suspected, _, _ = generator.ci_diagnosis(root)
+                self.assertEqual(suspected, "후처리 또는 자동 Artifact 승격")
+
+            with mock.patch.dict(
+                os.environ,
+                {"GILBOM_PRODUCTION_AUTO_CD_ENABLED": "true"},
+            ):
+                suspected, _, _ = generator.ci_diagnosis(root)
+                self.assertEqual(
+                    suspected,
+                    "Production automatic deployment trigger",
+                )
 
 
 if __name__ == "__main__":

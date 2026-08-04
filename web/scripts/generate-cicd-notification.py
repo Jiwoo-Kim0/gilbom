@@ -162,6 +162,11 @@ PIPELINES = {
                 "Cosign Blob signature",
                 "sh scripts/sign-release-image-archive.sh",
             ),
+            (
+                "cosign-release-manifest",
+                "Cosign complete release manifest",
+                "sh scripts/sign-release-manifest.sh",
+            ),
             ("artifact-checksum", "Release Artifact checksum", "sh scripts/verify-release-artifacts.sh"),
             (
                 "artifact-upload",
@@ -178,6 +183,11 @@ PIPELINES = {
                 "Jenkins console Secret scan",
                 "sh scripts/verify-jenkins-console-secret.sh",
             ),
+            (
+                "production-auto-deploy-trigger",
+                "Production automatic deployment trigger",
+                "Jenkins gilbom-production-auto-deploy console",
+            ),
         ),
     },
     "deploy": {
@@ -188,6 +198,16 @@ PIPELINES = {
             ("approval-record.json", "Jenkins 배포 승인 기록"),
             ("external-https-smoke.json", "외부 HTTPS smoke"),
             ("release-manifest.json", "Release Manifest 회수"),
+        ),
+    },
+    "production-auto-deploy": {
+        "label": "운영 자동 배포",
+        "artifact_root": ".artifacts/production-auto-deploy",
+        "files": (
+            ("preflight.json", "운영 자동 배포 preflight"),
+            ("approval-record.json", "운영 자동 승인 기록"),
+            ("external-https-smoke.json", "운영 외부 HTTPS smoke"),
+            ("release-manifest.json", "운영 Release Manifest 회수"),
         ),
     },
     "rollback": {
@@ -249,6 +269,11 @@ def result_icon(result: str) -> str:
 def ci_diagnosis(root: Path) -> tuple[str, str, list[str]]:
     passed: list[str] = []
     for result_id, label, reproduce in PIPELINES["ci"]["ordered_gates"]:
+        if (
+            result_id == "production-auto-deploy-trigger"
+            and env("GILBOM_PRODUCTION_AUTO_CD_ENABLED") != "true"
+        ):
+            continue
         status = root / ".artifacts/ci-results" / f"{result_id}.status"
         if status.is_file() and status.read_text(encoding="utf-8").strip() == "PASS":
             passed.append(label)
