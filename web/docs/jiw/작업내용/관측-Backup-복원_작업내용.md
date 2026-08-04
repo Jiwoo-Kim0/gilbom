@@ -1,6 +1,6 @@
 # 관측·Backup·복원(Day 10) 작업내용
 
-기간: 2026-08-03
+기간: 2026-08-03 ~ 08-04
 범위: Prometheus 수집·알람, Grafana 대시보드, Loki/Alloy 로그, Backup 암호화·반출,
    systemd 자동화, 복원 시험, host auditd
 
@@ -219,7 +219,18 @@ network 삭제만 실패하고 나머지는 정상 진행된다(다음 `up`이 �
 `Map<String, HealthIndicator>` 주입으로 바꾸고, actuator가 bean 이름에서 `HealthIndicator`
 접미사를 떼는 규칙을 그대로 흉내 냈다.
 
-**남은 검증은 전부 EC2에서** — runbook 3·5·6절이 순서대로 그 절차다.
+**나중에 CI와 EC2에서 확인된 것** (8/3~8/4)
+
+| 항목 | 결과 |
+| --- | --- |
+| 백엔드 컴파일·테스트 | Jenkins CI **796 tests 통과, 실패·스킵 0** — 위에서 못 한 검증이 여기서 끝났다 |
+| `collect-host-metrics.sh` | 실제 host에서 동작. 디스크 289GB/331GB, container CPU·메모리 백분율 파싱 정상 |
+| Prometheus alert rule | 기동 로그에 `rules=31ms` 오류 없음 — `promtool`을 못 돌린 채 남겨둔 위험이 해소됐다 |
+| Alloy 설정 | `textfile`·`loki.source.journal`·`stage.structured_metadata`·`redact` 전부 로드 |
+| Mattermost webhook | 실제 전송 확인 |
+| auditd 규칙 | `auditctl -l`에 10개 watch 등록 |
+
+**남은 검증은 EC2에서** — runbook 3·5·6절이 순서대로 그 절차다.
 
 ---
 
@@ -229,8 +240,10 @@ network 삭제만 실패하고 나머지는 정상 진행된다(다음 `up`이 �
 
 | 항목 | 상태 |
 | --- | --- |
-| `scripts/backend-test.sh` 그린 확인 | Java·Docker가 있는 환경에서 실행 필요 |
-| `verify-day10-runtime.sh` 실행 | EC2에서 |
+| ~~백엔드 테스트 그린~~ | **완료** — Jenkins CI 796 tests |
+| ~~host 설치·timer·auditd~~ | **완료** — `install-day10-host.sh`, timer 3개 활성 |
+| ~~monitoring stack 기동~~ | **완료** — 컨테이너 8개 Up |
+| `verify-day10-runtime.sh` 통과 | port 발행 문제(§7.2) 수정 적용 후 재실행 |
 | Grafana 대시보드 4장 눈으로 확인 | SSH 터널(local 3000 → remote 3001) |
 | 테스트 알람 실제 수신 | runbook 5절 4종 |
 | `restore-drill.sh` 실제 실행 | 개인키가 있는 위치에서 |
@@ -240,9 +253,10 @@ network 삭제만 실패하고 나머지는 정상 진행된다(다음 `up`이 �
 
 | 항목 | 내용 |
 | --- | --- |
-| gpg 키 보관자 | 개인키를 누가 갖고, 지문을 누구와 대조할지. **최소 두 사람이 각자 보관해야** 한 명이 빠져도 복원이 된다 |
-| Mattermost 알람 채널 | `alertmanager.yml`의 `channel`을 `#gilbom-alerts`로 두었다. 실제 채널명 확인 필요 |
+| gpg 키 보관자 | 공개키는 등록됐다. **개인키를 최소 두 사람이 각자 보관**하는 것은 아직 정해지지 않았다. 한 명이 빠지면 복원이 막힌다 |
+| ~~Mattermost 알람 채널~~ | **해소(8/4)** — `d101_alertmanager`로 확정. §7.3 |
 | volume backup 시각 | 04:10에 Frontend·Backend·Mosquitto를 잠시 멈춘다. 시연 주간에도 그대로 둘지 |
+| 커널 업그레이드 재부팅 | `6.17.0-1019-aws` 실행 중, `7.0.0-1009-aws` 대기. 시연 전 여유 있는 시점에 잡아야 한다 |
 
 ### A(김채운)와 겹치는 지점
 
@@ -261,11 +275,21 @@ network 삭제만 실패하고 나머지는 정상 진행된다(다음 `up`이 �
 
 **운영 절차가 바뀐 것 2개**
 
-- `monitoring.env`에 네 줄(`ALERTMANAGER_PORT`, `ALERTMANAGER_WEBHOOK_SECRET_FILE`,
+- `monitoring.env`에 다섯 줄(`ALERTMANAGER_PORT`, `ALERTMANAGER_WEBHOOK_SECRET_FILE`,
   `APP_NETWORK_NAME`, `MONITORING_TEXTFILE_DIR`, `PROBE_DOMAIN`)을 넣기 전에는
   **`verify-day8-auxiliary-runtime.sh`가 실패한다.**
 - Prometheus가 `gilbom_app` network에 external로 참여해 **운영 stack이 먼저 떠 있어야**
   monitoring stack이 뜬다. 운영 stack `down` 시 network 삭제만 실패하고 나머지는 정상이다.
+
+**A가 판단해야 하는 것 2개 (8/4 추가)**
+
+- **CI 승격 목록에 소스 archive가 없다.** `build-release-artifacts.sh`는
+  `gilbom-web-<sha>.tar.zst`를 만들지만 `promote-ci-release-artifacts.sh`가 허용하는 것은
+  images 계열뿐이다. 그래서 **Jenkins로 배포해도 `/opt/gilbom/deploy`가 갱신되지 않는다.**
+  이번에는 배포된 SHA로 같은 archive를 만들어 손으로 옮겼다. 우회다 (§7.1)
+- **Docker 28+에서 internal network 단독 구성은 port를 열지 못한다.** Day 8이 설계한
+  `monitoring` 단독 구성이 그대로 걸렸다(§7.2). `compose.jenkins.yaml`도 같은 구조라면
+  같은 증상이 있을 수 있어 확인이 필요하다
 
 **문서 정책 갱신 1개**
 
@@ -274,7 +298,88 @@ network 삭제만 실패하고 나머지는 정상 진행된다(다음 `up`이 �
 
 ---
 
-## 7. 남는 위험
+## 7. 운영 반영에서 드러난 것 (2026-08-03 ~ 08-04)
+
+코드는 8/3에 끝났고 CI·CD도 성공했다. 그런데 **EC2에 올리는 과정에서 네 가지가 걸렸다.**
+전부 "저장소에서는 알 수 없고 실제 host에서만 드러나는" 종류였다.
+
+### 7.1 CI·CD가 성공해도 `/opt/gilbom/deploy`는 갱신되지 않는다
+
+`install-day10-host.sh`를 실행했더니 `No such file`이 났다. 배포는 분명히 성공한 뒤였다.
+
+`gilbom-deploy.sh`는 그 디렉터리를 **읽기만** 하고, 배포가 실제로 바꾸는 것은 container
+image와 `image.env` 한 줄뿐이다. 소스 트리는 release source archive를 사람이 풀어야
+갱신된다. Day 8 runbook 3절에 그 절차가 있지만 Day 10 runbook은 그것을 전제로만 두고
+적지 않았다. 내 문서의 구멍이었다.
+
+**더 큰 문제는 그 archive가 host에 없다는 것이었다.** Jenkins가 쓰는
+`promote-ci-release-artifacts.sh`의 허용 목록에는 `images.tar.zst` 계열과 metadata·sbom만
+있다. 수동 승격 경로(`promote-release-artifacts.sh` → `/opt/gilbom/artifacts/releases/<sha>`)와
+Jenkins 경로(`/opt/gilbom/artifacts/<sha>`)는 목적지도 내용도 다르다.
+
+그래서 배포된 SHA로 `git archive <sha>:web`을 떠서 SFTP로 옮겼다. `build-release-artifacts.sh`와
+같은 방식이라 내용은 공식 archive와 동일하고, 운영 상태 파일(`runtime.env`·`image.env`·
+`secrets/*`)이 섞이지 않았는지도 Day 8과 같은 검사로 확인했다. **다만 이것은 우회다.**
+정공법은 CI 승격 목록에 소스 archive를 넣는 것이고 그건 배포 파이프라인 소유자 몫이다.
+
+### 7.2 Docker 28+는 internal network 단독 container의 port를 열지 않는다
+
+`verify-day10-runtime.sh`가 16건 실패했다. Alertmanager만 PASS였다.
+
+처음에는 Prometheus가 alert rule을 읽다 죽은 줄 알았다. 로그를 보니 전부 정상 기동해
+있었고 rule도 오류 없이 로드돼 있었다. `docker inspect`에는 `PortBindings`가 그대로
+있는데 `ss -ltnp`에는 `9093`만 보였다.
+
+갈린 기준이 network였다.
+
+| 서비스 | network | port |
+| --- | --- | --- |
+| alertmanager | monitoring(internal) + alert-egress(일반) | 열림 |
+| prometheus | monitoring(internal) + app(internal) | 닫힘 |
+| loki·grafana·alloy | monitoring(internal) 단독 | 닫힘 |
+
+**Docker 28부터 internal network만 가진 container는 port 발행이 적용되지 않는다.**
+설정에는 bind가 남아 있어서 원인을 찾기 어렵다. Day 8은 이 stack을 `internal: true`
+하나에만 두었고 당시 Docker에서는 동작했다. 이 EC2가 Docker 29로 올라오면서 걸렸다.
+
+`monitoring`을 일반 network로 바꾸면 Day 8의 격리가 무너지고 게이트 단언도 깨진다.
+그래서 **발행 경로 전용 bridge network(`loopback-publish`)를 하나 두고** 발행하는 넷을
+붙였다. bind 주소는 그대로 `127.0.0.1`이라 외부 노출은 늘지 않는다.
+
+같은 실수가 재발하지 않도록 `verify-day10-observability.sh`에 "port를 발행하는 service는
+비-internal network를 가진다"를 검사로 넣었다. 일부러 되돌려 실제로 잡히는 것까지 확인했다.
+
+### 7.3 Mattermost 채널 이름을 가정으로 두면 알람이 조용히 사라진다
+
+`alertmanager.yml`에 채널을 `#gilbom-alerts`로 적어뒀는데 그런 채널이 없었다. Mattermost
+incoming webhook은 payload의 채널이 실제와 다르면 **전송을 거부한다.** Alertmanager는
+정상으로 보이고 알람만 사라지는 형태라 알아채기 어렵다.
+
+`curl`로 직접 쏴서 확인한 `d101_alertmanager`로 바꿨다. Mattermost는 채널 이름을 앞의
+`#` 없이 받는다.
+
+### 7.4 timer는 첫 주기가 와야 돌고, 그전 검사는 정상인데도 실패한다
+
+`gilbom-host-metrics.timer`는 2분마다, backup timer는 하루 한 번이다. 설치 직후 바로
+`verify-day10-runtime.sh`를 돌리면 metric이 아직 없어 실패한다. **정상 상태와 실패가
+구분되지 않는 것이 문제**라, runbook에 "검사 전에 `systemctl start`로 한 번 만들어 둔다"를
+명시했다.
+
+auditd도 기본 이미지에 없어 설치가 필요했다. 설치 스크립트는 없으면 건너뛰고 안내만
+출력하도록 만들어 뒀던 것이 그대로 동작했다.
+
+### 후속 커밋
+
+| 커밋 | Jira | 내용 |
+| --- | --- | --- |
+| `6cf949a` | 738 `#comment` | `.gitignore`에 `*.asc` — gpg 공개키가 저장소에 들어가지 않게 |
+| `4fcc81a` | 741 `#comment` | runbook에 deploy 디렉터리 갱신 전제와 첫 검사 전 준비 추가 |
+| `51916a2` | 734 `#comment` | 알람 채널을 `d101_alertmanager`로 |
+| `f98aaee` | 734 `#comment` | port 발행 경로용 비-internal network 추가 + 정적 검사 |
+
+---
+
+## 8. 남는 위험
 
 - **개인키를 잃으면 모든 backup을 열 수 없다.**
 - **TOTP keyring을 잃으면 MFA 암호문은 복구 불가다.** DB를 되살려도 사용자는 다시 등록해야 한다.
