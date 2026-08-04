@@ -41,7 +41,8 @@ inhibit_rules:
 receivers:
   - name: mattermost-warning
     slack_configs:
-      - channel: "#gilbom-alerts"
+      # Mattermost는 채널 이름을 앞의 # 없이 받는다. 실제로 전송되는 것을 확인한 값이다.
+      - channel: "d101_alertmanager"
         send_resolved: true
         title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
         text: >-
@@ -51,7 +52,8 @@ receivers:
 
   - name: mattermost-critical
     slack_configs:
-      - channel: "#gilbom-alerts"
+      # Mattermost는 채널 이름을 앞의 # 없이 받는다. 실제로 전송되는 것을 확인한 값이다.
+      - channel: "d101_alertmanager"
         send_resolved: true
         title: '[CRITICAL] {{ .CommonLabels.alertname }}'
         text: >-
