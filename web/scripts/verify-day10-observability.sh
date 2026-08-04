@@ -126,6 +126,31 @@ assert_contains compose.monitoring.yaml \
   '/var/log/journal:/var/log/journal:ro' \
   "host journal 수집 마운트가 없다"
 
+# Docker 28+는 internal network만 가진 container의 port 발행을 적용하지 않는다.
+# 설정에는 bind가 남아 있는데 실제로는 열리지 않아 원인을 찾기 어렵다.
+# port를 발행하는 service는 비-internal network를 하나씩 가져야 한다.
+publishing_without_route="$(
+  python3 - <<'PY' 2>/dev/null || true
+import sys
+import yaml
+
+spec = yaml.safe_load(open("compose.monitoring.yaml"))
+internal = {
+    name
+    for name, value in (spec.get("networks") or {}).items()
+    if (value or {}).get("internal")
+}
+for name, service in (spec.get("services") or {}).items():
+    if not service.get("ports"):
+        continue
+    attached = set(service.get("networks") or [])
+    if attached and attached <= internal:
+        sys.stdout.write(name + " ")
+PY
+)"
+[ -z "$publishing_without_route" ] \
+  || fail "internal network만 가진 service가 port를 발행한다: $publishing_without_route"
+
 # Day 8이 정한 경계를 넘지 않았는지 다시 확인한다.
 assert_contains compose.monitoring.yaml 'internal: true' \
   "monitoring network가 internal이 아니다"

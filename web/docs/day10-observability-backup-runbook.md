@@ -46,6 +46,21 @@ loopback bind로 굳혀 둔 것과 정면으로 어긋난다.
 잃은 것: container별 network·disk I/O 상세, cgroup 단위 정밀도. 이번 알람 목록에는
 쓰이지 않는다.
 
+### port 발행에는 비-internal network가 하나 필요하다
+
+**Docker 28부터 `internal: true` network만 가진 container는 port 발행이 적용되지 않는다.**
+`docker inspect`에는 `HostConfig.PortBindings`가 그대로 보이는데 host에서는 실제로 열리지
+않아서, 설정만 봐서는 원인을 찾기 어렵다. `ss -ltnp`에 해당 port가 없는 것으로만 드러난다.
+
+Day 8은 monitoring stack을 `internal: true` 하나에만 두었고 당시 Docker 버전에서는
+발행이 동작했다. 이 EC2가 Docker 29로 올라오면서 Prometheus·Loki·Grafana·Alloy의
+loopback port가 전부 닫혔다.
+
+그래서 발행 경로 전용 bridge network(`loopback-publish`)를 하나 두고 이 넷을 붙인다.
+**노출 경계는 그대로 `127.0.0.1` bind다** — 이 network에 있다고 해서 밖에서 닿지 않는다.
+`verify-day10-observability.sh`가 "port를 발행하는 service는 비-internal network를 가진다"를
+검사하므로 같은 실수가 다시 나면 정적 검사에서 걸린다.
+
 ### PostgreSQL·Mosquitto Exporter를 쓰지 않는다
 
 connection pool은 Micrometer의 HikariCP metric으로 이미 보인다. MQTT는
