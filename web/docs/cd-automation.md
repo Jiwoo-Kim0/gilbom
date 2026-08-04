@@ -51,6 +51,12 @@ GILBOM_PRODUCTION_AUTO_CD_ENABLED=true
 - Flyway compatibility `COMPATIBLE_NO_SCHEMA_CHANGE`
 - pending migration `0`
 
+Jenkins Upstream Cause의 project 문자열은 설치 환경에 따라 표시용 선행·후행
+공백이 붙을 수 있다. Cause 유형은 반드시
+`hudson.model.Cause$UpstreamCause`로 제한하고 project 값의 양끝 공백만 제거한
+후 `gilbom-ci-baseline`과 정확히 비교한다. 다른 Job 이름이나 수동 Build Cause는
+계속 거부한다.
+
 Job의 일반 사용자 `Build` 권한을 제거한다. 수동으로 실행하면 upstream cause
 검증에서 fail-closed된다.
 

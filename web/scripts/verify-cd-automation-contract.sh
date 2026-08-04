@@ -138,7 +138,16 @@ assert_contains Jenkinsfile.production-auto \
   'currentBuild.getBuildCauses(' \
   "production auto-CD does not verify an upstream cause"
 assert_contains Jenkinsfile.production-auto \
-  "it.upstreamProject == 'gilbom-ci-baseline'" \
+  'hudson.model.Cause$UpstreamCause' \
+  "production auto-CD does not restrict the accepted cause type"
+assert_contains Jenkinsfile.production-auto \
+  'it.upstreamProject != null' \
+  "production auto-CD does not reject an absent upstream project"
+assert_contains Jenkinsfile.production-auto \
+  '.toString()' \
+  "production auto-CD does not normalize the upstream project value"
+assert_contains Jenkinsfile.production-auto \
+  ".trim() == 'gilbom-ci-baseline'" \
   "production auto-CD does not require the successful CI chain"
 assert_absent Jenkinsfile.production-auto \
   'gilbom-staging-deploy' \

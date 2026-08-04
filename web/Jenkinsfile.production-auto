@@ -70,7 +70,10 @@ pipeline {
                             'hudson.model.Cause$UpstreamCause'
                     )
                     def ciCause = upstreamCauses.find {
-                        it.upstreamProject == 'gilbom-ci-baseline'
+                        it.upstreamProject != null
+                                && it.upstreamProject
+                                        .toString()
+                                        .trim() == 'gilbom-ci-baseline'
                     }
                     if (ciCause == null) {
                         error(
