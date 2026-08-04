@@ -78,6 +78,7 @@ printf '{"fixture":"cosign-bundle"}\n' \
 printf 'services: {}\n# signed release %s\n' "$release_sha" \
   > "$artifact_dir/compose.prod.yaml"
 install -d "$source_fixture/infra/scripts"
+chmod 0775 "$source_fixture/infra"
 cp -- "$artifact_dir/compose.prod.yaml" "$source_fixture/compose.prod.yaml"
 printf 'services: {}\n# monitoring source fixture\n' \
   > "$source_fixture/compose.monitoring.yaml"
@@ -423,6 +424,8 @@ cmp -s "$artifact_dir/compose.prod.yaml" /opt/gilbom/deploy/compose.prod.yaml \
   || fail "successful deployment did not activate the release source tree"
 [ -x /opt/gilbom/deploy/infra/scripts/install-day10-host.sh ] \
   || fail "successful deployment did not install the Day 10 host script"
+[ "$(stat -c '%a' /opt/gilbom/deploy/infra)" = 755 ] \
+  || fail "Git archive directory mode was not normalized to 0755"
 grep -Fxq 'RUNTIME=value' /opt/gilbom/deploy/runtime.env \
   || fail "source tree activation did not preserve runtime.env"
 grep -Fq 'services: {}' \

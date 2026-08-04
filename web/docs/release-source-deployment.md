@@ -43,6 +43,11 @@ archive를 기존 tree 위에 바로 풀면 중간 실패 시 서로 다른 revi
 섞인다. 배포기는 `/opt/gilbom/.deploy-source-<SHA>.*`에 먼저 전개하고 다음을
 검사한다.
 
+`git archive`가 directory를 `0775`로 기록하는 경우가 있으므로 root tar의
+permission 보존 옵션은 사용하지 않는다. `umask 022`와
+`--no-same-permissions`로 directory `0755`, 일반 파일 `0644`, 실행 파일
+`0755` 경계로 정규화한 뒤 unsafe mode가 남지 않았는지 다시 검사한다.
+
 - `compose.prod.yaml`, `compose.monitoring.yaml`,
   `infra/scripts/install-day10-host.sh` 존재
 - archive의 `compose.prod.yaml`이 독립 release 파일과 byte-for-byte 일치

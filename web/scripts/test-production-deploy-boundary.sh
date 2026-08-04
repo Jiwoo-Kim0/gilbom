@@ -110,6 +110,10 @@ grep -Fq 'install_compose_file "$candidate_compose_path"' "$DEPLOY_SCRIPT" \
   || fail "signed production Compose installation is missing"
 grep -Fq 'prepare_release_source_tree' "$DEPLOY_SCRIPT" \
   || fail "signed release source staging is missing"
+grep -Fq 'umask 022' "$DEPLOY_SCRIPT" \
+  || fail "Git archive directory modes are not normalized during extraction"
+grep -Fq -- '--no-same-owner --no-same-permissions' "$DEPLOY_SCRIPT" \
+  || fail "root tar extraction still preserves unsafe archive permissions"
 grep -Fq 'activate_release_source_tree' "$DEPLOY_SCRIPT" \
   || fail "signed release source activation is missing"
 grep -Fq 'restore_deploy_source_tree' "$DEPLOY_SCRIPT" \

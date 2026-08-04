@@ -581,42 +581,76 @@ prepare_release_source_tree() {
 
   # The complete manifest signature and SHA256SUMS were verified before this
   # extraction. Extract into a sibling staging directory so an incomplete tree
-  # can never become /opt/gilbom/deploy.
-  bash -o pipefail -c \
-    'zstd --quiet -dc "$1" \
+  # can never become /opt/gilbom/deploy. git archive records directories as
+  # 0775; normalize them through umask instead of preserving group-write bits.
+  if ! bash -o pipefail -c \
+    'umask 022
+     zstd --quiet -dc "$1" \
       | tar --extract --file - --directory "$2" \
-          --no-same-owner --same-permissions' \
-    gilbom-source-extract "$source_archive_path" "$source_stage_dir" \
-    || return 1
+          --no-same-owner --no-same-permissions' \
+      gilbom-source-extract "$source_archive_path" "$source_stage_dir"; then
+    echo "Release source staging rejected: archive extraction failed" >&2
+    return 1
+  fi
 
-  [ -f "$source_stage_dir/compose.monitoring.yaml" ] \
-    && [ -f "$source_stage_dir/infra/scripts/install-day10-host.sh" ] \
-    && [ -f "$source_stage_dir/compose.prod.yaml" ] \
-    || return 1
-  cmp -s "$source_stage_dir/compose.prod.yaml" "$candidate_compose_path" \
-    || return 1
-  [ ! -e "$source_stage_dir/runtime.env" ] \
-    && [ ! -e "$source_stage_dir/image.env" ] \
-    || return 1
-  [ -z "$(find "$source_stage_dir" -type l -print -quit)" ] \
-    || return 1
-  [ -z "$(
+  if [ ! -f "$source_stage_dir/compose.monitoring.yaml" ] \
+      || [ ! -f "$source_stage_dir/infra/scripts/install-day10-host.sh" ] \
+      || [ ! -f "$source_stage_dir/compose.prod.yaml" ]; then
+    echo "Release source staging rejected: required deployment file is missing" >&2
+    return 1
+  fi
+  if ! cmp -s \
+      "$source_stage_dir/compose.prod.yaml" "$candidate_compose_path"; then
+    echo "Release source staging rejected: Compose artifacts differ" >&2
+    return 1
+  fi
+  if [ -e "$source_stage_dir/runtime.env" ] \
+      || [ -e "$source_stage_dir/image.env" ]; then
+    echo "Release source staging rejected: runtime state is present" >&2
+    return 1
+  fi
+  unsafe_source_entry="$(find "$source_stage_dir" -type l -print -quit)"
+  if [ -n "$unsafe_source_entry" ]; then
+    echo \
+      "Release source staging rejected: symlink is present: $unsafe_source_entry" \
+      >&2
+    return 1
+  fi
+  unsafe_source_entry="$(
     find "$source_stage_dir" -mindepth 1 \
       ! -type f ! -type d -print -quit
-  )" ] || return 1
-  [ -z "$(find "$source_stage_dir" -perm /7022 -print -quit)" ] \
-    || return 1
+  )"
+  if [ -n "$unsafe_source_entry" ]; then
+    echo \
+      "Release source staging rejected: special entry is present: $unsafe_source_entry" \
+      >&2
+    return 1
+  fi
+  unsafe_source_entry="$(
+    find "$source_stage_dir" -perm /7022 -print -quit
+  )"
+  if [ -n "$unsafe_source_entry" ]; then
+    echo \
+      "Release source staging rejected: unsafe mode: $unsafe_source_entry" \
+      >&2
+    return 1
+  fi
   if [ -d "$source_stage_dir/secrets" ] \
       && [ -n "$(
         find "$source_stage_dir/secrets" -type f \
           ! -name .gitignore -print -quit
       )" ]; then
+    echo "Release source staging rejected: Secret payload is present" >&2
     return 1
   fi
 
   chown -R root:root "$source_stage_dir" \
     && find "$source_stage_dir" -type d -exec chmod go-w {} + \
-    && find "$source_stage_dir" -type f -exec chmod go-w {} +
+    && find "$source_stage_dir" -type f -exec chmod go-w {} + \
+    || {
+      echo "Release source staging rejected: ownership normalization failed" >&2
+      return 1
+    }
 }
 
 activate_release_source_tree() {
