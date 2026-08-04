@@ -61,6 +61,8 @@ docker run --rm \
       printf "{\"status\":\"PASS\",\"marker\":\"%s\"}\n" "$marker" \
         > "$directory/vulnerabilities/policy-summary.json"
       printf "images-%s\n" "$marker" > "$directory/images.tar.zst"
+      printf "source-%s\n" "$marker" \
+        > "$directory/gilbom-web-$sha.tar.zst"
       printf "{\"fixture\":\"bundle\",\"marker\":\"%s\"}\n" "$marker" \
         > "$directory/images.tar.zst.sigstore.json"
       printf "{\"releaseSha\":\"%s\",\"marker\":\"%s\"}\n" \

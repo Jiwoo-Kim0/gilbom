@@ -71,74 +71,33 @@ DB 계정과 broker 계정이 하나씩 더 생기는데, 그만큼 얻는 것�
 
 ## 1. Host 준비
 
-### 먼저 — `/opt/gilbom/deploy`를 Day 10 revision으로 올린다
+### 먼저 — 배포 SHA와 source tree SHA가 같은지 확인한다
 
-**CI·CD가 성공해도 이 디렉터리는 갱신되지 않는다.** `gilbom-deploy.sh`는 여기를 읽기만
-하고, 배포가 실제로 바꾸는 것은 container image와 `image.env` 한 줄뿐이다. 이 단계를
-건너뛰면 아래 설치 명령이 `No such file`로 멈춘다.
+현재 CI는 exact commit의 `gilbom-web-<sha>.tar.zst`를 열세 번째 release
+Artifact로 만들고 전체 `SHA256SUMS`와 함께 서명한다. 운영 배포기는 archive를
+sibling directory에 검증·전개하고 모든 runtime health가 성공한 뒤
+`/opt/gilbom/deploy`를 교체한다. `runtime.env`와 `image.env`는 host 상태로
+따로 보존된다.
 
 `/opt/gilbom`과 `/var/lib/gilbom`은 root 전용이라 확인 명령에도 `sudo`가 필요하다.
 
 ```sh
-release_sha="$(sudo cat /var/lib/gilbom/releases/current.sha)"
-sudo ls "/opt/gilbom/artifacts/$release_sha"
-```
-
-목록에 `gilbom-web-<sha>.tar.zst`가 **있는지 없는지로 경로가 갈린다.**
-
-**(가) 소스 archive가 있는 경우** — 수동으로 승격한 release다. 그대로 푼다.
-
-```sh
-sudo sh -c '
-  sha="$(cat /var/lib/gilbom/releases/current.sha)"
-  cd "/opt/gilbom/artifacts/$sha"
-  sha256sum -c SHA256SUMS
-  zstd -dc "gilbom-web-$sha.tar.zst" \
-    | tar --extract --file - --directory /opt/gilbom/deploy --no-same-owner
-'
-```
-
-**(나) 없는 경우** — Jenkins 배포다. `promote-ci-release-artifacts.sh`의 허용 목록에
-소스 archive가 없어서 host에 존재하지 않는다. 배포된 SHA로 로컬에서 같은 archive를 만들어
-SFTP로 옮긴다. `build-release-artifacts.sh`와 같은 방식이라 내용은 공식 archive와 같다.
-
-```sh
-# 로컬 (저장소 root)
-sha=<current.sha 값>
-git archive --format=tar "$sha:web" | gzip -9 > "/tmp/gilbom-web-$sha.tar.gz"
-
-# 운영 상태 파일이 섞이지 않았는지 — Day 8과 같은 검사
-tar -tzf "/tmp/gilbom-web-$sha.tar.gz" \
-  | grep -E '(^|/)(runtime\.env|image\.env)$|(^|/)secrets/[^/]+$' \
-  | grep -Ev '(^|/)secrets/\.gitignore$' \
-  && echo "운영 상태가 섞여 있다. 전송하지 않는다." || echo "안전"
-
-sha256sum "/tmp/gilbom-web-$sha.tar.gz"
-```
-
-SFTP로 `/home/ubuntu`에 올린 뒤 EC2에서 checksum을 대조하고 푼다.
-
-```sh
-sha256sum "gilbom-web-$sha.tar.gz"          # 로컬 값과 일치해야 한다
-sudo tar --extract --gzip --file "gilbom-web-$sha.tar.gz" \
-  --directory /opt/gilbom/deploy --no-same-owner
-rm -f "gilbom-web-$sha.tar.gz"
-```
-
-> **(나)는 우회다.** 감사 흔적이 남는 정공법은 CI 승격 목록에 소스 archive를 포함시키는
-> 것이고, 그건 배포 파이프라인 소유자의 몫이다.
-
-어느 쪽이든 archive에는 Git이 추적하는 파일만 들어 있어 `runtime.env`, `image.env`,
-`/opt/gilbom/secrets`, named volume은 보존된다. 푼 뒤 확인한다.
-
-```sh
 cd /opt/gilbom/deploy
+release_sha="$(sudo cat /var/lib/gilbom/releases/current.sha)"
+test "$(sudo cat .release-source.sha)" = "$release_sha"
+test -f \
+  "/opt/gilbom/artifacts/$release_sha/gilbom-web-$release_sha.tar.zst"
 test -f infra/scripts/install-day10-host.sh \
   || echo "이 release에는 Day 10이 없다. master 기준으로 CI를 다시 돌려야 한다."
 sh scripts/verify-day10-observability.sh
 sudo docker compose --env-file runtime.env --env-file image.env \
   -f compose.prod.yaml config --quiet && echo "운영 compose 정상"
 ```
+
+`.release-source.sha`가 없으면 구 열두 파일 배포기가 아직 설치된 host다. source
+archive를 임의로 풀지 말고 [`cd-automation.md`](cd-automation.md)의
+“새 Artifact 형식 최초 반영”대로 승격 helper와 배포 entrypoint를 한 번 먼저
+갱신한 후 CI·CD를 다시 실행한다. 새 계약에서는 수동 SFTP 우회를 사용하지 않는다.
 
 ### 설치
 

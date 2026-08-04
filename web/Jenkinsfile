@@ -760,6 +760,17 @@ pipeline {
             }
         }
 
+        stage('Create release source archive') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        sh scripts/create-release-source-archive.sh
+                    '''
+                }
+            }
+        }
+
         stage('Build metadata and release integrity') {
             steps {
                 dir(env.APP_DIR) {

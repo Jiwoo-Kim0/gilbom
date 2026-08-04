@@ -56,6 +56,7 @@ for stage in \
   "stage('Prepare release SBOM and vulnerability artifacts')" \
   "stage('Create release image archive')" \
   "stage('Sign release image archive with Cosign')" \
+  "stage('Create release source archive')" \
   "stage('Build metadata and release integrity')"
 do
   current="$(line_of "$stage")"
@@ -145,6 +146,15 @@ assert_contains scripts/create-release-image-archive.sh \
 assert_contains scripts/create-release-image-archive.sh \
   'sha256sum images.tar.zst > images.tar.zst.sha256' \
   "image archive checksum is missing"
+assert_contains scripts/create-release-source-archive.sh \
+  '"$RELEASE_SHA:$PROJECT_PREFIX"' \
+  "source archive must be built from the exact release SHA and project tree"
+assert_contains scripts/create-release-source-archive.sh \
+  'runtime[.]env|image[.]env' \
+  "source archive does not reject tracked runtime state"
+assert_contains Jenkinsfile \
+  'sh scripts/create-release-source-archive.sh' \
+  "release source archive is not created before complete manifest signing"
 assert_contains Jenkinsfile \
   "credentialsId: 'gilbom-cosign-private-key'" \
   "Cosign private key must come from a Jenkins Secret File credential"
@@ -175,4 +185,5 @@ if grep -Eiq \
   fail "release scripts contain a forbidden local, latest, or short-SHA image tag"
 fi
 
+sh scripts/test-create-release-source-archive.sh
 echo "CI stages 4-8 release contract: PASS"

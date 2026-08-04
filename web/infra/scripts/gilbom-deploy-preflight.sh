@@ -37,7 +37,7 @@ printf '%s\n' "$release_sha" | grep -Eq '^[0-9a-f]{40}$' \
 
 for command in \
   awk cat chown chmod cmp cp cut date dirname docker find grep install jq \
-  mktemp mv rm sed sha256sum stat tail tr wc
+  mktemp mv rm sed sha256sum stat tail tr wc zstd
 do
   command -v "$command" >/dev/null 2>&1 \
     || fail "required command is missing: $command"
@@ -95,6 +95,8 @@ compose() {
 
 artifact_dir="$ARTIFACT_ROOT/$release_sha"
 candidate_compose_path="$artifact_dir/compose.prod.yaml"
+source_archive_name="gilbom-web-$release_sha.tar.zst"
+source_archive_path="$artifact_dir/$source_archive_name"
 metadata="$artifact_dir/build-metadata.json"
 policy="$artifact_dir/vulnerabilities/policy-summary.json"
 release_record_dir="$RELEASE_RECORD_ROOT/$release_sha"
@@ -121,6 +123,7 @@ for file in \
   "$artifact_dir/images.tar.zst" \
   "$artifact_dir/images.tar.zst.sigstore.json" \
   "$artifact_dir/images.tar.zst.sha256" \
+  "$source_archive_path" \
   "$metadata" \
   "$policy"
 do
@@ -130,8 +133,8 @@ done
   || fail "artifact directory contains a symlink"
 [ -z "$(find "$artifact_dir" -perm /0222 -print -quit)" ] \
   || fail "artifact directory is not immutable"
-[ "$(find "$artifact_dir" -type f | wc -l | tr -d ' ')" -eq 12 ] \
-  || fail "artifact directory must contain exactly twelve files"
+[ "$(find "$artifact_dir" -type f | wc -l | tr -d ' ')" -eq 13 ] \
+  || fail "artifact directory must contain exactly thirteen files"
 "$COSIGN_BIN" version \
   | grep -Fq "GitVersion:    $COSIGN_VERSION" \
   || fail "Cosign verifier version differs from $COSIGN_VERSION"
@@ -152,6 +155,8 @@ done
   --bundle "$artifact_dir/images.tar.zst.sigstore.json" \
   "$artifact_dir/images.tar.zst" >/dev/null \
   || fail "release image archive Cosign signature is invalid"
+zstd --quiet --test "$source_archive_path" \
+  || fail "release source archive failed zstd integrity testing"
 
 jq_cosign_public_key_sha256="$(
   sha256sum "$COSIGN_PUBLIC_KEY" | awk '{print $1}'
@@ -159,12 +164,17 @@ jq_cosign_public_key_sha256="$(
 candidate_compose_sha256="$(
   sha256sum "$candidate_compose_path" | awk '{print $1}'
 )"
+source_archive_sha256="$(
+  sha256sum "$source_archive_path" | awk '{print $1}'
+)"
 jq -e \
   --arg release_sha "$release_sha" \
   --arg backend_image "gilbom-backend:$release_sha" \
   --arg frontend_image "gilbom-frontend:$release_sha" \
   --arg cosign_public_key_sha256 "$jq_cosign_public_key_sha256" \
   --arg compose_sha256 "$candidate_compose_sha256" \
+  --arg source_archive_name "$source_archive_name" \
+  --arg source_archive_sha256 "$source_archive_sha256" \
   '
     .schemaVersion == 1
     and .releaseSha == $release_sha
@@ -182,6 +192,8 @@ jq -e \
       .artifacts.images.signature.bundle.path
       == "images.tar.zst.sigstore.json"
     )
+    and .artifacts.source.path == $source_archive_name
+    and .artifacts.source.sha256 == $source_archive_sha256
     and .artifacts.compose.path == "compose.prod.yaml"
     and .artifacts.compose.sha256 == $compose_sha256
     and (.flyway.latestVersion | test("^V[1-9][0-9]*$"))
@@ -434,6 +446,8 @@ jq -n -S \
   --arg signature_bundle_sha256 "$signature_bundle_sha256" \
   --arg manifest_signature_bundle_sha256 \
     "$manifest_signature_bundle_sha256" \
+  --arg source_archive_name "$source_archive_name" \
+  --arg source_archive_sha256 "$source_archive_sha256" \
   --arg compose_sha256 "$candidate_compose_sha256" \
   --arg backend_image "gilbom-backend:$release_sha" \
   --arg backend_image_id "$backend_image_id" \
@@ -467,6 +481,10 @@ jq -n -S \
           bundleSha256: $signature_bundle_sha256,
           manifestBundleSha256: $manifest_signature_bundle_sha256
         }
+      },
+      source: {
+        archive: $source_archive_name,
+        sha256: $source_archive_sha256
       },
       compose: {
         path: "compose.prod.yaml",

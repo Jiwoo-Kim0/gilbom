@@ -28,6 +28,8 @@ jq -e \
       .artifact.signature.manifestBundleSha256
       | test("^[0-9a-f]{64}$")
     )
+    and .source.archive == ("gilbom-web-" + .releaseSha + ".tar.zst")
+    and (.source.sha256 | test("^[0-9a-f]{64}$"))
     and .compose.path == "compose.prod.yaml"
     and (.compose.sha256 | test("^[0-9a-f]{64}$"))
     and (.production.currentSha | test("^[0-9a-f]{40}$"))
@@ -59,6 +61,7 @@ Cosign Signature: $(jq -r '.artifact.signature.status' "$preflight") ($(jq -r '.
 Cosign Public Key SHA-256: $(jq -r '.artifact.signature.publicKeySha256' "$preflight")
 Cosign Image Bundle SHA-256: $(jq -r '.artifact.signature.bundleSha256' "$preflight")
 Cosign Manifest Bundle SHA-256: $(jq -r '.artifact.signature.manifestBundleSha256' "$preflight")
+Source Archive SHA-256: $(jq -r '.source.sha256' "$preflight")
 Compose SHA-256: $(jq -r '.compose.sha256' "$preflight")
 Critical: $(jq -r '.vulnerabilities.critical' "$preflight")
 High: $(jq -r '.vulnerabilities.high' "$preflight") (승인 예외 $(jq -r '.vulnerabilities.exceptedHigh' "$preflight"), 미승인 $(jq -r '.vulnerabilities.unapprovedHigh' "$preflight"))

@@ -242,6 +242,7 @@ def main() -> int:
                 **artifact("images.tar.zst"),
                 "signature": signing_evidence(),
             },
+            "source": artifact(f"gilbom-web-{release_sha}.tar.zst"),
             "compose": artifact("compose.prod.yaml"),
         },
     }

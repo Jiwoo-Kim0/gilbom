@@ -240,9 +240,13 @@ release/
 ├── vulnerabilities/frontend.txt
 ├── vulnerabilities/policy-summary.json
 ├── images.tar.zst
+├── images.tar.zst.sigstore.json
 ├── images.tar.zst.sha256
+├── gilbom-web-<RELEASE_SHA>.tar.zst
+├── compose.prod.yaml
 ├── build-metadata.json
-└── SHA256SUMS
+├── SHA256SUMS
+└── SHA256SUMS.sigstore.json
 ```
 
 Trivy가 없거나 Critical/미승인 High/만료 예외가 있으면 `release/` 자체를 만들지
@@ -253,7 +257,8 @@ script가 거부한다.
 
 `build-metadata.json`은 full commit SHA, image ID, Dockerfile hash와 base image,
 UTC 시작·종료 시각, Runtime version, 테스트 결과, V1~V41 migration 목록·hash,
-SBOM/취약점/Archive checksum, Jenkins Job/Build를 기록한다. `jq empty` 이후
+SBOM/취약점/image·source archive·Compose checksum, Jenkins Job/Build를 기록한다.
+`jq empty` 이후
 `SHA256SUMS`를 생성·즉시 재검증하고, 마지막 Artifact Secret gate까지 통과해야
 Jenkins artifact로 보존된다.
 

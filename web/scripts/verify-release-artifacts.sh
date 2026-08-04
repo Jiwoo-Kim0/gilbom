@@ -8,6 +8,7 @@ RELEASE_DIR="$PROJECT_DIR/release"
 SECRET_DIR="$PROJECT_DIR/secrets"
 PATTERNS="$PROJECT_DIR/.artifacts/release-secret-patterns"
 MANIFEST_SIGNING_EVIDENCE="$PROJECT_DIR/.artifacts/cosign-manifest/summary.json"
+SOURCE_ARCHIVE="gilbom-web-${RELEASE_SHA:-}.tar.zst"
 
 fail() {
   echo "Release artifact verification failed: $1" >&2
@@ -23,6 +24,7 @@ for path in \
   images.tar.zst \
   images.tar.zst.sigstore.json \
   images.tar.zst.sha256 \
+  "$SOURCE_ARCHIVE" \
   compose.prod.yaml \
   build-metadata.json \
   SHA256SUMS \
@@ -30,8 +32,8 @@ for path in \
 do
   test -s "$RELEASE_DIR/$path" || fail "missing or empty file: $path"
 done
-[ "$(find "$RELEASE_DIR" -type f | wc -l | tr -d ' ')" -eq 12 ] \
-  || fail "release directory must contain exactly twelve regular files"
+[ "$(find "$RELEASE_DIR" -type f | wc -l | tr -d ' ')" -eq 13 ] \
+  || fail "release directory must contain exactly thirteen regular files"
 
 find "$RELEASE_DIR" -type l -print -quit | grep -q . \
   && fail "symlinks are forbidden in release artifacts"
@@ -45,6 +47,8 @@ find "$RELEASE_DIR" -type f \
   sha256sum -c SHA256SUMS
   sha256sum -c images.tar.zst.sha256
 )
+zstd --quiet --test "$RELEASE_DIR/$SOURCE_ARCHIVE" \
+  || fail "release source archive failed zstd integrity testing"
 jq empty "$RELEASE_DIR/build-metadata.json"
 jq empty "$RELEASE_DIR/images.tar.zst.sigstore.json"
 jq empty "$RELEASE_DIR/SHA256SUMS.sigstore.json"
@@ -86,6 +90,9 @@ jq -e \
   --arg compose_sha256 "$(
     sha256sum "$RELEASE_DIR/compose.prod.yaml" | awk '{print $1}'
   )" \
+  --arg source_sha256 "$(
+    sha256sum "$RELEASE_DIR/$SOURCE_ARCHIVE" | awk '{print $1}'
+  )" \
   '
     .releaseSha == $sha
     and .images.backend.name == $backend
@@ -113,6 +120,8 @@ jq -e \
     )
     and .artifacts.images.signature.negativeTests.tamperedArchiveRejected == true
     and .artifacts.images.signature.negativeTests.wrongPublicKeyRejected == true
+    and .artifacts.source.path == ("gilbom-web-" + $sha + ".tar.zst")
+    and .artifacts.source.sha256 == $source_sha256
     and .artifacts.compose.path == "compose.prod.yaml"
     and .artifacts.compose.sha256 == $compose_sha256
   ' "$RELEASE_DIR/build-metadata.json" >/dev/null \

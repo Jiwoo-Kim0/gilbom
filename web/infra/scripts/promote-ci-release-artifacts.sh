@@ -30,6 +30,7 @@ printf '%s\n' "$release_sha" | grep -Eq '^[0-9a-f]{40}$' \
 incoming="$INCOMING_ROOT/$release_sha"
 destination="$ARTIFACT_ROOT/$release_sha"
 lock="$ARTIFACT_ROOT/.promote-$release_sha.lock"
+source_archive="gilbom-web-$release_sha.tar.zst"
 
 expected_files='
 sbom/backend.sbom.json
@@ -45,6 +46,8 @@ compose.prod.yaml
 SHA256SUMS
 SHA256SUMS.sigstore.json
 '
+expected_files="$expected_files
+$source_archive"
 manifest_files='
 ./sbom/backend.sbom.json
 ./sbom/frontend.sbom.json
@@ -57,6 +60,8 @@ manifest_files='
 ./build-metadata.json
 ./compose.prod.yaml
 '
+manifest_files="$manifest_files
+./$source_archive"
 
 validate_release_directory() {
   directory="$1"
@@ -73,8 +78,8 @@ validate_release_directory() {
     find "$directory" -mindepth 1 \
       ! -type f ! -type d -print -quit
   )" ] || fail "release directory contains an unsupported entry type"
-  [ "$(find "$directory" -type f | wc -l)" -eq 12 ] \
-    || fail "release directory must contain exactly twelve files"
+  [ "$(find "$directory" -type f | wc -l)" -eq 13 ] \
+    || fail "release directory must contain exactly thirteen files"
   [ "$(find "$directory" -mindepth 1 -type d | wc -l)" -eq 2 ] \
     || fail "release directory must contain exactly two subdirectories"
 
@@ -106,13 +111,14 @@ validate_release_directory() {
       ./images.tar.zst.sigstore.json|\
       ./images.tar.zst.sha256|\
       ./build-metadata.json|\
-      ./compose.prod.yaml) ;;
+      ./compose.prod.yaml|\
+      "./$source_archive") ;;
       *) fail "SHA256SUMS contains an unsafe or unexpected path" ;;
     esac
     manifest_count=$((manifest_count + 1))
   done < "$directory/SHA256SUMS"
-  [ "$manifest_count" -eq 10 ] \
-    || fail "SHA256SUMS must contain exactly ten entries"
+  [ "$manifest_count" -eq 11 ] \
+    || fail "SHA256SUMS must contain exactly eleven entries"
   for relative_path in $manifest_files
   do
     [ "$(
