@@ -263,7 +263,14 @@ services:
   alloy-logs:
     image: grafana/alloy:v1.18.0
     restart: unless-stopped
-    user: "473:473"
+    # Docker의 log 디렉터리는 0710 root:root이고 log 파일도 root 소유다. 그룹 권한으로는
+    # 목록 조회조차 되지 않아 UID 0으로만 읽을 수 있다. 비-root로 두고 DAC_READ_SEARCH를
+    # 주는 방식은 동작하지 않는다 — Docker가 비-root 사용자에게 ambient capability를
+    # 부여하지 않아 그 권한이 effective set에 들어가지 않는다. 실제로 Day 8 이후
+    # 이 수집기는 로그를 한 줄도 읽지 못하고 있었다.
+    # 대신 cap_drop ALL, no-new-privileges, read_only rootfs를 유지하고 mount는
+    # 읽기 전용 두 개뿐이라 권한면은 "그 두 경로를 읽는 것"으로 한정된다.
+    user: "0:0"
     command:
       - run
       - --disable-reporting
