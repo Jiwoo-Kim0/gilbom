@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SSAFY Bot · DataRecorder</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1e2128; --border: #2e323b;
+    --text: #e6e8ec; --muted: #8b919c;
+    --accent: #4c8dff; --rec: #ff4d4f; --ok: #35c26a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text);
+         font-family: 'Pretendard', 'Noto Sans KR', system-ui, sans-serif; padding: 20px; }
+  h1 { font-size: 18px; font-weight: 700; margin-bottom: 16px; }
+  h1 .sub { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 8px; }
+
+  .layout { display: grid; grid-template-columns: 1fr 300px; gap: 16px; max-width: 1400px; }
+  @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }
+
+  .cams { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 760px) { .cams { grid-template-columns: 1fr; } }
+  .cam { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .cam header { display: flex; justify-content: space-between; align-items: center;
+                padding: 8px 12px; font-size: 13px; color: var(--muted); }
+  .cam img { width: 100%; display: block; aspect-ratio: 4/3; background: #000; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #555; display: inline-block; }
+  .dot.on { background: var(--ok); }
+
+  .panel { background: var(--panel); border: 1px solid var(--border);
+           border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+  .panel h2 { font-size: 12px; font-weight: 600; color: var(--muted);
+              text-transform: uppercase; letter-spacing: .06em; margin-bottom: 12px; }
+
+  #recBtn { width: 100%; padding: 14px; font-size: 16px; font-weight: 700;
+            border: none; border-radius: 8px; cursor: pointer;
+            background: var(--rec); color: #fff; transition: background .15s; }
+  #recBtn.recording { background: #3a3d45; outline: 2px solid var(--rec); }
+  #recBtn:disabled { opacity: .5; cursor: not-allowed; }
+  .rec-info { margin-top: 10px; font-size: 13px; color: var(--muted); line-height: 1.7; }
+  .rec-info b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .blink { animation: blink 1s step-end infinite; color: var(--rec); }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .row { display: flex; justify-content: space-between; font-size: 13px;
+         padding: 5px 0; border-bottom: 1px solid var(--border); }
+  .row:last-child { border-bottom: none; }
+  .row .k { color: var(--muted); }
+  .row .v { font-variant-numeric: tabular-nums; }
+  .v.warn { color: var(--rec); font-weight: 600; }
+  .v.good { color: var(--ok); }
+
+  .gps-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+               gap: 8px; margin-bottom: 12px; }
+  .gps-strip .cell { background: #171a20; border: 1px solid var(--border);
+                     border-radius: 8px; padding: 8px 10px; }
+  .gps-strip .lbl { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+  .gps-strip .big { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .gps-strip .big.good { color: var(--ok); }
+  .gps-strip .big.warn { color: var(--rec); }
+
+  .bar-wrap { margin: 6px 0 12px; }
+  .bar-label { display: flex; justify-content: space-between; font-size: 12px;
+               color: var(--muted); margin-bottom: 4px; }
+  .bar { position: relative; height: 10px; background: #2a2d35; border-radius: 5px; }
+  .bar .fill { position: absolute; top: 0; bottom: 0; background: var(--accent); border-radius: 5px; }
+  .bar .center-tick { position: absolute; left: 50%; top: -2px; bottom: -2px;
+                      width: 2px; background: var(--muted); }
+</style>
+</head>
+<body>
+  <h1>🎥 DataRecorder <span class="sub">SSAFY Bot · 주행 데이터 녹화</span></h1>
+
+  <div class="layout">
+    <div>
+      <div class="cams">
+        <div class="cam">
+          <header><span>주행 카메라 (nav · video0)</span><span class="dot" id="dot-nav"></span></header>
+          <img src="/stream/nav" alt="nav camera">
+        </div>
+        <div class="cam">
+          <header><span>전방 카메라 (front · video2)</span><span class="dot" id="dot-front"></span></header>
+          <img src="/stream/front" alt="front camera">
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:12px">
+        <h2 style="display:flex;justify-content:space-between;align-items:center">GPS 지도
+          <label style="text-transform:none;letter-spacing:0;cursor:pointer">
+            <input type="checkbox" id="followChk" checked> 위치 따라가기
+          </label>
+        </h2>
+        <div class="gps-strip">
+          <div class="cell"><span class="lbl">상태</span><span class="big" id="gpsBigFix">–</span></div>
+          <div class="cell"><span class="lbl">위도</span><span class="big" id="gpsBigLat">–</span></div>
+          <div class="cell"><span class="lbl">경도</span><span class="big" id="gpsBigLon">–</span></div>
+          <div class="cell"><span class="lbl">속도</span><span class="big" id="gpsBigSpd">–</span></div>
+          <div class="cell"><span class="lbl">진행 방향</span><span class="big" id="gpsBigCrs">–</span></div>
+        </div>
+        <div id="map" style="width:100%;height:380px;border-radius:8px;overflow:hidden;background:#0d0f12"></div>
+        <div class="rec-info" id="mapMsg">지도 로딩 중…</div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>녹화</h2>
+        <button id="recBtn" disabled>● 녹화 시작</button>
+        <div class="rec-info" id="recInfo">상태 확인 중…</div>
+      </div>
+
+      <div class="panel">
+        <h2>컨트롤러</h2>
+        <div class="bar-wrap">
+          <div class="bar-label"><span>조향</span><span id="angleVal">–</span></div>
+          <div class="bar"><div class="center-tick"></div><div class="fill" id="steerFill"></div></div>
+        </div>
+        <div class="bar-wrap">
+          <div class="bar-label"><span>스로틀</span><span id="speedVal">–</span></div>
+          <div class="bar"><div class="fill" id="throttleFill" style="left:0"></div></div>
+        </div>
+        <div class="row"><span class="k">연결</span><span class="v" id="jsConn">–</span></div>
+        <div class="row"><span class="k">방향</span><span class="v" id="dirVal">–</span></div>
+        <div class="row"><span class="k">최대 스로틀 (X−/Y+)</span><span class="v" id="capVal">–</span></div>
+        <div class="row"><span class="k">비상정지</span><span class="v" id="estopVal">–</span></div>
+      </div>
+
+      <div class="panel">
+        <h2>GPS</h2>
+        <div class="row"><span class="k">상태</span><span class="v" id="gpsFix">–</span></div>
+        <div class="row"><span class="k">위도</span><span class="v" id="gpsLat">–</span></div>
+        <div class="row"><span class="k">경도</span><span class="v" id="gpsLon">–</span></div>
+        <div class="row"><span class="k">속도</span><span class="v" id="gpsSpd">–</span></div>
+        <div class="row"><span class="k">고도</span><span class="v" id="gpsAlt">–</span></div>
+        <div class="row"><span class="k">위성 / HDOP</span><span class="v" id="gpsSat">–</span></div>
+      </div>
+
+      <div class="panel">
+        <h2>보드 온도</h2>
+        <div class="row"><span class="k">CPU</span><span class="v" id="tempCpu">–</span></div>
+        <div class="row"><span class="k">GPU</span><span class="v" id="tempGpu">–</span></div>
+        <div class="row"><span class="k">TJ (최고 정션)</span><span class="v" id="tempTj">–</span></div>
+      </div>
+
+      <div class="panel">
+        <h2>마지막 세션</h2>
+        <div class="rec-info" id="lastSession">없음</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+let recording = false;
+
+$('recBtn').addEventListener('click', async () => {
+  $('recBtn').disabled = true;
+  await fetch(recording ? '/api/record/stop' : '/api/record/start', { method: 'POST' });
+  await refresh();
+});
+
+function fmtTime(sec) {
+  const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+async function refresh() {
+  try {
+    const st = await (await fetch('/api/status')).json();
+
+    // cameras
+    for (const name of ['nav', 'front'])
+      $('dot-' + name).classList.toggle('on', st.cameras[name]?.alive);
+
+    // recorder
+    recording = st.recorder.recording;
+    const btn = $('recBtn');
+    btn.disabled = false;
+    btn.classList.toggle('recording', recording);
+    btn.textContent = recording ? '■ 녹화 중지' : '● 녹화 시작';
+    if (recording) {
+      const f = st.recorder.frames;
+      $('recInfo').innerHTML =
+        `<span class="blink">●</span> <b>${st.recorder.session}</b><br>` +
+        `경과 <b>${fmtTime(st.recorder.elapsed_sec)}</b><br>` +
+        `nav <b>${f.nav ?? 0}</b> · front <b>${f.front ?? 0}</b> 프레임`;
+    } else {
+      $('recInfo').textContent = '대기 중 — 컨트롤러 A 버튼으로도 토글 가능';
+    }
+    const last = st.recorder.last_session;
+    if (last) {
+      const files = Object.values(last.files).map(v => `${v.frames}f`).join(' · ');
+      $('lastSession').innerHTML = `<b>${last.session}</b><br>${fmtTime(last.duration_sec)} · ${files}`;
+    }
+
+    // bot
+    const b = st.bot;
+    $('jsConn').textContent = b.connected ? '연결됨' : '끊김';
+    $('jsConn').className = 'v ' + (b.connected ? 'good' : 'warn');
+    $('dirVal').textContent = b.direction;
+    $('capVal').textContent = b.throttle_cap + '%';
+
+    // gps
+    const g = st.gps ?? {};
+    $('gpsFix').textContent = !g.connected ? '연결 안 됨'
+                            : (g.fix ? `Fix (${g.sats}위성)` : `위성 검색 중 (${g.sats})`);
+    $('gpsFix').className = 'v ' + (!g.connected ? 'warn' : (g.fix ? 'good' : ''));
+    $('gpsLat').textContent = g.lat != null ? g.lat.toFixed(6) + '°' : '–';
+    $('gpsLon').textContent = g.lon != null ? g.lon.toFixed(6) + '°' : '–';
+    $('gpsSpd').textContent = g.speed_kmh != null ? g.speed_kmh.toFixed(1) + ' km/h' : '–';
+    $('gpsAlt').textContent = g.alt_m != null ? g.alt_m.toFixed(1) + ' m' : '–';
+    $('gpsSat').textContent = `${g.sats ?? 0} / ${g.hdop != null ? g.hdop.toFixed(1) : '–'}`;
+    updateGpsStrip(g);
+    updateMap(g);
+
+    // board temps: warn color from 85°C (Jetson soft-throttle territory)
+    for (const [key, id] of [['cpu','tempCpu'], ['gpu','tempGpu'], ['tj','tempTj']]) {
+      const t = st.temps?.[key];
+      $(id).textContent = t == null ? '–' : t.toFixed(1) + '°C';
+      $(id).className = 'v' + (t >= 85 ? ' warn' : '');
+    }
+    $('estopVal').textContent = b.estop ? '작동!' : '해제';
+    $('estopVal').className = 'v ' + (b.estop ? 'warn' : '');
+    $('angleVal').textContent = b.angle + '°';
+    $('speedVal').textContent = b.speed + '%' + (b.direction === 'BACKWARD' ? ' (후진)' : '');
+
+    // steering bar: center-out fill
+    const norm = (b.angle - b.angle_center) / b.angle_span;   // -1 .. 1
+    const fill = $('steerFill');
+    if (norm >= 0) { fill.style.left = '50%'; fill.style.width = (norm * 50) + '%'; }
+    else { fill.style.left = (50 + norm * 50) + '%'; fill.style.width = (-norm * 50) + '%'; }
+    $('throttleFill').style.width = (b.speed) + '%';
+  } catch (e) { /* server restarting */ }
+}
+
+// ---- GPS value strip (works with or without the map) ----
+const COMPASS = ['북', '북동', '동', '남동', '남', '남서', '서', '북서'];
+function updateGpsStrip(g) {
+  const fixEl = $('gpsBigFix');
+  if (!g.connected) { fixEl.textContent = '연결 안 됨'; fixEl.className = 'big warn'; }
+  else if (g.fix)   { fixEl.textContent = `Fix · ${g.sats}위성`; fixEl.className = 'big good'; }
+  else              { fixEl.textContent = `검색 중 · ${g.sats ?? 0}위성`; fixEl.className = 'big'; }
+  $('gpsBigLat').textContent = g.lat != null ? g.lat.toFixed(6) : '–';
+  $('gpsBigLon').textContent = g.lon != null ? g.lon.toFixed(6) : '–';
+  $('gpsBigSpd').textContent = g.speed_kmh != null ? g.speed_kmh.toFixed(1) + ' km/h' : '–';
+  $('gpsBigCrs').textContent = g.course != null
+    ? `${g.course.toFixed(0)}° ${COMPASS[Math.round(g.course / 45) % 8]}` : '–';
+}
+
+// ---- Naver map ----
+let map = null, marker = null, trail = null, mapAuthFailed = false;
+let hadFix = false, lastLat = null, lastLon = null;
+
+function mapUnavailable(msgHtml) {
+  $('map').style.display = 'none';    // collapse to the value strip only
+  $('mapMsg').innerHTML = msgHtml;
+}
+
+// Called by the Naver SDK when the key/URL check fails (e.g. this dashboard's
+// origin is not registered as a Web 서비스 URL in the NCP console).
+window.navermap_authFailure = () => {
+  mapAuthFailed = true;
+  mapUnavailable(`지도 인증 실패 — NCP 콘솔의 Maps 애플리케이션에 ` +
+    `Web 서비스 URL로 <b>${location.origin}</b> 을 등록해야 합니다. (GPS 값은 위에 계속 표시됩니다)`);
+};
+
+(async function initMap() {
+  try {
+    const cfg = await (await fetch('/api/mapcfg')).json();
+    const s = document.createElement('script');
+    s.src = 'https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=' + cfg.client_id;
+    s.onload = () => {
+      if (mapAuthFailed) return;
+      map = new naver.maps.Map('map', {
+        center: new naver.maps.LatLng(37.5666, 126.9784),  // placeholder until first fix
+        zoom: 17, mapTypeControl: false,
+      });
+      marker = new naver.maps.Marker({ map, position: map.getCenter() });
+      trail = new naver.maps.Polyline({
+        map, path: [], strokeColor: '#4c8dff', strokeWeight: 4, strokeOpacity: .85,
+      });
+      $('mapMsg').textContent = 'GPS 위치 대기 중… (위성 fix 후 표시)';
+    };
+    s.onerror = () => { mapUnavailable('지도 스크립트 로드 실패 — 인터넷 연결을 확인하세요. (GPS 값은 위에 계속 표시됩니다)'); };
+    document.head.appendChild(s);
+  } catch {
+    mapUnavailable('지도 설정을 불러오지 못했습니다. (GPS 값은 위에 계속 표시됩니다)');
+  }
+})();
+
+function updateMap(g) {
+  if (!map || mapAuthFailed || !g.fix || g.lat == null || g.lon == null) return;
+  const pos = new naver.maps.LatLng(g.lat, g.lon);
+  marker.setPosition(pos);
+  if (!hadFix) {
+    hadFix = true;
+    map.setCenter(pos);
+    $('mapMsg').textContent = '';
+  }
+  if (g.lat !== lastLat || g.lon !== lastLon) {
+    const path = trail.getPath();
+    path.push(pos);                      // KVOArrayOfCoords - mutates in place
+    if (path.getLength() > 2000) path.removeAt(0);
+    lastLat = g.lat; lastLon = g.lon;
+  }
+  if ($('followChk').checked) map.setCenter(pos);
+}
+
+refresh();
+setInterval(refresh, 500);
+</script>
+</body>
+</html>

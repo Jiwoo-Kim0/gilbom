@@ -1,0 +1,174 @@
+# OrinCar 설정 — 구현 착수 시 값 채울 것. 코드에 하드코딩 금지.
+# 비밀값(MQTT 비번, API Key)은 Git 커밋 금지 — 환경변수나 별도 미추적 파일로.
+#
+<<<<<<< HEAD
+# placeholder 두 가지를 지원한다 (comms/config.py: load_document).
+#   ${env:NAME}   환경변수. 없으면 기동 시 ConfigError — 비밀값은 전부 이 형식으로.
+#   ${robot.id}   이 파일 안의 다른 값 참조. 같은 값을 두 번 적지 않기 위한 것.
+
+robot:
+  # 이 값 하나가 topic 세그먼트 {robot_id} · payload 의 robot_id ·
+  # MQTT username 을 결정한다. 여기만 고치면 된다.
+  # client_id 는 기본값이 이 값이지만 mqtt.client_id 로 따로 줄 수 있다 —
+  # 계약에 없는 접속 식별자라 robot_id 와 같을 필요가 없다.
+  id: RBT-001
+  firmware_version: 1.0.0
+
+mqtt:
+  host: ${env:MQTT_HOST}        # EC2 브로커 주소
+  port: 8883
+  username: ${robot.id}         # 브로커 ACL·payload 검증이 robot_id 와 같아야 통과한다
+  # client_id: ${robot.id}      # 생략하면 robot.id. 여러 프로세스가 같은 계정으로 붙는
+                                # 테스트에서만 다르게 준다 — 같으면 브로커가 먼저 붙은
+                                # 쪽을 끊는다("session taken over").
+  password: ${env:MQTT_PASSWORD}
+  keepalive: 30                 # LTE NAT 매핑이 끊기기 전에 PINGREQ 를 보낸다
+  ca_cert: null                 # 브로커 CA 인증서 경로. 운영은 필수 —
+                                # null 이면 TLS 없이 접속한다(로컬 mosquitto 검증 전용).
+  require_tls: false            # true 로 두면 ca_cert 가 비었을 때 기동 시 바로 죽는다.
+                                # 실기·운영 배포에서는 true + ca_cert 경로를 같이 채운다 —
+                                # 안 그러면 평문으로 붙으려다 무한 재접속만 반복한다.
+  outbox_path: var/outbox.sqlite3   # 미전송 event 저장소 (커밋 금지)
+
+upload:
+  url: ${env:UPLOAD_URL}          # POST /api/v1/images 전체 URL
+  api_key: ${env:UPLOAD_API_KEY}  # 기기별 X-API-Key. 세션 쿠키·CSRF 아니다.
+=======
+# placeholder 네 가지를 지원한다 (comms/config.py: load_document).
+#   ${env:NAME}            환경변수. 없으면 기동 시 ConfigError — 필수값은 이 형식으로.
+#   ${env?:NAME}           선택 환경변수. 없으면 null.
+#   ${env?:NAME|기본값}    없으면 기본값. 기본값을 코드에 숨기지 않기 위한 것.
+#   ${robot.id}            이 파일 안의 다른 값 참조.
+#
+# 실기 주입값은 scripts/orincar.env.example 참고. 로봇 등록·Credential 발급 응답에서
+# 받은 값을 환경변수로 넣는다 — 이 파일에 직접 적고 커밋하지 않는다.
+
+robot:
+  # 웹 로봇 등록 응답의 mqttId. topic 세그먼트 {mqtt_id} · payload 의 mqtt_id ·
+  # MQTT username 을 전부 이 값 하나가 결정한다.
+  # ⚠️ DB 내부 PK 인 robot_id(UUID)와 다른 값이다. MQTT wire 에는 mqtt_id 만 나간다.
+  id: ${env:MQTT_ID}
+  # 이미지 업로드 form 의 robot_id 에 들어가는 DB 내부 UUID (robot.robot_id).
+  # mqtt_id 가 아니다 — 서버 ImageUploadController 가 UUID.fromString() 으로 파싱하므로
+  # RBT-001 을 보내면 400 COMMON_INVALID_REQUEST 가 떨어지고, 400 은 재시도 대상이
+  # 아니라서 증거 이미지가 100% 유실된다.
+  # 웹 로봇 등록 응답의 robotId. Credential·CA 와 함께 초기 환경변수로 주입한다.
+  # `env?:` 라 없어도 기동한다 — 이 값이 없으면 이미지 업로드만 막히고 MQTT
+  # (state·telemetry·event·command)는 전부 정상 동작하기 때문이다. 비어 있는 동안
+  # 업로드는 건너뛰고 error 로그를 남기며, 결함 event 는 image_id: null 로 발행된다.
+  uuid: ${env?:ROBOT_UUID}
+  firmware_version: 1.0.0
+
+mqtt:
+  host: ${env:MQTT_HOST}              # 운영: i15d101.p.ssafy.io
+  port: ${env?:MQTT_PORT|8883}
+  # Credential 발급 응답의 username. 현재 서버는 mqttId 와 같은 값을 주지만 항목은
+  # 분리해 둔다. 갈라지면 기동 시 거부한다 — 브로커 ACL 이 %u 를 mqtt_id 에 묶었고
+  # 서버가 topic·payload 의 mqtt_id 를 대조하므로, 달라지면 접속은 되는데 발행이
+  # 전부 거부되는 상태가 된다.
+  username: ${env?:MQTT_USERNAME}     # 생략하면 robot.id
+  # Credential 발급 응답의 clientId. 계약에 없는 접속 식별자라 mqtt_id 와 같을 필요는
+  # 없다. 같은 client_id 로 두 번 붙으면 브로커가 먼저 붙은 쪽을 끊는다
+  # ("session taken over") — 한 계정으로 여러 프로세스를 띄우는 테스트에서만 다르게 준다.
+  client_id: ${env?:MQTT_CLIENT_ID}   # 생략하면 robot.id
+  password: ${env:MQTT_PASSWORD}      # Credential 발급 시 1회만 보이는 값
+  keepalive: 30                       # LTE NAT 매핑이 끊기기 전에 PINGREQ 를 보낸다
+  # 브로커 CA. 운영 브로커는 8883 TLS 전용이라 이 값이 비면 평문으로 붙으려다
+  # 무한 재접속만 반복한다.
+  # 기본값 system = OS 신뢰 저장소 검증. 운영 브로커(i15d101.p.ssafy.io)는
+  # Let's Encrypt 인증서라 CA 파일이 필요 없다 — 예전 사설 CA 파일을 주면 오히려
+  # 검증에 실패한다. 사설 CA 브로커(로컬 mosquitto TLS 검증)에서만 파일 경로를 준다.
+  # 상대경로는 이 파일이 있는 디렉터리 기준이다.
+  ca_cert: ${env?:MQTT_CA_CERT|system}
+  require_tls: true                   # ca_cert 가 비면 기동 시 바로 죽인다. 환경변수
+                                      # 하나가 빠진 채 평문으로 뜨는 것을 막는다.
+                                      # 로컬 평문 mosquitto 검증에서만 ca_cert: null +
+                                      # require_tls: false 로 되돌린다.
+  # QoS 는 topic 마다 계약이 고정한다 (comms/topics.py: PUBLISH_POLICY). 설정으로
+  # 열지 않는다 — 하나로 뭉뚱그리면 QoS 1 topic 7종이 한꺼번에 강등돼 서버가
+  # MQTT_QOS_MISMATCH 로 전부 거부한다. 웹의 MQTT_QOS=1 은 서버 구독 설정이다.
+  outbox_path: var/outbox.sqlite3   # 미전송 event 저장소 (커밋 금지)
+
+upload:
+  # 관리자 Robot Credential 발급 응답의 imageUpload.url·imageUpload.apiKey를 넣는다.
+  # 둘 다 `env?:`라 없어도 로봇은 정상 기동하지만 이미지 업로드만 건너뛰고 결함
+  # event는 image_id: null로 발행된다. Secret 원문은 발급 응답에서 한 번만 보인다.
+  url: ${env?:UPLOAD_URL}          # POST /api/v1/images 전체 URL
+  api_key: ${env?:UPLOAD_API_KEY}  # 기기별 X-API-Key. 세션 쿠키·CSRF 아니다.
+>>>>>>> f869ccfb8170f77fa8cc6aafeaf699ec33e46b84
+
+# 주행·라이다·카메라 값은 driving_test 에서 실측으로 맞춘 것이다. 여기가 단일 출처이고
+# driving_test/config.py 는 그 앱 전용 사본이다 — 두 프로세스를 동시에 띄우면
+# /dev/ttyUSB0 · 카메라 · I2C 를 서로 뺏는다.
+drive:
+  hardware_mode: PCA9685
+  pca9685_address: 0x40     # 구동 모터
+  servo_address: 0x60       # 조향 서보
+  steering_channel: 0
+  motor_pwm_channel: 5
+  motor_in1_channel: 4
+  motor_in2_channel: 3
+  steering_center: 100      # 조향 캘리브레이션 — 실측값이라 임의로 바꾸지 말 것
+  steering_max_left: 40
+  steering_max_right: 160
+  default_speed: 75
+
+safety:
+  obstacle_confirm_sec: 3.0   # 최초 감지 후 재확인까지 (계약 §10.2).
+                              # 이 시간이 지난 뒤 '다시 봤을 때' 도 있어야 SAFETY_STOPPED 다.
+  lidar_port: /dev/ttyUSB0
+  lidar_baudrate: 128000
+  lidar_angle_offset_deg: 200.0   # 센서 장착 방향 보정 — 실측값
+  stop_distance_m: 0.40           # 이 거리 안이면 장애물로 본다
+  fov_front_min_deg: -30.0        # 전방 부채꼴
+  fov_front_max_deg: 30.0
+  min_scan_distance_m: 0.10
+  max_scan_distance_m: 4.00
+  min_scan_points: 10             # 이보다 희박하면 health.lidar=DEGRADED (계약 §5.3)
+  scan_ttl_sec: 0.5               # 각도별 측정값 수명. 센서가 7~10Hz 라 서너 바퀴다.
+                                  # 지나쳐 온 장애물의 거리가 계속 남아 있지 않게 한다.
+  sensor_fault_stops_driving: true  # LiDAR·모터가 FAULT 면 주행 중일 때 SAFE_STOP 으로 세운다.
+                                    # 장치 없는 개발 PC 에서 주행 흐름을 흉내 낼 때만 false.
+
+battery:
+  # 등급 판정 임계값 (계약 §9, F-007 "배터리 20% 경고").
+  # 내려가는 방향과 올라오는 방향이 다르다 — 전압 기반 추정이라 모터가 물리면
+  # 퍼센트가 출렁이는데, 단일 임계값이면 LOW/RECOVERED 가 번갈아 나간다.
+  low_pct: 20.0
+  low_recover_pct: 25.0
+  critical_pct: 10.0
+  critical_recover_pct: 15.0
+  confirm_samples: 2        # 배터리는 telemetry 주기(5초)에 읽히므로 10초 연속 확인
+
+# gps:
+#   port: /dev/ttyTHS1      # 실제 포트 확인 필요
+#   baud: 9600
+
+detect:
+  camera_index: 0
+  camera_width: 640
+  camera_height: 480
+  model_path: /home/ubuntu/SSAFY/models/best.pt
+  confidence_threshold: 0.35
+  model_name: tbs-braille-yolo   # incident.model 에 그대로 실린다 (계약 §8.3)
+  model_version: 0.0.0-stub      # ⚠️ 실제 export 버전으로 교체 필요
+  # 확정 기준 (계약 §8.1 "Tracking·Cooldown 을 통과해 확정했을 때 1회").
+  # 프레임 수가 아니라 확정 관측 수를 센다 (§11.3).
+  confirm_frames: 3
+  cooldown_sec: 30.0
+  interval_sec: 0.2              # 추론 주기. 메인 루프 tick 과 분리된 스레드에서 돈다
+  # 증거 이미지 규격 (계약 §8) — 장변 1280px, JPEG q80, 500KB 이하
+  evidence_dir: var/evidence
+  evidence_long_edge_px: 1280
+  evidence_jpeg_quality: 80
+  evidence_max_bytes: 512000
+  evidence_min_jpeg_quality: 40
+  # 모델 클래스명 → 계약 enum (§8.3). ⚠️ 클래스 이름·순서 미확정 — 학습 담당 확인 후
+  # 이 표만 고치면 된다. 표에 없는 클래스는 block_type=UNKNOWN 정상 관측으로 처리한다.
+  classes:
+    linear: {block_type: LINEAR, defect_type: null}
+    linear_damaged: {block_type: LINEAR, defect_type: DAMAGED}
+    dot: {block_type: DOT, defect_type: null}
+    dot_damaged: {block_type: DOT, defect_type: DAMAGED}
+    normal: {block_type: UNKNOWN, defect_type: null}
+    damaged: {block_type: UNKNOWN, defect_type: DAMAGED}
