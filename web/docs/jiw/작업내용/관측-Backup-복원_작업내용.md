@@ -487,6 +487,10 @@ backup 시계열이 통째로 사라졌다.** 두 파일이 같은 metric 이름
 container를 재생성해 온 것이 결과적으로 맞았다. **archive를 다시 풀면 monitoring
 stack 전체를 재생성해야 한다.** 확인은 반드시 container 안에서 한다.
 
+**A가 배포 자동화를 고친 뒤 이 함정은 오히려 더 중요해졌다.** 이제 배포기가 매 배포마다
+`/opt/gilbom/deploy`를 통째로 교체하므로, 배포할 때마다 이 일이 일어난다. runbook 1절에
+"배포 뒤에는 monitoring stack을 재생성한다"를 상시 절차로 넣었다.
+
 ### 7.12 instance 라벨이 바뀌면 대시보드와 알람이 함께 흔들린다
 
 "마지막 배포" 타일에 값이 둘로 나오고 이름이 `{instance="12909c9b468b", job=...}`처럼
