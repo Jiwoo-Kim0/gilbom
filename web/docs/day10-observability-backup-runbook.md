@@ -137,7 +137,29 @@ rm -f "gilbom-web-$sha.tar.gz"
 > **(나)는 우회다.** 감사 흔적이 남는 정공법은 CI 승격 목록에 소스 archive를 포함시키는
 > 것이고, 그건 배포 파이프라인 소유자의 몫이다.
 
-어느 쪽이든 archive에는 Git이 추적하는 파일만 들어 있어 `runtime.env`, `image.env`,
+어느 쪽이든 > **archive를 다시 풀었으면 monitoring stack을 반드시 재생성한다.**
+> `tar`가 디렉터리를 새 inode로 바꾸는데, container의 bind mount는 기동 시점 inode에
+> 고정돼 있다. 그래서 그 뒤로 container는 **떨어져 나간 옛 디렉터리를 계속 본다.**
+>
+> 증상이 고약하다 — Prometheus는 정상 기동하고 로그에도 오류가 없는데 alert rule이
+> **0개**가 된다. host에서 `ls`하면 파일이 다 있고 `promtool check rules`도 통과한다.
+> container 안에서만 비어 있다. Grafana 대시보드도 같은 방식으로 사라진다.
+>
+> ```sh
+> sudo sh -c 'cd /opt/gilbom/deploy && docker compose \
+>   --project-name gilbom-monitoring \
+>   --env-file /opt/gilbom/monitoring/monitoring.env \
+>   -f compose.monitoring.yaml up --detach --force-recreate --wait'
+> ```
+>
+> 확인은 container 안에서 한다. host에서 보는 것은 의미가 없다.
+>
+> ```sh
+> sudo docker exec gilbom-monitoring-prometheus-1 ls /etc/prometheus/rules/
+> curl -s http://127.0.0.1:9090/api/v1/rules | jq '[.data.groups[].rules[]] | length'
+> ```
+
+archive에는 Git이 추적하는 파일만 들어 있어 `runtime.env`, `image.env`,
 `/opt/gilbom/secrets`, named volume은 보존된다. 푼 뒤 확인한다.
 
 ```sh
