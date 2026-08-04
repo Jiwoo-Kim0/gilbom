@@ -71,7 +71,7 @@ unsafe_entries="$(
   || fail "runtime state or a Secret payload is tracked in the source archive"
 
 zstd --quiet --threads=0 -19 \
-  --output "$ARCHIVE" \
+  -o "$ARCHIVE" \
   "$source_tar"
 zstd --quiet --test "$ARCHIVE" \
   || fail "release source archive failed zstd integrity testing"

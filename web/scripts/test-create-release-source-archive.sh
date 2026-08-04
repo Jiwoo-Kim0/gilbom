@@ -8,7 +8,7 @@ case "$(basename -- "$0")" in
       [ -s "${3:-}" ]
       exit
     fi
-    [ "${4:-}" = --output ] && [ "$#" -eq 6 ] \
+    [ "${4:-}" = -o ] && [ "$#" -eq 6 ] \
       || exit 1
     cp -- "$6" "$5"
     exit
@@ -28,6 +28,7 @@ fail() {
 fixture_root="$TEST_ROOT/repository"
 fixture_project="$fixture_root/web"
 fake_bin="$TEST_ROOT/bin"
+test_path="$PATH"
 mkdir -p \
   "$fixture_project/scripts" \
   "$fixture_project/infra/scripts" \
@@ -36,10 +37,16 @@ mkdir -p \
   "$fake_bin"
 cp -- "$PROJECT_DIR/scripts/create-release-source-archive.sh" \
   "$fixture_project/scripts/"
-cp -- "$0" "$fake_bin/zstd"
 chmod 0755 \
-  "$fixture_project/scripts/create-release-source-archive.sh" \
-  "$fake_bin/zstd"
+  "$fixture_project/scripts/create-release-source-archive.sh"
+if [ "${GILBOM_TEST_REAL_ZSTD:-}" = 1 ]; then
+  command -v zstd >/dev/null 2>&1 \
+    || fail "GILBOM_TEST_REAL_ZSTD=1 requires zstd"
+else
+  cp -- "$0" "$fake_bin/zstd"
+  chmod 0755 "$fake_bin/zstd"
+  test_path="$fake_bin:$PATH"
+fi
 printf 'services: {}\n' > "$fixture_project/compose.monitoring.yaml"
 printf 'services: {}\n' > "$fixture_project/compose.prod.yaml"
 printf '#!/bin/sh\n' \
@@ -53,18 +60,23 @@ git -C "$fixture_root" add web
 git -C "$fixture_root" commit --quiet -m fixture
 release_sha="$(git -C "$fixture_root" rev-parse HEAD)"
 
-PATH="$fake_bin:$PATH" \
+PATH="$test_path" \
 RELEASE_SHA="$release_sha" \
   sh "$fixture_project/scripts/create-release-source-archive.sh"
 
 archive="$fixture_project/release/gilbom-web-$release_sha.tar.zst"
 [ -s "$archive" ] \
   || fail "exact-SHA source archive was not created"
-tar -tf "$archive" | grep -Fxq compose.monitoring.yaml \
+archive_tar="$archive"
+if [ "${GILBOM_TEST_REAL_ZSTD:-}" = 1 ]; then
+  archive_tar="$TEST_ROOT/gilbom-web.tar"
+  zstd --quiet -dc "$archive" > "$archive_tar"
+fi
+tar -tf "$archive_tar" | grep -Fxq compose.monitoring.yaml \
   || fail "archive omitted monitoring Compose"
-tar -tf "$archive" | grep -Fxq infra/scripts/install-day10-host.sh \
+tar -tf "$archive_tar" | grep -Fxq infra/scripts/install-day10-host.sh \
   || fail "archive omitted the Day 10 host installer"
-if tar -tf "$archive" | grep -Fq 'web/'; then
+if tar -tf "$archive_tar" | grep -Fq 'web/'; then
   fail "archive unexpectedly retained the project directory prefix"
 fi
 
@@ -73,7 +85,7 @@ printf 'must-not-cross-the-boundary\n' > "$fixture_project/runtime.env"
 git -C "$fixture_root" add web/runtime.env
 git -C "$fixture_root" commit --quiet -m unsafe-runtime-state
 unsafe_sha="$(git -C "$fixture_root" rev-parse HEAD)"
-if PATH="$fake_bin:$PATH" \
+if PATH="$test_path" \
    RELEASE_SHA="$unsafe_sha" \
     sh "$fixture_project/scripts/create-release-source-archive.sh" \
       >/dev/null 2>&1; then
