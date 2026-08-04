@@ -63,8 +63,8 @@ collect_containers() {
   # 이름·상태·재시작 횟수·OOM 여부·기동 시각을 한 번의 inspect로 가져온다.
   printf '%s\n' "$ids" \
     | xargs docker inspect \
-        --format '{{.Name}} {{.State.Running}} {{.RestartCount}} {{.State.OOMKilled}} {{.State.StartedAt}}' \
-    | while read -r name running restarts oom started; do
+        --format '{{.Name}} {{.State.Running}} {{.RestartCount}} {{.State.OOMKilled}} {{.State.StartedAt}} {{.HostConfig.RestartPolicy.Name}}' \
+    | while read -r name running restarts oom started policy; do
         name="${name#/}"
         case "$name" in
           ""|*[!A-Za-z0-9_.-]*)
@@ -72,6 +72,10 @@ collect_containers() {
             continue
             ;;
         esac
+        # restart 정책이 없는 container는 한 번 돌고 끝나는 init 작업이다
+        # (alloy-data-init, mosquitto-config-init). 종료돼 있는 것이 정상이라
+        # 살아 있는지 감시하면 영구히 발화하는 거짓 알람이 된다.
+        [ "$policy" = no ] && continue
         started_seconds="$(date -u -d "$started" +%s 2>/dev/null || echo 0)"
         printf 'gilbom_container_running{name="%s"} %s\n' \
           "$name" "$([ "$running" = true ] && echo 1 || echo 0)"
