@@ -229,6 +229,10 @@ network 삭제만 실패하고 나머지는 정상 진행된다(다음 `up`이 �
 | Alloy 설정 | `textfile`·`loki.source.journal`·`stage.structured_metadata`·`redact` 전부 로드 |
 | Mattermost webhook | 실제 전송 확인 |
 | auditd 규칙 | `auditctl -l`에 10개 watch 등록 |
+| `verify-day10-runtime.sh` | **전 항목 PASS** (수집 대상 7, alert rule 37개, Loki, host metric, backup metric, Grafana) |
+| requestId 추적 | Nginx access log 줄이 structured metadata로 검색됨 |
+| 민감값 차단 | `?password=` 는 `[REDACTED]`, 경로의 `csrf-token`은 원형 유지 |
+| 알람 발화·전달·해소 | `BackupFailed`·`HostDiskCritical`·`HostDiskLow` 왕복 확인 (통지 6건, 실패 0) |
 
 **남은 검증은 EC2에서** — runbook 3·5·6절이 순서대로 그 절차다.
 
@@ -243,9 +247,11 @@ network 삭제만 실패하고 나머지는 정상 진행된다(다음 `up`이 �
 | ~~백엔드 테스트 그린~~ | **완료** — Jenkins CI 796 tests |
 | ~~host 설치·timer·auditd~~ | **완료** — `install-day10-host.sh`, timer 3개 활성 |
 | ~~monitoring stack 기동~~ | **완료** — 컨테이너 8개 Up |
-| `verify-day10-runtime.sh` 통과 | port 발행 문제(§7.2) 수정 적용 후 재실행 |
-| Grafana 대시보드 4장 눈으로 확인 | SSH 터널(local 3000 → remote 3001) |
-| 테스트 알람 실제 수신 | runbook 5절 4종 |
+| ~~`verify-day10-runtime.sh` 통과~~ | **완료** — 전 항목 PASS |
+| ~~알람 실제 수신 (디스크·Backup)~~ | **완료** — 발화·전달·해소 왕복 확인 |
+| ~~Grafana 대시보드 4장 눈으로 확인~~ | **완료** — 4장 모두 값이 들어오는 것을 확인 |
+| ~~알람 시험 5.1 Backend Down~~ | **완료(2회차)** — 발화·전달·해소 확인. 1회차는 전달 실패했다 (§7.16) |
+| p95 값 확인 | Backend 재배포 후. 지금은 최대값만 보인다 |
 | `restore-drill.sh` 실제 실행 | 개인키가 있는 위치에서 |
 | 복원된 결함 이미지 화면 확인 | 사람이 봐야 끝난다 |
 
@@ -303,8 +309,12 @@ network 삭제만 실패하고 나머지는 정상 진행된다(다음 `up`이 �
 
 ## 7. 운영 반영에서 드러난 것 (2026-08-03 ~ 08-04)
 
-코드는 8/3에 끝났고 CI·CD도 성공했다. 그런데 **EC2에 올리는 과정에서 네 가지가 걸렸다.**
-전부 "저장소에서는 알 수 없고 실제 host에서만 드러나는" 종류였다.
+코드는 8/3에 끝났고 CI·CD도 성공했다. 그런데 **EC2에 올려 실제로 돌리는 과정에서 열여섯 가지가
+걸렸다.** 전부 "저장소에서는 알 수 없고 실제 host에서만 드러나는" 종류였고, 그중 다섯은
+**정상으로 보이면서 아무 일도 하지 않고 있던** 것이었다 — 로그 수집, 알람 전달, 거짓 알람,
+사라진 시계열, 그리고 container가 보고 있던 옛 디렉터리.
+
+돌려보지 않았으면 시연 때까지 몰랐을 것들이다. 정적 검사로는 어느 것도 드러나지 않았다.
 
 ### 7.1 CI·CD source archive 누락과 해소
 
@@ -377,6 +387,233 @@ incoming webhook은 payload의 채널이 실제와 다르면 **전송을 거부�
 auditd도 기본 이미지에 없어 설치가 필요했다. 설치 스크립트는 없으면 건너뛰고 안내만
 출력하도록 만들어 뒀던 것이 그대로 동작했다.
 
+### 7.5 로그가 한 줄도 수집되고 있지 않았다
+
+port를 연 뒤 `verify-day10-runtime.sh`가 "Loki에 Backend 로그가 없다"로 실패했다. 라벨
+목록을 24시간 범위로 물어도 비어 있었다. **Day 8 이후 줄곧 그 상태였다.**
+
+alloy-logs가 `/var/lib/docker/containers`를 읽지 못했다. 비-root 사용자에게 `cap_add`로
+준 `DAC_READ_SEARCH`는 **effective set에 들어가지 않는다.** Docker가 비-root에 ambient
+capability를 부여하지 않기 때문이다. 그 디렉터리는 `0710 root:root`라 보조 그룹을 붙여도
+목록 조회가 되지 않는다. 실제로 확인해 보니 log 파일이 `root` 소유여서 **UID 0이면
+capability 없이도 읽힌다.** 즉 필요한 것은 capability가 아니라 UID였다.
+
+`user: "0:0"`으로 바꾸되 `cap_drop: ALL`·`no-new-privileges`·`read_only` rootfs와
+읽기 전용 mount 두 개는 그대로 두어 권한면을 "그 두 경로를 읽는 것"으로 한정했다.
+
+### 7.6 민감값 치환이 로그를 망가뜨리고 있었다
+
+로그가 흐르기 시작하자마자 Nginx access log가 이렇게 찍혔다.
+
+```
+"GET /api/v1/auth/${1}[REDACTED]${1}[REDACTED]" 200 147
+```
+
+원래는 `/api/v1/auth/csrf-token`이다. 두 가지가 겹쳤다.
+
+- `stage.replace`는 **캡처 그룹만 치환**한다. `${1}` 템플릿 문법을 쓰면 그 문자열이
+  그대로 로그에 박힌다
+- 구분자 조건 `["'=: ]+`가 느슨해 URL 경로의 `csrf-token`까지 비밀값으로 오인했다
+
+캡처 그룹을 값 하나로 줄이고 구분자로 `=` 또는 `:`를 요구하도록 고쳤다. 운영에서
+`?password=secret` 은 지워지고 경로의 `csrf-token`은 원형으로 남는 것을 확인했다.
+
+### 7.7 알람은 한 번도 전달된 적이 없었다
+
+시험 알람을 띄웠는데 Mattermost에 아무것도 오지 않았다. Prometheus에서 firing이 보이고
+Alertmanager도 ready였다. 로그에 답이 있었다.
+
+```
+open /run/secrets/alertmanager_mattermost_webhook: permission denied
+```
+
+secret 파일이 `0400 root`인데 Alertmanager container는 `nobody`(65534)로 돈다. Grafana
+비밀번호 파일이 되는 것은 `0444`(누구나 읽기)로 만들어져 있기 때문이었다. 그 차이를
+놓쳤다.
+
+**0444로 여는 대신 소유자를 container 사용자로 바꾸고 0400을 유지**했다. 0444는 host의
+모든 사용자가 webhook URL을 읽을 수 있게 만든다.
+
+이 사건의 핵심은 **관측 시스템이 정상으로 보이면서 아무것도 알려주지 않았다**는 것이다.
+`verify-day10-runtime.sh`의 receiver 검사도 설정에 receiver가 있는지만 봐서 PASS였다.
+Alertmanager가 이미 `alertmanager_notifications_failed_total`로 실패를 세고 있었으므로
+그 값을 알람(`AlertDeliveryFailing`)과 검사 양쪽에 넣었다.
+
+> 이 알람 자체도 같은 경로로 나가므로 채널에는 못 올 수 있다. 그때는 Prometheus 알람
+> 화면과 운영 대시보드가 유일한 신호다. 완전한 해결은 아니지만, 조용한 실패보다는 낫다.
+
+### 7.8 영구히 발화하는 거짓 알람이 있었다
+
+시험 중에 `ContainerNotRunning`이 두 건 떠 있는 것을 발견했다. `alloy-data-init`과
+`mosquitto-config-init` — **실행 후 종료가 정상인 일회성 container**다.
+`docker ps --all`이 이들을 포함하면서 장애로 집계됐다.
+
+거짓 알람은 없느니만 못하다. 팀이 알람 자체를 무시하게 되고 그러면 진짜 장애도 함께
+묻힌다. `restart` 정책이 `no`인 container를 수집에서 제외했다 — "계속 떠 있어야 하는
+대상이 아니다"라는 뜻이 정책에 이미 들어 있다.
+
+### 7.9 textfile은 HELP·TYPE이 어긋나면 조용히 시계열을 삼킨다
+
+시험용 metric 파일을 넣으면서 `# HELP`·`# TYPE`을 "안전하게" 생략했더니, **실제 디스크·
+backup 시계열이 통째로 사라졌다.** 두 파일이 같은 metric 이름을 선언하는데 메타데이터가
+다르면 collector가 한쪽을 버린다.
+
+가장 나쁜 점은 **`node_textfile_scrape_error`가 0으로 남는다**는 것이다. 오류 표시 없이
+값만 없어진다. 문구를 실제 파일과 똑같이 맞추자 공존했다.
+
+`backup-common.sh`가 두 backup 종류의 metric을 같은 함수로 찍는 것이 이 때문이다.
+새 textfile을 손으로 추가할 때는 기존 파일의 HELP·TYPE을 그대로 복사해야 한다.
+
+### 7.10 해소 메시지가 발생 메시지와 구분되지 않았다
+
+`[RESOLVED]`가 하나만 온 것처럼 보였다. 실제로는 세 건 모두 전달됐고(slack 통지 6건,
+실패 0건), critical 수신자의 제목을 `[CRITICAL]`로 **고정**해 둬서 해소 메시지가 발생
+메시지와 글자까지 같았을 뿐이다. 색만 초록으로 바뀌는데 채널에서는 알아채기 어렵다.
+
+두 수신자 모두 `[상태 · 심각도]` 형식으로 맞췄다. 심각도를 색에만 의존하지 않게 되는
+부수 효과도 있다.
+
+### 7.11 archive를 다시 풀면 container가 옛 디렉터리를 계속 본다
+
+대시보드를 고쳐 배포한 뒤 Prometheus의 alert rule이 **0개**가 됐다. 그런데
+`promtool check rules`는 36개를 정상으로 봤고, host에서 `ls`해도 파일이 다 있었다.
+로그에도 오류가 없었다. container 안에서만 디렉터리가 비어 있었다.
+
+그사이 누군가 `/opt/gilbom/deploy`에 소스 archive를 다시 풀었다. `tar`가 디렉터리를
+**새 inode로 교체**하는데, container의 bind mount는 기동 시점 inode에 고정돼 있다.
+그래서 떨어져 나간 옛 디렉터리를 계속 보게 된다.
+
+파일 하나를 `install`로 바꿀 때도 같은 일이 일어난다 — 그래서 설정을 고칠 때마다
+container를 재생성해 온 것이 결과적으로 맞았다. **archive를 다시 풀면 monitoring
+stack 전체를 재생성해야 한다.** 확인은 반드시 container 안에서 한다.
+
+### 7.12 instance 라벨이 바뀌면 대시보드와 알람이 함께 흔들린다
+
+"마지막 배포" 타일에 값이 둘로 나오고 이름이 `{instance="12909c9b468b", job=...}`처럼
+찍혔다. Alloy container를 재생성할 때마다 `instance` 라벨(container ID)이 바뀌어
+시계열이 갈라진 것이다.
+
+표시만의 문제가 아니었다. **`scalar()`는 시계열이 둘 이상이면 `NaN`을 반환한다.**
+`RobotImagesStorageFillingUp`과 `DockerStorageFillingUp`이 그 형태라, Alloy를 재생성한
+뒤 옛 시계열이 만료되기까지 5분쯤 **조용히 평가되지 않는** 구간이 생긴다.
+
+stat 패널 12개의 질의를 집계(`max`, `avg`, `max by (...)`)로 감싸 instance 라벨을
+없애고 `legendFormat`을 붙였다. 알람 두 개의 `scalar()`도 `max()`로 감쌌다.
+
+### 7.13 응답 시간 p95는 켜야 나온다
+
+Backend 대시보드의 p95 패널이 `No data`였다. Spring은 기본적으로 요청 시간의
+`count`·`sum`·`max`만 내보내고 **백분위 계산에 필요한 데이터를 내지 않는다.**
+
+`percentiles-histogram`(bucket)과 `percentiles`(직접 계산) 중 후자를 골랐다. bucket은
+endpoint 수만큼 시계열을 곱해 늘리는데, 인스턴스가 하나뿐이라 집계할 일이 없어 그
+비용을 치를 이유가 없다. 인스턴스가 늘어나면 bucket으로 바꾸면 된다.
+
+패널은 p95와 최대값을 함께 그리도록 바꿨다. p95는 Backend 재배포 후부터 값이 들어오고,
+그전까지는 최대값이 빈 화면을 막는다.
+
+**그런데 최대값을 켜자 그래프가 30분 단위로 치솟았다.** SSE 스트림
+(`/api/v1/stream/*`)이 원인이었다. EventSource는 연결을 오래 유지하는 것이 정상인데
+서버 입장에서는 "30분 걸린 요청"으로 기록된다. 느린 것이 아니라 원래 그런 것이다.
+
+스트림을 빼자 이번에는 `/error`가 27초로 남았다. 확인해 보니
+`status=200 outcome=SUCCESS exception=IOException` — **SSE 클라이언트가 연결을 끊을 때**
+서버가 쓰기 중 IOException을 받고 error dispatch로 넘어간 것이다. 이것도 장애가 아니다.
+
+결국 패널 범위를 `/api/` 요청으로 한정했다. actuator와 `/error`가 자연스럽게 빠지고
+실제 API가 보인다(전부 6ms 이하). **한 종류의 요청이 다른 종류를 가리면 그 패널은
+아무것도 알려주지 않는다** — 눈금이 30분이면 6ms는 0과 구분되지 않는다.
+
+### 7.14 `topk`는 시계열 질의에서 상위 N을 고정하지 못한다
+
+범위를 좁혔는데도 범례가 5개를 훨씬 넘어 스크롤바가 생겼다. **`topk(5, ...)`는 시점마다
+상위 5개를 따로 고른다.** 시간대에 따라 다른 endpoint가 뽑히고 Grafana는 그 합집합을
+전부 그린다. 6시간 범위에서 36개 시계열이 나왔다.
+
+`max_over_time(...[1h])`으로 기준 창을 줘 봐도 23개였다. 평가 시점마다 창이 함께 밀려서
+집합이 계속 바뀐다. **PromQL만으로 시계열 질의의 상위 N을 고정하는 깔끔한 방법은 없다.**
+
+대시보드의 목적은 "느려졌는가"를 한눈에 보는 것이다. 전체 최대와 가장 느린 endpoint의
+p95, 두 줄로 줄이니 눈금과 범례가 언제나 읽힌다. 어느 endpoint인지는 그때 파고들면 되고,
+그 질의를 패널 설명에 적어 뒀다.
+
+### 7.15 느려 보이는 것이 정상인 경우 — 인증 경로
+
+정리된 그래프에서 `/api/v1/auth/mfa/totp/confirm`이 1.2초, `/api/v1/auth/login`이 338ms로
+튀었다. 나머지 조회 API는 최고값이 266~288ms이고 평소 0ms 부근이다.
+
+**둘 다 Argon2id 비밀번호 해싱 경로다.** Argon2id는 대입 공격을 비싸게 만들려고 의도적으로
+느리게 설계됐다. 수백 ms가 걸리는 것이 정상이고, 이 프로젝트는 `passwordHashLoadTest`로
+그 비용을 따로 측정하고 있기도 하다.
+
+그래프의 뾰족한 부분은 장애 신호가 아니라 **누군가 로그인한 흔적**이다. 관측을 붙이면
+이렇게 "정상인데 이상해 보이는 것"이 먼저 눈에 띈다. 임계값을 정하기 전에 무엇이
+정상인지부터 알아야 하는 이유다.
+
+### 7.16 Backend Down 시험 — 첫 회차는 발화만 되고 전달은 실패했다
+
+backend를 멈춰 `BackendDown`을 발화시켰다. **Prometheus에서는 떴는데 채널에는 오지
+않았다.** webhook secret이 `nobody:nogroup`에서 `root:root`로 되돌아가 있었고, 그래서
+Alertmanager가 읽지 못했다. `/opt/gilbom/deploy`가 `700 root:root`로 바뀐 것과 같은
+보안 정리에 함께 쓸린 것으로 보인다.
+
+§7.7에서 같은 증상을 이미 겪었는데 그때 고친 방식이 **host 파일 소유자에 기대는
+것**이었다. 정리가 한 번 지나갈 때마다 무너지는 방식이었다. Compose로 container 안의
+소유자를 지정해 보려 했으나 v5는 파일 secret의 `uid`·`gid`·`mode`를 무시하고 host
+파일을 그대로 bind mount한다. `0444`로 여는 것은 host의 모든 사용자에게 webhook URL을
+주는 것이라 더 나쁘다. 결국 **alloy-logs와 같은 방식**으로 UID 0으로 돌리되 capability를
+전부 빼고 rootfs는 read-only로 뒀다(§7.5와 같은 판단이다).
+
+**같은 실수를 두 번 했다.** 처음에는 권한을 몰라서, 두 번째는 고친 방식이 외부 변경에
+견디지 못해서다. "동작하게 만들었다"와 "계속 동작한다"는 다르다.
+
+시험 자체보다 그 과정에서 나온 것이 더 많았다.
+
+**억제 규칙은 이번 경우에 필요가 없었다.** `StorageReadinessDown`·`ReadinessComponentDown`은
+애초에 뜨지 않았다. backend가 죽으면 `gilbom_health_component_status` 시계열이 아예
+사라져서 조건을 평가할 대상이 없기 때문이다. 억제로 막으려던 것이 데이터 부재로 이미
+막혀 있었다. 규칙은 그대로 두되, **한 번도 발동한 적 없는 규칙을 "동작한다"고 적지 않는다.**
+
+**대신 `ContainerNotRunning`이 함께 왔다.** 억제 대상 목록에 없었기 때문인데, 목록에
+넣으면 무관한 container의 알람까지 함께 묻힌다(`equal`이 `environment`뿐이라 이름으로
+구분하지 못한다). 지금은 그대로 두고 기록만 남긴다.
+
+**진짜 발견은 두 가지였다.**
+
+- `ContainerNotRunning`의 대상이 또 init container 두 개였다. §7.8에서 고친 것이
+  **되돌아가 있었다.** archive를 다시 푼 뒤 누군가 `install-day10-host.sh`를 재실행하면서
+  `/usr/local/sbin/gilbom-host-metrics`가 archive에 든 옛 버전으로 덮인 것이다. 내 수정이
+  아직 CI 아티팩트에 없으니 당연한 결과다. **손으로 옮긴 수정은 다음 배포에 사라진다.**
+- `ContainerMemoryNearLimit`이 Grafana를 가리키고 있었다. 242MiB/256MiB, **94%**였다.
+  시험이 아니라 실제 경고다. Grafana 13은 대시보드 provisioning과 검색 index만으로도
+  240MiB를 쓰는데, Day 8의 256m은 datasource만 있던 시절 기준이었다. 512m으로 올리자
+  29%가 됐다.
+
+**내 스크립트 문제도 하나 있었다.** 발화 감지용 grep이 JSON 필드 순서에 의존해 맞지
+않았고, 폴링이 5분 타임아웃까지 돌고서야 trap이 backend를 되살렸다. **계획한 3분이 아니라
+6분을 멈췄다.** 상태 확인은 문자열이 아니라 `jq`로 필드를 짚어야 한다.
+
+**두 번째 회차 — 통과.** secret 권한을 고치고 폴링을 `jq`로 바꿔 다시 했다.
+
+```
+정지        12:56:25
+발화·수신   12:59:05   (2분 40초)
+재기동      12:59:48
+복구 확인   13:00:12   (총 중단 3분 23초)
+
+통지 누계 2 → 3,  실패 0
+firing  BackendDown 하나뿐
+```
+
+Mattermost 수신까지 확인했다. `ContainerNotRunning`은 이번엔 `pending`에 머물러 함께
+오지 않았다 — 첫 회차보다 조용했다. 시험을 다시 하기로 한 판단이 맞았다. **"발화했다"와
+"전달됐다"는 다른 사실이고, 전자만 보고 통과로 적었으면 시연 중 장애가 나도 아무도
+모르는 상태로 남았을 것이다.**
+
+시험을 다시 하는 데도 대가가 있다. 3분간 실패한 요청은 되돌아오지 않고, 대시보드
+그래프에는 끊긴 구간이 보관 기간 내내 남는다. 이번에는 요청률이 0.11 req/s이고 이미지
+업로드가 0건이라 유실될 데이터가 사실상 없는 시점을 골랐다.
+
 ### 후속 커밋
 
 | 커밋 | Jira | 내용 |
@@ -385,6 +622,21 @@ auditd도 기본 이미지에 없어 설치가 필요했다. 설치 스크립트
 | `4fcc81a` | 741 `#comment` | runbook에 deploy 디렉터리 갱신 전제와 첫 검사 전 준비 추가 |
 | `51916a2` | 734 `#comment` | 알람 채널을 `d101_alertmanager`로 |
 | `f98aaee` | 734 `#comment` | port 발행 경로용 비-internal network 추가 + 정적 검사 |
+| `c26b31a` | 737 `#comment` | alloy-logs 권한(§7.5)과 민감값 치환 규칙(§7.6) |
+| `1b62028` | 735 `#comment` | 일회성 init container를 감시 대상에서 제외 (§7.8) |
+| `f5f00d7` | 734 `#comment` | 알람 전달 실패 감지 — 알람·검사·runbook (§7.7, §7.9) |
+| `8743da0` | 734 `#comment` | 알람 제목에 상태 추가 (§7.10) |
+| `479f06f` | 736 `#comment` | 현재 상태 타일을 시점 질의로 (알람 시험 잔상 제거) |
+| `5b55bf4` | 733 `#comment` | 응답 시간 백분위 노출 (§7.13) |
+| `62b278a` | 734 `#comment` | `scalar()`를 집계로 감싸 instance 분기에 견디게 (§7.12) |
+| `affb60b` | 736 `#comment` | stat 패널 집계·legendFormat, p95·최대 패널 (§7.12, §7.13) |
+| `aea5478` | 741 `#comment` | runbook에 inode 함정 추가 (§7.11~7.13) |
+| `f54d8ef` | 736 `#comment` | 응답 시간 패널을 API 요청으로 한정 (§7.13) |
+| `29285d0` | 736 `#comment` | 응답 시간 패널을 집계 두 줄로 (§7.14) |
+| `fb043cd` | 741 `#comment` | 작업 기록에 대시보드 확인 결과 반영 (§7.14, §7.15) |
+| `541caf4` | 734 `#comment` | Grafana 메모리 상한 512m (§7.16) |
+| `06e839c` | 741 `#comment` | 작업 기록에 Backend Down 시험 결과 (§7.16) |
+| `edcf156` | 734 `#comment` | Alertmanager를 UID 0으로 — host 소유자 변경 견딤 (§7.16) |
 
 ---
 
@@ -394,5 +646,9 @@ auditd도 기본 이미지에 없어 설치가 필요했다. 설치 스크립트
 - **TOTP keyring을 잃으면 MFA 암호문은 복구 불가다.** DB를 되살려도 사용자는 다시 등록해야 한다.
 - **`gilbom-host-metrics.timer`가 멈추면 디스크 알람이 조용히 사라진다.**
 - **Loki 민감값 차단은 목록 기반이다.** 새 형식이 생기면 규칙을 함께 늘려야 한다.
+- **알람 전달 경로가 끊기면 그 사실을 알리는 알람도 함께 끊긴다.** `AlertDeliveryFailing`은
+  Prometheus 화면과 운영 대시보드에만 남는다. 주기적으로 눈으로 보는 수밖에 없다.
+- **textfile을 손으로 추가하면 실제 metric을 지울 수 있다.** HELP·TYPE이 어긋나면 오류
+  없이 사라진다(§7.9). 급할 때 임시 파일을 넣는 습관이 특히 위험하다.
 - HTTPS probe는 공개 DNS·보안그룹 경로를 확인하지 않는다(§4). 시연 전 외부 브라우저 확인으로 잡는다.
 - Prometheus 보존 15일, Loki 14일. 그보다 오래된 사건은 남지 않는다.

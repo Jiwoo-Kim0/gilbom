@@ -1,20 +1,34 @@
 {
   "uid": "gilbom-backend",
   "title": "길봄 · Backend",
-  "tags": ["gilbom", "backend"],
+  "tags": [
+    "gilbom",
+    "backend"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
   "editable": false,
   "refresh": "30s",
-  "time": { "from": "now-6h", "to": "now" },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "panels": [
     {
       "id": 1,
       "type": "stat",
       "title": "Backend 수집 상태",
-      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
@@ -22,8 +36,16 @@
             {
               "type": "value",
               "options": {
-                "0": { "text": "DOWN", "color": "red", "index": 0 },
-                "1": { "text": "UP", "color": "green", "index": 1 }
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 1
+                }
               }
             }
           ]
@@ -33,17 +55,38 @@
       "options": {
         "colorMode": "background",
         "graphMode": "none",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
       },
-      "targets": [{ "refId": "A", "expr": "up{job=\"backend\"}" }]
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(up{job=\"backend\"})",
+          "instant": true,
+          "range": false
+        }
+      ]
     },
     {
       "id": 2,
       "type": "stat",
       "title": "Readiness 구성요소",
       "description": "storageReadiness가 DOWN이면 결함 이미지 업로드가 막힌다.",
-      "gridPos": { "h": 5, "w": 12, "x": 6, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 6,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
@@ -51,8 +94,16 @@
             {
               "type": "value",
               "options": {
-                "0": { "text": "DOWN", "color": "red", "index": 0 },
-                "1": { "text": "UP", "color": "green", "index": 1 }
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 1
+                }
               }
             }
           ]
@@ -63,13 +114,21 @@
         "colorMode": "background",
         "graphMode": "none",
         "textMode": "value_and_name",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
       },
       "targets": [
         {
           "refId": "A",
           "legendFormat": "{{component}}",
-          "expr": "gilbom_health_component_status"
+          "expr": "max by (component) (gilbom_health_component_status)",
+          "instant": true,
+          "range": false
         }
       ]
     },
@@ -77,8 +136,16 @@
       "id": 3,
       "type": "stat",
       "title": "HTTPS 종단",
-      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
@@ -86,8 +153,16 @@
             {
               "type": "value",
               "options": {
-                "0": { "text": "실패", "color": "red", "index": 0 },
-                "1": { "text": "정상", "color": "green", "index": 1 }
+                "0": {
+                  "text": "실패",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "정상",
+                  "color": "green",
+                  "index": 1
+                }
               }
             }
           ]
@@ -97,27 +172,59 @@
       "options": {
         "colorMode": "background",
         "graphMode": "none",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
       },
-      "targets": [{ "refId": "A", "expr": "probe_success{job=\"blackbox-https\"}" }]
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(probe_success{job=\"blackbox-https\"})",
+          "instant": true,
+          "range": false
+        }
+      ]
     },
     {
       "id": 4,
       "type": "timeseries",
       "title": "HTTP 요청률 (상태별)",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
           "min": 0,
-          "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" }
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
@@ -130,46 +237,90 @@
     {
       "id": 5,
       "type": "timeseries",
-      "title": "응답 시간 p95",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "title": "응답 시간 (p95 · 최대)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "s",
           "min": 0,
-          "custom": { "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" }
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
           "refId": "A",
-          "legendFormat": "{{uri}}",
-          "expr": "topk(5, histogram_quantile(0.95, sum by (uri, le) (rate(http_server_requests_seconds_bucket{job=\"backend\"}[5m]))))"
+          "legendFormat": "p95 (가장 느린 endpoint)",
+          "expr": "max(http_server_requests_seconds{job=\"backend\",uri=~\"/api/.*\",uri!~\"/api/v1/stream/.*\",quantile=\"0.95\"})"
+        },
+        {
+          "refId": "B",
+          "legendFormat": "최대 (전체 API)",
+          "expr": "max(http_server_requests_seconds_max{job=\"backend\",uri=~\"/api/.*\",uri!~\"/api/v1/stream/.*\"})"
         }
-      ]
+      ],
+      "description": "p95는 95%의 요청이 그보다 빨랐다는 뜻이다. 평균이 감추는 느린 꼬리를 본다. /api/ 요청만 본다 — SSE 스트림은 연결을 오래 유지하는 것이 정상이고, SSE 클라이언트가 끊을 때 생기는 IOException은 /error에 수십 초로 잡힌다. 어느 endpoint가 느린지는 Prometheus에서 topk(5, max by (uri) (http_server_requests_seconds_max{uri=~\"/api/.*\"})) 로 본다. p95는 Backend 재배포 후부터 값이 들어온다."
     },
     {
       "id": 6,
       "type": "timeseries",
       "title": "5xx 응답",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
           "min": 0,
-          "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" }
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false },
-        "tooltip": { "mode": "single", "sort": "none" }
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
       },
       "targets": [
         {
@@ -183,19 +334,38 @@
       "id": 7,
       "type": "timeseries",
       "title": "JVM heap",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "bytes",
           "min": 0,
-          "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" }
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
@@ -215,43 +385,93 @@
       "type": "timeseries",
       "title": "DB connection pool",
       "description": "pending이 0을 넘으면 요청이 connection을 기다리고 있다는 뜻이다.",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 21 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 21
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "min": 0,
-          "custom": { "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" }
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
-        { "refId": "A", "legendFormat": "사용 중", "expr": "hikaricp_connections_active{job=\"backend\"}" },
-        { "refId": "B", "legendFormat": "유휴", "expr": "hikaricp_connections_idle{job=\"backend\"}" },
-        { "refId": "C", "legendFormat": "대기", "expr": "hikaricp_connections_pending{job=\"backend\"}" }
+        {
+          "refId": "A",
+          "legendFormat": "사용 중",
+          "expr": "hikaricp_connections_active{job=\"backend\"}"
+        },
+        {
+          "refId": "B",
+          "legendFormat": "유휴",
+          "expr": "hikaricp_connections_idle{job=\"backend\"}"
+        },
+        {
+          "refId": "C",
+          "legendFormat": "대기",
+          "expr": "hikaricp_connections_pending{job=\"backend\"}"
+        }
       ]
     },
     {
       "id": 9,
       "type": "timeseries",
       "title": "MQTT inbound 거부",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 21 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 21
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
           "min": 0,
-          "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" }
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
@@ -266,19 +486,38 @@
       "type": "timeseries",
       "title": "인증·권한 이벤트",
       "description": "로그인 실패와 계정 잠금, 그리고 CSRF·권한 거부다. 급증은 배포 불일치이거나 대입 시도다.",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 29 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 29
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "min": 0,
-          "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" }
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
