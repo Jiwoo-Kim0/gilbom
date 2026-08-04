@@ -252,6 +252,56 @@ class RobotEventMissionDefectIntegrationTest {
     }
 
     @Test
+    void cancelsReadyMissionFromRobotEventAndStoresTerminalReason() {
+        jdbcTemplate.update("""
+                UPDATE robot.mission
+                SET status = 'READY',
+                    updated_at = ?
+                WHERE mission_id = ?
+                """,
+                java.sql.Timestamp.from(BASE_TIME.minusSeconds(1)),
+                MISSION_ID);
+        MissionEventPayload cancelled = missionEvent(
+                UUID.fromString(
+                        "23000000-0000-4000-8000-000000000105"),
+                1,
+                MissionEventPayload.EventType.MISSION_CANCELLED,
+                new MissionEventPayload.Result(
+                        0,
+                        0,
+                        0,
+                        "operator cancellation"));
+
+        RobotEventIngestionResult stored =
+                missionIngestionService.ingest(
+                        cancelled,
+                        "{\"event_type\":\"MISSION_CANCELLED\"}",
+                        BASE_TIME.plusSeconds(2));
+
+        Map<String, Object> mission = jdbcTemplate.queryForMap("""
+                SELECT status, ended_at, completion_reason
+                FROM robot.mission
+                WHERE mission_id = ?
+                """,
+                MISSION_ID);
+        Map<String, Object> history = jdbcTemplate.queryForMap("""
+                SELECT before_status, after_status, transition_reason
+                FROM robot.mission_status_history
+                WHERE mission_id = ?
+                """,
+                MISSION_ID);
+        assertThat(stored.inserted()).isTrue();
+        assertThat(mission.get("status")).isEqualTo("CANCELLED");
+        assertThat(mission.get("ended_at")).isNotNull();
+        assertThat(mission.get("completion_reason"))
+                .isEqualTo("operator cancellation");
+        assertThat(history.get("before_status")).isEqualTo("READY");
+        assertThat(history.get("after_status")).isEqualTo("CANCELLED");
+        assertThat(history.get("transition_reason"))
+                .isEqualTo("operator cancellation");
+    }
+
+    @Test
     void rejectsChangedEventIdempotencyKeyAndSequenceCollision() {
         UUID eventId = UUID.fromString(
                 "23000000-0000-4000-8000-000000000102");
