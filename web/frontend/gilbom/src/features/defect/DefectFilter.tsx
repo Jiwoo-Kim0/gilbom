@@ -14,6 +14,11 @@ interface DefectFilterProps {
   filters: DefectFilters
   onChange: (filters: DefectFilters) => void
   disabled?: boolean
+  /**
+   * "필터 초기화"를 눌렀다는 신호. 검색어를 비우는 것은 `onChange`로 전달되지만,
+   * 아직 올려보내지 않은(디바운스 대기 중인) 입력까지 버리려면 상위가 알아야 한다.
+   */
+  onReset?: () => void
 }
 
 /**
@@ -37,6 +42,7 @@ export function DefectFilter({
   filters,
   onChange,
   disabled = false,
+  onReset,
 }: DefectFilterProps) {
   const update = (partial: Partial<DefectFilters>) => {
     onChange({ ...filters, ...partial })
@@ -148,7 +154,10 @@ export function DefectFilter({
         className="secondary-button defect-filter-reset"
         type="button"
         disabled={disabled}
-        onClick={() => onChange(EMPTY_DEFECT_FILTERS)}
+        onClick={() => {
+          onChange(EMPTY_DEFECT_FILTERS)
+          onReset?.()
+        }}
       >
         필터 초기화
       </button>

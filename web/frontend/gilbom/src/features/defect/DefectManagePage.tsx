@@ -103,6 +103,8 @@ export function DefectManagePage() {
   const [merging, setMerging] = useState(false)
   const [mergeNotice, setMergeNotice] = useState<string | null>(null)
   const mapCardRef = useRef<HTMLElement | null>(null)
+  /** 늘려서 검색창을 새로 마운트하는 표식. 아래 `key` 주석 참고. */
+  const [searchResetToken, setSearchResetToken] = useState(0)
 
   const { user } = useAuthentication()
   const canMerge = hasPermission(user?.permissions ?? [], DEFECT_MERGE)
@@ -245,7 +247,14 @@ export function DefectManagePage() {
           {RISK_LEVEL_LABELS[lastEvent.riskLevel] ?? lastEvent.riskLevel}
         </p>
       )}
+      {/*
+        key를 바꿔 초기화 때 검색창을 새로 마운트한다. 검색어를 비우는 것만으로는
+        부족하다 — 이미 비어 있던 상태에서 무언가 치다가 초기화를 누르면 `value`가
+        그대로 ''라 컴포넌트가 변화를 알 수 없고, 디바운스 대기 중이던 입력이
+        300ms 뒤에 되살아난다.
+      */}
       <DefectSearchBar
+        key={searchResetToken}
         value={filters.q}
         onChange={(q) => applyFilters({ ...filters, q })}
         disabled={loading && result === null}
@@ -267,6 +276,7 @@ export function DefectManagePage() {
           filters={filters}
           onChange={applyFilters}
           disabled={loading && result === null}
+          onReset={() => setSearchResetToken((token) => token + 1)}
         />
       </div>
       {canMerge && checkedVisible.length > 0 && (
