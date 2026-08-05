@@ -170,9 +170,16 @@ export type ReportVersionSummary = {
   createdAt: string
 }
 
+export type ReportEvidenceSnapshot = {
+  defectIds: string[]
+  missionIds: string[]
+  patrolAreaIds: string[]
+}
+
 export type ReportVersion = ReportVersionSummary & {
   content: string
   statistics: ReportStatisticsSnapshot
+  evidenceSnapshot: ReportEvidenceSnapshot
 }
 
 export type ReportVersionListResponse = {

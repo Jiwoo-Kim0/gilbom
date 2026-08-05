@@ -45,6 +45,11 @@ function report(status: ReportStatus): ReportDetail {
       createdBy: AUTHOR_ID,
       createdAt: '2026-07-02T00:00:00Z',
       content: '본문',
+      evidenceSnapshot: {
+        defectIds: [],
+        missionIds: [],
+        patrolAreaIds: [],
+      },
       statistics: {
         aggregate: {
           missionCount: 0,

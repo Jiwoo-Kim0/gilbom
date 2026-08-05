@@ -27,6 +27,7 @@ import {
   getApiErrorMessage,
 } from '../../shared/api/apiClient'
 import { useAuthentication } from '../auth/authenticationContext'
+import { DEFECT_STATUS_VIEW } from '../auth/permissions'
 import {
   approveReport,
   deleteReport,
@@ -43,6 +44,7 @@ import {
   formatReportPeriod,
 } from './reportFormat'
 import { getReportActionPolicy } from './reportPolicy'
+import { ReportEvidenceGallery } from './ReportEvidenceGallery'
 import { ReportStatusBadge } from './ReportStatusBadge'
 import { SafeReportText } from './SafeReportText'
 import {
@@ -95,6 +97,8 @@ export function ReportDetailPage() {
     ),
     [detail, user],
   )
+  const canViewDefectEvidence =
+    user?.permissions.includes(DEFECT_STATUS_VIEW) ?? false
 
   const load = useCallback(async (preserveSelectedVersion = false) => {
     const requestSequence = requestSequenceRef.current + 1
@@ -391,7 +395,17 @@ export function ReportDetailPage() {
                   버전을 불러오는 중입니다.
                 </div>
               ) : (
-                <SafeReportText text={version.content} />
+                <>
+                  <SafeReportText text={version.content} />
+                  <ReportEvidenceGallery
+                    key={[
+                      version.versionNo,
+                      ...version.evidenceSnapshot.defectIds,
+                    ].join(':')}
+                    defectIds={version.evidenceSnapshot.defectIds}
+                    canView={canViewDefectEvidence}
+                  />
+                </>
               )}
             </div>
           </article>
