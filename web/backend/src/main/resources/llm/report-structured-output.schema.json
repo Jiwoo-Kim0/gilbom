@@ -1,0 +1,291 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "title",
+    "summary",
+    "statistics",
+    "keyDefects",
+    "actionRecommendations",
+    "period",
+    "promptVersion",
+    "modelIdentifier"
+  ],
+  "properties": {
+    "title": {
+      "type": "string",
+      "pattern": ".*\\S.*"
+    },
+    "summary": {
+      "type": "string",
+      "pattern": ".*\\S.*"
+    },
+    "statistics": {
+      "$ref": "#/$defs/statistics"
+    },
+    "keyDefects": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/keyDefect"
+      }
+    },
+    "actionRecommendations": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/actionRecommendation"
+      }
+    },
+    "period": {
+      "$ref": "#/$defs/period"
+    },
+    "promptVersion": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$"
+    },
+    "modelIdentifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$"
+    }
+  },
+  "$defs": {
+    "period": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to"
+      ],
+      "properties": {
+        "from": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "to": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "statistics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "aggregate",
+        "defectsByStatus",
+        "defectsByType"
+      ],
+      "properties": {
+        "aggregate": {
+          "$ref": "#/$defs/aggregateMetrics"
+        },
+        "defectsByStatus": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/defectStatusCount"
+          }
+        },
+        "defectsByType": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/defectTypeCount"
+          }
+        }
+      }
+    },
+    "aggregateMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "missionCount",
+        "completedMissionCount",
+        "cancelledMissionCount",
+        "failedMissionCount",
+        "completionRatePercent",
+        "totalMissionDurationSeconds",
+        "incidentEventCount",
+        "defectCount",
+        "observationCount"
+      ],
+      "properties": {
+        "missionCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completedMissionCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cancelledMissionCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failedMissionCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completionRatePercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "totalMissionDurationSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "incidentEventCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "defectCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observationCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "defectStatusCount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workflowStatus",
+        "defectCount"
+      ],
+      "properties": {
+        "workflowStatus": {
+          "type": "string",
+          "enum": [
+            "NEW",
+            "ACCEPTED",
+            "IN_PROGRESS",
+            "RESOLVED",
+            "FALSE_POSITIVE",
+            "REJECTED"
+          ]
+        },
+        "defectCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "defectTypeCount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "defectType",
+        "defectCount"
+      ],
+      "properties": {
+        "defectType": {
+          "type": "string",
+          "enum": [
+            "DAMAGED",
+            "MISSING",
+            "INSTALLATION_INVALID",
+            "UNKNOWN_ANOMALY"
+          ]
+        },
+        "defectCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "keyDefect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "defectId",
+        "incidentCode",
+        "defectType",
+        "riskLevel",
+        "locationLabel",
+        "lastSeenAt",
+        "rationale"
+      ],
+      "properties": {
+        "defectId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "incidentCode": {
+          "type": "string"
+        },
+        "defectType": {
+          "type": "string",
+          "enum": [
+            "DAMAGED",
+            "MISSING",
+            "INSTALLATION_INVALID",
+            "UNKNOWN_ANOMALY"
+          ]
+        },
+        "riskLevel": {
+          "type": "string",
+          "enum": [
+            "LOW",
+            "MEDIUM",
+            "HIGH",
+            "CRITICAL"
+          ]
+        },
+        "locationLabel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastSeenAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "rationale": {
+          "type": "string",
+          "pattern": ".*\\S.*"
+        }
+      }
+    },
+    "actionRecommendation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priority",
+        "recommendation",
+        "rationale",
+        "relatedDefectIds"
+      ],
+      "properties": {
+        "priority": {
+          "type": "string",
+          "enum": [
+            "IMMEDIATE",
+            "HIGH",
+            "NORMAL",
+            "LOW"
+          ]
+        },
+        "recommendation": {
+          "type": "string",
+          "pattern": ".*\\S.*"
+        },
+        "rationale": {
+          "type": "string",
+          "pattern": ".*\\S.*"
+        },
+        "relatedDefectIds": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      }
+    }
+  }
+}

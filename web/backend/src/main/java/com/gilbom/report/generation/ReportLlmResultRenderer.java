@@ -36,9 +36,9 @@ public class ReportLlmResultRenderer {
         body.append("# ").append(inline(result.title()))
                 .append("\n\n## 요약\n")
                 .append(inline(result.summary()))
-                .append("\n\n## 통계\n")
-                .append("검증된 통계 snapshot은 이 보고서 버전에 함께 보존됩니다.")
-                .append("\n\n## 주요 결함\n");
+                .append("\n\n## 통계\n");
+        appendStatistics(body, result.statistics());
+        body.append("\n## 주요 결함\n");
         if (result.keyDefects().isEmpty()) {
             body.append("- 기간 내 보고 가능한 주요 결함이 없습니다.\n");
         } else {
@@ -90,6 +90,64 @@ public class ReportLlmResultRenderer {
                 result.promptVersion(),
                 ReportGenerationMethod.LLM,
                 null);
+    }
+
+    private static void appendStatistics(
+            StringBuilder body,
+            ReportLlmResult.Statistics statistics
+    ) {
+        ReportLlmInput.Aggregate aggregate =
+                statistics.aggregate();
+        body.append("- 임무: 전체 ")
+                .append(aggregate.missionCount())
+                .append("건, 완료 ")
+                .append(aggregate.completedMissionCount())
+                .append("건, 취소 ")
+                .append(aggregate.cancelledMissionCount())
+                .append("건, 실패 ")
+                .append(aggregate.failedMissionCount())
+                .append("건\n")
+                .append("- 완료율: ")
+                .append(aggregate.completionRatePercent()
+                        .stripTrailingZeros()
+                        .toPlainString())
+                .append("%\n")
+                .append("- 총 임무 시간: ")
+                .append(aggregate.totalMissionDurationSeconds())
+                .append("초\n")
+                .append("- 사건 이벤트: ")
+                .append(aggregate.incidentEventCount())
+                .append("건, 결함: ")
+                .append(aggregate.defectCount())
+                .append("건, 관측: ")
+                .append(aggregate.observationCount())
+                .append("건\n")
+                .append("- 상태별 결함: ");
+        appendDistribution(
+                body,
+                statistics.defectsByStatus().stream()
+                        .map(value -> value.workflowStatus()
+                                + " " + value.defectCount()
+                                + "건")
+                        .toList());
+        body.append("- 유형별 결함: ");
+        appendDistribution(
+                body,
+                statistics.defectsByType().stream()
+                        .map(value -> value.defectType()
+                                + " " + value.defectCount()
+                                + "건")
+                        .toList());
+    }
+
+    private static void appendDistribution(
+            StringBuilder body,
+            java.util.List<String> values
+    ) {
+        body.append(values.isEmpty()
+                        ? "없음"
+                        : String.join(", ", values))
+                .append('\n');
     }
 
     private static String inline(String value) {

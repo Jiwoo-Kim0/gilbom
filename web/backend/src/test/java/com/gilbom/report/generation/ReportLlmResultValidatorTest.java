@@ -56,8 +56,14 @@ class ReportLlmResultValidatorTest {
         assertThat(content.promptVersion())
                 .isEqualTo("report-v1");
         assertThat(content.body())
+                .contains("## 통계")
+                .contains("임무: 전체 3건, 완료 2건, 취소 1건, 실패 0건")
+                .contains("완료율: 66.67%")
+                .contains("상태별 결함: NEW 1건")
+                .contains("유형별 결함: DAMAGED 1건")
                 .contains("## 주요 결함")
                 .contains("## 조치 권고")
+                .doesNotContain("검증된 통계 snapshot")
                 .doesNotContain("<script");
     }
 

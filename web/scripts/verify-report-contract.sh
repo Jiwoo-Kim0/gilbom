@@ -8,6 +8,7 @@ ERRORS=docs/common-api-response-and-errors.md
 CONTRACT=docs/report-status-contract.md
 COMPLETION_CHECK=docs/day6-report-completion-check.md
 LLM_SCHEMA=docs/report-llm-result.schema.json
+LLM_STRUCTURED_OUTPUT_SCHEMA=backend/src/main/resources/llm/report-structured-output.schema.json
 BACKEND_BUILD=backend/build.gradle
 REPORT_ACCEPTANCE_SCRIPT=scripts/report-acceptance-test.sh
 ERROR_CODE=backend/src/main/java/com/gilbom/common/error/ErrorCode.java
@@ -209,6 +210,10 @@ done
 
 assert_contains "$LLM_SCHEMA" '"additionalProperties": false' \
     "strict LLM JSON Schema"
+assert_contains "$LLM_STRUCTURED_OUTPUT_SCHEMA" '"locationLabel"' \
+    "Structured Outputs nullable location field"
+assert_contains "$LLM_STRUCTURED_OUTPUT_SCHEMA" '"additionalProperties": false' \
+    "strict provider Structured Outputs schema"
 assert_contains "$CONTRACT" '생성 ───────────────→ DRAFT' \
     "create to DRAFT transition"
 assert_contains "$CONTRACT" '| `IN_REVIEW` | 승인 | `APPROVED` |' \
@@ -446,6 +451,12 @@ assert_contains "$REPORT_FALLBACK_MIGRATION" \
 assert_contains "$GMS_LLM_CLIENT" \
     "Base64.getEncoder().encodeToString" \
     "in-memory image Base64 conversion"
+assert_contains "$GMS_LLM_CLIENT" \
+    '"json_schema"' \
+    "provider Structured Outputs response format"
+assert_contains "$GMS_LLM_CLIENT" \
+    "LocalDate.parse" \
+    "approved provider dated snapshot compatibility"
 assert_contains "$LLM_IMAGE_CONTENT" \
     "containsExif(bytes)" \
     "EXIF rejection"

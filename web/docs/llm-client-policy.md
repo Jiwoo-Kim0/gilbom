@@ -68,7 +68,9 @@ Base URL 검사는 HTTPS scheme, 정확한 host·443 port·path를 모두 비교
 ## 4. Client 책임
 
 - `LlmClient`: 외부 생성 포트. 요청에는 구조화된 입력 JSON만 받는다.
-- `GmsLlmClient`: 서버에 고정된 endpoint, model, System Prompt, 출력 상한으로 GMS를 호출한다.
+- `GmsLlmClient`: 서버에 고정된 endpoint, model, System Prompt, 출력 상한과
+  `json_schema` strict Structured Outputs 계약으로 GMS를 호출한다. 설정한 승인 모델
+  별칭과 동일한 응답 모델 또는 그 별칭의 `YYYY-MM-DD` 날짜 snapshot만 허용한다.
 - `FakeLlmClient`: 테스트 source set에서 응답·오류·가용성을 결정적으로 제어한다.
 - `DisabledLlmClient`: 외부 요청을 만들지 않고 직접 호출 시 `LLM_UNAVAILABLE`을 반환한다.
 - `TemplateReportGenerator`: 외부 통신 없이 같은 입력으로 항상 같은 `TEMPLATE` 보고서 본문을 만든다.
@@ -99,8 +101,11 @@ Base URL 검사는 HTTPS scheme, 정확한 host·443 port·path를 모두 비교
    일치하는지 확인한다.
 4. 인스턴스 semaphore를 얻은 뒤 PostgreSQL ledger에서 사용자별 일일 요청 수와 전체
    일일 credit을 한 UTC 날짜 advisory lock 아래 원자적으로 예약한다.
-5. GMS를 호출한다. `429`, `5xx`, network timeout만 100ms 기반 backoff와 jitter 후
-   최대 한 번 재시도한다. 재시도도 별도 quota·credit 사용량으로 센다.
+5. GMS를 호출한다. provider에는
+   `backend/src/main/resources/llm/report-structured-output.schema.json`을
+   `response_format.type=json_schema`, `strict=true`로 전달한다. `429`, `5xx`,
+   network timeout만 100ms 기반 backoff와 jitter 후 최대 한 번 재시도한다.
+   재시도도 별도 quota·credit 사용량으로 센다.
 6. `4xx`와 JSON·Schema 오류는 재시도하지 않는다.
 7. 응답은 최대 100,000자, 정확한 필드 집합, JSON 타입·enum·개수, 원본 통계·기간·
    결함 identity 일치와 HTML·script·실행 command 금지를 모두 통과해야 한다.
