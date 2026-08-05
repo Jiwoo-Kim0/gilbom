@@ -173,6 +173,17 @@ test.describe('결함 목록 표', () => {
     await expect(merge).toBeDisabled()
     const before = await listTop()
 
+    // 브라우저 기본 크기(13px)로는 표에서 눌러 맞추기 어렵다.
+    const boxSize = await page
+      .locator('.defect-table-body-row input[type="checkbox"]')
+      .first()
+      .evaluate((box) => {
+        const rect = box.getBoundingClientRect()
+        return { width: Math.round(rect.width), height: Math.round(rect.height) }
+      })
+    expect(boxSize.width, '체크박스 크기').toBeGreaterThanOrEqual(18)
+    expect(boxSize.height, '체크박스 크기').toBeGreaterThanOrEqual(18)
+
     // 한 건 선택 — 줄이 보이고 목록은 그대로다.
     await page.locator('.defect-table-body-row input[type="checkbox"]')
       .first()

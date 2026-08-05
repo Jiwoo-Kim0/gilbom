@@ -1237,6 +1237,18 @@
   white-space: nowrap;
 }
 
+/*
+ * 병합 선택 체크박스. 브라우저 기본(13px)은 표에서 너무 작아 눌러 맞추기 어렵다.
+ * 색은 필터 쪽 체크박스와 같은 값을 쓴다.
+ */
+.defect-table-row input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+
 .defect-table-head {
   color: var(--text-muted);
   background: var(--surface-muted);
@@ -2966,7 +2978,7 @@ button:disabled {
 /* 병합 다중 선택 — 체크박스 열은 권한이 있을 때만 붙으므로 modifier로 분리한다. */
 .defect-table.is-selectable .defect-table-row {
   grid-template-columns:
-    32px 146px 72px 58px minmax(0, 1fr) 96px 44px 46px 106px;
+    38px 146px 72px 58px minmax(0, 1fr) 96px 44px 46px 106px;
 }
 
 .defect-merge-bar {
