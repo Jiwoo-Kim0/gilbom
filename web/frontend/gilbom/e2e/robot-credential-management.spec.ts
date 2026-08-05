@@ -160,6 +160,8 @@ test('Robot 관리에서 최초 Credential 발급과 회전을 수행한다', as
       }
 
       await fulfillJson(route, {
+        robotId: PROVISIONING_ROBOT_ID,
+        mqttId: 'RBT-101',
         credentialId: '84000000-0000-4000-8000-000000000004',
         credentialType: 'MQTT_PASSWORD',
         mqtt: {
@@ -167,6 +169,10 @@ test('Robot 관리에서 최초 Credential 발급과 회전을 수행한다', as
           username: 'RBT-101',
           password: 'provisioning-one-time-password',
           clientId: 'RBT-101',
+        },
+        imageUpload: {
+          url: `/api/v1/robots/${PROVISIONING_ROBOT_ID}/images`,
+          apiKey: 'provisioning-image-api-key',
         },
         expiresAt: null,
       }, 201)
@@ -207,6 +213,8 @@ test('Robot 관리에서 최초 Credential 발급과 회전을 수행한다', as
       expect(idempotencyKey).toMatch(/^[0-9a-f-]{36}$/u)
       activeIdempotencyKeys.push(idempotencyKey)
       await fulfillJson(route, {
+        robotId: ACTIVE_ROBOT_ID,
+        mqttId: 'RBT-102',
         credentialId: '84000000-0000-4000-8000-000000000005',
         credentialType: 'MQTT_PASSWORD',
         mqtt: {
@@ -214,6 +222,10 @@ test('Robot 관리에서 최초 Credential 발급과 회전을 수행한다', as
           username: 'RBT-102',
           password: 'rotated-one-time-password',
           clientId: 'RBT-102',
+        },
+        imageUpload: {
+          url: `/api/v1/robots/${ACTIVE_ROBOT_ID}/images`,
+          apiKey: 'rotated-image-api-key',
         },
         expiresAt: null,
       }, 201)
@@ -234,6 +246,73 @@ test('Robot 관리에서 최초 Credential 발급과 회전을 수행한다', as
   await expect(page.getByText(
     '임무를 생성할 때마다 바꾸지 않습니다.',
   )).toBeVisible()
+  await expect(page.getByText(/전체 현황 갱신/u)).toBeVisible()
+  await expect(page.getByText(/정본 갱신/u)).toHaveCount(0)
+
+  const speedMetricIcon = page.locator('.robot-fleet-metric').filter({
+    hasText: '현재 속도',
+  }).first().locator('strong > svg')
+  await expect(speedMetricIcon).toBeVisible()
+  await expect(speedMetricIcon).toHaveClass(/lucide-circle-gauge/u)
+  await expect(speedMetricIcon).toHaveCSS('overflow', 'visible')
+  await expect(speedMetricIcon).toHaveCSS('flex-shrink', '0')
+  const speedIconBox = await speedMetricIcon.boundingBox()
+  expect(speedIconBox?.width).toBe(speedIconBox?.height)
+
+  const activeCredentialItem = page.locator('.robot-credential-item').filter({
+    has: page.getByRole('button', {
+      name: 'Credential 회전',
+      exact: true,
+    }),
+  })
+  const activeCredentialControls = activeCredentialItem.locator(
+    '.robot-credential-item-controls',
+  )
+  await expect(activeCredentialControls).toHaveCSS(
+    'justify-content',
+    'end',
+  )
+  const credentialControlLayout = await activeCredentialControls.evaluate(
+    (controls) => {
+      const state = controls.querySelector<HTMLElement>(
+        '.robot-credential-item-state',
+      )
+      const button = controls.querySelector<HTMLElement>('button')
+      if (!state || !button) {
+        return null
+      }
+      const stateStyle = window.getComputedStyle(state)
+      const buttonStyle = window.getComputedStyle(button)
+      return {
+        stateBeforeButton: Boolean(
+          state.compareDocumentPosition(button)
+          & Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+        statePaddingInline: [stateStyle.paddingLeft, stateStyle.paddingRight],
+        buttonPaddingInline: [buttonStyle.paddingLeft, buttonStyle.paddingRight],
+        statePaddingBlock: [stateStyle.paddingTop, stateStyle.paddingBottom],
+        buttonPaddingBlock: [buttonStyle.paddingTop, buttonStyle.paddingBottom],
+        stateHeight: state.getBoundingClientRect().height,
+        buttonHeight: button.getBoundingClientRect().height,
+        stateWidth: state.getBoundingClientRect().width,
+        buttonWidth: button.getBoundingClientRect().width,
+        controlGap: window.getComputedStyle(controls).columnGap,
+        stateBackground: stateStyle.backgroundColor,
+      }
+    },
+  )
+  expect(credentialControlLayout).not.toBeNull()
+  expect(credentialControlLayout?.stateBeforeButton).toBe(true)
+  expect(credentialControlLayout?.statePaddingInline)
+    .toEqual(credentialControlLayout?.buttonPaddingInline)
+  expect(credentialControlLayout?.statePaddingBlock)
+    .toEqual(credentialControlLayout?.buttonPaddingBlock)
+  expect(credentialControlLayout?.stateHeight)
+    .toBe(credentialControlLayout?.buttonHeight)
+  expect(credentialControlLayout?.stateWidth)
+    .toBe(credentialControlLayout?.buttonWidth)
+  expect(credentialControlLayout?.controlGap).not.toBe('normal')
+  expect(credentialControlLayout?.stateBackground).toBe('rgba(0, 0, 0, 0)')
 
   await page.getByRole('button', {
     name: '최초 발급·활성화',

@@ -483,6 +483,15 @@
   font-weight: 800;
 }
 
+.robot-fleet-metric strong > svg {
+  display: block;
+  width: 1rem;
+  height: 1rem;
+  min-width: 1rem;
+  flex: 0 0 1rem;
+  overflow: visible;
+}
+
 .robot-battery-progress {
   appearance: none;
   width: 100%;
