@@ -6,10 +6,12 @@
 config 픽스처는 tests/conftest.py에 있다.
 """
 
+from dataclasses import replace
+
 import pytest
 
 from driving.state_machine import StateMachineParams, StateMachine
-from driving.states import DriveState
+from driving.states import DeadEndPhase, DriveState
 from hardware.jetson.imu import JetsonImu
 from hardware.mocks import MockImu
 from perception.interfaces import ObstacleRegion, SegmentationFrame
@@ -64,6 +66,21 @@ def braille_frame(t: float, offset: float, proximity: float) -> SegmentationFram
                              braille_detected=True,
                              braille_center_offset_ratio=offset,
                              braille_proximity=proximity)
+
+
+def settle_to_cruise(machine, frame_fn, t, imu=None, tick=0.05, limit=60):
+    """탈출 후 STRAIGHTEN(바퀴 정렬)을 지나 CRUISE에 닿을 때까지 밟는다.
+
+    재정향은 이제 곧장 CRUISE로 가지 않는다 — 조향이 중앙으로 돌아온 뒤에 추종을
+    시작한다(꺾인 채 전진하면 방금 피한 쪽으로 다시 들어간다).
+    """
+    for _ in range(limit):
+        if machine.state is DriveState.CRUISE:
+            return t
+        t += tick
+        machine.step(frame_fn(t), None if imu is None else imu.read(), t)
+    raise AssertionError(f"CRUISE에 닿지 못했다 (상태={machine.state}, "
+                         f"국면={machine.context.dead_end_phase})")
 
 
 def started_machine(params: StateMachineParams, t: float = 0.0) -> StateMachine:
@@ -131,14 +148,16 @@ class TestObstacleFlow:
         machine.step(clear_frame(recheck), None, recheck)
         assert machine.state is DriveState.CRUISE
 
-    def test_no_direction_persists_keeps_holding(self, params):
-        # 막힘이 유지되고 IMU도 없으면(회차 불가) 정지 대기가 계속된다 — 수동 개입 대기
+    def test_no_direction_persists_escalates_to_reorient(self, params):
+        # 막힘이 유지되면 재정향으로 승격된다 — **IMU가 없어도** 간다(0804 개편).
+        # 완료 판정이 시각이라 yaw가 필요 없고, 종전의 IMU 게이트는 센서가 빠졌을 때
+        # 막다른 길에서 아무것도 못 하게 만들었다.
         machine = started_machine(params)
         machine.step(all_blocked_frame(1.0), None, 1.0)
         after = 1.0 + params.avoid_recheck_sec * 2
         command = machine.step(all_blocked_frame(after), None, after)
-        assert machine.state is DriveState.AVOID
-        assert command.throttle_pct == 0
+        assert machine.state is DriveState.DEAD_END
+        assert command.throttle_pct == pytest.approx(-params.dead_end_throttle_pct)
 
 
 class TestBoundaryLost:
@@ -194,16 +213,125 @@ class TestPerceptionDebounce:
         assert machine.state is DriveState.CRUISE
         assert command.throttle_pct == 0 and command.brake
 
-    def test_recovery_brakes_when_something_blocks_the_path(self, params):
-        # 복구 주행은 '인도가 안 보인다'에 대한 대응이다. 앞을 막는 장애물이 잡혀
-        # 있으면 그쪽으로 기어가는 셈이므로 브레이크가 맞다
+    def test_recovery_reverses_when_something_blocks_the_path(self, params):
+        # 0804 개편: 앞이 막힌 채로 인도가 안 보이면 **후진 복구**다.
+        # 벽에 코가 닿으면 화각을 벽이 채워 인도가 안 보인다 — 길을 잃은 것이 아니라
+        # 너무 가까이 붙은 것이므로 대응이 반대여야 한다(뒤로 빼면 보인다).
+        # 종전에는 브레이크였고, 그래서 벽 앞에서 1.5초 정지 후 IDLE이 전부였다.
         machine = started_machine(params)
         blocking = ObstacleRegion(lateral_bias=0.0, proximity=1.0, blocking=True)
         frame = SegmentationFrame(timestamp=0.1, sidewalk_detected=False,
                                   obstacles=(blocking,))
-        command = machine.step(frame, None, 0.1)
+        machine.step(frame, None, 0.1)                # 디바운스 시작
+        armed = 0.1 + params.recovery_reverse_debounce_sec + 0.05
+        command = machine.step(replace(frame, timestamp=armed), None, armed)
         assert machine.state is DriveState.CRUISE     # 아직 유예 중
-        assert command.throttle_pct == 0 and command.brake
+        assert command.throttle_pct == pytest.approx(-params.recovery_reverse_throttle_pct)
+        # 조향은 중립이다 — 후방은 카메라 사각이라 곡선 후진은 눈먼 횡방향 기동이다
+        assert command.steering_offset_deg == pytest.approx(0.0)
+        assert not command.brake
+
+    def test_single_bad_frame_does_not_trigger_reverse(self, params):
+        """깜빡임 한 프레임으로 후진을 걸지 않는다 (0804 실기).
+
+        세그 마스크는 프레임 단위로 흔들린다. 후진은 되돌리기 어려운 기동이라
+        진입에 디바운스가 없으면 깜빡임 하나가 곧바로 1.2초 강제 후진이 되고,
+        인계 규칙에 따라 재정향·U턴까지 간다 — 코스트맵이 거의 전부 0인
+        (완전히 트인) 장면에서도 후진이 걸렸다.
+        """
+        machine = started_machine(params)
+        blocking = ObstacleRegion(lateral_bias=0.0, proximity=1.0, blocking=True)
+        flicker = SegmentationFrame(timestamp=0.1, sidewalk_detected=False,
+                                    obstacles=(blocking,))
+        command = machine.step(flicker, None, 0.1)
+        assert command.throttle_pct >= 0            # 아직 후진하지 않는다
+
+        # 다음 틱에 인지가 돌아오면 후진 없이 그대로 간다
+        good = SegmentationFrame(timestamp=0.2, sidewalk_detected=True)
+        command = machine.step(good, None, 0.2)
+        assert command.throttle_pct >= 0
+
+    def test_reverse_commits_to_minimum_even_if_floor_reappears(self, params):
+        """후진은 최소 시간을 채운다 — 0804 실기 '후진 찔끔하고 벽에 계속 쳐박음'.
+
+        벽에서 한 틱 물러나면 바닥이 곧 보이는데, 그 순간 가드가 풀려 CRUISE가 다시
+        전진해 벽에 박았다. 상한만 있고 하한이 없어 실제 후진이 한두 틱이었다.
+        """
+        machine = started_machine(params)
+        blocking = ObstacleRegion(lateral_bias=0.0, proximity=1.0, blocking=True)
+        lost = SegmentationFrame(timestamp=0.1, sidewalk_detected=False,
+                                 obstacles=(blocking,))
+        machine.step(lost, None, 0.1)                     # 디바운스 시작
+        armed = 0.1 + params.recovery_reverse_debounce_sec + 0.05
+        machine.step(replace(lost, timestamp=armed), None, armed)   # 후진 시작
+
+        # 바닥이 다시 보여도 최소 시간 전에는 계속 뺀다.
+        # (종료 조건은 '경로 인지'다 — 인도가 보이고 정면을 막는 것이 없어야 한다.
+        #  그래서 이 프레임에는 blocking을 넣지 않는다)
+        seen = SegmentationFrame(timestamp=0.2, sidewalk_detected=True)
+        command = machine.step(replace(seen, timestamp=armed + 0.05), None, armed + 0.05)
+        assert command.throttle_pct == pytest.approx(-params.recovery_reverse_throttle_pct)
+
+        mid = armed + params.recovery_reverse_min_sec - 0.05
+        command = machine.step(replace(seen, timestamp=mid), None, mid)
+        assert command.throttle_pct == pytest.approx(-params.recovery_reverse_throttle_pct)
+
+        # 최소 시간을 채우고 인도도 보이면 후진을 끝낸다
+        done = armed + params.recovery_reverse_min_sec + 0.05
+        command = machine.step(replace(seen, timestamp=done), None, done)
+        assert command.throttle_pct >= 0
+
+    def test_reverse_minimum_never_exceeds_the_cap(self, params):
+        # 최소·최대를 같은 기준점에서 재야 한다 — 틱마다 갱신되는 래치로 만들면
+        # 재무장되며 상한이 무의미해진다
+        assert params.recovery_reverse_min_sec < params.recovery_reverse_sec
+
+    def test_reverse_recovery_has_its_own_longer_window(self, params):
+        # 후진 복구는 전진 복구보다 긴 창을 쓴다 — 벽에서 빠져나오는 데 필요한 거리가
+        # '중심으로 되돌아오는' 것보다 크고, 이 창이 짧으면 재정향 승격(AVOID 재확인
+        # 3초)에 도달하기 전에 IDLE로 떨어진다
+        assert params.recovery_reverse_sec > params.perception_grace_sec
+        machine = started_machine(params)
+        blocking = ObstacleRegion(lateral_bias=0.0, proximity=1.0, blocking=True)
+
+        def frame(t):
+            return SegmentationFrame(timestamp=t, sidewalk_detected=False,
+                                     obstacles=(blocking,))
+
+        machine.step(frame(0.1), None, 0.1)
+        armed = 0.1 + params.recovery_reverse_debounce_sec + 0.05
+        machine.step(frame(armed), None, armed)          # 후진 시작
+        # 전진 복구였다면 이미 IDLE로 떨어졌을 시점에도 아직 후진 중이다
+        mid = armed + params.perception_grace_sec + 0.05
+        command = machine.step(frame(mid), None, mid)
+        assert machine.state is DriveState.CRUISE
+        assert command.throttle_pct == pytest.approx(-params.recovery_reverse_throttle_pct)
+
+        # 상한을 넘겨도 **갈 방향이 남아 있으면** 사람을 부르지 않고 꺾어서 시도한다.
+        # 이 프레임은 all_directions_blocked=False(기본값)라 그 경로로 간다.
+        expired = armed + params.recovery_reverse_sec + 0.05
+        command = machine.step(frame(expired), None, expired)
+        assert machine.state is DriveState.DEAD_END
+        assert command.throttle_pct > 0 and command.steering_offset_deg != 0
+
+    def test_reverse_cap_waits_manually_only_when_fully_blocked(self, params):
+        # 정말 전 방향이 막혔을 때만 수동 대기로 간다 — 좁은 실내에서 벽·가구는
+        # 미분류라 1m를 물러나도 blocking으로 남는다. 그것만으로 미션을 끝내면 안 된다.
+        machine = started_machine(params)
+        blocking = ObstacleRegion(lateral_bias=0.0, proximity=1.0, blocking=True)
+
+        def walled(t):
+            return SegmentationFrame(timestamp=t, sidewalk_detected=False,
+                                     obstacles=(blocking,),
+                                     all_directions_blocked=True)
+
+        machine.step(walled(0.1), None, 0.1)
+        armed = 0.1 + params.recovery_reverse_debounce_sec + 0.05
+        machine.step(walled(armed), None, armed)
+        expired = armed + params.recovery_reverse_sec + 0.05
+        command = machine.step(walled(expired), None, expired)
+        assert machine.state is DriveState.IDLE
+        assert command.brake
 
     def test_recovery_holds_last_steering(self, params):
         # 복구 조향은 '소실 직전에 내던 조향'이다 — 인도를 벗어나는 중이라면 그 조향이
@@ -453,6 +581,28 @@ class TestRoadwayEscape:
         machine.step(roadway_risk_frame(1.0), None, 1.0)
         command = machine.step(None, None, 1.1)
         assert command.throttle_pct == 0 and command.brake
+        assert machine.state is DriveState.ESCAPE   # 한 틱 두절로 상태를 버리지 않는다
+
+    def test_perception_dropout_during_escape_still_times_out_to_estop(self, params):
+        """인지가 끊긴 채로도 이탈 타임아웃은 계속 간다 — 안 가면 영구 브레이크다.
+
+        회귀 방어: frame=None 폴백은 상태 핸들러보다 앞이라, 이 승격이 없으면
+        카메라가 죽은 ESCAPE는 핸들러의 timeout→ESTOP에 영영 닿지 못하고 차도
+        위(이거나 근처)에서 상태 전이 없이 무한 브레이크가 된다 — 그동안 서버
+        투영은 PATROLLING(주행 중)이라 관제도 이상을 모른다.
+        """
+        machine = started_machine(params)
+        machine.step(roadway_risk_frame(1.0), None, 1.0)
+        # 타임아웃 전: 브레이크 유지 + 상태 보존 (눈먼 선회 금지)
+        before = 1.0 + params.escape_timeout_sec - 0.1
+        command = machine.step(None, None, before)
+        assert machine.state is DriveState.ESCAPE
+        assert command.brake
+        # 타임아웃 도달: ESTOP 승격 — 수동 해제만이 출구 (핸들러 타임아웃과 같은 결말)
+        expired = 1.0 + params.escape_timeout_sec
+        command = machine.step(None, None, expired)
+        assert machine.state is DriveState.ESTOP
+        assert command.brake
 
 
 class TestEstop:
@@ -938,6 +1088,93 @@ class TestInspectFlow:
         # 블록이 다시 보여도 확정 시간을 새로 채워야 한다 (한 프레임으로는 안 된다)
         t += 0.10
         machine.step(braille_frame(t, 0.0, params.inspect_enter_proximity), None, t)
+        assert machine.state is DriveState.CRUISE
+
+
+class TestInspectCamHoldsTracking:
+    """탐지캠(하향) 관측이 주행캠 세그를 **보완**해 추종을 유지한다 (0805 실기 근거).
+
+    주행 카메라는 하향각이 낮아 블록에 올라탄 뒤에도 세그가 자주 놓친다. 그때 추종이
+    '블록 소실 확정'으로 끊기면 '블록을 따라가며 순차 탐지'라는 미션 자체가 성립하지
+    않는다. 탐지캠은 로봇 바로 앞 노면을 보므로 그 구간에서는 오히려 더 확실한 증거다.
+
+    **발견 쪽으로는 새지 않는다**: 이 신호는 도착 후에만 참이 될 수 있고(하향캠 화각 +
+    main.detection_due), TRACE·INSPECT를 떠날 때 지워진다.
+    """
+
+    TICK = 0.05
+
+    def lost_ticks(self, machine, params, t: float, count: int) -> float:
+        """블록이 세그에서 안 보이는 프레임을 count번 먹인다 → 마지막 시각."""
+        for _ in range(count):
+            t += self.TICK
+            machine.step(clear_frame(t), None, t)
+        return t
+
+    def test_cam_observation_keeps_trace_through_a_seg_miss(self, params):
+        machine = TestTraceFlow().enter_trace(params, t=1.0)
+        t = 1.0
+        # 탐지캠이 블록을 봤다 — 그 뒤로 세그는 계속 놓친다.
+        machine.notify_braille_seen()
+        t += self.TICK
+        machine.step(clear_frame(t), None, t)
+        assert machine.context.braille_cam_seen_at == pytest.approx(t)
+
+        # 소실 확정 시간을 넘겨도 추종이 유지된다 (유지창 안이므로 raw가 계속 True)
+        t = self.lost_ticks(machine, params, t,
+                            int(params.inspect_confirm_sec / self.TICK) + 4)
+        assert t - machine.context.braille_cam_seen_at < params.trace_cam_hold_sec
+        assert machine.context.braille_stable
+        assert machine.state is DriveState.TRACE
+
+    def test_stale_observation_lets_the_loss_confirm(self, params):
+        """유지창을 넘긴 관측은 죽는다 — 블록을 지나친 뒤 추종이 남으면 안 된다."""
+        machine = TestTraceFlow().enter_trace(params, t=1.0)
+        t = 1.0
+        machine.notify_braille_seen()
+        t += self.TICK
+        machine.step(clear_frame(t), None, t)
+
+        # 유지창 + 확정창을 모두 넘길 만큼 세그 미검출을 이어간다
+        span = params.trace_cam_hold_sec + params.inspect_confirm_sec + 0.2
+        t = self.lost_ticks(machine, params, t, int(span / self.TICK))
+        assert not machine.context.braille_stable
+        assert machine.state is DriveState.CRUISE
+
+    def test_observation_is_cleared_on_trace_exit(self, params):
+        """ESCAPE 등으로 이탈하면 관측을 버린다 — 복귀 틱에 없는 블록을 추종하지 않게.
+
+        braille_stable을 가드보다 먼저 갱신하는 것과 같은 이유다(그 회귀는
+        test_debounce_does_not_freeze_outside_cruise가 지킨다).
+        """
+        machine = TestTraceFlow().enter_trace(params, t=1.0)
+        machine.notify_braille_seen()
+        t = 1.0 + self.TICK
+        machine.step(clear_frame(t), None, t)
+        assert machine.context.braille_cam_seen_at is not None
+
+        # 차도가 코리도에 들어와 ESCAPE로 이탈 → TRACE 이탈 정리가 관측을 지운다
+        t += self.TICK
+        machine.step(roadway_risk_frame(t), None, t)
+        assert machine.state is DriveState.ESCAPE
+        assert machine.context.braille_cam_seen_at is None
+
+    def test_observation_alone_does_not_start_tracking(self, params):
+        """탐지캠 관측만으로 CRUISE→TRACE에 들어가지는 않는다 — 그건 발견이 아니다.
+
+        실주행에서는 도착 전에 이 신호가 오지 않지만(하향캠 화각 + detection_due),
+        FSM은 그 보장에 기대지 않는다. 발견은 세그의 일이다.
+        """
+        machine = started_machine(params)
+        t = 1.0
+        machine.notify_braille_seen()
+        machine.step(clear_frame(t), None, t)          # 세그는 블록을 못 봤다
+        # 추종 밖의 통지는 **래치조차 하지 않는다** — 래치하면 유지창 동안 raw가 참이
+        # 되어 confirm_sec을 채우고, 세그가 블록을 본 적 없는데 TRACE로 진입한다.
+        assert machine.context.braille_cam_seen_at is None
+        assert machine.state is DriveState.CRUISE
+        t = self.lost_ticks(machine, params, t,
+                            int(params.inspect_confirm_sec / self.TICK) + 4)
         assert machine.state is DriveState.CRUISE
 
 
@@ -1449,6 +1686,30 @@ class TestAvoidBypass:
         assert machine.state is DriveState.AVOID
         assert command.throttle_pct == 0 and command.brake
 
+    def test_slope_hold_still_returns_when_the_obstacle_clears(self, params):
+        """경사발 HOLD는 all_blocked 중에도 **복귀 출구가 남아 있어야 한다** (0805 실외).
+
+        all_blocked가 복귀를 막는 것은 재정향으로 승격할 수 있을 때만 뜻이 있다.
+        경사발(avoid_brake)에서는 재정향이 금지돼 있어(경사 위 후진·선회 = 밀림·등판
+        토크) 승격 분기가 죽고 선회 분기도 막혀 있다 — 그때 all_blocked가 복귀까지
+        막으면 이 HOLD에는 출구가 하나도 남지 않고 장애물이 치워져도 영구 브레이크가
+        된다(수동 개입만이 탈출). 경사는 막다른 길이 아니다: 풀리면 주행으로 돌려보내고
+        pitch가 남아 있으면 다음 틱에 CRUISE가 곧바로 SLOPE로 되돌린다.
+        """
+        imu = MockImu(pitch_deg=params.slope_enter_pitch_deg)
+        machine = started_machine(params)
+        machine.step(clear_frame(1.0), imu.read(), 1.0)
+        assert machine.state is DriveState.SLOPE
+        machine.step(obstacle_frame(2.0), imu.read(), 2.0)
+        assert machine.state is DriveState.AVOID
+        assert machine.context.avoid_brake            # 경사발이라 브레이크 대기다
+
+        # 장애물이 치워졌지만 코스트맵은 여전히 전 슬롯 ∞(경사 정상 너머가 안 보임).
+        # 종전(0805 이전)에는 이 장면이 영구 브레이크였다.
+        after = 2.0 + params.avoid_recheck_sec * 2
+        machine.step(all_blocked_frame(after), imu.read(), after)
+        assert machine.state is DriveState.CRUISE     # 출구가 살아 있다
+
     def test_no_imu_evades_immediately(self, params):
         # IMU 없이도 첫 틱에 선회가 시작된다 — 재확인 대기를 거치지 않는다
         machine = started_machine(params)
@@ -1458,91 +1719,493 @@ class TestAvoidBypass:
         assert machine.context.avoid_phase.value == "SWERVE"
 
 
-class TestDeadEndTurnaround:
-    """막다른 길 K턴 회차 — 좌/우 모두 경로 없음 유지 → 좌조향 전진 호 ↔ 정렬
-    후진 반복 → yaw 누적으로 완료. 진입은 AVOID 재확인 경유다."""
+class TestReverseThenTurn:
+    """후진 복구가 끝나면 **직진이 아니라 선회**로 넘어간다.
+
+    0804 실기: 뒤로 빼고 나서 CRUISE로 그냥 돌아가면 직진해서 방금 물러난 벽에 그대로
+    다시 박았다. 뒤로 뺀 목적은 꺾을 공간을 만든 것이므로 유리한 쪽으로 꺾어야 한다.
+    """
 
     TICK = 0.05
 
-    def turnaround_started(self, params):
-        """전 방향 통행 불가가 재확인까지 유지돼 회차가 막 시작된 (machine, imu, t)."""
+    def blocked_lost(self, t: float) -> SegmentationFrame:
+        blocking = ObstacleRegion(lateral_bias=0.0, proximity=1.0, blocking=True)
+        return SegmentationFrame(timestamp=t, sidewalk_detected=False,
+                                 obstacles=(blocking,),
+                                 cost_profile=(0.2, 0.9, 0.9, 0.9, 0.2))
+
+    def test_reverse_recovery_hands_off_to_turn_not_straight(self, params):
+        machine = started_machine(params)
+        machine.step(self.blocked_lost(0.1), None, 0.1)      # 디바운스 시작
+        armed = 0.1 + params.recovery_reverse_debounce_sec + 0.05
+        machine.step(self.blocked_lost(armed), None, armed)  # 후진 복구 시작
+        done = armed + params.recovery_reverse_min_sec + 0.05
+        seen = SegmentationFrame(timestamp=done, sidewalk_detected=True,
+                                 cost_profile=(0.2, 0.9, 0.9, 0.9, 0.2))
+        command = machine.step(seen, None, done)
+        assert machine.state is DriveState.DEAD_END       # CRUISE 직진이 아니다
+        assert command.throttle_pct > 0
+        assert command.steering_offset_deg != 0           # 꺾는다
+
+    def test_slope_never_reverses(self, params):
+        """**경사에서는 후진 복구를 하지 않는다** (0805 실외 근거를 지키는 회귀 방어).
+
+        이 가드는 GUARDED_STATES 전체에 걸리고 거기엔 SLOPE도 들어 있다. 경사 위
+        후진은 내리막에서 중력 가속이 붙고 오르막에서 미끄러지는데, 후방은 카메라
+        사각이라 그것을 관측할 수도 없다 — AvoidPhase가 경사 위 선회를 금지하는 것과
+        같은 이유다. 경사에서는 종전대로 전진 복구·브레이크로 간다.
+        """
+        imu = MockImu(pitch_deg=params.slope_enter_pitch_deg)
+        machine = started_machine(params)
+        machine.step(clear_frame(1.0), imu.read(), 1.0)
+        assert machine.state is DriveState.SLOPE
+
+        # 평지라면 후진이 걸리는 장면 그대로를 경사에서 먹인다
+        machine.step(self.blocked_lost(1.1), imu.read(), 1.1)
+        armed = 1.1 + params.recovery_reverse_debounce_sec + 0.05
+        command = machine.step(self.blocked_lost(armed), imu.read(), armed)
+        assert command.throttle_pct >= 0           # 후진이 아니다
+        assert machine.context.reverse_recovery_since is None
+
+        # 경사에서는 짧은 창(perception_grace_sec)이 그대로 적용돼 IDLE 폴백으로 간다 —
+        # 후진 상한(recovery_reverse_sec)으로 늘어나지 않는다.
+        expired = 1.1 + params.perception_grace_sec + 0.05
+        machine.step(self.blocked_lost(expired), imu.read(), expired)
+        assert machine.state is DriveState.IDLE
+
+
+class TestStraightenBeforeFollowing:
+    """탈출 직후 **바퀴를 중앙으로 정렬한 뒤에** 추종을 시작한다 (0804 실측 근거).
+
+    조향 슬루율 제한 때문에 -40°에서 중앙까지 0.5~0.6초가 걸리는데, 그동안 CRUISE가
+    스로틀 100%로 전진하면 19cm를 30° 꺾인 채 달린다 — 방금 피한 쪽으로 호를 그리며
+    다시 들어가 '재정향 완료 → 0.3초 뒤 다시 AVOID'가 됐다. 실측 흔적: CRUISE 조향
+    상한이 좌15/우12인데 기록된 범위가 -33.3~+20.1이었고, 상한 초과 표본 22건이
+    **전부** 직전 DEAD_END였다.
+    """
+
+    TICK = 0.05
+
+    def reoriented(self, params):
+        """재정향이 완료돼 정렬 국면에 막 들어간 (machine, imu, t)."""
         imu = MockImu()
         machine = started_machine(params)
         machine.step(all_blocked_frame(1.0), imu.read(), 1.0)
+        t = 1.0 + params.avoid_recheck_sec
+        machine.step(all_blocked_frame(t), imu.read(), t)
+        assert machine.state is DriveState.DEAD_END
+        t += params.dead_end_reverse_min_sec + self.TICK
+        machine.step(clear_frame(t), imu.read(), t)              # 후진 종료 → 선회
+        t += params.dead_end_forward_sec + self.TICK
+        machine.step(clear_frame(t), imu.read(), t)              # 호 완주 → 완료
+        return machine, imu, t
+
+    def test_completion_goes_to_straighten_not_cruise(self, params):
+        machine, _, _ = self.reoriented(params)
+        assert machine.state is DriveState.DEAD_END
+        assert machine.context.dead_end_phase is DeadEndPhase.STRAIGHTEN
+
+    def test_straighten_holds_still(self, params):
+        # 정렬은 **정지한 채로** 한다 — 꺾인 채 전진하는 것이 문제였다
+        machine, imu, t = self.reoriented(params)
+        t += self.TICK
+        command = machine.step(clear_frame(t), imu.read(), t)
+        assert command.throttle_pct == 0
+
+    def test_resumes_following_after_alignment(self, params):
+        machine, imu, t = self.reoriented(params)
+        t = settle_to_cruise(machine, clear_frame, t, imu)
+        assert machine.state is DriveState.CRUISE
+        assert abs(machine.context.prev_steer_deg) <= params.dead_end_straighten_deg
+
+    def test_straighten_has_a_cap(self, params):
+        # 서보가 안 따라와도 영원히 서 있지 않는다
+        machine, imu, t = self.reoriented(params)
+        expired = t + params.dead_end_straighten_max_sec + self.TICK
+        machine.step(clear_frame(expired), imu.read(), expired)
+        assert machine.state is DriveState.CRUISE
+
+
+class TestDeadEndUturn:
+    """후진↔선회를 반복해도 안 풀리면 U턴으로 승격한다 (0804 실기 요구).
+
+    재정향은 '이 방향에서 나갈 길'을 찾는 기동이라, 그 길이 애초에 없으면 몇 번을
+    해도 같은 자리다. U턴에서만 완료 기준이 각도인 이유도 같다 — '경로가 보인다'는
+    판정으로 이미 여러 번 실패한 자리다.
+    """
+
+    TICK = 0.05
+
+    def started(self, params):
+        imu = MockImu()
+        machine = started_machine(params)
+        machine.step(all_blocked_frame(1.0), imu.read(), 1.0)
+        t = 1.0 + params.avoid_recheck_sec
+        machine.step(all_blocked_frame(t), imu.read(), t)
+        assert machine.state is DriveState.DEAD_END
+        return machine, imu, t
+
+    def run_cycles(self, machine, imu, t, params, cycles: int):
+        """막힌 채로 후진↔선회 사이클을 cycles회 돌린다."""
+        for _ in range(cycles):
+            t += params.dead_end_reverse_max_sec + self.TICK      # 후진 → 선회
+            machine.step(all_blocked_frame(t), imu.read(), t)
+            t += params.dead_end_forward_sec + self.TICK          # 선회 호 끝
+            machine.step(all_blocked_frame(t), imu.read(), t)
+        return t
+
+    def test_escalates_to_uturn_after_configured_cycles(self, params):
+        machine, imu, t = self.started(params)
+        self.run_cycles(machine, imu, t, params, params.dead_end_uturn_after_cycles)
+        assert machine.state is DriveState.DEAD_END
+        assert machine.context.dead_end_phase is DeadEndPhase.UTURN
+
+    def test_does_not_uturn_before_the_limit(self, params):
+        # 진입 자체가 1번째 시도다 — 한 사이클 실패하면 2번째(반대쪽 선회)이고,
+        # U턴은 3번째부터다
+        machine, imu, t = self.started(params)
+        self.run_cycles(machine, imu, t, params,
+                        params.dead_end_uturn_after_cycles - 2)
+        assert machine.context.dead_end_phase is not DeadEndPhase.UTURN
+
+    def test_second_attempt_turns_the_other_way(self, params):
+        # 같은 방향으로 반복하면 그쪽이 막힌 자리에서는 몇 번을 해도 같은 결과다
+        machine, imu, t = self.started(params)
+        first = machine.context.dead_end_direction
+        self.run_cycles(machine, imu, t, params, 1)
+        assert machine.context.dead_end_direction == -first
+
+    def test_opposite_is_relative_to_what_was_tried(self, params):
+        """반대는 '직전에 시도한 쪽'의 반대다 — 지금 유리한 쪽의 반대가 아니다.
+
+        코스트맵은 매 틱 바뀐다. 관측 기준으로 잡으면 1회에 좌를 시도한 뒤 2회 시점에
+        우가 유리해질 때 그 반대가 다시 좌가 되어 같은 방향을 반복한다
+        (0804 실기: 1번째 좌 → 2번째도 좌).
+        """
+        from driving.state_machine import _attempt_direction
+        右 = 1
+        # 지금 유리한 쪽이 어느 쪽이든, 직전에 우(+1)를 했으면 다음은 좌(-1)다
+        frame = all_blocked_frame(0.0)
+        assert _attempt_direction(frame, 2, previous=右) == -右
+        assert _attempt_direction(frame, 2, previous=-右) == 右
+
+    def test_uturn_completes_at_target_yaw(self, params):
+        machine, imu, t = self.started(params)
+        t = self.run_cycles(machine, imu, t, params,
+                            params.dead_end_uturn_after_cycles)
+        assert machine.context.dead_end_phase is DeadEndPhase.UTURN
+        # U턴 목표각을 채우면 경로가 안 보여도 완료된다 — 각도가 기준이다
+        imu.yaw_deg += (params.dead_end_uturn_target_yaw_deg
+                        - params.dead_end_uturn_tolerance_deg)
+        t += self.TICK
+        machine.step(all_blocked_frame(t), imu.read(), t)
+        settle_to_cruise(machine, all_blocked_frame, t, imu)
+
+    def test_uturn_takes_a_real_path_without_finishing(self, params):
+        """회차 도중 **진짜로 트인 경로**가 나오면 다 돌지 않고 그리로 간다.
+
+        U턴은 목적이 아니라 수단이다 (0804 실기 요구). 다만 기준은 강한 쪽이다 —
+        인도가 보이고 정면을 막는 것이 없어야 한다.
+        """
+        machine, imu, t = self.started(params)
+        t = self.run_cycles(machine, imu, t, params,
+                            params.dead_end_uturn_after_cycles)
+        assert machine.context.dead_end_phase is DeadEndPhase.UTURN
+        # 최소 각도를 돌기 전에는 경로가 보여도 안 빠진다 — 진입 순간 이미 참인
+        # 조건으로 이탈하면 회전 0°짜리 'U턴'이 된다 (0804 실기)
+        t += self.TICK
+        machine.step(clear_frame(t), imu.read(), t)
+        assert machine.state is DriveState.DEAD_END
+        imu.yaw_deg += params.dead_end_uturn_min_yaw_deg
+        t += self.TICK
+        machine.step(clear_frame(t), imu.read(), t)
+        assert "경로 확보" in machine.context.reason
+        settle_to_cruise(machine, clear_frame, t, imu)
+
+    def test_uturn_keeps_turning_on_a_weak_signal(self, params):
+        # 'blocked 아님'만으로는 안 끝낸다 — 벽이 코앞이어도 슬롯이 ∞만 아니면
+        # 참이 되고, 그러면 다시 박는다. 그 실패는 재정향 완료 판정에서 이미 겪었다.
+        machine, imu, t = self.started(params)
+        t = self.run_cycles(machine, imu, t, params,
+                            params.dead_end_uturn_after_cycles)
+        assert machine.context.dead_end_phase is DeadEndPhase.UTURN
+        t += self.TICK
+        machine.step(obstacle_frame(t), imu.read(), t)    # 비용은 유한, 정면은 막힘
+        assert machine.state is DriveState.DEAD_END       # 계속 돈다
+
+    def test_uturn_direction_is_fixed_not_alternating(self, params):
+        # 회차는 한 방향으로 끝까지 도는 기동이다 — 중간에 바뀌면 번 각도가 상쇄된다
+        machine, imu, t = self.started(params)
+        self.run_cycles(machine, imu, t, params,
+                        params.dead_end_uturn_after_cycles)
+        assert machine.context.dead_end_phase is DeadEndPhase.UTURN
+        assert machine.context.dead_end_direction == params.dead_end_uturn_direction
+
+    def test_uturn_falls_back_to_time_without_imu(self, params):
+        # IMU가 없으면 각도를 못 재므로 시간으로 대신한다 — '아무것도 못 함'보다 낫다
+        machine = started_machine(params)
+        machine.step(all_blocked_frame(1.0), None, 1.0)
+        t = 1.0 + params.avoid_recheck_sec
+        machine.step(all_blocked_frame(t), None, t)
+        assert machine.state is DriveState.DEAD_END
+        t = self.run_cycles(machine, _NoImu(), t, params,
+                            params.dead_end_uturn_after_cycles)
+        assert machine.context.dead_end_phase is DeadEndPhase.UTURN
+        t += params.dead_end_uturn_sec + self.TICK
+        machine.step(all_blocked_frame(t), None, t)
+        settle_to_cruise(machine, all_blocked_frame, t)
+
+
+class _NoImu:
+    """IMU 미장착 대역 — run_cycles가 read()만 부른다."""
+
+    def read(self):
+        return None
+
+
+class TestAvoidThrashEscalation:
+    """반복 회피 승격 — 인지가 '한쪽은 열려 있다'고 우겨도 FSM 이력으로 막힘을 판정한다.
+
+    0804 실내 실측: 재정향 코드가 정상 동작하는데도 90초 동안 회피만 14회 반복됐고
+    `all_directions_blocked`는 **한 번도** True가 되지 않아 승격이 영영 일어나지 않았다.
+    승격 조건을 인지에만 맡기면 인지 오탐 한 종류로 상태 전체가 도달 불가가 된다 —
+    같은 실패를 `TestWallTriggersTurnaround` 주석이 이미 한 번 기록하고 있다.
+    """
+
+    TICK = 0.05
+
+    def swervable_frame(self, t: float) -> SegmentationFrame:
+        """정면은 막혔는데 인지는 '좌우 중 한쪽은 열렸다'고 본다 — 오탐 장면 그대로."""
+        blocking = ObstacleRegion(lateral_bias=0.0, proximity=1.0, blocking=True)
+        return SegmentationFrame(timestamp=t, sidewalk_detected=True,
+                                 obstacles=(blocking,),
+                                 cost_profile=(0.2, 0.9, 0.9, 0.9, 0.2),
+                                 all_directions_blocked=False)
+
+    def back_to_cruise(self, machine, t: float) -> float:
+        """맑은 프레임을 먹여 CRUISE로 돌려놓는다 — AVOID 복귀는 여러 국면을 거친다
+        (SWERVE → PASS → RETURN), 한 틱에 끝나지 않는다."""
+        for _ in range(60):
+            if machine.state is DriveState.CRUISE:
+                return t
+            t += self.TICK
+            machine.step(clear_frame(t), None, t)
+        raise AssertionError(f"CRUISE로 복귀하지 못했다 (상태={machine.state})")
+
+    def thrash(self, params, cycles: int, collect=None):
+        """회피 진입 ↔ CRUISE 복귀를 cycles회 반복한 (machine, t)."""
+        machine = started_machine(params)
+        t = 1.0
+        for _ in range(cycles):
+            command = machine.step(self.swervable_frame(t), None, t)
+            if collect is not None:
+                collect.append(command)
+            if machine.state is DriveState.DEAD_END:
+                return machine, t
+            t = self.back_to_cruise(machine, t) + 0.5   # 창(6초) 안의 간격
+        return machine, t
+
+    def test_repeated_avoid_escalates_to_reorient(self, params):
+        machine, _ = self.thrash(params, params.avoid_thrash_limit)
+        assert machine.state is DriveState.DEAD_END
+
+    def test_escalation_reverses_first(self, params):
+        commands = []
+        machine, _ = self.thrash(params, params.avoid_thrash_limit, collect=commands)
+        assert machine.state is DriveState.DEAD_END
+        command = commands[-1]
+        # 승격의 첫 명령은 후진이다 — 인지가 '열렸다'고 한 방향으로 또 선회하면
+        # 같은 루프를 한 번 더 도는 것뿐이다
+        assert command.throttle_pct == pytest.approx(-params.dead_end_throttle_pct)
+
+    def test_below_limit_keeps_swerving(self, params):
+        machine, _ = self.thrash(params, params.avoid_thrash_limit - 1)
+        assert machine.state is not DriveState.DEAD_END
+
+    def test_gap_resets_the_count(self, params):
+        # 창을 넘겨 조용했으면 그 사이에 실제로 나아갔다는 뜻 — 처음부터 다시 센다
+        machine = started_machine(params)
+        t = 1.0
+        for _ in range(params.avoid_thrash_limit - 1):
+            machine.step(self.swervable_frame(t), None, t)
+            t = self.back_to_cruise(machine, t) + 0.5
+        t += params.avoid_thrash_window_sec + 1.0      # 충분히 조용한 구간
+        machine.step(self.swervable_frame(t), None, t)
+        assert machine.state is DriveState.AVOID       # 카운트 리셋 → 승격하지 않는다
+
+
+class TestDeadEndTurnaround:
+    """막다른 길 재정향 — 좌/우 모두 경로 없음 유지 → 후진으로 공간 확보 → 유리한
+    쪽으로 선회 전진 → **시각으로** 완료. 진입은 AVOID 재확인 경유다.
+
+    0804 개편: 종전은 좌회전 고정 180° K턴이었고 완료 판정이 yaw 단독이었다.
+    yaw_sign 부호가 틀리자 누적이 반대로 가며 완료 조건에 도달 자체가 불가능해져
+    매번 timeout 30초를 채웠다. 완료를 시각으로 옮기면 그 종류의 실수가 주행을
+    멈추지 못한다 — AVOID·TURN이 이미 같은 이유로 시각 판정이다.
+    """
+
+    TICK = 0.05
+
+    def turnaround_started(self, params, imu=None):
+        """전 방향 통행 불가가 재확인까지 유지돼 재정향이 막 시작된 (machine, imu, t).
+
+        첫 국면은 **후진**이다 — 벽에 붙은 채로는 선회할 공간이 없다.
+        """
+        imu = MockImu() if imu is None else imu
+        reading = None if imu is False else imu.read()
+        machine = started_machine(params)
+        machine.step(all_blocked_frame(1.0), reading, 1.0)
         assert machine.state is DriveState.AVOID   # 일단 정지 후 재확인
         t = 1.0 + params.avoid_recheck_sec
-        command = machine.step(all_blocked_frame(t), imu.read(), t)
+        command = machine.step(all_blocked_frame(t), reading, t)
         assert machine.state is DriveState.DEAD_END
-        assert command.throttle_pct == pytest.approx(params.dead_end_throttle_pct)
+        assert command.throttle_pct == pytest.approx(-params.dead_end_throttle_pct)
+        assert command.steering_offset_deg == pytest.approx(0.0)
         return machine, imu, t
 
     def test_all_blocked_persisting_enters_dead_end(self, params):
         self.turnaround_started(params)
 
-    def test_all_blocked_without_imu_waits(self, params):
-        # IMU 없이는 회차 불가 — 재확인이 지나도 정지 대기 (수동 개입 대기)
+    def test_starts_with_reverse_not_forward(self, params):
+        # 개편의 핵심 — 벽에 코가 닿은 상태에서 전진 호부터 시도하면 헛바퀴만 돈다
+        _, _, _ = self.turnaround_started(params)   # 진입 명령이 후진임을 위에서 검증
+
+    def test_all_blocked_without_imu_still_reorients(self, params):
+        # IMU 없이도 재정향한다 — 완료가 시각이라 yaw가 필요 없다.
+        # 종전에는 IMU 게이트라 센서가 빠지면 막다른 길에서 아무것도 못 했고,
+        # 그것은 AvoidPhase 주석이 기록한 0803 실외 실패와 같은 형태다.
         machine = started_machine(params)
         machine.step(all_blocked_frame(1.0), None, 1.0)
         assert machine.state is DriveState.AVOID
-        after = 1.0 + params.avoid_recheck_sec * 2
-        command = machine.step(all_blocked_frame(after), None, after)
-        assert machine.state is DriveState.AVOID
-        assert command.throttle_pct == 0
-
-    def test_forward_arc_steers_hard_left(self, params):
-        machine, imu, t = self.turnaround_started(params)
-        for _ in range(20):   # forward_sec 안, 슬루율 통과 뒤 정상 상태
-            t += self.TICK
-            command = machine.step(all_blocked_frame(t), imu.read(), t)
-        assert machine.state is DriveState.DEAD_END
-        assert command.throttle_pct == pytest.approx(params.dead_end_throttle_pct)
-        assert command.steering_offset_deg == pytest.approx(-params.dead_end_steer_deg)
-
-    def test_alternates_forward_and_reverse(self, params):
-        # 국면 경계를 한 틱 넘겨 밟는다 — 등호 경계 자체가 아니라 '교대가 일어나는가'를
-        # 보는 테스트이고, 누적 부동소수 오차가 경계 판정을 흔들면 안 된다
-        # (예: 4.0 + 1.1 − 4.0 == 1.0999999999999996 < 1.1)
-        machine, imu, t = self.turnaround_started(params)
-        t += params.dead_end_forward_sec + self.TICK
-        command = machine.step(all_blocked_frame(t), imu.read(), t)   # → 정렬 후진
+        t = 1.0 + params.avoid_recheck_sec
+        command = machine.step(all_blocked_frame(t), None, t)
         assert machine.state is DriveState.DEAD_END
         assert command.throttle_pct == pytest.approx(-params.dead_end_throttle_pct)
 
-        t += params.dead_end_reverse_sec + self.TICK
-        command = machine.step(all_blocked_frame(t), imu.read(), t)   # → 다시 전진 호
+    def test_turn_arc_steers_toward_chosen_side(self, params):
+        machine, imu, t = self.turnaround_started(params)
+        # 막힘이 유지되면 후진은 상한까지 이어진다 — 고정 시간이 아니다
+        t += params.dead_end_reverse_max_sec + self.TICK
+        command = machine.step(all_blocked_frame(t), imu.read(), t)   # 후진 → 선회 전진
+        assert machine.state is DriveState.DEAD_END
+        assert command.throttle_pct == pytest.approx(params.dead_end_throttle_pct)
+        # all_blocked_frame은 좌우 대칭이라 동점 → 좌(조향 여유가 더 크다)
+        assert command.steering_offset_deg == pytest.approx(-params.dead_end_steer_left_deg)
+
+    def test_alternates_reverse_and_turn_arc(self, params):
+        # 국면 경계를 한 틱 넘겨 밟는다 — 등호 경계가 아니라 '교대가 일어나는가'다
+        machine, imu, t = self.turnaround_started(params)
+        t += params.dead_end_reverse_max_sec + self.TICK
+        command = machine.step(all_blocked_frame(t), imu.read(), t)   # → 선회 전진
         assert command.throttle_pct == pytest.approx(params.dead_end_throttle_pct)
 
-    def test_completes_at_accumulated_yaw(self, params):
+        t += params.dead_end_forward_sec + self.TICK
+        command = machine.step(all_blocked_frame(t), imu.read(), t)   # → 다시 후진
+        assert command.throttle_pct == pytest.approx(-params.dead_end_throttle_pct)
+        assert command.steering_offset_deg == pytest.approx(0.0)
+
+    def test_reverse_continues_while_blocked(self, params):
+        # 후진은 고정 시간이 아니라 막힘이 풀릴 때까지다 — 0.9초 고정이던 종전
+        # 구조는 벽에 바짝 붙었을 때 선회 공간을 못 만들고 다시 벽에 박았다.
         machine, imu, t = self.turnaround_started(params)
-        imu.yaw_deg = (params.dead_end_target_yaw_deg
-                       - params.dead_end_yaw_tolerance_deg)   # 좌회전 누적 = yaw+
+        mid = t + params.dead_end_reverse_min_sec + self.TICK
+        command = machine.step(all_blocked_frame(mid), imu.read(), mid)
+        assert command.throttle_pct == pytest.approx(-params.dead_end_throttle_pct)
+
+    def test_reverse_ends_early_once_clear(self, params):
+        # 막힘이 풀리면 상한을 기다리지 않고 최소 시간 뒤 선회로 넘어간다
+        machine, imu, t = self.turnaround_started(params)
+        early = t + params.dead_end_reverse_min_sec + self.TICK
+        command = machine.step(clear_frame(early), imu.read(), early)
+        assert machine.state is DriveState.DEAD_END      # 아직 완료가 아니다
+        assert command.throttle_pct == pytest.approx(params.dead_end_throttle_pct)
+
+    def test_does_not_complete_during_reverse(self, params):
+        # 반복 회피로 승격된 경우 인지는 그 순간에도 '안 막혔다'고 말한다 —
+        # 여기서 완료를 보면 후진을 한 틱도 못 하고 같은 루프에 다시 빠진다
+        machine, imu, t = self.turnaround_started(params)
         command = machine.step(clear_frame(t + self.TICK), imu.read(), t + self.TICK)
-        assert machine.state is DriveState.CRUISE
+        assert machine.state is DriveState.DEAD_END
+        assert command.throttle_pct == pytest.approx(-params.dead_end_throttle_pct)
+
+    def test_completes_when_path_reappears(self, params):
+        # 완료는 시각이다 — 각도가 아니라 '갈 수 있는 경로가 생겼는가'.
+        # 단 최소 한 번의 후진과 선회를 마친 뒤에 판정한다.
+        machine, imu, t = self.turnaround_started(params)
+        t += params.dead_end_reverse_min_sec + self.TICK
+        machine.step(clear_frame(t), imu.read(), t)          # 후진 종료 → 선회
+        # 선회 호를 다 돈 뒤에 판정한다 — 매 틱 보면 진입 순간 바로 끝난다
+        t += params.dead_end_forward_sec + self.TICK
+        command = machine.step(clear_frame(t), imu.read(), t)
         assert command.throttle_pct == 0
+        settle_to_cruise(machine, clear_frame, t, imu)   # 바퀴 정렬 뒤 추종 시작
+
+    def test_completes_without_imu(self, params):
+        # yaw 없이도 완료된다 — 부호·적분 오류가 출구를 막을 수 없다는 것이 개편의 요지
+        machine = started_machine(params)
+        machine.step(all_blocked_frame(1.0), None, 1.0)
+        t = 1.0 + params.avoid_recheck_sec
+        machine.step(all_blocked_frame(t), None, t)
+        assert machine.state is DriveState.DEAD_END
+        t += params.dead_end_reverse_min_sec + self.TICK
+        machine.step(clear_frame(t), None, t)                # 후진 종료 → 선회
+        t += params.dead_end_forward_sec + self.TICK         # 호를 다 돈 뒤 판정
+        machine.step(clear_frame(t), None, t)
+        settle_to_cruise(machine, clear_frame, t)
 
     def test_ignores_blocking_obstacle_during_turnaround(self, params):
-        # 막다른 길에서는 벽·구석이 상시 blocking으로 잡힌다 — 재정지하면 회차가
-        # 영원히 시작을 못 하므로 회차 중 장애물 검출은 무시한다
+        # 막다른 길에서는 벽·구석이 상시 blocking으로 잡힌다 — 재정지하면 재정향이
+        # 영원히 시작을 못 하므로, **아직 막혀 있는 동안**의 장애물은 무시한다.
         machine, imu, t = self.turnaround_started(params)
-        command = machine.step(obstacle_frame(t + self.TICK), imu.read(), t + self.TICK)
+        walled = replace(all_blocked_frame(t + self.TICK),
+                         obstacles=(ObstacleRegion(lateral_bias=0.0, proximity=1.0,
+                                                   blocking=True),))
+        command = machine.step(walled, imu.read(), t + self.TICK)
         assert machine.state is DriveState.DEAD_END
         assert command.throttle_pct != 0
 
+    def test_blocking_obstacle_blocks_completion(self, params):
+        """정면을 막는 것이 남아 있으면 완료가 아니다 (0804 실기 요구).
+
+        종전에는 blocking을 무시하고 'blocked 아님'만 봤다. 그러면 벽이 코앞이어도
+        슬롯이 ∞만 아니면 통과해, 꺾자마자 빠져나가고 CRUISE가 곧장 다시 박았다 —
+        시도 하나가 1.6초 만에 소진돼 3초 만에 U턴까지 갔다.
+        대가로 좁은 곳에서는 상한(reverse_max/timeout)까지 가는 경우가 생기지만,
+        그쪽이 '나갈 수 있다고 착각하고 다시 박는 것'보다 낫다.
+        """
+        machine, imu, t = self.turnaround_started(params)
+        t += params.dead_end_reverse_min_sec + self.TICK
+        machine.step(clear_frame(t), imu.read(), t)          # 경로 인지 → 선회
+        t += params.dead_end_forward_sec + self.TICK
+        machine.step(obstacle_frame(t), imu.read(), t)
+        assert machine.state is DriveState.DEAD_END          # 아직 완료가 아니다
+
+    def test_spin_cap_gives_up_to_manual_wait(self, params):
+        # 한 바퀴 가까이 돌고도 길이 없으면 갇힌 것 — 무한 회전 대신 수동 대기.
+        # 부호에 의존하지 않도록 절댓값으로 본다.
+        machine, imu, t = self.turnaround_started(params)
+        imu.yaw_deg = -params.dead_end_max_yaw_deg   # 반대 부호로도 걸려야 한다
+        command = machine.step(all_blocked_frame(t + self.TICK), imu.read(), t + self.TICK)
+        assert machine.state is DriveState.IDLE
+        assert command.throttle_pct == 0 and command.brake
+
     def test_timeout_gives_up_to_manual_wait(self, params):
-        # yaw가 늘지 않으면(벽에 걸림·헛바퀴) 갇힌 것 — 무한 반복 대신 수동 대기
         machine, imu, t = self.turnaround_started(params)
         expired = t + params.dead_end_timeout_sec
         command = machine.step(all_blocked_frame(expired), imu.read(), expired)
         assert machine.state is DriveState.IDLE
         assert command.throttle_pct == 0 and command.brake
 
-    def test_imu_loss_aborts_to_cruise(self, params):
-        machine, _, t = self.turnaround_started(params)
-        machine.step(all_blocked_frame(t + self.TICK), None, t + self.TICK)
-        assert machine.state is DriveState.CRUISE
+    def test_imu_loss_mid_reorient_keeps_going(self, params):
+        # IMU가 도중에 빠져도 재정향은 계속된다 — 회전 상한만 비활성이고,
+        # timeout이 여전히 무한 반복을 막는다
+        machine, imu, t = self.turnaround_started(params)
+        command = machine.step(all_blocked_frame(t + self.TICK), None, t + self.TICK)
+        assert machine.state is DriveState.DEAD_END
+        assert command.throttle_pct != 0
 
     def test_estop_still_wins_during_turnaround(self, params):
-        # 공통 가드는 회차 중에도 산다 — 코리도가 차도로 덮이면 즉시 ESTOP
+        # 공통 가드는 재정향 중에도 산다 — 코리도가 차도로 덮이면 즉시 ESTOP
         machine, imu, t = self.turnaround_started(params)
         command = machine.step(roadway_critical_frame(t + self.TICK), imu.read(),
                                t + self.TICK)
@@ -1550,15 +2213,16 @@ class TestDeadEndTurnaround:
         assert command.brake
 
     def test_roadway_risk_during_turnaround_escapes(self, params):
-        # 차도가 코리도에 들어오면 회차를 접고 선회로 벗어난다 — 막다른 길이 차도 앞인
-        # 경우가 흔하고, 그때 K턴으로 후진하며 차도에 들어가는 것보다 선회가 맞다
+        # 차도가 코리도에 들어오면 재정향을 접고 선회로 벗어난다 — 막다른 길이 차도
+        # 앞인 경우가 흔하고, 그때 후진하며 차도에 들어가는 것보다 선회가 맞다
         machine, imu, t = self.turnaround_started(params)
         machine.step(roadway_risk_frame(t + self.TICK), imu.read(), t + self.TICK)
         assert machine.state is DriveState.ESCAPE
 
     def test_dead_end_steer_stays_inside_hardware(self, config, params):
-        assert params.dead_end_steer_deg <= (
-            config["hardware"]["steering_servo"]["left_offset_limit_deg"])
+        limits = config["hardware"]["steering_servo"]
+        assert params.dead_end_steer_left_deg <= limits["left_offset_limit_deg"]
+        assert params.dead_end_steer_right_deg <= limits["right_offset_limit_deg"]
 
 
 class TestImuGate:
@@ -1739,15 +2403,17 @@ class TestWallTriggersTurnaround:
         t = 1.0 + params.avoid_recheck_sec
         command = machine.step(self.wall_frame(t), imu.read(), t)
         assert machine.state is DriveState.DEAD_END
-        assert command.throttle_pct == pytest.approx(params.dead_end_throttle_pct)
+        # 첫 국면은 후진이다 — 벽에 코가 닿은 채로 전진 호부터 시도하면 헛바퀴다
+        assert command.throttle_pct == pytest.approx(-params.dead_end_throttle_pct)
 
-    def test_wall_without_imu_does_not_turn(self, params):
-        # 회차만은 yaw 누적으로 진행을 재므로 IMU 없이는 하지 않는다 — 종전 계약 유지
+    def test_wall_without_imu_still_reorients(self, params):
+        # 0804 개편: 재정향 완료가 시각이라 IMU 없이도 성립한다. 종전에는 IMU 게이트라
+        # 센서가 빠지면 벽 앞에서 좌우 회피만 무한 반복했다.
         machine = started_machine(params)
         machine.step(self.wall_frame(1.0), None, 1.0)
         t = 1.0 + params.avoid_recheck_sec
         machine.step(self.wall_frame(t), None, t)
-        assert machine.state is DriveState.AVOID
+        assert machine.state is DriveState.DEAD_END
 
     def test_clearing_wall_returns_to_cruise(self, params):
         # 재확인에서 풀리면 회차하지 않는다 — 오탐 한 번에 180° 돌지 않게

@@ -276,10 +276,28 @@ class TestCruiseCostmap:
 
         recheck = 1.0 + params.avoid_recheck_sec
         command = machine.step(self.frame(recheck, (inf, inf, inf)), None, recheck)
-        assert machine.state is DriveState.AVOID   # 여전히 막힘 → 정지 대기 유지
-        assert command.throttle_pct == 0
-        machine.step(self.frame(recheck + 0.05, (0.0, 0.0, 0.0)), None, recheck + 0.05)
-        assert machine.state is DriveState.CRUISE  # 막힘 해소 → 즉시 복귀
+        # 0804 개편: 막힘이 유지되면 재정향으로 승격된다(IMU 불필요). 첫 명령은 후진 —
+        # 벽에 붙은 채로는 선회할 공간이 없다.
+        assert machine.state is DriveState.DEAD_END
+        assert command.throttle_pct == pytest.approx(-params.dead_end_throttle_pct)
+        # 막힘이 풀려도 **후진 최소 시간은 채운 뒤** 선회로 넘어가고, 완료는 그
+        # 선회 국면에서 판정한다 — 뒤로 빼서 상황을 바꾸는 것이 이 상태의 목적이라
+        # 후진을 한 틱도 못 하고 되돌아가면 같은 회피 루프에 다시 빠진다.
+        clear = recheck + params.dead_end_reverse_min_sec + 0.05
+        machine.step(self.frame(clear, (0.0, 0.0, 0.0)), None, clear)
+        assert machine.state is DriveState.DEAD_END          # 선회 국면으로 전환
+        # 완료는 **선회 호를 다 돈 뒤**에 판정한다 — 진입 순간 판정하면 후진이
+        # 넘겨준 'path_seen 참'이 그대로 이탈 조건이 되어 회전 0°로 빠진다
+        done = clear + params.dead_end_forward_sec + 0.05
+        machine.step(self.frame(done, (0.0, 0.0, 0.0)), None, done)
+        # 탈출 후 **바퀴 정렬**을 지나 추종을 시작한다 (꺾인 채 전진하면 다시 박는다)
+        t = done
+        for _ in range(60):
+            if machine.state is DriveState.CRUISE:
+                break
+            t += 0.05
+            machine.step(self.frame(t, (0.0, 0.0, 0.0)), None, t)
+        assert machine.state is DriveState.CRUISE            # 경로 확보 → 복귀
 
     def test_cleared_costmap_resumes_driving(self, params):
         inf = float("inf")

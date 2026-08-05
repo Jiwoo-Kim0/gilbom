@@ -192,12 +192,21 @@ class PostParams:
     obstacle_bottom_margin_ratio: float  # 판정 밴드에서 제외할 최하단 비율 (로봇 몸체·그림자)
     obstacle_min_height_ratio: float     # 영역 세로 폭 하한 (노면 오분류 띠 배제)
     braille_min_fraction: float
+    braille_corridor_min_fraction: float  # **코리도 분모** 기준 발견 임계. 위 값과 OR다 —
+                                # 하향각이 낮아 화면 전체 분모로는 앞쪽 블록의 얇은 띠가
+                                # 문턱을 못 넘기 때문이다 (MaskSummary 필드 주석에 근거).
     proximity_quantile: float   # 근접도 = 이 퍼센타일 행 — 최하단 노이즈 픽셀 1개가
                                 # 근접도를 1로 튀게 하는 것을 막는 강건성 노브
     crosswalk_min_fraction: float               # ≥ → 횡단보도 발견
     crosswalk_seam_band_ratio: float            # 이음 띠 높이 / 화면 높이
     crosswalk_seam_braille_min_fraction: float  # 띠 내 블록 비율 미만 → 미설치
     crosswalk_seam_drivable_min_fraction: float  # 띠 내 주행가능 비율 미만 → 판정 보류
+    crosswalk_seam_min_near_ratio: float    # 횡단보도 최근접 행이 화면 이 비율보다 위면
+                                # (= 아직 멀면) 판정 보류. 원거리에서는 원근압축으로
+                                # 점형블록이 아직 몇 픽셀이라 '없다'가 관측이 아니다
+    crosswalk_seam_max_tilt_band_ratio: float  # 하단 경계 기울기 허용치 / 띠 높이.
+                                # 초과 시 보류 — 수평 띠 하나로 사선 이음부를 덮는
+                                # 전제가 깨진다
     centerline: CenterlineParams
 
     @classmethod
@@ -214,6 +223,8 @@ class PostParams:
             obstacle_bottom_margin_ratio=float(post["obstacle_bottom_margin_ratio"]),
             obstacle_min_height_ratio=float(post["obstacle_min_height_ratio"]),
             braille_min_fraction=float(post["braille_min_fraction"]),
+            braille_corridor_min_fraction=float(
+                post["braille_corridor_min_fraction"]),
             proximity_quantile=float(post["proximity_quantile"]),
             crosswalk_min_fraction=float(post["crosswalk_min_fraction"]),
             crosswalk_seam_band_ratio=float(post["crosswalk_seam_band_ratio"]),
@@ -221,6 +232,10 @@ class PostParams:
                 post["crosswalk_seam_braille_min_fraction"]),
             crosswalk_seam_drivable_min_fraction=float(
                 post["crosswalk_seam_drivable_min_fraction"]),
+            crosswalk_seam_min_near_ratio=float(
+                post["crosswalk_seam_min_near_ratio"]),
+            crosswalk_seam_max_tilt_band_ratio=float(
+                post["crosswalk_seam_max_tilt_band_ratio"]),
             centerline=CenterlineParams.from_config(post["centerline"]),
         )
 
@@ -250,7 +265,13 @@ class FreeSpaceParams:
     notch_cost: 노치 깊이에 곱해 코스트맵 슬롯 비용에 가산하는 계수. 이 경로가
         **상태 전이 없이 좌우로 비껴가는** 동작을 만든다 (CRUISE 코스트맵 조향).
     blocking_reach_ratio: 자유거리 비율이 이 값 미만이면 blocking (절대 판정 —
-        '바로 앞에서 막혔다'). AVOID 회피 기동의 트리거.
+        '바로 앞에서 막혔다'). AVOID 회피 기동의 트리거. **한 슬롯**에 적용하는
+        확인 임계값이다 — 상대 노치가 '이 방향이 이상하다'를 이미 세운 뒤에 온다.
+    all_blocked_enabled: 위 임계값을 **전 슬롯에 동시** 적용해 막다른 길
+        (all_directions_blocked)을 판정할지. 기본 off이고, 그 이유는 config.yaml의
+        같은 키 주석에 있다 — 요약하면 자유거리 상한은 장면이 정하므로(경사로의
+        정상, 코너) 전 슬롯 동시 미만이 '벽'을 뜻하지 않는다. notch_min_ratio가
+        절대 임계를 피하는 이유와 같은 이야기다.
     obstacle_min_slots: 노치가 이 개수 이상 연속돼야 장애물로 보고한다 (세그 노이즈
         한 슬롯이 회피를 유발하는 것을 막는 하한).
     """
@@ -260,6 +281,7 @@ class FreeSpaceParams:
     notch_min_ratio: float
     notch_cost: float
     blocking_reach_ratio: float
+    all_blocked_enabled: bool
     obstacle_min_slots: int
 
     @classmethod
@@ -270,6 +292,7 @@ class FreeSpaceParams:
             notch_min_ratio=float(free_space["notch_min_ratio"]),
             notch_cost=float(free_space["notch_cost"]),
             blocking_reach_ratio=float(free_space["blocking_reach_ratio"]),
+            all_blocked_enabled=bool(free_space["all_blocked_enabled"]),
             obstacle_min_slots=int(free_space["obstacle_min_slots"]),
         )
 
@@ -334,6 +357,16 @@ class MaskSummary:
                                 # sidewalk 사이'를 화면 좌표로 옮긴 것.
                                 # **None = 판정 보류**(횡단보도 없음 / 띠가 화면 밖 / 띠가
                                 # 인도가 아님). 0.0과 구별해야 한다 — 0.0은 '봤는데 없다'다
+    braille_corridor_fraction: float = 0.0       # **진행 코리도 안** 점자블록 비율.
+                                # braille_fraction(화면 전체)과 분모가 다른 같은 픽셀이다.
+                                # 주행 카메라는 하향각이 낮아 앞쪽 블록이 화면 상단에 얇게
+                                # 찍히고, 화면 전체 분모에서는 그 띠가 0.5% 문턱을 못 넘는다
+                                # (0805 실기: 세그 주행 중 블록 발견이 잘 안 됨). 코리도
+                                # (중앙 폭 50% × 하단 40% = 화면의 20%)로 분모를 좁히면 같은
+                                # 픽셀이 5배로 보인다 — roadway_corridor_fraction이 같은
+                                # 이유로 코리도 분모를 쓰는 것과 같은 산식이다.
+                                # 발견 판정은 둘의 OR다 (build_frame) — 어느 하나가 잡으면
+                                # 발견이고, 코리도 밖 원거리 블록은 종전 경로가 그대로 받는다
 
 
 # ======================================================================
@@ -660,11 +693,27 @@ def build_frame(summary: MaskSummary, post: PostParams, timestamp: float,
     # 없다. free_space_obstacle의 상대 노치 판정으로는 이 장면이 잡히지 않는다 —
     # 가로 담장·벽이면 전 슬롯이 균등하게 막혀 노치가 전부 0이 된다(free_space_notches
     # 독스트링의 명시된 한계). 그래서 같은 절대 기준을 전 슬롯에 직접 적용한다.
+    #
+    # **all_blocked_enabled 기본 off** — 이 판정에는 벽 말고도 걸리는 것이 있다.
+    # 자유거리 상한은 장면이 정한다: 유한한 경사로는 정상(crest) 너머 지면이 보이지
+    # 않아 주행가능 런이 정상 라인에서 끊기고, 그 끊김은 특정 슬롯이 아니라 좌·정면·
+    # 우에 **균등하게** 걸린다(코너도 같다). 그러면 벽이 없는데 전 슬롯 미만이 된다 —
+    # 0805 실외에서 경사 영구 정지와 평지 오회차의 원인이다. notch_min_ratio가 절대
+    # 임계를 피하는 이유와 같은 이야기이고, 그 주석이 이미 경고하고 있었다.
+    # 재보정 조건은 config.yaml의 같은 키에 적어 두었다.
     all_directions_blocked = bool(
         use_free_space
+        and free_space.all_blocked_enabled
         and all(reach < free_space.blocking_reach_ratio for reach in reaches))
 
-    braille_detected = summary.braille_fraction >= post.braille_min_fraction
+    # 발견은 **두 분모의 OR**다. 화면 전체 분모는 멀리 크게 보이는 블록을, 코리도
+    # 분모는 앞쪽에 얇게 찍힌 블록을 잡는다 — 하향각이 낮은 주행 카메라에서는 후자가
+    # 지배적이고, 전체 분모만 쓰던 종전에는 그 장면이 통째로 미발견이었다(0805 실기).
+    # OR인 이유: 코리도는 중앙 폭 50%뿐이라 좌우로 벗어난 블록을 놓친다. 두 경로는
+    # 대체가 아니라 병행이다(자유공간 판정이 장애물 밴드와 병행인 것과 같은 구조).
+    braille_detected = bool(
+        summary.braille_fraction >= post.braille_min_fraction
+        or summary.braille_corridor_fraction >= post.braille_corridor_min_fraction)
 
     # 횡단보도 미설치 판정 (명세 5단계) — 횡단보도가 보일 때만 의미가 있다.
     # 보이지 않으면 '이음 띠에 블록이 없다'가 항상 참이므로, 이 게이트가 없으면
@@ -775,6 +824,9 @@ def summarize_class_masks(class_masks: Dict[str, "object"], shape: Tuple[int, in
         height_denominator=y1 - y0, quantile=post.proximity_quantile)
 
     braille_fraction = _fraction(braille)
+    # 코리도 분모 — 하향각이 낮아 화면 전체 분모로는 앞쪽 블록의 얇은 띠가 문턱을
+    # 못 넘는다. roadway_corridor_fraction과 **같은 슬라이스**를 쓴다(위 몇 줄).
+    braille_corridor_fraction = _fraction(braille[corridor])
     braille_offset = _centroid_offset_ratio(braille, x_origin=0, full_width=width)
     _, braille_proximity, _ = _region_position(
         np, braille, x_origin=0, full_width=width,
@@ -787,7 +839,9 @@ def summarize_class_masks(class_masks: Dict[str, "object"], shape: Tuple[int, in
         np, crosswalk, braille, drivable, height=height, width=width,
         band_ratio=post.crosswalk_seam_band_ratio,
         quantile=post.proximity_quantile,
-        drivable_min_fraction=post.crosswalk_seam_drivable_min_fraction)
+        drivable_min_fraction=post.crosswalk_seam_drivable_min_fraction,
+        min_near_ratio=post.crosswalk_seam_min_near_ratio,
+        max_tilt_band_ratio=post.crosswalk_seam_max_tilt_band_ratio)
 
     # 코스트맵 슬롯: 조향 후보는 전체 폭 — 코리도(중앙만)와 달리 옆으로 비껴갈
     # 방향까지 평가해야 한다. 높이는 코리도와 같은 하단 밴드(원경 노이즈 배제).
@@ -817,6 +871,7 @@ def summarize_class_masks(class_masks: Dict[str, "object"], shape: Tuple[int, in
         obstacle_proximity=obstacle_proximity,
         obstacle_height_ratio=obstacle_height,
         braille_fraction=braille_fraction,
+        braille_corridor_fraction=braille_corridor_fraction,
         braille_center_offset_ratio=(braille_offset if braille_offset is not None else 0.0),
         braille_proximity=braille_proximity,
         slot_class_fractions=slot_fractions,
@@ -892,7 +947,9 @@ def _free_reach_ratios(np, ego_run, width: int, slot_count: int,
 def _crosswalk_seam_braille_fraction(np, crosswalk, braille, drivable,
                                      height: int, width: int, band_ratio: float,
                                      quantile: float,
-                                     drivable_min_fraction: float) -> Optional[float]:
+                                     drivable_min_fraction: float,
+                                     min_near_ratio: float,
+                                     max_tilt_band_ratio: float) -> Optional[float]:
     """횡단보도-인도 **이음 띠** 안의 점자블록 비율 (numpy 계층). 판정 불가면 None.
 
     명세 5단계('횡단보도와 sidewalk 클래스 사이에 점자블록 클래스 있는지 판단')를
@@ -906,25 +963,53 @@ def _crosswalk_seam_braille_fraction(np, crosswalk, braille, drivable,
     픽셀 하나가 띠를 인도 쪽으로 통째로 밀어내리는 것을 막는다. x 범위도 같은 이유로
     양끝 분위수를 쓴다.
 
-    **None(판정 보류)을 돌려주는 두 경우** — 0804 실외에서 오탐 2건의 원인이다.
-    보고는 되돌릴 수 없으므로 '관측하지 못했다'를 '없다'로 바꾸지 않는다:
+    **None(판정 보류)을 돌려주는 네 경우.** 보고는 되돌릴 수 없는 외부 출력이므로
+    '관측하지 못했다'를 '없다'로 바꾸지 않는다 — 이 함수의 오탐은 전부 그 혼동이었다:
       ① 띠가 화면 안에 다 들어오지 않는다 — 횡단보도 최근접 행이 화면 하단에서
          band_px 안쪽이면 띠가 잘린다. 잘린 띠는 블록 비율이 구조적으로 0에 가깝다
          (로봇이 이음부를 이미 밟고 있는 순간도 여기 걸린다 — 그때 판정은 무의미하다).
       ② 띠 안에 주행가능면이 거의 없다 — 명세는 '횡단보도와 **sidewalk 사이**'다.
          띠가 차도·미분류 영역에 얹혀 있으면 애초에 그 '사이'가 아니다.
+      ③ **횡단보도가 아직 멀다** (min_near_ratio). ①이 '너무 가까움'만 막고 있어서
+         원거리 오탐이 통째로 열려 있었다 — 0805 실기의 지배적 오탐 경로다.
+         crosswalk_min_fraction(0.03)은 도색면이 넓어 **원거리에서도** 넘는데(그 키의
+         주석이 그렇게 적고 있다), 그 거리에서는 원근압축으로 band_px 58px가 지면
+         수 미터를 덮고 점형블록은 아직 몇 픽셀이거나 화각 밖이다. 즉 '블록이 보이기
+         전에 없다고 판정'한다. ①과 ③이 함께 **판정 창**을 만든다: 이음부가 화면에
+         온전히 들어오고(①) 충분히 가까울 때(③)만 판정한다.
+      ④ **횡단보도 하단 경계가 사선이다** (max_tilt_band_ratio). 수평 띠 하나로
+         이음부를 덮는 전제가 깨진다 — near_y는 가장 가까운 한쪽 코너가 정하는데
+         x 범위는 횡단보도가 걸친 폭 전체라, 기울기가 크면 띠가 반대쪽에서 실제
+         이음부를 완전히 비껴간다(0805 실기: '각도에 따라 오탐'). 허용 기울기를
+         **띠 높이에 상대적으로** 두는 이유는 그 기하 때문이다 — 띠가 두꺼우면 같은
+         기울기를 흡수할 수 있다. 픽셀 절대값으로 두면 band_ratio를 바꿀 때마다
+         따라 고쳐야 하는 숨은 결합이 생긴다.
+         (사선을 **보류가 아니라 판정**하려면 띠를 열별로 경계에 붙여 따야 한다 —
+          지금은 하지 않는다. 미보고가 오보고보다 안전한 쪽이고, 열별 띠는 실사
+          영상으로 노이즈 강건성을 확인한 뒤에 넣을 일이다.)
     """
     ys, xs = crosswalk.nonzero()
     if ys.size == 0:
         return None
     near_y = int(np.quantile(ys, quantile))
     band_px = max(1, int(round(height * band_ratio)))
+    if near_y < height * min_near_ratio:             # ③ 아직 멀다 — 블록이 안 보인다
+        return None
     y_from = min(height - 1, near_y)
     y_to = min(height, near_y + band_px)             # 아래(로봇 쪽)로 band_px
     if y_to - y_from < band_px:                      # ① 띠가 화면 밖으로 잘렸다
         return None
     x_from = int(np.quantile(xs, 1.0 - quantile))
     x_to = max(x_from + 1, int(np.quantile(xs, quantile)) + 1)
+    # ④ 하단 경계 기울기 — 좌/우 절반의 최근접 행 차이. 같은 quantile을 쓴다
+    # (near_y와 같은 노이즈 내성이어야 비교가 의미 있다).
+    mid_x = (x_from + x_to) // 2
+    left_ys, right_ys = ys[xs < mid_x], ys[xs >= mid_x]
+    if left_ys.size and right_ys.size:
+        tilt_px = abs(float(np.quantile(left_ys, quantile))
+                      - float(np.quantile(right_ys, quantile)))
+        if tilt_px > band_px * max_tilt_band_ratio:
+            return None
     band = (slice(y_from, y_to), slice(x_from, min(width, x_to)))
     if _fraction(drivable[band]) < drivable_min_fraction:   # ② 인도가 아니다
         return None
