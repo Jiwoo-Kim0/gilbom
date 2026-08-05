@@ -4,6 +4,7 @@ set -eu
 
 COMPOSE_FILE=${COMPOSE_FILE:-compose.prod.yaml}
 BUILD_COMPOSE_FILE=${BUILD_COMPOSE_FILE:-compose.build.yaml}
+SMOKE_COMPOSE_FILE=${SMOKE_COMPOSE_FILE:-compose.smoke.yaml}
 ENV_FILE=${ENV_FILE:-}
 RUNTIME_ENV_FILE=${RUNTIME_ENV_FILE:-}
 IMAGE_ENV_FILE=${IMAGE_ENV_FILE:-}
@@ -83,6 +84,23 @@ build_compose() {
   fi
 }
 
+smoke_compose() {
+  if [ -n "$ENV_FILE" ]; then
+    docker compose \
+      --env-file "$ENV_FILE" \
+      -f "$COMPOSE_FILE" \
+      -f "$SMOKE_COMPOSE_FILE" \
+      "$@"
+  else
+    docker compose \
+      --env-file "$RUNTIME_ENV_FILE" \
+      --env-file "$IMAGE_ENV_FILE" \
+      -f "$COMPOSE_FILE" \
+      -f "$SMOKE_COMPOSE_FILE" \
+      "$@"
+  fi
+}
+
 compose config --quiet
 compose --profile certificate config --quiet
 compose --profile certificate config > "$CHECK_DIR/full.yaml"
@@ -95,6 +113,17 @@ GILBOM_LLM_API_KEY_SECRET_FILE=/dev/null \
   compose config > "$CHECK_DIR/no-llm-secret.yaml"
 assert_contains "$CHECK_DIR/no-llm-secret.yaml" "file: /dev/null" \
   "disabled LLM deployment must resolve without a real API key file"
+assert_contains "$CHECK_DIR/no-llm-secret.yaml" "GILBOM_LLM_ENABLED: \"true\"" \
+  "production Compose must keep the LLM feature gate enabled"
+GILBOM_LLM_ENABLED=false \
+GILBOM_LLM_API_KEY_SECRET_FILE=/dev/null \
+  smoke_compose config > "$CHECK_DIR/smoke-no-llm.yaml"
+assert_contains "$CHECK_DIR/smoke-no-llm.yaml" "GILBOM_LLM_ENABLED: \"false\"" \
+  "report smoke must be able to disable the production LLM feature gate"
+GILBOM_LLM_ENABLED=true \
+  smoke_compose config > "$CHECK_DIR/smoke-llm-canary.yaml"
+assert_contains "$CHECK_DIR/smoke-llm-canary.yaml" "GILBOM_LLM_ENABLED: \"true\"" \
+  "report smoke must be able to enable the explicit GMS canary"
 
 extract_service() {
   service=$1
