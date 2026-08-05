@@ -30,7 +30,7 @@
 | 호출 경로 | `POST /chat/completions` |
 | Outbound | `gms.ssafy.io:443` |
 | 보고서 모델 | `gpt-5.4-mini`, `gpt-5.4` |
-| Prompt 버전 | 운영 `report-v2`, 롤백 호환 `report-v1` |
+| Prompt 버전 | 운영 `report-v3`, 롤백 호환 `report-v1`, `report-v2` |
 | 최대 출력 | 1,500 tokens |
 | 최대 입력 | 보수적 비용 예약 기준 8,000 tokens |
 | 동시 호출 | 인스턴스당 기본 5, 허용 범위 1~20 |
@@ -108,8 +108,11 @@ Base URL 검사는 HTTPS scheme, 정확한 host·443 port·path를 모두 비교
    재시도도 별도 quota·credit 사용량으로 센다.
 6. `4xx`와 JSON·Schema 오류는 재시도하지 않는다.
 7. 응답은 최대 100,000자, 정확한 필드 집합, JSON 타입·enum·개수, 원본 통계·기간·
-   결함 identity 일치와 HTML·script·실행 command 금지를 모두 통과해야 한다.
-8. 검증된 구조만 Markdown text로 렌더링한다. provider raw text는 보고서 본문이나
+   결함 identity 일치, 자연어에 포함된 결함 ID·사건 코드의 원본 일치와
+   HTML·script·실행 command 금지를 모두 통과해야 한다.
+8. 검증된 구조만 Markdown text로 렌더링하며, 식별자는 서버 원본으로 표시하고
+   결함 유형·위험도·처리 상태·조치 우선순위 enum은 한국어 의미로 치환한다.
+   provider raw text는 보고서 본문이나
    usage ledger에 저장하지 않는다.
 9. 어느 외부 단계가 실패해도 `TemplateReportGenerator`로 낮추고
    `ReportGenerationFallbackReason`의 고정 코드만 상위 생성 서비스에 전달한다.

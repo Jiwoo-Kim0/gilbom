@@ -46,6 +46,7 @@ import {
 import { getReportActionPolicy } from './reportPolicy'
 import { ReportEvidenceGallery } from './ReportEvidenceGallery'
 import { ReportStatusBadge } from './ReportStatusBadge'
+import { SafeReportDocument } from './SafeReportDocument'
 import { SafeReportText } from './SafeReportText'
 import {
   useReportRealtime,
@@ -404,7 +405,10 @@ export function ReportDetailPage() {
                     defectIds={version.evidenceSnapshot.defectIds}
                     canView={canViewDefectEvidence}
                   />
-                  <SafeReportText text={version.content} />
+                  <SafeReportDocument
+                    text={version.content}
+                    documentTitle={version.title}
+                  />
                 </>
               )}
             </div>

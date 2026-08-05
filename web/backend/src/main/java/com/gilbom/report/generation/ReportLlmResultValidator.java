@@ -8,6 +8,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
 
@@ -31,6 +33,22 @@ public class ReportLlmResultValidator {
 
     public static final int MAXIMUM_RESPONSE_CHARACTERS =
             100_000;
+    private static final Pattern STRICT_UUID = Pattern.compile(
+            "(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}"
+                    + "-[0-9a-f]{4}-[0-9a-f]{12}$");
+    private static final Pattern UUID_LIKE = Pattern.compile(
+            "(?i)(?<![a-z0-9])[a-z0-9]{8}-[a-z0-9]{4}"
+                    + "-[a-z0-9]{4}-[a-z0-9]{4}"
+                    + "-[a-z0-9]{12}(?![a-z0-9])");
+    private static final Pattern LABELLED_DEFECT_ID =
+            Pattern.compile(
+                    "(?i)(?:\\bdefect\\s*id\\b|결함\\s*ID)"
+                            + "\\s*(?:[:=]|는|은)?\\s*"
+                            + "([a-z0-9-]{4,})");
+    private static final Pattern INCIDENT_CODE_REFERENCE =
+            Pattern.compile(
+                    "(?i)(?<![a-z0-9-])INC-[a-z0-9-]{1,36}"
+                            + "(?![a-z0-9-])");
 
     private final ObjectMapper objectMapper;
     private final GeneratedReportTextGuard textGuard;
@@ -66,7 +84,7 @@ public class ReportLlmResultValidator {
             validateMetadata(response, prepared, result);
             validateStatistics(prepared.source(), result);
             validateEvidence(prepared, result);
-            validateGeneratedText(result);
+            validateGeneratedText(result, prepared);
             return result;
         } catch (BusinessException exception) {
             if (exception.errorCode()
@@ -245,6 +263,13 @@ public class ReportLlmResultValidator {
                 throw invalid();
             }
         }
+        // 현재 제품의 LLM 보고서는 결함 한 건을 지정해 생성한다. Provider가
+        // keyDefects를 비우거나 다른 결함만 선택해 실제 defectId가 본문에서
+        // 사라지는 응답을 허용하지 않는다.
+        if (prepared.evidenceById().size() == 1
+                && !seen.equals(prepared.evidenceById().keySet())) {
+            throw invalid();
+        }
         for (ReportLlmResult.ActionRecommendation recommendation
                 : result.actionRecommendations()) {
             if (!prepared.evidenceById().keySet().containsAll(
@@ -254,22 +279,79 @@ public class ReportLlmResultValidator {
         }
     }
 
-    private void validateGeneratedText(ReportLlmResult result) {
-        textGuard.validate(result.title());
-        textGuard.validate(result.summary());
+    private void validateGeneratedText(
+            ReportLlmResult result,
+            PreparedReportLlmInput prepared
+    ) {
+        validateNarrative(result.title(), prepared);
+        validateNarrative(result.summary(), prepared);
         for (ReportLlmResult.KeyDefect defect
                 : result.keyDefects()) {
             textGuard.validate(defect.incidentCode());
-            textGuard.validate(defect.rationale());
+            validateNarrative(defect.rationale(), prepared);
             if (defect.locationLabel() != null) {
                 textGuard.validate(defect.locationLabel());
             }
         }
         for (ReportLlmResult.ActionRecommendation recommendation
                 : result.actionRecommendations()) {
-            textGuard.validate(
-                    recommendation.recommendation());
-            textGuard.validate(recommendation.rationale());
+            validateNarrative(
+                    recommendation.recommendation(),
+                    prepared);
+            validateNarrative(
+                    recommendation.rationale(),
+                    prepared);
+        }
+    }
+
+    private void validateNarrative(
+            String value,
+            PreparedReportLlmInput prepared
+    ) {
+        textGuard.validate(value);
+        Matcher labelled = LABELLED_DEFECT_ID.matcher(value);
+        while (labelled.find()) {
+            requireKnownDefectId(
+                    labelled.group(1),
+                    prepared);
+        }
+        Matcher uuid = UUID_LIKE.matcher(value);
+        while (uuid.find()) {
+            requireKnownDefectId(
+                    uuid.group(),
+                    prepared);
+        }
+        Set<String> incidentCodes = prepared.evidenceById()
+                .values()
+                .stream()
+                .map(DefectEvidence::incidentCode)
+                .collect(java.util.stream.Collectors.toSet());
+        Matcher incidentCode =
+                INCIDENT_CODE_REFERENCE.matcher(value);
+        while (incidentCode.find()) {
+            if (!incidentCodes.contains(
+                    incidentCode.group().toUpperCase(
+                            java.util.Locale.ROOT))) {
+                throw invalid();
+            }
+        }
+    }
+
+    private static void requireKnownDefectId(
+            String candidate,
+            PreparedReportLlmInput prepared
+    ) {
+        if (!STRICT_UUID.matcher(candidate).matches()) {
+            throw invalid();
+        }
+        UUID defectId;
+        try {
+            defectId = UUID.fromString(candidate);
+        } catch (IllegalArgumentException exception) {
+            throw invalid();
+        }
+        if (!prepared.evidenceById().containsKey(defectId)) {
+            throw invalid();
         }
     }
 

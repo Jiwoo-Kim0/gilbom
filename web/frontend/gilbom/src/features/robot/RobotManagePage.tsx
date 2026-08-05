@@ -315,7 +315,7 @@ export function RobotManagePage() {
           {streamStatusLabel[streamStatus]}
         </span>
         <span>서버 90초 기준 ONLINE/OFFLINE</span>
-        <span>정본 갱신 {formatDateTime(lastSyncedAt)}</span>
+        <span>전체 현황 갱신 {formatDateTime(lastSyncedAt)}</span>
         <span>Heartbeat {formatDateTime(lastHeartbeatAt)}</span>
       </div>
 

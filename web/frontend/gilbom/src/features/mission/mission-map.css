@@ -98,10 +98,10 @@
   background: #e36b2c;
 }
 
-.mission-map-legend-current > span {
-  width: 9px !important;
-  height: 9px !important;
-  background: #175c4c;
+.mission-map-legend-current > img {
+  width: 12px;
+  height: 18px;
+  object-fit: contain;
 }
 
 .mission-map-canvas-wrap,
@@ -171,20 +171,13 @@
   vector-effect: non-scaling-stroke;
 }
 
-.mission-map-current circle {
-  fill: #175c4c;
-  stroke: #fff;
-  stroke-width: 4;
-  vector-effect: non-scaling-stroke;
+.mission-map-current-car {
   filter: drop-shadow(0 3px 5px rgb(15 23 42 / 30%));
 }
 
-.mission-map-current.is-offline circle {
-  fill: #6b7280;
-}
-
-.mission-map-current path {
-  fill: #fff;
+.mission-map-current.is-offline .mission-map-current-car {
+  filter: grayscale(1) drop-shadow(0 3px 5px rgb(15 23 42 / 25%));
+  opacity: 0.7;
 }
 
 .mission-map-fallback-label {

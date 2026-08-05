@@ -115,8 +115,8 @@ assert_contains "$CHECK_DIR/no-llm-secret.yaml" "file: /dev/null" \
   "disabled LLM deployment must resolve without a real API key file"
 assert_contains "$CHECK_DIR/no-llm-secret.yaml" "GILBOM_LLM_ENABLED: \"true\"" \
   "production Compose must keep the LLM feature gate enabled"
-assert_contains "$CHECK_DIR/no-llm-secret.yaml" "GILBOM_LLM_PROMPT_VERSION: report-v2" \
-  "production Compose must select the current report-v2 prompt"
+assert_contains "$CHECK_DIR/no-llm-secret.yaml" "GILBOM_LLM_PROMPT_VERSION: report-v3" \
+  "production Compose must select the current report-v3 prompt"
 assert_contains "$CHECK_DIR/no-llm-secret.yaml" "GILBOM_LLM_IMAGE_INPUT_ENABLED: \"true\"" \
   "production Compose must enable report image input"
 assert_contains "$CHECK_DIR/no-llm-secret.yaml" "GILBOM_LLM_IMAGE_DEIDENTIFICATION_APPROVED: \"true\"" \

@@ -2,6 +2,7 @@ package com.gilbom.report.generation;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 import org.springframework.stereotype.Component;
 
@@ -9,6 +10,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gilbom.report.ReportContent;
 import com.gilbom.report.ReportGenerationMethod;
+import com.gilbom.report.generation.ReportLlmInput.DefectEvidence;
 import com.gilbom.report.generation.ReportLlmInputPreparer.PreparedReportLlmInput;
 
 /**
@@ -33,10 +35,12 @@ public class ReportLlmResultRenderer {
             String reportTitle,
             Map<String, Object> evidenceSnapshot
     ) {
+        String renderedSummary =
+                narrative(result.summary());
         StringBuilder body = new StringBuilder();
         body.append("# ").append(inline(reportTitle))
                 .append("\n\n## 요약\n")
-                .append(inline(result.summary()))
+                .append(renderedSummary)
                 .append("\n\n## 통계\n");
         appendStatistics(body, result.statistics());
         body.append("\n## 주요 결함\n");
@@ -45,14 +49,27 @@ public class ReportLlmResultRenderer {
         } else {
             for (ReportLlmResult.KeyDefect defect
                     : result.keyDefects()) {
-                body.append("- ")
+                DefectEvidence evidence = prepared.evidenceById()
+                        .get(defect.defectId());
+                if (evidence == null) {
+                    throw new IllegalStateException(
+                            "Validated defect evidence is missing");
+                }
+                body.append("- 결함 ID: ")
+                        .append(evidence.defectId())
+                        .append(" · 사건 코드: ")
                         .append(inline(defect.incidentCode()))
-                        .append(" · ")
-                        .append(defect.defectType())
-                        .append(" · ")
-                        .append(defect.riskLevel())
-                        .append(": ")
-                        .append(inline(defect.rationale()))
+                        .append(" · 결함 유형: ")
+                        .append(ReportKoreanLabels.defectType(
+                                defect.defectType()))
+                        .append(" · 위험도: ")
+                        .append(ReportKoreanLabels.riskLevel(
+                                defect.riskLevel()))
+                        .append(" · 처리 상태: ")
+                        .append(ReportKoreanLabels.workflowStatus(
+                                evidence.workflowStatus()))
+                        .append(" — ")
+                        .append(narrative(defect.rationale()))
                         .append('\n');
             }
         }
@@ -62,12 +79,22 @@ public class ReportLlmResultRenderer {
         } else {
             for (ReportLlmResult.ActionRecommendation action
                     : result.actionRecommendations()) {
-                body.append("- [")
-                        .append(action.priority())
+                body.append("- [조치 우선순위: ")
+                        .append(ReportKoreanLabels.priority(
+                                action.priority()))
                         .append("] ")
-                        .append(inline(action.recommendation()))
-                        .append(" — ")
-                        .append(inline(action.rationale()))
+                        .append(narrative(
+                                action.recommendation()));
+                if (!action.relatedDefectIds().isEmpty()) {
+                    body.append(" — 관련 결함 ID: ")
+                            .append(action.relatedDefectIds()
+                                    .stream()
+                                    .map(UUID::toString)
+                                    .collect(java.util.stream.Collectors
+                                            .joining(", ")));
+                }
+                body.append(" — ")
+                        .append(narrative(action.rationale()))
                         .append('\n');
             }
         }
@@ -80,7 +107,7 @@ public class ReportLlmResultRenderer {
                         JSON_OBJECT);
         return new ReportContent(
                 reportTitle,
-                result.summary(),
+                renderedSummary,
                 prepared.source().period().from(),
                 prepared.source().period().to(),
                 body.toString(),
@@ -127,7 +154,9 @@ public class ReportLlmResultRenderer {
         appendDistribution(
                 body,
                 statistics.defectsByStatus().stream()
-                        .map(value -> value.workflowStatus()
+                        .map(value -> ReportKoreanLabels
+                                .workflowStatus(
+                                        value.workflowStatus())
                                 + " " + value.defectCount()
                                 + "건")
                         .toList());
@@ -135,7 +164,8 @@ public class ReportLlmResultRenderer {
         appendDistribution(
                 body,
                 statistics.defectsByType().stream()
-                        .map(value -> value.defectType()
+                        .map(value -> ReportKoreanLabels
+                                .defectType(value.defectType())
                                 + " " + value.defectCount()
                                 + "건")
                         .toList());
@@ -155,5 +185,10 @@ public class ReportLlmResultRenderer {
         return value.replace('\r', ' ')
                 .replace('\n', ' ')
                 .trim();
+    }
+
+    private static String narrative(String value) {
+        return inline(
+                ReportKoreanLabels.translateNarrative(value));
     }
 }

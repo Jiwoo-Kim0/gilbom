@@ -1,4 +1,10 @@
-import { Clock, Gamepad2, Gauge, MoreVertical, Thermometer } from 'lucide-react'
+import {
+  CircleGauge,
+  Clock,
+  Gamepad2,
+  MoreVertical,
+  Thermometer,
+} from 'lucide-react'
 import { Link } from 'react-router'
 import type { RobotFleetItem, RobotStatus } from './robotTypes'
 
@@ -117,7 +123,7 @@ export function RobotFleetGrid({
                 <div className="robot-fleet-metric">
                   <span>현재 속도</span>
                   <strong>
-                    <Gauge size={14} aria-hidden="true" />
+                    <CircleGauge size={14} aria-hidden="true" />
                     {formatMetric(robot.speedMps, ' m/s')}
                   </strong>
                 </div>

@@ -36,6 +36,10 @@ test('Mission Mock 전체 흐름이 TLS MQTT부터 React까지 이어진다', as
   await page.route('https://oapi.map.naver.com/**', (route) => route.abort())
   await page.goto('/missions')
 
+  await page.getByRole('button', {
+    name: `${missionCode} 상세 보기`,
+  }).click()
+
   const detail = page.getByTestId('mission-detail')
   await expect(detail.getByText(missionCode!, { exact: true })).toBeVisible()
   await expect(

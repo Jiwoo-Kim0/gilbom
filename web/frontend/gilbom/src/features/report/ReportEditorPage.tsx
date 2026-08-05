@@ -383,7 +383,7 @@ export function ReportEditorPage() {
                   <p className="eyebrow">CONTENT</p>
                   <h3>제목과 본문</h3>
                 </div>
-                <span>HTML·Markdown 미지원</span>
+                <span>보고서 제목·목록 서식 지원</span>
               </div>
               <div className="report-form-grid">
                 <label className="admin-form-field report-form-wide">
@@ -417,7 +417,10 @@ export function ReportEditorPage() {
                     disabled={submitting}
                     required
                   />
-                  <small>저장된 문자열은 상세 화면에서 text node로만 렌더링됩니다.</small>
+                  <small>
+                    줄 시작의 #, ##, ### 제목과 - 목록만 지원합니다.
+                    HTML·링크·이미지는 일반 텍스트로 표시됩니다.
+                  </small>
                 </label>
                 <label className="admin-form-field report-form-wide">
                   변경 사유

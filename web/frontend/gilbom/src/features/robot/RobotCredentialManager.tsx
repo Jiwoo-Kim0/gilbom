@@ -1,6 +1,5 @@
 import {
   KeyRound,
-  RefreshCw,
   ShieldCheck,
   X,
 } from 'lucide-react'
@@ -164,15 +163,6 @@ export function RobotCredentialManager({
               회전합니다. 임무를 생성할 때마다 바꾸지 않습니다.
             </p>
           </div>
-          <button
-            className="secondary-button button-with-icon"
-            type="button"
-            onClick={() => void loadRobots()}
-            disabled={loading}
-          >
-            <RefreshCw size={16} aria-hidden="true" />
-            {loading ? '갱신 중…' : '상태 갱신'}
-          </button>
         </div>
 
         {listError ? (
@@ -205,33 +195,35 @@ export function RobotCredentialManager({
                     <span>{robot.mqttId} · {robot.serialNumber}</span>
                   </div>
                 </div>
-                <div className="robot-credential-item-state">
-                  <span
-                    className={[
-                      'robot-credential-status',
-                      provisioning ? 'is-provisioning' : 'is-active',
-                    ].join(' ')}
+                <div className="robot-credential-item-controls">
+                  <div className="robot-credential-item-state">
+                    <span
+                      className={[
+                        'robot-credential-status',
+                        provisioning ? 'is-provisioning' : 'is-active',
+                      ].join(' ')}
+                    >
+                      {robot.operationalStatus}
+                    </span>
+                    <small>
+                      {robot.connectivityStatus}
+                      {robot.missionStatus === null
+                        ? ' · 임무 미수행'
+                        : ` · 임무 ${robot.missionStatus}`}
+                    </small>
+                  </div>
+                  <button
+                    className={provisioning
+                      ? 'primary-button'
+                      : 'secondary-button'}
+                    type="button"
+                    onClick={() => openCredentialModal(robot)}
+                    disabled={submitting}
                   >
-                    {robot.operationalStatus}
-                  </span>
-                  <small>
-                    {robot.connectivityStatus}
-                    {robot.missionStatus === null
-                      ? ' · 임무 미수행'
-                      : ` · 임무 ${robot.missionStatus}`}
-                  </small>
+                    <KeyRound size={16} aria-hidden="true" />
+                    {provisioning ? '최초 발급·활성화' : 'Credential 회전'}
+                  </button>
                 </div>
-                <button
-                  className={provisioning
-                    ? 'primary-button'
-                    : 'secondary-button'}
-                  type="button"
-                  onClick={() => openCredentialModal(robot)}
-                  disabled={submitting}
-                >
-                  <KeyRound size={16} aria-hidden="true" />
-                  {provisioning ? '최초 발급·활성화' : 'Credential 회전'}
-                </button>
               </article>
             )
           })}

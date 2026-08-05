@@ -314,7 +314,7 @@ export const EMPTY_DEFECT_FILTERS: DefectFilters = {
 /** 서버 `DefectFilter.SORTABLE_COLUMNS`가 허용하는 키만 노출한다. */
 export const DEFECT_SORT_OPTIONS = [
   { value: 'lastSeenAt,desc', label: '최근 관측순' },
-  { value: 'firstSeenAt,desc', label: '최초 발견순' },
+  { value: 'firstSeenAt,asc', label: '최초 발견순' },
   { value: 'riskScore,desc', label: '위험도순' },
   { value: 'observationCount,desc', label: '반복 관측순' },
   { value: 'latestConfidence,desc', label: '신뢰도순' },
