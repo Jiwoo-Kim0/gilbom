@@ -1,7 +1,6 @@
 import {
   ChevronLeft,
   ChevronRight,
-  RefreshCw,
   Search,
 } from 'lucide-react'
 import {
@@ -22,6 +21,8 @@ import {
   actorLabel,
   formatReportDateTime,
   formatReportPeriod,
+  toReportPeriodEndInstant,
+  toReportPeriodStartInstant,
 } from './reportFormat'
 import { ReportStatusBadge } from './ReportStatusBadge'
 import { useReportRealtime } from './useReportRealtime'
@@ -39,6 +40,8 @@ type ReportListDraftFilters = {
   status: ReportStatus | ''
   reportType: ReportType | ''
   generationMethod: ReportGenerationMethod | ''
+  periodFrom: string
+  periodTo: string
 }
 
 const EMPTY_FILTERS: ReportListDraftFilters = {
@@ -46,6 +49,8 @@ const EMPTY_FILTERS: ReportListDraftFilters = {
   status: '',
   reportType: '',
   generationMethod: '',
+  periodFrom: '',
+  periodTo: '',
 }
 
 const GENERATION_LABELS: Record<ReportGenerationMethod, string> = {
@@ -86,6 +91,8 @@ export function ReportListPage() {
         size: PAGE_SIZE,
         search: filters.search,
         statuses: filters.status === '' ? undefined : [filters.status],
+        periodFrom: toReportPeriodStartInstant(filters.periodFrom),
+        periodTo: toReportPeriodEndInstant(filters.periodTo),
         reportType: filters.reportType === '' ? undefined : filters.reportType,
         generationMethod: filters.generationMethod === ''
           ? undefined
@@ -120,6 +127,15 @@ export function ReportListPage() {
 
   function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (
+      draftFilters.periodFrom !== ''
+      && draftFilters.periodTo !== ''
+      && draftFilters.periodFrom > draftFilters.periodTo
+    ) {
+      setError(new Error('조회 시작일은 종료일보다 늦을 수 없습니다.'))
+      return
+    }
+    setError(null)
     setPage(0)
     setAppliedFilters({ ...draftFilters })
   }
@@ -137,17 +153,6 @@ export function ReportListPage() {
           <p className="eyebrow">REPORTS</p>
           <h2 id="reports-page-title">운영 보고서</h2>
           <p>승인 가능한 불변 버전으로 운영 현황과 결함 조치를 관리합니다.</p>
-        </div>
-        <div className="report-heading-actions">
-          <button
-            className="secondary-button button-with-icon"
-            type="button"
-            onClick={() => void load(page, appliedFilters)}
-            disabled={loading}
-          >
-            <RefreshCw size={17} aria-hidden="true" />
-            새로고침
-          </button>
         </div>
       </div>
 
@@ -212,17 +217,34 @@ export function ReportListPage() {
           </select>
         </label>
         <fieldset
-          className="report-period-contract-gap"
-          aria-describedby="report-period-gap-help"
-          disabled
+          className="report-period-filter"
+          aria-describedby="report-period-help"
         >
           <legend>기간 검색</legend>
-          <input type="date" aria-label="조회 기간 시작" />
+          <input
+            type="date"
+            aria-label="조회 기간 시작"
+            value={draftFilters.periodFrom}
+            max={draftFilters.periodTo || undefined}
+            onChange={(event) => setDraftFilters((current) => ({
+              ...current,
+              periodFrom: event.target.value,
+            }))}
+          />
           <span>–</span>
-          <input type="date" aria-label="조회 기간 종료" />
+          <input
+            type="date"
+            aria-label="조회 기간 종료"
+            value={draftFilters.periodTo}
+            min={draftFilters.periodFrom || undefined}
+            onChange={(event) => setDraftFilters((current) => ({
+              ...current,
+              periodTo: event.target.value,
+            }))}
+          />
         </fieldset>
-        <p id="report-period-gap-help" className="report-contract-note">
-          목록 기간 필터는 서버 API 계약 추가 후 활성화됩니다.
+        <p id="report-period-help" className="report-contract-note">
+          선택한 기간과 하루라도 겹치는 보고서를 조회합니다.
         </p>
         <div className="report-filter-actions">
           <button className="secondary-button" type="button" onClick={resetFilters}>

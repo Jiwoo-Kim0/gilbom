@@ -30,10 +30,11 @@ public class ReportLlmResultRenderer {
     public ReportContent render(
             ReportLlmResult result,
             PreparedReportLlmInput prepared,
+            String reportTitle,
             Map<String, Object> evidenceSnapshot
     ) {
         StringBuilder body = new StringBuilder();
-        body.append("# ").append(inline(result.title()))
+        body.append("# ").append(inline(reportTitle))
                 .append("\n\n## 요약\n")
                 .append(inline(result.summary()))
                 .append("\n\n## 통계\n");
@@ -78,7 +79,7 @@ public class ReportLlmResultRenderer {
                         sourceStatistics,
                         JSON_OBJECT);
         return new ReportContent(
-                result.title(),
+                reportTitle,
                 result.summary(),
                 prepared.source().period().from(),
                 prepared.source().period().to(),

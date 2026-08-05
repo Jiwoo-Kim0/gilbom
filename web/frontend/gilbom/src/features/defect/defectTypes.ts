@@ -252,7 +252,15 @@ export type DefectMergeResult = {
 
 export type DefectFilters = {
   q: string
+  /**
+   * 서버가 `last_seen_at >= from`으로 거는 하한이다. 필터 패널은 날짜만 받지만
+   * 값은 datetime-local 문자열(`2026-08-05T00:00`)로 들고 다닌다.
+   */
   from: string
+  /**
+   * 상한. 결함 필터 패널은 노출하지 않는다(상한은 늘 "지금"이다).
+   * 요약처럼 기간을 못박아 조회하는 쪽에서만 채운다.
+   */
   to: string
   workflowStatuses: WorkflowStatus[]
   defectTypes: DefectType[]

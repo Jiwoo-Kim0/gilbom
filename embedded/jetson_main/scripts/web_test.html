@@ -71,6 +71,21 @@
   .v.good { color: var(--ok); }
   .v.mid { color: var(--warn2); font-weight: 600; }
 
+  /* 보고 이력 — 무엇을 어떤 사진으로 보냈는지. 썸네일을 누르면 원본이 새 탭에 뜬다 */
+  .rep-empty { font-size: 13px; color: var(--muted); }
+  .rep { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .rep:last-child { border-bottom: none; padding-bottom: 0; }
+  .rep img { width: 72px; height: 54px; object-fit: cover; border-radius: 6px;
+             background: #000; flex-shrink: 0; }
+  .rep .noimg { width: 72px; height: 54px; border-radius: 6px; background: #171a20;
+                border: 1px dashed var(--border); flex-shrink: 0; font-size: 10px;
+                color: var(--muted); display: flex; align-items: center; justify-content: center; }
+  .rep .body { min-width: 0; font-size: 12px; line-height: 1.6; }
+  .rep .top { font-weight: 700; font-size: 13px; }
+  .rep .top.defect { color: var(--rec); } .rep .top.missing { color: var(--warn2); }
+  .rep .meta { color: var(--muted); }
+  .rep .sent.ok { color: var(--ok); } .rep .sent.bad { color: var(--rec); font-weight: 600; }
+
   .bar-wrap { margin: 6px 0 12px; }
   .bar-label { display: flex; justify-content: space-between; font-size: 12px;
                color: var(--muted); margin-bottom: 4px; }
@@ -192,6 +207,13 @@
       </div>
 
       <div class="panel">
+        <h2>보고 이력 (서버로 보낸 것)</h2>
+        <div class="reports" id="reports">
+          <div class="rep-empty">아직 보고 없음</div>
+        </div>
+      </div>
+
+      <div class="panel">
         <h2>마지막 전이</h2>
         <div class="rec-info" id="transitionInfo">없음</div>
       </div>
@@ -215,8 +237,12 @@ $('modeBtn').addEventListener('click', async () => {
 
 const OX = flag => flag ? 'O' : 'X';
 const COMPASS = ['북', '북동', '동', '남동', '남', '남서', '서', '북서'];
+// 판정 문구는 모델이 만든 문자열이다 — 그대로 innerHTML에 꽂지 않는다
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 let missedPolls = 0;   // 연속 실패 수 — 2회(1초) 넘게 끊기면 화면에 표시
+let lastReportSeq = 0; // 다시 그릴 시점 판정용 (아래 보고 이력 참조)
 
 async function refresh() {
   try {
@@ -390,6 +416,36 @@ async function refresh() {
       ? `${g.course.toFixed(0)}° ${COMPASS[Math.round(g.course / 45) % 8]}` : '–';
     $('gpsAlt').textContent = g.alt_m != null ? g.alt_m.toFixed(1) + ' m' : '–';
     $('gpsSat').textContent = `${g.sats ?? 0} / ${g.hdop != null ? g.hdop.toFixed(1) : '–'}`;
+
+    // 보고 이력 — '무엇을 어떤 사진으로 보냈나'. 새 보고가 들어올 때만 다시 그린다:
+    // 0.5초마다 innerHTML을 갈면 썸네일이 매번 다시 로드돼 깜빡이고 요청도 반복된다.
+    const reps = st.reports ?? [];
+    const newestSeq = reps.length ? reps[0].seq : 0;
+    if (newestSeq !== lastReportSeq) {
+      lastReportSeq = newestSeq;
+      $('reports').innerHTML = reps.length === 0
+        ? '<div class="rep-empty">아직 보고 없음</div>'
+        : reps.map(r => {
+            const sentOk = r.server === '서버 전송 요청';
+            const coord = (r.fix && r.lat != null)
+              ? `📍 ${r.lat.toFixed(6)}, ${r.lon.toFixed(6)}`
+              : `📍 좌표 없음 (위성 ${r.sats ?? 0})`;
+            const thumb = r.has_image
+              ? `<a href="/report/${r.seq}.jpg" target="_blank" rel="noopener">`
+                + `<img src="/report/${r.seq}.jpg" alt="보고에 쓴 사진"></a>`
+              : '<div class="noimg">사진<br>없음</div>';
+            const size = r.bytes ? ` · ${Math.round(r.bytes / 1024)}KB` : '';
+            const local = r.local_image ? ` · ${esc(r.local_image)}` : '';
+            return `<div class="rep">${thumb}<div class="body">`
+              + `<div class="top ${r.kind === 'defect' ? 'defect' : 'missing'}">`
+              + `${esc(r.label)} <span class="meta">${r.at}</span></div>`
+              + `<div class="meta">${esc(r.camera)} · ${esc(r.detail)}</div>`
+              + `<div class="meta">${coord}${local}</div>`
+              + `<div class="sent ${sentOk ? 'ok' : 'bad'}">`
+              + `${sentOk ? '✔' : '⚠'} ${esc(r.server)}${size}</div>`
+              + `</div></div>`;
+          }).join('');
+    }
 
     // transition
     if (st.last_transition)

@@ -122,6 +122,12 @@ export function listReports(
   if (filters.statuses !== undefined && filters.statuses.length > 0) {
     query.set('statuses', [...new Set(filters.statuses)].join(','))
   }
+  if (filters.periodFrom !== undefined) {
+    query.set('periodFrom', filters.periodFrom)
+  }
+  if (filters.periodTo !== undefined) {
+    query.set('periodTo', filters.periodTo)
+  }
   if (filters.reportType !== undefined) {
     query.set('reportType', filters.reportType)
   }

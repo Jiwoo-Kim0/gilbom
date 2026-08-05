@@ -55,6 +55,8 @@ class ReportLlmGenerationPipelineTest {
         assertThat(outcome.externalAttempts()).isEqualTo(1);
         assertThat(outcome.content().generationMethod())
                 .isEqualTo(ReportGenerationMethod.LLM);
+        assertThat(outcome.content().title())
+                .isEqualTo("7월 점자블록 결함 보고서");
         assertThat(client.requests()).hasSize(1);
         verify(quota).completeSuccess(
                 any(Reservation.class),

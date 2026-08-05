@@ -35,6 +35,12 @@ class StateMachineParams:
     steer_rate_deg_per_s: float     # 조향 슬루율 상한 — 전 상태 공통(_limit_steer_rate)
     perception_grace_sec: float     # 인지 두절·경계 소실 유예창 (0이면 즉시 IDLE 폴백)
     recovery_throttle_pct: float    # 경계 소실 유예 중의 복구 주행 스로틀 (정지가 아니다)
+    recovery_reverse_throttle_pct: float  # 막혀서 안 보일 때의 **후진** 복구 스로틀
+    recovery_reverse_debounce_sec: float  # 막힘+소실이 이만큼 지속돼야 후진을 시작한다
+                                    # (깜빡임 한 프레임으로 후진을 걸지 않는다)
+    recovery_reverse_min_sec: float # 후진 복구 **최소** 시간 — 한 틱 물러나 바닥이
+                                    # 보이는 것으로 끊기지 않게 하는 래치
+    recovery_reverse_sec: float     # 후진 복구 상한 — 후방은 카메라 사각이라 짧게
     avoid_recheck_sec: float
     avoid_bypass_throttle_pct: float    # 회피 선회 스로틀
     avoid_pass_sec: float               # 통과 직진 시간 (옆은 카메라 사각 — 시간 판정)
@@ -62,12 +68,31 @@ class StateMachineParams:
     turn_max_yaw_deg: float             # |yaw 변화| 강제 종료 상한 (IMU 있을 때만)
     turn_exit_center_abs: float         # 완료 판정: |인도 중심 오차| ≤ 이 값 (재정렬)
     turn_timeout_sec: float             # 무한 회전 방지 안전판
-    dead_end_target_yaw_deg: float      # 회차 종료 yaw 누적각 (180)
-    dead_end_yaw_tolerance_deg: float   # 완료 판정 여유 — 나머지는 CRUISE 추종이 수렴
-    dead_end_steer_deg: float           # 전진 호 좌조향 크기 (좌회전 고정 — config 근거)
+    avoid_thrash_limit: int             # 이 횟수만큼 회피가 연달아 반복되면 재정향으로
+                                        # 승격 — 인지가 '한쪽은 열렸다'고 우겨도 무시한다
+    avoid_thrash_window_sec: float      # 연속으로 치는 판정 창(직전 회피와의 간격)
+    dead_end_max_yaw_deg: float         # |회전| 상한 — 초과 시 갇힘으로 보고 IDLE.
+                                        # 완료 기준이 아니다(완료는 시각이다)
+    dead_end_attempt_window_sec: float  # 탈출 후 이 시간을 못 달리고 다시 막히면
+                                        # 시도 번호를 이어서 센다(같은 자리로 본다)
+    dead_end_uturn_after_cycles: int    # 이 번째 시도에서 U턴 (1 유리한 쪽 / 2 반대쪽 / 3 U턴)
+    dead_end_uturn_target_yaw_deg: float   # U턴 종료 yaw 누적각
+    dead_end_uturn_tolerance_deg: float    # U턴 완료 여유
+    dead_end_uturn_sec: float           # IMU가 없을 때 U턴을 시간으로 대신하는 길이
+    dead_end_straighten_deg: float      # 이 이내로 조향이 돌아오면 정렬 완료로 본다
+    dead_end_straighten_max_sec: float  # 정렬 상한 — 서보가 안 따라와도 영원히 안 선다
+    dead_end_uturn_min_yaw_deg: float   # 이만큼은 돌고 나서야 '경로 확보' 이탈을 인정한다
+    dead_end_uturn_min_sec: float       # 위의 시간판(IMU 없을 때)
+    dead_end_uturn_direction: int       # U턴 회전 방향 고정 (-1=좌, +1=우).
+                                        # 탈출 시도처럼 교대하지 않는다 — 회차는 한 방향
+                                        # 으로 끝까지 도는 기동이라 중간에 바뀌면 이미 번
+                                        # 각도가 상쇄된다
+    dead_end_steer_left_deg: float      # 선회 전진 좌조향 크기
+    dead_end_steer_right_deg: float     # 선회 전진 우조향 크기 (우 한계가 더 작다)
     dead_end_throttle_pct: float        # 전진 호·후진 공통 스로틀 크기
-    dead_end_forward_sec: float         # 전진 호 1회 시간
-    dead_end_reverse_sec: float         # 후진 1회 시간 (후방은 카메라 사각 — 짧게)
+    dead_end_forward_sec: float         # 선회 전진 호 1회 시간
+    dead_end_reverse_min_sec: float     # 후진 최소 시간 — 이만큼은 무조건 뺀다
+    dead_end_reverse_max_sec: float     # 후진 상한 (후방은 카메라 사각 — 무한정 못 뺀다)
     dead_end_timeout_sec: float         # 회차 전체 상한 — 초과 시 IDLE(수동 대기)
     inspect_confirm_sec: float          # 블록 발견/소실 확정에 필요한 지속 시간(양방향 디바운스)
     inspect_enter_proximity: float      # 이 근접도에서 블록 중심 추종 비중이 1이 된다
@@ -78,6 +103,10 @@ class StateMachineParams:
     trace_approach_throttle_pct: float  # 블록에 **가는 중**(근접도 < enter_proximity)의 스로틀
     trace_throttle_pct: float           # 블록에 붙었을 때의 탐지 저속 스로틀
     trace_timeout_sec: float            # 한 번의 추종 상한 — 초과 시 CRUISE 복귀(쿨다운 시작)
+    trace_cam_hold_sec: float           # 탐지캠이 블록을 본 뒤 그 관측을 '유효'로 들고 있는
+                                        # 창. 추론이 detect_period_sec 주기라 통지가
+                                        # 띄엄띄엄 오는데, 그 사이를 이 창이 잇는다 —
+                                        # 반드시 detect_period_sec보다 커야 한다
     start_request_hold_sec: float       # 시작 요청 유지창 — IDLE 탈출은 '인도 확인'도
                                         # 요구하므로, 누른 틱에 인도가 안 보이면 요청이
                                         # 그냥 소멸했다. 이 창 동안 요청을 들고 재시도한다
@@ -101,6 +130,10 @@ class StateMachineParams:
             steer_rate_deg_per_s=driving["steer_rate_deg_per_s"],
             perception_grace_sec=driving["perception_grace_sec"],
             recovery_throttle_pct=driving["recovery_throttle_pct"],
+            recovery_reverse_throttle_pct=driving["recovery_reverse_throttle_pct"],
+            recovery_reverse_min_sec=driving["recovery_reverse_min_sec"],
+            recovery_reverse_debounce_sec=driving["recovery_reverse_debounce_sec"],
+            recovery_reverse_sec=driving["recovery_reverse_sec"],
             avoid_recheck_sec=driving["avoid"]["recheck_sec"],
             avoid_bypass_throttle_pct=driving["avoid"]["bypass_throttle_pct"],
             avoid_pass_sec=driving["avoid"]["pass_sec"],
@@ -130,12 +163,26 @@ class StateMachineParams:
             turn_max_yaw_deg=driving["turn"]["max_yaw_deg"],
             turn_exit_center_abs=driving["turn"]["exit_center_abs"],
             turn_timeout_sec=driving["turn"]["timeout_sec"],
-            dead_end_target_yaw_deg=driving["dead_end"]["target_yaw_deg"],
-            dead_end_yaw_tolerance_deg=driving["dead_end"]["yaw_tolerance_deg"],
-            dead_end_steer_deg=driving["dead_end"]["steer_deg"],
+            avoid_thrash_limit=driving["avoid"]["thrash_limit"],
+            avoid_thrash_window_sec=driving["avoid"]["thrash_window_sec"],
+            dead_end_max_yaw_deg=driving["dead_end"]["max_yaw_deg"],
+            dead_end_attempt_window_sec=driving["dead_end"]["attempt_window_sec"],
+            dead_end_uturn_after_cycles=driving["dead_end"]["uturn_after_cycles"],
+            dead_end_uturn_target_yaw_deg=driving["dead_end"]["uturn_target_yaw_deg"],
+            dead_end_uturn_tolerance_deg=driving["dead_end"]["uturn_tolerance_deg"],
+            dead_end_uturn_sec=driving["dead_end"]["uturn_sec"],
+            dead_end_straighten_deg=driving["dead_end"]["straighten_deg"],
+            dead_end_straighten_max_sec=driving["dead_end"]["straighten_max_sec"],
+            dead_end_uturn_min_yaw_deg=driving["dead_end"]["uturn_min_yaw_deg"],
+            dead_end_uturn_min_sec=driving["dead_end"]["uturn_min_sec"],
+            dead_end_uturn_direction=(-1 if str(
+                driving["dead_end"]["uturn_direction"]).lower().startswith("l") else 1),
+            dead_end_steer_left_deg=driving["dead_end"]["steer_left_deg"],
+            dead_end_steer_right_deg=driving["dead_end"]["steer_right_deg"],
             dead_end_throttle_pct=driving["dead_end"]["throttle_pct"],
             dead_end_forward_sec=driving["dead_end"]["forward_sec"],
-            dead_end_reverse_sec=driving["dead_end"]["reverse_sec"],
+            dead_end_reverse_min_sec=driving["dead_end"]["reverse_min_sec"],
+            dead_end_reverse_max_sec=driving["dead_end"]["reverse_max_sec"],
             dead_end_timeout_sec=driving["dead_end"]["timeout_sec"],
             inspect_confirm_sec=driving["inspect"]["confirm_sec"],
             inspect_enter_proximity=driving["inspect"]["enter_proximity"],
@@ -144,6 +191,7 @@ class StateMachineParams:
             trace_approach_throttle_pct=driving["trace"]["approach_throttle_pct"],
             trace_throttle_pct=driving["trace"]["throttle_pct"],
             trace_timeout_sec=driving["trace"]["timeout_sec"],
+            trace_cam_hold_sec=driving["trace"]["cam_hold_sec"],
             start_request_hold_sec=driving["start_request_hold_sec"],
         )
 
@@ -157,6 +205,15 @@ class ExternalRequests:
     defect_found: TRACE 중 상시 탐지가 파손 후보를 봤다는 통지 —
         TRACE → INSPECT(정차 정밀 판정)의 유일한 트리거. 추론이 I/O라 같은 이유로
         FSM 밖에서 온다.
+    braille_seen: 같은 탐지 추론이 **블록(정상 포함)을 하나라도 봤다**는 통지.
+        파손 여부와 무관하다 — defect_found가 '멈춰서 볼 가치가 있나'라면 이쪽은
+        '아직 블록 위에 있나'다. 하향 검사 카메라는 로봇 바로 앞 노면을 보므로 이
+        신호는 **블록에 올라탄 뒤에만** 참이 될 수 있고, 그래서 발견이 아니라
+        **추종 유지**에만 쓴다 (braille_stable 디바운스 입력에 OR).
+        주행 카메라 세그가 블록을 놓치는 틱에도 추종이 끊기지 않게 하는 것이 목적이다
+        — 하향각이 낮아 세그가 앞쪽 블록을 자주 놓치는 것이 0805 실기 증상이었다.
+        추론이 detect_period_sec 주기라 통지는 띄엄띄엄 온다 — 그 사이를 잇는 것은
+        FSM 쪽 유지창(trace_cam_hold_sec)이다.
     pause / resume / cancel: 원격 미션 제어(통신 계층의 commands 소비자가 넣는다).
         조작자 입력과 같은 통로를 쓴다 — FSM은 요청의 출처를 구분하지 않는다.
     """
@@ -169,6 +226,7 @@ class ExternalRequests:
     estop_release: bool = False
     inspection_done: bool = False
     defect_found: bool = False
+    braille_seen: bool = False
 
 
 @dataclass(frozen=True)
@@ -197,6 +255,15 @@ class StateMachineContext:
     braille_stable / braille_pending_since: 디바운스를 통과한 점자블록 발견 판정과,
         아직 확정되지 않은 반대 값이 시작된 시각. 접근·INSPECT 게이트는 raw 값이
         아니라 braille_stable만 본다.
+    braille_cam_seen_at: 탐지캠(하향)이 블록을 마지막으로 본 시각. 이 시각으로부터
+        trace_cam_hold_sec 안이면 디바운스 입력에서 세그 판정과 OR된다 — 주행 카메라
+        하향각이 낮아 블록에 올라탄 뒤에도 세그가 자주 놓치는데, 그때 추종이 끊기면
+        '블록을 따라가며 순차 탐지'가 성립하지 않는다(0805 실기).
+        **발견에는 참여하지 않는다.** 하향캠은 로봇 바로 앞만 보므로 이 값이 참인
+        상태는 이미 블록 위이고, 추론 자체도 도착 후에만 돈다(main.detection_due).
+        TRACE·INSPECT를 떠날 때 함께 지운다 — 안 지우면 ESCAPE로 선회하고 돌아온 틱에
+        이미 지나친 블록의 관측이 살아 있어 없는 블록을 추종한다(braille_stable을
+        가드보다 먼저 갱신하는 것과 같은 이유).
     prev_steer_deg / last_step_at: 직전 틱에 실제로 낸 조향 명령과 그 시각 —
         조향 슬루율 제한의 기준점. 시계를 읽지 않고 now 인자만 쓰므로 순수성 유지.
     last_steer_ratio: 코스트맵 조향의 직전 선택 **방향**(-1~+1) — 히스테리시스
@@ -224,9 +291,43 @@ class StateMachineContext:
     escape_direction / escape_clear_since: 차도 이탈 선회 방향과, 차도 위험이 해소된
         시각. clear_since가 escape_clear_sec을 넘기면 CRUISE 복귀다 — 즉시 복귀하면
         코리도 경계에서 위험 판정이 켜졌다 꺼지며 ESCAPE↔CRUISE를 왕복한다.
-    dead_end_phase / dead_end_phase_since / dead_end_entry_yaw_deg: DEAD_END
-        회차의 하위 국면(전진 호 ↔ 정렬 후진)·국면 시작 시각·회차 시작 방위.
-        yaw 누적(현재 yaw − 시작 방위)이 target에 닿으면 회차 완료다.
+    avoid_thrash_count / avoid_thrash_last: 회피가 연달아 반복된 횟수와 마지막 회피
+        시각. 인지가 '한쪽은 열려 있다'고 잘못 판단하면 SWERVE→복귀→재막힘이
+        무한 반복되고(0804 실내 실측: 90초에 14회, 그동안 all_directions_blocked는
+        **한 번도** True가 되지 않았다) 재정향은 그 위에 있어 영원히 발동하지 않는다.
+        그래서 '막혔다'를 인지에만 맡기지 않고 **FSM 자신의 이력**으로도 판단한다 —
+        창 안에서 limit번 반복되면 인지 판정과 무관하게 재정향으로 승격한다.
+    reverse_recovery_count / reverse_recovery_last: 후진 복구가 연달아 걸린 횟수와
+        마지막 시각. 후진 중 인도가 한 프레임만 보여도 perception_bad_since가
+        해제되므로, 벽 앞 깜빡임에서는 '2.5초 후진 → 잠깐 보임 → 전진 → 다시 벽'이
+        무한 반복되며 상한이 무의미해진다. 게다가 이 가드는 상태 핸들러보다 앞이라
+        후진이 걸려 있는 동안 AVOID가 실행되지 않아 반복 회피 카운터도 오르지 않는다
+        — 즉 후진 복구가 재정향 승격을 막는다. 그래서 후진 복구 반복 자체를
+        승격 신호로 쓴다(0804).
+    reverse_recovery_since: 후진 복구 에피소드가 시작된 시각(진행 중이 아니면 None).
+        최소/최대 시간을 **이 한 기준점**에서 잰다 — 틱마다 갱신되는 래치로 만들면
+        재무장되며 상한이 무의미해진다.
+        후진은 '인도가 안 보이는 동안'만 하는데, 벽에서 조금만 물러나도 바닥이 한
+        프레임 보이고 그 순간 가드가 풀려 CRUISE가 다시 전진해 벽에 박는다 —
+        0804 실기 관찰 '후진 찔끔하고 벽에 계속 쳐박는다'가 정확히 이것이다.
+        상한(recovery_reverse_sec)만 있고 하한이 없어 실제 후진은 한두 틱이었다.
+        한 번 시작하면 이 시각까지는 프레임이 좋아 보여도 계속 뺀다.
+    dead_end_phase / dead_end_phase_since: DEAD_END 재정향의 하위 국면
+        (후진 → 선회 전진)과 그 국면의 시작 시각.
+    dead_end_direction: 재정향 선회 방향(-1=좌, +1=우). 진입 시 코스트맵으로
+        한 번 고르고 유지한다 — AVOID의 SWERVE와 달리 매 틱 다시 고르지 않는다.
+        막다른 길에서는 어느 쪽도 '열려' 보이지 않아 재선택이 좌우 진동만 낳는다.
+    dead_end_attempt / dead_end_attempt_at: 몇 번째 탈출 시도인지와 그 시각.
+        시도마다 **방향을 바꾼다**: 1회 유리한 쪽 → 2회 반대쪽 → 3회 U턴.
+        한 방향으로만 반복하면 그쪽이 막힌 자리에서는 몇 번을 해도 같은 결과다.
+        시각을 함께 들고 있는 이유: 재정향은 CRUISE를 거쳐 재진입하는 일이 잦아
+        (후진 복구 → 선회 → 잠깐 풀림 → 다시 막힘) 진입할 때마다 0으로 리셋하면
+        시도가 영영 쌓이지 않는다 — 0804 실기 '3회 실패가 안 쌓인다'가 그것이다.
+        창 안에 다시 들어오면 이어서 센다.
+    dead_end_uturn_since: U턴 국면 시작 시각(IMU 없을 때 시간으로 완료를 재기 위함).
+    dead_end_entry_yaw_deg: 재정향 시작 방위. **완료 판정에는 쓰지 않는다** —
+        완료는 시각(새 경로 확보)이고, 이 값은 무한 회전을 막는 상한 판정용이다.
+        IMU가 없으면(=진입 시 None) 상한만 비활성이고 재정향 자체는 돈다.
     """
 
     state: DriveState
@@ -239,6 +340,7 @@ class StateMachineContext:
     perception_bad_since: Optional[float] = None
     braille_stable: bool = False
     braille_pending_since: Optional[float] = None
+    braille_cam_seen_at: Optional[float] = None
     prev_steer_deg: float = 0.0
     last_step_at: Optional[float] = None
     last_steer_ratio: Optional[float] = None
@@ -248,11 +350,20 @@ class StateMachineContext:
     avoid_phase: AvoidPhase = AvoidPhase.HOLD
     avoid_phase_since: float = 0.0
     avoid_direction: int = 0
+    avoid_thrash_count: int = 0
+    avoid_thrash_last: Optional[float] = None
+    reverse_recovery_count: int = 0
+    reverse_recovery_last: Optional[float] = None
+    reverse_recovery_since: Optional[float] = None
     escape_direction: int = 0
     escape_clear_since: Optional[float] = None
-    dead_end_phase: DeadEndPhase = DeadEndPhase.FORWARD_ARC
+    dead_end_phase: DeadEndPhase = DeadEndPhase.REVERSE
     dead_end_phase_since: float = 0.0
-    dead_end_entry_yaw_deg: float = 0.0
+    dead_end_direction: int = 0
+    dead_end_attempt: int = 0
+    dead_end_attempt_at: Optional[float] = None
+    dead_end_uturn_since: Optional[float] = None
+    dead_end_entry_yaw_deg: Optional[float] = None
 
 
 def initial_context(now: float) -> StateMachineContext:
@@ -427,18 +538,48 @@ def _enter_bypass(context: StateMachineContext, params: StateMachineParams,
     # 무의미하다 — 종전에는 이 장면에서도 SWERVE로 들어가 SWERVE→PASS→RETURN→재막힘이
     # 무한 반복됐고, 회차(DEAD_END)는 그 위에 있어 영원히 발동하지 않았다.
     # 여기서 HOLD로 보내면 재확인 주기 뒤 회차로 승격된다 (_handle_avoid HOLD).
+    # 반복 회피 카운트 — 창 안에 연달아 들어오면 누적, 창을 넘겨 조용했으면 리셋.
+    # 이 값이 '앞으로 못 나가고 있다'의 유일한 증거다: 인지가 매번 '한쪽은 열렸다'고
+    # 해도 실제로 나아갔다면 회피가 이렇게 촘촘히 반복될 수 없다.
+    consecutive = (context.avoid_thrash_count + 1
+                   if (context.avoid_thrash_last is not None
+                       and now - context.avoid_thrash_last <= params.avoid_thrash_window_sec)
+                   else 1)
+
+    if consecutive >= params.avoid_thrash_limit:
+        # 인지 판정과 무관하게 재정향으로 승격한다. all_directions_blocked를 기다리면
+        # 0804 실내처럼 90초 동안 14회를 치고도 영영 승격되지 않는다.
+        # 카운터는 여기서 리셋한다 — 재정향이 끝나고 나서 다시 세기 시작해야 한다.
+        return (_enter(context, DriveState.DEAD_END, now,
+                       f"{reason} → 회피 {consecutive}회 반복(진행 없음) → 재정향 시작",
+                       avoid_brake=False,
+                       avoid_thrash_count=0, avoid_thrash_last=None,
+                       dead_end_phase=DeadEndPhase.REVERSE,
+                       dead_end_phase_since=now,
+                       dead_end_attempt=_next_attempt(context, params, now),
+                       dead_end_attempt_at=now,
+                       dead_end_direction=_attempt_direction(
+                           frame, _next_attempt(context, params, now),
+                           context.dead_end_direction),
+                       dead_end_entry_yaw_deg=None),
+                DriveCommand(throttle_pct=-params.dead_end_throttle_pct,
+                             steering_offset_deg=0.0))
+
     if frame.all_directions_blocked:
         return (_enter(context, DriveState.AVOID, now,
                        f"{reason} → 좌우 모두 막힘, 정지 후 재확인",
                        avoid_brake=False, avoid_phase=AvoidPhase.HOLD,
-                       avoid_phase_since=now),
+                       avoid_phase_since=now,
+                       avoid_thrash_count=consecutive, avoid_thrash_last=now),
                 STOP_COMMAND)
 
     direction = _bypass_direction(frame)
     return (_enter(context, DriveState.AVOID, now,
-                   f"{reason} → 정지 없이 {'좌' if direction < 0 else '우'} 회피",
+                   f"{reason} → 정지 없이 {'좌' if direction < 0 else '우'} 회피"
+                   f" ({consecutive}회째)",
                    avoid_brake=False, avoid_phase=AvoidPhase.SWERVE,
-                   avoid_phase_since=now, avoid_direction=direction),
+                   avoid_phase_since=now, avoid_direction=direction,
+                   avoid_thrash_count=consecutive, avoid_thrash_last=now),
             DriveCommand(throttle_pct=params.avoid_bypass_throttle_pct,
                          steering_offset_deg=_turn_steer_deg(params, direction)))
 
@@ -788,18 +929,39 @@ def _handle_avoid(context: StateMachineContext, params: StateMachineParams, fram
             all_blocked = (frame.all_directions_blocked
                            or (frame.cost_profile is not None
                                and all(math.isinf(cost) for cost in frame.cost_profile)))
-            if not frame.has_blocking_obstacle() and not all_blocked:
+            # all_blocked가 복귀를 막는 것은 **회차로 승격할 수 있을 때만** 뜻이 있다.
+            # 경사발(avoid_brake)에서는 재정향이 금지돼 있어(경사 위 후진·선회 =
+            # 밀림·등판 토크) 아래 승격 분기가 죽어 있고, 선회 분기도 avoid_brake로
+            # 막혀 있다. 그러면 all_blocked가 복귀까지 막는 순간 이 HOLD에는
+            # **출구가 하나도 남지 않는다** — 장애물이 치워져도 영구 브레이크이고,
+            # 수동 개입만이 탈출이다(0805 실외).
+            # 경사는 막다른 길이 아니다: 풀리면 주행으로 돌려보내고, pitch가 남아
+            # 있으면 다음 틱에 CRUISE가 곧바로 SLOPE로 되돌린다 — 그쪽이 경사의
+            # 정상 경로다. 평지에서는 종전 그대로 all_blocked가 복귀를 막는다
+            # (재정향으로 갈 수 있으므로 막는 것이 옳다).
+            if not frame.has_blocking_obstacle() and not (all_blocked
+                                                          and not context.avoid_brake):
                 return (_enter(context, DriveState.CRUISE, now, "재확인: 장애물 소멸 → 직진 복귀",
                                avoid_brake=False), STOP_COMMAND)
-            if all_blocked and imu is not None and not context.avoid_brake:
+            if all_blocked and not context.avoid_brake:
+                # IMU를 요구하지 않는다 — 완료가 시각이라 센서 없이도 성립한다.
+                # 방향은 여기서 한 번만 고른다(코스트맵 반쪽 점수 → 이득이 큰 쪽,
+                # 동점이면 좌: 좌 조향 여유 45°가 우 30°보다 커 회전반경이 작다).
+                # 첫 국면은 **후진**이다 — 벽에 붙은 채로는 선회할 공간이 없다.
                 return (_enter(context, DriveState.DEAD_END, now,
-                               "재확인: 전 방향 통행 불가 유지(막다른 길) → 회차 시작",
+                               "재확인: 전 방향 통행 불가 유지(막다른 길) → 재정향 시작",
                                avoid_brake=False,
-                               dead_end_phase=DeadEndPhase.FORWARD_ARC,
+                               dead_end_phase=DeadEndPhase.REVERSE,
                                dead_end_phase_since=now,
-                               dead_end_entry_yaw_deg=imu.yaw_deg),
-                        DriveCommand(throttle_pct=params.dead_end_throttle_pct,
-                                     steering_offset_deg=-params.dead_end_steer_deg))
+                               dead_end_attempt=_next_attempt(context, params, now),
+                               dead_end_attempt_at=now,
+                               dead_end_direction=_attempt_direction(
+                                   frame, _next_attempt(context, params, now),
+                                   context.dead_end_direction),
+                               dead_end_entry_yaw_deg=(None if imu is None
+                                                       else imu.yaw_deg)),
+                        DriveCommand(throttle_pct=-params.dead_end_throttle_pct,
+                                     steering_offset_deg=0.0))
             if not all_blocked and not context.avoid_brake:
                 return _swerve(context, params, frame, now)
         return context, (BRAKE_COMMAND if context.avoid_brake else STOP_COMMAND)
@@ -943,57 +1105,258 @@ def _handle_turn(context: StateMachineContext, params: StateMachineParams, frame
         steering_offset_deg=_turn_steer_deg(params, context.turn_direction))
 
 
+def _path_seen(frame: SegmentationFrame, blocked: bool) -> bool:
+    """주행 카메라가 **갈 수 있는 경로**를 인지했는가.
+
+    'blocked 아님'과 다르다: 코스트맵 슬롯이 ∞가 아니기만 하면 blocked는 풀리므로
+    벽이 코앞이어도 참이 된다. 실제로 나가려면 인도가 보이고 정면을 막는 것이 없어야
+    한다. 후진 종료·선회 완료가 **같은 기준**을 써야 시도 하나가 제 몫을 한다.
+    """
+    return (frame.sidewalk_detected and not blocked
+            and not frame.has_blocking_obstacle())
+
+
+def _next_attempt(context: StateMachineContext, params: StateMachineParams,
+                  now: float) -> int:
+    """이번이 몇 번째 탈출 시도인지.
+
+    기준점은 **직전 시도/탈출 시각**이다. 탈출할 때도 시각을 다시 찍으므로, 이 값과
+    지금의 차이는 '탈출한 뒤 얼마나 멀쩡히 달렸나'가 된다 — 창을 넘겨 달렸으면 그
+    자리를 실제로 벗어난 것이니 1부터 다시 센다.
+    진입 시각만 찍던 종전에는 사다리 한 번이 창보다 길어(17.8초 vs 20초) 다음 진입이
+    늘 창 안에 들어왔고, 카운터가 7→10→13→17로 올라 **모든 탈출이 U턴**이 됐다.
+    좌/우 시도를 건너뛰는 것은 낭비이고 야외에서는 위험하다 (0804 실기).
+    """
+    if (context.dead_end_attempt_at is not None
+            and now - context.dead_end_attempt_at <= params.dead_end_attempt_window_sec):
+        return context.dead_end_attempt + 1
+    return 1
+
+
+def _attempt_direction(frame: SegmentationFrame, attempt: int, previous: int) -> int:
+    """시도 번호 → 선회 방향. 1회는 유리한 쪽, 2회부터는 **직전에 시도한 쪽의 반대**.
+
+    반대를 '지금 시점의 유리한 쪽' 기준으로 잡으면 안 된다: 코스트맵이 매 틱 바뀌므로
+    1회에 좌를 시도한 뒤 2회 시점에 우가 유리해지면 그 반대는 다시 좌가 되어 **같은
+    방향을 반복**한다(0804 실기: 1번째 좌 → 2번째도 좌). 기준은 관측이 아니라
+    '이미 해 본 것'이어야 한다.
+    """
+    if attempt <= 1 or previous == 0:
+        return _bypass_direction(frame)
+    return -previous
+
+
+def _dead_end_steer_deg(params: StateMachineParams, direction: int) -> float:
+    """재정향 선회 조향 오프셋(도). 좌우 한계가 비대칭이라 크기가 다르다 —
+    TURN보다 깊게 준다(지속 주행이 아니라 짧은 호 반복이라 회전반경이 우선)."""
+    return (-abs(params.dead_end_steer_left_deg) if direction < 0
+            else abs(params.dead_end_steer_right_deg))
+
+
 def _handle_dead_end(context: StateMachineContext, params: StateMachineParams, frame: SegmentationFrame,
                      imu: Optional[ImuReading], now: float
                      ) -> Tuple[StateMachineContext, DriveCommand]:
-    """DEAD_END: 막다른 길 K턴 회차 — 큰 좌조향 전진 호 ↔ 정렬 후진 반복 (IMU 게이트).
+    """DEAD_END: 막다른 길 재정향 — 후진으로 공간을 벌고 유리한 쪽으로 선회해 새 경로를 찾는다.
 
-    진입은 AVOID 재확인이 담당한다: 좌/우 어느 쪽에도 경로가 없을 때(코스트맵
-    전 슬롯 ∞ 유지)만 여기로 온다. 왼쪽 고정인 이유: 좌 조향 여유(45°)가 우(30°)
-    보다 커서 회전반경이 최소다 (docs/HARDWARE.md).
+    진입은 AVOID 재확인이 담당한다: 좌/우 어느 쪽에도 경로가 없을 때만 여기로 온다.
 
     하위 국면(DeadEndPhase):
-      FORWARD_ARC   좌 dead_end_steer_deg 조향 전진 — yaw가 실제로 늘어나는 국면.
-      REVERSE_ALIGN 조향 정렬(0) + 후진 — 다음 호를 위한 공간 확보. 후방은 카메라
-                    사각(완전 무지)이므로 reverse_sec은 짧게 유지한다.
-    회차 중 blocking 장애물 검출은 무시한다 — 막다른 길에서는 벽·구석이 상시
-    blocking으로 잡히므로 여기서 재정지하면 회차가 영원히 시작을 못 한다.
+      REVERSE   조향 정렬(0) + 후진 — **먼저 한다.** 벽에 코가 닿은 상태에서는
+                조향을 꺾어도 호를 그릴 공간이 없다. 후방은 카메라 사각(완전 무지)
+                이므로 reverse_sec은 짧게 유지할 것.
+      TURN_ARC  진입 시 고른 방향으로 깊은 조향 전진 — 새 경로를 찾는 국면.
+    둘을 교대하며, 매 틱 '갈 수 있는 경로가 생겼는가'를 본다.
+
+    **완료는 시각이다 — 목표 각도가 아니다.** 종전에는 yaw 누적이 180°에 닿는 것이
+    유일한 출구였고, 그래서 부호 하나(yaw_sign)가 틀리자 누적이 반대로 가며 완료
+    조건에 **도달 자체가 불가능**해져 매번 timeout 30초를 채웠다(0804 실내 실측:
+    좌조향 회차의 누적이 -1.5° → -7.0°). AVOID·TURN은 같은 교훈으로 이미 시각
+    판정으로 옮겨가 있었고 그래서 같은 부호 오류에도 멀쩡히 돌았다 — 이 상태만
+    yaw 단독이라 죽었다. yaw는 이제 무한 회전을 막는 상한으로만 남는다.
+
+    **IMU를 요구하지 않는다.** 완료가 시각이므로 IMU 없이도 재정향은 성립한다.
+    종전 IMU 게이트는 센서가 빠지면 막다른 길에서 아무것도 못 하게 만들었고,
+    그것은 AvoidPhase 주석이 기록한 0803 실외 실패('자꾸 정지만 함')와 같은 형태다.
+    IMU가 있으면 회전 상한만 추가로 얻는다.
+
+    재정향 중 blocking 장애물 검출은 무시한다 — 막다른 길에서는 벽·구석이 상시
+    blocking으로 잡히므로 여기서 재정지하면 재정향이 영원히 시작을 못 한다.
     (차도 위험 ESTOP·경계 소실 IDLE 폴백 등 공통 가드는 그대로 산다.)
 
-    종료: yaw 누적(시작 방위 대비, 좌회전=+)이 target−tolerance에 닿으면 CRUISE —
-          잔여 각도·횡오차는 CRUISE 중심 추종이 수렴시킨다.
-    안전 출구: IMU 소실 → CRUISE(진행을 잴 수 없다 — 막혀 있으면 CRUISE 장애물
-          검사가 다시 AVOID로 보낸다). timeout_sec 초과 → 물리적으로 갇힌 것으로
-          보고 IDLE(정지 + 수동 대기) — yaw가 안 늘어도 무한 반복하지 않는다.
+    안전 출구:
+      경로 확보(시각)        → CRUISE. 잔여 정렬은 중심 추종이 수렴시킨다.
+      |yaw| ≥ max_yaw_deg   → IDLE. 한 바퀴 가까이 돌고도 길이 없으면 갇힌 것이다.
+      timeout_sec 초과       → IDLE(정지 + 수동 대기). 무한 반복하지 않는다.
     """
-    if imu is None:
-        return _enter(context, DriveState.CRUISE, now, "IMU 소실 → 회차 중단"), STOP_COMMAND
-    yaw_progress_deg = imu.yaw_deg - context.dead_end_entry_yaw_deg   # 좌회전 회차 = yaw+
-    if yaw_progress_deg >= (params.dead_end_target_yaw_deg
-                            - params.dead_end_yaw_tolerance_deg):
-        return (_enter(context, DriveState.CRUISE, now,
-                       f"회차 완료 (yaw {yaw_progress_deg:+.0f}°) → 추종 복귀"),
-                STOP_COMMAND)
+    if context.dead_end_phase is DeadEndPhase.STRAIGHTEN:
+        # 바퀴 중앙 정렬 — 조향 슬루율 제한 때문에 -40°에서 한 번에 안 돌아온다.
+        # **정지한 채로** 조향만 0으로 되돌린 뒤에 추종을 시작한다: 꺾인 채로 전진하면
+        # 방금 피한 쪽으로 호를 그리며 다시 들어간다(0804 실측: 꼬리 0.6초, 그 사이
+        # 19cm를 30° 꺾인 채 주행 — '재정향 완료 → 0.3초 뒤 다시 AVOID'의 원인).
+        aligned = abs(context.prev_steer_deg) <= params.dead_end_straighten_deg
+        timed_out = now - context.dead_end_phase_since >= params.dead_end_straighten_max_sec
+        if aligned or timed_out:
+            return (_enter(context, DriveState.CRUISE, now,
+                           "바퀴 정렬 완료 → 인도 추종 시작"
+                           if aligned else "바퀴 정렬 상한 → 인도 추종 시작",
+                           dead_end_attempt_at=now), STOP_COMMAND)
+        return context, STOP_COMMAND
+
+    blocked = (frame.all_directions_blocked
+               or (frame.cost_profile is not None
+                   and all(math.isinf(cost) for cost in frame.cost_profile)))
+
+    # 완료 판정 — 이 상태의 유일한 정상 출구다. **TURN_ARC 국면에서만 본다.**
+    # REVERSE 중에 보지 않는 이유: 반복 회피로 승격된 경우 인지는 바로 그 순간에도
+    # '막히지 않았다'고 말하고 있다(그 오판이 승격의 이유다). 그때 완료를 보면
+    # 후진을 단 한 틱도 못 하고 곧장 CRUISE로 되돌아가 같은 회피 루프에 다시 빠진다.
+    # 뒤로 빼서 상황을 바꾸는 것이 이 상태의 목적이므로, 최소 한 번의 후진과
+    # 선회를 마친 뒤에 판정한다.
+    # 장애물 유무는 보지 않는다: 막다른 길의 벽은 빠져나오는 동안에도 blocking으로
+    # 남아 있고, 그것까지 요구하면 '경로는 생겼는데 못 나가는' 상태가 된다.
+    # 남은 장애물은 CRUISE의 장애물 검사가 다시 AVOID로 보내 처리한다.
+    # 완료 기준은 후진 종료와 **같다**: 인도가 보이고 정면을 막는 것이 없어야 한다.
+    # 'blocked 아님'만으로는 벽이 코앞이어도 통과한다(슬롯이 ∞만 아니면 풀린다) —
+    # 그러면 꺾자마자 빠져나가 CRUISE가 곧장 다시 박고, 시도 하나가 1.6초 만에
+    # 소진돼 3초 만에 U턴까지 간다(0804 실기). 한 시도는 제 몫을 해야 실패로 셀 수 있다.
+    if (context.dead_end_phase is DeadEndPhase.TURN_ARC
+            and now - context.dead_end_phase_since >= params.dead_end_forward_sec
+            and _path_seen(frame, blocked)):
+        # **호를 다 돈 뒤에만** 판정한다. 매 틱 보면 진입 순간 바로 끝난다:
+        # 후진은 path_seen이 참이 되어야 끝나고, 그 상태를 그대로 넘겨받으므로
+        # 받는 쪽의 완료 조건이 이미 충족돼 있다(0804 실기: 0.1초 만에 이탈,
+        # 조향은 슬루율 때문에 10°도 못 들어간 채였다). 기동은 제 몫을 하고 나서
+        # 판정받아야 한다.
+        return (_enter(context, DriveState.DEAD_END, now,
+                       "재정향 완료 (새 경로 확보) → 바퀴 정렬",
+                       dead_end_attempt_at=now,
+                       dead_end_phase=DeadEndPhase.STRAIGHTEN,
+                       dead_end_phase_since=now), STOP_COMMAND)
+
+    if imu is not None and context.dead_end_entry_yaw_deg is not None:
+        # 회전 상한 — 부호에 의존하지 않도록 절댓값으로 본다. 완료가 시각이므로
+        # 이 값은 '얼마나 돌았나'가 아니라 '너무 돌았나'만 판단한다.
+        spun_deg = abs(imu.yaw_deg - context.dead_end_entry_yaw_deg)
+        if spun_deg >= params.dead_end_max_yaw_deg:
+            return (_enter(context, DriveState.IDLE, now,
+                           f"재정향 실패(회전 {spun_deg:.0f}° 초과 — 갇힘) "
+                           "→ 정지 + 수동 대기"), BRAKE_COMMAND)
+
     if now - context.entered_at >= params.dead_end_timeout_sec:
+        spun = ("" if imu is None or context.dead_end_entry_yaw_deg is None
+                else f", 회전 {imu.yaw_deg - context.dead_end_entry_yaw_deg:+.0f}°")
         return (_enter(context, DriveState.IDLE, now,
-                       "회차 실패(타임아웃) → 정지 + 수동 대기"), BRAKE_COMMAND)
+                       f"재정향 실패(타임아웃{spun}) → 정지 + 수동 대기"),
+                BRAKE_COMMAND)
 
-    if context.dead_end_phase is DeadEndPhase.FORWARD_ARC:
-        if now - context.dead_end_phase_since >= params.dead_end_forward_sec:
-            return (replace(context, dead_end_phase=DeadEndPhase.REVERSE_ALIGN,
+    if context.dead_end_phase is DeadEndPhase.UTURN:
+        # U턴 — 여기서만 완료 기준이 yaw 목표각이다. 방향을 되돌리는 것이 목적이라
+        # '경로가 보인다'로는 끝낼 수 없다(뒤로 빼고 꺾는 것으로 이미 여러 번 실패한
+        # 자리이고, 그때마다 '보인다'가 곧 다시 막혔다). yaw_sign이 정정된 뒤에야
+        # 성립하는 판정이다 — 부호가 틀렸을 때 이 조건은 도달 불가였다.
+        started = (context.dead_end_uturn_since
+                   if context.dead_end_uturn_since is not None else now)
+        if imu is not None and context.dead_end_entry_yaw_deg is not None:
+            turned = abs(imu.yaw_deg - context.dead_end_entry_yaw_deg)
+            done = turned >= (params.dead_end_uturn_target_yaw_deg
+                              - params.dead_end_uturn_tolerance_deg)
+        else:
+            # IMU가 없으면 각도를 잴 수 없다 — 시간으로 대신한다. 정확하지 않지만
+            # '아무것도 못 함'보다 낫다(AVOID가 같은 이유로 시간 폴백을 쓴다).
+            turned = None
+            done = now - started >= params.dead_end_uturn_sec
+        if done:
+            return (_enter(context, DriveState.DEAD_END, now,
+                           "U턴 완료" + ("" if turned is None else f" (회전 {turned:.0f}°)")
+                           + " → 바퀴 정렬",
+                           dead_end_attempt_at=now,
+                           dead_end_phase=DeadEndPhase.STRAIGHTEN,
+                           dead_end_phase_since=now), STOP_COMMAND)
+        turned_enough = (now - started >= params.dead_end_uturn_min_sec
+                         if turned is None
+                         else turned >= params.dead_end_uturn_min_yaw_deg)
+        if turned_enough and _path_seen(frame, blocked):
+            # 회차 도중에 **진짜로 트인 경로**가 나오면 굳이 다 돌지 않는다 —
+            # U턴은 목적이 아니라 수단이다. 여기서 쓰는 기준은 강한 쪽(_path_seen:
+            # 인도가 보이고 정면을 막는 것이 없음)이다. 약한 'blocked 아님'으로 열어
+            # 두면 벽이 코앞인 상태에서 빠져나가 곧장 다시 박는다 — 그 실패는
+            # 재정향 완료 판정에서 이미 겪었다.
+            return (_enter(context, DriveState.DEAD_END, now,
+                           "U턴 중 경로 확보"
+                           + ("" if turned is None else f" (회전 {turned:.0f}°)")
+                           + " → 바퀴 정렬",
+                           dead_end_attempt_at=now,
+                           dead_end_phase=DeadEndPhase.STRAIGHTEN,
+                           dead_end_phase_since=now), STOP_COMMAND)
+        # 깊은 조향 전진 호와 짧은 정렬 후진을 교대한다 — 좁은 곳에서 한 번에 돌 수
+        # 있는 반경이 아니다. 국면 타이머는 dead_end_phase_since를 그대로 쓴다.
+        leg = now - context.dead_end_phase_since
+        if leg >= params.dead_end_forward_sec + params.dead_end_reverse_min_sec:
+            context = replace(context, dead_end_phase_since=now,
+                              dead_end_uturn_since=started)
+            leg = 0.0
+        context = replace(context, dead_end_uturn_since=started)
+        if leg < params.dead_end_forward_sec:
+            return context, DriveCommand(
+                throttle_pct=params.dead_end_throttle_pct,
+                steering_offset_deg=_dead_end_steer_deg(params,
+                                                        context.dead_end_direction))
+        return context, DriveCommand(throttle_pct=-params.dead_end_throttle_pct,
+                                     steering_offset_deg=0.0)
+
+    if context.dead_end_phase is DeadEndPhase.REVERSE:
+        # 후진은 고정 시간이 아니라 **막힘이 풀릴 때까지** 한다(상한 안에서).
+        # 0.9초 고정이던 종전 구조는 벽에 바짝 붙었을 때 선회할 공간을 못 만들고
+        # 곧장 전진 호로 넘어가 다시 벽에 박았다. 최소 시간을 두는 이유는 인지가
+        # 한 틱 깜빡이는 것으로 후진이 끊기지 않게 하기 위해서다.
+        # 종료 조건은 **주행 카메라가 경로를 인지했는가**다 — 시간이 아니다.
+        # 'blocked가 아니다'만으로는 부족하다: 벽이 여전히 코앞에 있어도 코스트맵
+        # 슬롯이 ∞가 아니면 blocked가 풀린다. 실제로 나갈 수 있으려면 인도가 보이고
+        # 정면을 막는 것이 없어야 한다. 상한은 안전 한계일 뿐 목표가 아니다
+        # (후방은 카메라 사각이라 무한정 뺄 수 없다).
+        reversed_sec = now - context.dead_end_phase_since
+        if (reversed_sec >= params.dead_end_reverse_max_sec
+                or (_path_seen(frame, blocked)
+                    and reversed_sec >= params.dead_end_reverse_min_sec)):
+            return (replace(context, dead_end_phase=DeadEndPhase.TURN_ARC,
                             dead_end_phase_since=now),
-                    DriveCommand(throttle_pct=-params.dead_end_throttle_pct,
-                                 steering_offset_deg=0.0))
-        return context, DriveCommand(throttle_pct=params.dead_end_throttle_pct,
-                                     steering_offset_deg=-params.dead_end_steer_deg)
+                    DriveCommand(throttle_pct=params.dead_end_throttle_pct,
+                                 steering_offset_deg=_dead_end_steer_deg(
+                                     params, context.dead_end_direction)))
+        return context, DriveCommand(throttle_pct=-params.dead_end_throttle_pct,
+                                     steering_offset_deg=0.0)
 
-    if now - context.dead_end_phase_since >= params.dead_end_reverse_sec:
-        return (replace(context, dead_end_phase=DeadEndPhase.FORWARD_ARC,
-                        dead_end_phase_since=now),
-                DriveCommand(throttle_pct=params.dead_end_throttle_pct,
-                             steering_offset_deg=-params.dead_end_steer_deg))
-    return context, DriveCommand(throttle_pct=-params.dead_end_throttle_pct,
-                                 steering_offset_deg=0.0)
+    if now - context.dead_end_phase_since >= params.dead_end_forward_sec:
+        # 선회 호를 한 번 끝냈는데도 완료되지 않았다 = 이번 시도 실패.
+        cycles = context.dead_end_attempt + 1
+        if cycles >= params.dead_end_uturn_after_cycles:
+            # 뒤로 빼고 꺾기를 이만큼 반복해도 안 풀리는 자리다 — 방향을 되돌린다.
+            # 진입 방위를 여기서 다시 잡는다: U턴의 목표각은 'U턴을 시작한 시점'
+            # 기준이어야 하고, 재정향하며 이미 돌아간 각도를 포함하면 안 된다.
+            return (_enter(context, DriveState.DEAD_END, now,
+                           f"재정향 {cycles}회 실패 → U턴",
+                           avoid_brake=False,
+                           dead_end_phase=DeadEndPhase.UTURN,
+                           dead_end_phase_since=now,
+                           dead_end_uturn_since=now,
+                           dead_end_attempt=cycles, dead_end_attempt_at=now,
+                           dead_end_direction=params.dead_end_uturn_direction,
+                           dead_end_entry_yaw_deg=(None if imu is None
+                                                   else imu.yaw_deg)),
+                    DriveCommand(throttle_pct=params.dead_end_throttle_pct,
+                                 steering_offset_deg=_dead_end_steer_deg(
+                                     params, context.dead_end_direction)))
+        # 다음 시도는 **반대쪽**으로 꺾는다 — 같은 방향으로 반복하면 그쪽이 막힌
+        # 자리에서는 몇 번을 해도 같은 결과다(0804 실기 지적).
+        return (replace(context, dead_end_phase=DeadEndPhase.REVERSE,
+                        dead_end_phase_since=now, dead_end_attempt=cycles,
+                        dead_end_attempt_at=now,
+                        dead_end_direction=-context.dead_end_direction),
+                DriveCommand(throttle_pct=-params.dead_end_throttle_pct,
+                             steering_offset_deg=0.0))
+    return context, DriveCommand(throttle_pct=params.dead_end_throttle_pct,
+                                 steering_offset_deg=_dead_end_steer_deg(
+                                     params, context.dead_end_direction))
 
 
 def _escape_steer_deg(params: StateMachineParams, direction: int) -> float:
@@ -1106,17 +1469,41 @@ def _decide(context: StateMachineContext, params: StateMachineParams,
     # 경계 소실(IDLE) 셋이고, 어느 쪽도 '이 유도선을 다 봤다'는 뜻이 아니다. 사람이 다시
     # 출발시키거나 선회로 차도를 벗어났다면 중단된 검사를 이어가는 것이 맞고, 여기서
     # 추종을 막으면 블록 추종이 복귀 뒤 조용히 꺼진다.
-    trace_exit = ({"last_inspect_done_at": now, "trace_started_at": None}
+    # 탐지캠 관측도 함께 지운다 — 이미 지나친 블록의 관측이 살아 있으면 복귀 틱에
+    # 없는 블록을 추종한다 (braille_cam_seen_at 독스트링).
+    trace_exit = ({"last_inspect_done_at": now, "trace_started_at": None,
+                   "braille_cam_seen_at": None}
                   if context.state in (DriveState.TRACE, DriveState.INSPECT)
                   else {})
+
+    # 탐지캠(하향)이 이 틱에 블록을 봤다는 통지를 시각으로 래치한다. 추론이
+    # detect_period_sec 주기라 통지는 띄엄띄엄 오고, 그 사이는 아래 유지창이 잇는다.
+    #
+    # **추종 중일 때만 래치한다** — 이 신호는 유지 전용이고 발견에는 참여하지 않는다.
+    # 실주행에서는 도착 전에 통지가 오지 않지만(하향캠 화각 + main.detection_due),
+    # FSM이 그 보장에 기대면 안 된다: 밖에서 통지가 한 번 새면 유지창 동안 raw가 참이
+    # 되고 confirm_sec을 채워 **세그가 블록을 본 적 없는데 TRACE로 진입한다**.
+    # 발견은 세그의 일이다 — 여기서 원천 차단한다.
+    if requests.braille_seen and context.state in (DriveState.TRACE,
+                                                   DriveState.INSPECT):
+        context = replace(context, braille_cam_seen_at=now)
 
     # 점자블록 발견 디바운스는 **어떤 가드보다 먼저** 매 틱 갱신한다. 아래 가드들은
     # 전부 조기 return이므로, 갱신이 뒤에 있으면 그 상태에 머무는 동안 판정이 얼어붙는다
     # — ESCAPE로 4초 선회하고 나온 틱에 이미 지나친 블록의 braille_stable=True가 그대로
     # 남아, 확정 시간 없이 곧바로 없는 블록을 추종하러 간다(경계 소실 유예도 마찬가지).
     if frame is not None:
-        stable, pending_since = _debounce_braille(context, params,
-                                                  frame.braille_detected, now)
+        # 세그(주행캠) 판정과 탐지캠 관측의 **OR**. 주행캠은 하향각이 낮아 블록에
+        # 올라탄 뒤에도 자주 놓치는데, 그 틱에 추종이 끊기면 '블록을 따라가며 순차
+        # 탐지'가 성립하지 않는다(0805 실기). 탐지캠은 바로 앞 노면을 보므로 그
+        # 구간에서 오히려 더 확실한 증거다.
+        # 발견 쪽으로는 새는 곳이 없다: 이 값은 도착 후에만 참이 될 수 있고
+        # (하향캠 화각 + main.detection_due), TRACE·INSPECT 이탈 시 지워진다.
+        cam_fresh = (context.braille_cam_seen_at is not None
+                     and now - context.braille_cam_seen_at
+                     <= params.trace_cam_hold_sec)
+        stable, pending_since = _debounce_braille(
+            context, params, frame.braille_detected or cam_fresh, now)
         context = replace(context, braille_stable=stable,
                           braille_pending_since=pending_since)
 
@@ -1171,20 +1558,163 @@ def _decide(context: StateMachineContext, params: StateMachineParams,
     # 그 조향을 계속 내면 되돌아온다. 눈먼 주행이 아니다 — 위 차도 가드가 이 위에서
     # 그대로 돌고, frame 자체가 없으면(카메라 장애) 복구하지 않고 브레이크로 간다.
     if context.state in GUARDED_STATES:
+        # 후진 복구 진행 중 — 최소 시간까지는 프레임이 좋아 보여도 계속 뺀다.
+        # 벽에서 한 틱 물러나 바닥이 보이는 것은 '풀렸다'가 아니라 '이제 겨우 보인다'다.
+        # 시작 시각 하나로 최소·최대를 다 재므로 재무장으로 늘어나지 않는다.
+        if context.reverse_recovery_since is not None:
+            reversed_for = now - context.reverse_recovery_since
+            if frame is None:                       # 카메라 장애 — 눈먼 후진은 금물
+                return (replace(context, reverse_recovery_since=None), BRAKE_COMMAND)
+            if reversed_for >= params.recovery_reverse_sec:
+                # 상한까지 뺐는데도 '경로 인지'가 안 됐다. 그런데 **갈 방향이 아예 없는
+                # 것과, 정면 장애물이 안 사라지는 것은 다르다** — 좁은 실내에서 벽·가구는
+                # 미분류라 1m를 물러나도 밴드에 계속 남는다(0804 실기: sidewalk=True·
+                # blocked_all=False 인데 blocking=True 라 IDLE 로 떨어졌다).
+                # 갈 방향이 남아 있으면 사람을 부르지 말고 꺾어서 시도한다.
+                # 정말 전 방향이 막혔을 때만 수동 대기로 간다.
+                if not frame.all_directions_blocked:
+                    attempt = _next_attempt(context, params, now)
+                    direction = _attempt_direction(frame, attempt,
+                                                   context.dead_end_direction)
+                    return (_enter(context, DriveState.DEAD_END, now,
+                                   f"후진 상한 · 갈 방향은 있음 → {attempt}번째 시도"
+                                   f" ({'좌' if direction < 0 else '우'} 선회)",
+                                   avoid_brake=False, perception_bad_since=None,
+                                   reverse_recovery_since=None,
+                                   dead_end_phase=DeadEndPhase.TURN_ARC,
+                                   dead_end_phase_since=now,
+                                   dead_end_attempt=attempt, dead_end_attempt_at=now,
+                                   dead_end_uturn_since=None,
+                                   dead_end_direction=direction,
+                                   dead_end_entry_yaw_deg=(None if imu is None
+                                                           else imu.yaw_deg)),
+                            DriveCommand(throttle_pct=params.dead_end_throttle_pct,
+                                         steering_offset_deg=_dead_end_steer_deg(
+                                             params, direction)))
+                return (_enter(context, DriveState.IDLE, now,
+                               "후진 복구 상한 — 전 방향 막힘 → 정지 + 수동 대기",
+                               avoid_brake=False, perception_bad_since=None,
+                               reverse_recovery_since=None),
+                        BRAKE_COMMAND)
+            # 여기서도 종료 조건은 '경로 인지'다. 인도가 보이기만 하고 정면이
+            # 여전히 막혀 있으면 나갈 수 없다 — 그대로 풀면 선회 국면이 벽을 마주한
+            # 채 시작한다.
+            path_seen = (frame.sidewalk_detected
+                         and not frame.all_directions_blocked
+                         and not frame.has_blocking_obstacle())
+            if reversed_for < params.recovery_reverse_min_sec or not path_seen:
+                return context, DriveCommand(
+                    throttle_pct=-params.recovery_reverse_throttle_pct,
+                    steering_offset_deg=0.0)
+            # 최소 시간을 채웠고 인도도 보인다 — 뒤로는 충분히 뺐다.
+            # **CRUISE로 그냥 돌려보내지 않는다.** 여기서 풀어주면 CRUISE가 직진하고,
+            # 방금 물러난 그 벽에 그대로 다시 박는다(0804 실기: '후진만 하다가 경로
+            # 나와도 직진 쳐박아버린다'). 뒤로 뺀 목적은 **꺾을 공간을 만든 것**이므로,
+            # 유리한 쪽으로 꺾는 국면에 인계한다.
+            attempt = _next_attempt(context, params, now)
+            direction = _attempt_direction(frame, attempt,
+                                           context.dead_end_direction)
+            if attempt >= params.dead_end_uturn_after_cycles:
+                return (_enter(context, DriveState.DEAD_END, now,
+                               f"후진 복구 완료 · {attempt}번째 시도 → U턴",
+                               avoid_brake=False, perception_bad_since=None,
+                               reverse_recovery_since=None,
+                               dead_end_phase=DeadEndPhase.UTURN,
+                               dead_end_phase_since=now, dead_end_uturn_since=now,
+                               dead_end_attempt=attempt, dead_end_attempt_at=now,
+                               dead_end_direction=params.dead_end_uturn_direction,
+                               dead_end_entry_yaw_deg=(None if imu is None
+                                                       else imu.yaw_deg)),
+                        DriveCommand(throttle_pct=params.dead_end_throttle_pct,
+                                     steering_offset_deg=_dead_end_steer_deg(
+                                         params, params.dead_end_uturn_direction)))
+            return (_enter(context, DriveState.DEAD_END, now,
+                           f"후진 복구 완료 → {attempt}번째 시도"
+                           f" ({'좌' if direction < 0 else '우'} 선회)",
+                           avoid_brake=False, perception_bad_since=None,
+                           reverse_recovery_since=None,
+                           dead_end_phase=DeadEndPhase.TURN_ARC,
+                           dead_end_phase_since=now,
+                           dead_end_attempt=attempt, dead_end_attempt_at=now,
+                           dead_end_uturn_since=None,
+                           dead_end_direction=direction,
+                           dead_end_entry_yaw_deg=(None if imu is None
+                                                   else imu.yaw_deg)),
+                    DriveCommand(throttle_pct=params.dead_end_throttle_pct,
+                                 steering_offset_deg=_dead_end_steer_deg(
+                                     params, direction)))
+
         lost = ("인지 두절" if frame is None
                 else "인도 경계 소실" if not frame.sidewalk_detected else None)
         if lost is not None:
             bad_since = (context.perception_bad_since
                          if context.perception_bad_since is not None else now)
-            if now - bad_since < params.perception_grace_sec:
+            # '인도가 안 보인다'의 원인을 둘로 나눈다. 종전에는 구분 없이 브레이크였고,
+            # 그래서 벽에 코가 닿으면 1.5초 정지 후 IDLE로 떨어지는 것이 전부였다
+            # (0804 실내: 재정향 승격에 3초가 필요한데 이 가드가 2초에 끊어, 벽 앞에서는
+            #  재정향에 **구조적으로 도달할 수 없었다**).
+            #   막혀서 안 보인다 → 뒤로 빼면 보인다. 후진 복구.
+            #   벗어나서 안 보인다 → 조향 유지 전진 복구(종전 그대로).
+            # 구분 신호는 정면 blocking 장애물이다. 길을 잃은 것이 아니라 너무 가까이
+            # 붙은 것이므로 대응이 반대여야 한다.
+            # **경사에서는 후진 복구를 하지 않는다.** 이 가드는 GUARDED_STATES 전체에
+            # 걸리고 거기엔 SLOPE도 들어 있다(states.py). 경사 위 후진은 내리막에서
+            # 중력 가속이 붙고 오르막에서 미끄러지며, 후방은 카메라 사각이라 그것을
+            # 관측할 수도 없다 — AvoidPhase가 경사 위 선회를 금지하는 것과 같은 이유다
+            # (_enter_bypass 독스트링: '경사 위 저속 횡방향 기동은 밀림·등판 토크
+            # 양쪽으로 나쁘다'). 경사에서는 종전대로 전진 복구·브레이크로 간다.
+            on_slope = (context.state is DriveState.SLOPE or context.avoid_brake)
+            blocked_close = (frame is not None and frame.has_blocking_obstacle()
+                             and not on_slope)
+            grace_sec = (params.recovery_reverse_sec if blocked_close
+                         else params.perception_grace_sec)
+            if now - bad_since < grace_sec:
                 context = replace(context, perception_bad_since=bad_since)
-                # 복구 주행은 인도가 안 보일 때만 한다. frame 자체가 없으면(카메라 장애)
-                # 진짜 눈먼 주행이고, 앞을 막는 장애물이 잡혀 있으면 그쪽으로 기어가는
-                # 셈이다 — 둘 다 브레이크가 맞다. 회피 기동으로 넘기지 않는 이유:
-                # 인도가 안 보이는 상태에서 횡방향 기동은 인도를 벗어나는 방향일 수 있고,
-                # 여기서 필요한 것은 '되돌아오기'다.
-                if frame is None or frame.has_blocking_obstacle():
+                # frame 자체가 없으면(카메라 장애) 원인을 가릴 수 없다 — 눈먼 후진은
+                # 눈먼 전진만큼 나쁘므로 브레이크가 맞다.
+                if frame is None:
                     return context, BRAKE_COMMAND
+                if blocked_close and (context.reverse_recovery_since is not None
+                                      or now - bad_since
+                                      >= params.recovery_reverse_debounce_sec):
+                    # **디바운스** — 깜빡임 한 프레임으로 후진을 걸지 않는다.
+                    # 세그 마스크는 프레임 단위로 흔들리고(0804 실기: SLOPE 82ms 플랩,
+                    # AVOID 2~3초 주기), 후진은 되돌리기 어려운 기동이다. 진입에
+                    # 디바운스가 없으면 깜빡임 하나가 곧바로 min_sec(1.2초) 강제 후진이
+                    # 되고, 그 뒤 인계 규칙에 따라 재정향까지 간다 — 실제로 코스트맵이
+                    # 거의 전부 0인(완전히 트인) 장면에서 후진이 걸렸다.
+                    # 이미 후진 중이면(래치) 디바운스를 다시 요구하지 않는다.
+                    #
+                    # 후진 복구가 창 안에서 반복되면 뒤로 빼는 것만으로는 상황이
+                    # 풀리지 않는다는 뜻이다 — 방향을 바꿔야 한다. 여기서 직접
+                    # 재정향으로 보낸다: 이 가드가 핸들러보다 앞이라 AVOID를 거쳐
+                    # 승격되기를 기다리면 영영 오지 않는다.
+                    episodes = (context.reverse_recovery_count + 1
+                                if (context.reverse_recovery_last is not None
+                                    and now - context.reverse_recovery_last
+                                    <= params.avoid_thrash_window_sec)
+                                else 1)
+                    if episodes >= params.avoid_thrash_limit:
+                        return (_enter(context, DriveState.DEAD_END, now,
+                                       f"후진 복구 {episodes}회 반복(안 풀림) → 재정향 시작",
+                                       avoid_brake=False, perception_bad_since=None,
+                                       reverse_recovery_count=0,
+                                       reverse_recovery_last=None,
+                                       dead_end_phase=DeadEndPhase.REVERSE,
+                                       dead_end_phase_since=now,
+                                       dead_end_direction=_bypass_direction(frame),
+                                       dead_end_entry_yaw_deg=(None if imu is None
+                                                               else imu.yaw_deg)),
+                                DriveCommand(throttle_pct=-params.dead_end_throttle_pct,
+                                             steering_offset_deg=0.0))
+                    # 조향은 중립이다. 후방은 카메라 사각이라 곡선 후진은 어디로 가는지
+                    # 모르는 채로 횡방향까지 움직이는 것이 된다 — 곧게 빼는 것만 한다.
+                    context = replace(context, reverse_recovery_count=episodes,
+                                      reverse_recovery_last=now,
+                                      reverse_recovery_since=now)
+                    return context, DriveCommand(
+                        throttle_pct=-params.recovery_reverse_throttle_pct,
+                        steering_offset_deg=0.0)
                 return context, DriveCommand(
                     throttle_pct=params.recovery_throttle_pct,
                     steering_offset_deg=context.prev_steer_deg)
@@ -1195,7 +1725,20 @@ def _decide(context: StateMachineContext, params: StateMachineParams,
         if context.perception_bad_since is not None:
             context = replace(context, perception_bad_since=None)  # 정상 프레임 → 타이머 해제
     elif frame is None:
-        return context, BRAKE_COMMAND  # IDLE·PAUSED·ESCAPE에서 인지 두절: 파킹 브레이크 유지
+        # IDLE·PAUSED: 인지 두절 중 파킹 브레이크 유지.
+        # ESCAPE만은 자기 타임아웃이 계속 가야 한다 — 이 폴백은 상태 핸들러보다
+        # 앞이라, 인지가 끊긴 ESCAPE는 핸들러의 timeout→ESTOP에 영영 닿지 못하고
+        # 차도 위(이거나 그 근처)에서 상태 전이 없이 무한 브레이크가 된다. 그동안
+        # 서버 투영은 PATROLLING(주행 중)이라 관제도 이상을 모른다. 눈먼 선회를
+        # 계속할 수는 없으니 명령은 브레이크로 두되, 이탈에 쓸 시간이 다하면
+        # ESTOP으로 승격해 사람을 부른다(수동 해제만이 출구 — 핸들러의 타임아웃
+        # 출구와 같은 결말이다).
+        if (context.state is DriveState.ESCAPE
+                and now - context.entered_at >= params.escape_timeout_sec):
+            return (_enter(context, DriveState.ESTOP, now,
+                           "차도 이탈 중 인지 두절 지속 → 정지 + 수동 대기"),
+                    BRAKE_COMMAND)
+        return context, BRAKE_COMMAND
 
     # 상태 디스패치
     if context.state is DriveState.IDLE:
@@ -1297,6 +1840,7 @@ class StateMachine:
         self._release_requested = False
         self._inspection_done = False
         self._defect_found = False
+        self._braille_seen = False
 
     @property
     def state(self) -> DriveState:
@@ -1352,6 +1896,15 @@ class StateMachine:
         """TRACE 중 상시 탐지가 파손 후보를 봤다는 통지 (TRACE → INSPECT의 트리거)."""
         self._defect_found = True
 
+    def notify_braille_seen(self) -> None:
+        """같은 탐지 추론이 블록(정상 포함)을 봤다는 통지 — **추종 유지**용.
+
+        파손 여부와 무관하다. main 루프는 파손 후보가 아니어도 블록이 잡혔으면 이쪽을
+        부른다 — 주행 카메라 세그가 놓치는 틱에 추종이 끊기지 않게 하는 것이 목적이다
+        (ExternalRequests.braille_seen 독스트링에 근거).
+        """
+        self._braille_seen = True
+
     def step(self, frame: Optional[SegmentationFrame],
              imu: Optional[ImuReading], now: float) -> DriveCommand:
         requests = ExternalRequests(start=self._start_requested,
@@ -1361,10 +1914,11 @@ class StateMachine:
                                     estop=self._estop_requested,
                                     estop_release=self._release_requested,
                                     inspection_done=self._inspection_done,
-                                    defect_found=self._defect_found)
+                                    defect_found=self._defect_found,
+                                    braille_seen=self._braille_seen)
         self._start_requested = self._estop_requested = self._release_requested = False
         self._pause_requested = self._resume_requested = self._cancel_requested = False
-        self._inspection_done = self._defect_found = False
+        self._inspection_done = self._defect_found = self._braille_seen = False
 
         prev = self._context
         self._context, command = step(prev, self._params, frame, imu, now, requests)

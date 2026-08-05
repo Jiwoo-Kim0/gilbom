@@ -1,4 +1,4 @@
-import { Check } from 'lucide-react'
+import { DefectFilterDropdown } from './DefectFilterDropdown'
 import {
   DEFECT_TYPES,
   DEFECT_TYPE_LABELS,
@@ -8,41 +8,7 @@ import {
   WORKFLOW_STATUSES,
   WORKFLOW_STATUS_LABELS,
 } from './defectTypes'
-import type {
-  DefectFilters,
-  DefectType,
-  RiskLevel,
-  WorkflowStatus,
-} from './defectTypes'
-
-const dateRangeOptions: { value: string; label: string; days: number }[] = [
-  { value: 'today', label: '오늘', days: 0 },
-  { value: '7d', label: '지난 7일', days: 7 },
-  { value: '30d', label: '지난 30일', days: 30 },
-]
-
-/** `<input type="datetime-local">`이 요구하는 로컬 시각 문자열이다. */
-function toLocalInputValue(date: Date): string {
-  const offset = date.getTimezoneOffset() * 60_000
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16)
-}
-
-function rangeFor(days: number): { from: string; to: string } {
-  const now = new Date()
-  const from = new Date(now)
-  if (days === 0) {
-    from.setHours(0, 0, 0, 0)
-  } else {
-    from.setDate(from.getDate() - days)
-  }
-  return { from: toLocalInputValue(from), to: toLocalInputValue(now) }
-}
-
-function toggle<T>(values: T[], value: T): T[] {
-  return values.includes(value)
-    ? values.filter((item) => item !== value)
-    : [...values, value]
-}
+import type { DefectFilters } from './defectTypes'
 
 interface DefectFilterProps {
   filters: DefectFilters
@@ -50,16 +16,28 @@ interface DefectFilterProps {
   disabled?: boolean
 }
 
+/**
+ * `filters.from`은 서버로 나갈 때 시각까지 쓰는 datetime-local 문자열인데, 화면에서는
+ * 날짜만 받는다. 그래서 앞 10자만 잘라 보여주고, 고른 날짜는 그 날 0시로 되돌린다.
+ * 상한(`to`)은 받지 않는다. 결함은 미래에 생기지 않으니 늘 "지금"이다.
+ */
+function toDateInputValue(from: string): string {
+  return from.slice(0, 10)
+}
+
+function fromDateInputValue(date: string): string {
+  return date === '' ? '' : `${date}T00:00`
+}
+
+/**
+ * 지도 오른쪽에 세로로 붙는 조건 패널이다. 검색은 화면 맨 위 {@link DefectSearchBar}로
+ * 따로 나가 있다.
+ */
 export function DefectFilter({
   filters,
   onChange,
   disabled = false,
 }: DefectFilterProps) {
-  // 시작 시각만으로 판정한다. 종료는 항상 "지금"이라 매 렌더 값이 달라진다.
-  const activeRange = dateRangeOptions.find(
-    (option) => filters.from === rangeFor(option.days).from,
-  )
-
   const update = (partial: Partial<DefectFilters>) => {
     onChange({ ...filters, ...partial })
   }
@@ -71,115 +49,67 @@ export function DefectFilter({
       onSubmit={(event) => event.preventDefault()}
     >
       <fieldset className="defect-filter-group" disabled={disabled}>
-        <legend>검색</legend>
-        <input
-          type="search"
-          value={filters.q}
-          placeholder="결함 코드·위치 검색"
-          maxLength={100}
-          onChange={(event) => update({ q: event.target.value })}
-        />
-      </fieldset>
-
-      <fieldset className="defect-filter-group" disabled={disabled}>
-        <legend>날짜 범위</legend>
-        <div className="defect-filter-date-options">
-          {dateRangeOptions.map(({ value, label, days }) => (
+        <legend>
+          시작 날짜
+          {filters.from.length > 0 && (
             <button
-              key={value}
               type="button"
-              className={`defect-filter-date-option${activeRange?.value === value ? ' is-selected' : ''}`}
-              aria-pressed={activeRange?.value === value}
-              onClick={() => update(rangeFor(days))}
+              className="defect-filter-clear-date"
+              onClick={() => update({ from: '' })}
             >
-              {label}
-              {activeRange?.value === value && (
-                <Check size={14} aria-hidden="true" />
-              )}
+              전체 기간
             </button>
-          ))}
-        </div>
-        <label className="defect-filter-date-custom">
-          <span>시작</span>
-          <input
-            type="datetime-local"
-            value={filters.from}
-            onChange={(event) => update({ from: event.target.value })}
+          )}
+        </legend>
+        <input
+          type="date"
+          className="defect-filter-date-input"
+          value={toDateInputValue(filters.from)}
+          aria-describedby="defect-filter-from-hint"
+          onChange={(event) =>
+            update({ from: fromDateInputValue(event.target.value) })
+          }
+        />
+        {/* 서버는 이 조건을 last_seen_at에 건다. "최초 발견"으로 읽으면 오해한다. */}
+        <small id="defect-filter-from-hint">이 날짜 이후 관측된 결함</small>
+      </fieldset>
+
+      {/*
+        조건 셋은 접어둔다. 펼쳐 두면 체크박스 14개가 패널을 다 먹어서
+        신뢰도·초기화가 화면 밖으로 밀렸다.
+      */}
+      <DefectFilterDropdown
+        label="처리 상태"
+        options={WORKFLOW_STATUSES}
+        optionLabels={WORKFLOW_STATUS_LABELS}
+        selected={filters.workflowStatuses}
+        disabled={disabled}
+        onChange={(workflowStatuses) => update({ workflowStatuses })}
+        renderMark={(status) => (
+          <span
+            className={`defect-status-dot defect-status-dot-${status.toLowerCase()}`}
+            aria-hidden="true"
           />
-        </label>
-        <label className="defect-filter-date-custom">
-          <span>종료</span>
-          <input
-            type="datetime-local"
-            value={filters.to}
-            onChange={(event) => update({ to: event.target.value })}
-          />
-        </label>
-      </fieldset>
+        )}
+      />
 
-      <fieldset className="defect-filter-group" disabled={disabled}>
-        <legend>처리 상태</legend>
-        {WORKFLOW_STATUSES.map((status) => (
-          <label key={status} className="defect-filter-checkbox">
-            <input
-              type="checkbox"
-              checked={filters.workflowStatuses.includes(status)}
-              onChange={() =>
-                update({
-                  workflowStatuses: toggle<WorkflowStatus>(
-                    filters.workflowStatuses,
-                    status,
-                  ),
-                })
-              }
-            />
-            <span
-              className={`defect-status-dot defect-status-dot-${status.toLowerCase()}`}
-              aria-hidden="true"
-            />
-            {WORKFLOW_STATUS_LABELS[status]}
-          </label>
-        ))}
-      </fieldset>
+      <DefectFilterDropdown
+        label="결함 유형"
+        options={DEFECT_TYPES}
+        optionLabels={DEFECT_TYPE_LABELS}
+        selected={filters.defectTypes}
+        disabled={disabled}
+        onChange={(defectTypes) => update({ defectTypes })}
+      />
 
-      <fieldset className="defect-filter-group" disabled={disabled}>
-        <legend>결함 유형</legend>
-        {DEFECT_TYPES.map((defectType) => (
-          <label key={defectType} className="defect-filter-checkbox">
-            <input
-              type="checkbox"
-              checked={filters.defectTypes.includes(defectType)}
-              onChange={() =>
-                update({
-                  defectTypes: toggle<DefectType>(
-                    filters.defectTypes,
-                    defectType,
-                  ),
-                })
-              }
-            />
-            {DEFECT_TYPE_LABELS[defectType]}
-          </label>
-        ))}
-      </fieldset>
-
-      <fieldset className="defect-filter-group" disabled={disabled}>
-        <legend>심각도</legend>
-        {RISK_LEVELS.map((riskLevel) => (
-          <label key={riskLevel} className="defect-filter-checkbox">
-            <input
-              type="checkbox"
-              checked={filters.severities.includes(riskLevel)}
-              onChange={() =>
-                update({
-                  severities: toggle<RiskLevel>(filters.severities, riskLevel),
-                })
-              }
-            />
-            {RISK_LEVEL_LABELS[riskLevel]}
-          </label>
-        ))}
-      </fieldset>
+      <DefectFilterDropdown
+        label="심각도"
+        options={RISK_LEVELS}
+        optionLabels={RISK_LEVEL_LABELS}
+        selected={filters.severities}
+        disabled={disabled}
+        onChange={(severities) => update({ severities })}
+      />
 
       <fieldset className="defect-filter-group" disabled={disabled}>
         <legend>
@@ -205,6 +135,7 @@ export function DefectFilter({
         />
       </fieldset>
 
+      {/* 검색어까지 함께 지운다. 검색창이 위에 보이므로 지워진 것도 바로 보인다. */}
       <button
         className="secondary-button defect-filter-reset"
         type="button"

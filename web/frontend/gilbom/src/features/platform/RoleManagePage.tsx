@@ -14,6 +14,7 @@ import {
   type FormEvent,
 } from 'react'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
+import { isEnforcedPermissionCode } from '../auth/permissions'
 import {
   createAdminRole,
   deactivateAdminRole,
@@ -63,6 +64,9 @@ export function RoleManagePage() {
   const permissionsByResource = useMemo(() => {
     const grouped = new Map<string, AdminPermission[]>()
     for (const permission of permissions) {
+      if (!isEnforcedPermissionCode(permission.permissionCode)) {
+        continue
+      }
       const group = grouped.get(permission.resourceType) ?? []
       group.push(permission)
       grouped.set(permission.resourceType, group)
@@ -491,7 +495,9 @@ export function RoleManagePage() {
               <form className="content-card admin-detail-card" onSubmit={handlePermissionSave}>
                 <div>
                   <h3>기능 권한</h3>
-                  <p>비활성 permission은 새로 부여할 수 없으며 서버가 최종 검증합니다.</p>
+                  <p>
+                    실제 기능에서 검증되는 permission만 표시하며 서버가 최종 인가합니다.
+                  </p>
                 </div>
 
                 <div className="permission-groups">

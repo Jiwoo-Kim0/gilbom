@@ -23,7 +23,7 @@ from typing import Optional
 from comms import TopicKind
 from comms.codec import utc_now
 from comms.contract import SCHEMA_VERSION, ZONE_ID_PATTERN
-from driving.states import DriveState
+from driving.states import PAUSABLE_STATES, DriveState
 
 log = logging.getLogger(__name__)
 
@@ -110,18 +110,36 @@ class DriveCommandRunner:
             try:
                 command = self._client.commands.get_nowait()
             except queue.Empty:
-                return any(
-                    pending.command_type in {
-                        "PAUSE_MISSION", "COMPLETE_MISSION",
-                        "CANCEL_MISSION", "EMERGENCY_STOP"
-                    }
-                    for pending in self._pending.values()
-                )
+                return any(self._urgent(pending, machine)
+                           for pending in self._pending.values())
             try:
                 self._accept(command, machine)
             except Exception:
                 # 명령 하나가 잘못돼도 ESTOP 포함 뒤 명령을 계속 소비한다.
                 log.exception("command handling failed")
+
+    @staticmethod
+    def _urgent(pending: PendingCommand, machine) -> bool:
+        """이 대기 명령이 '인지를 기다리지 않는 즉시 정지'를 요구하는가.
+
+        urgent 경로(main 루프)는 새 YOLO 추론을 건너뛰고 frame=None 으로 step 을
+        돈다. 취소·완료·ESTOP 은 어느 상태에서든 그 tick 에 적용되므로 항상 urgent.
+
+        일시정지는 **적용 가능한 상태에서만** urgent 다. ESCAPE(차도 이탈 선회)는
+        PAUSABLE_STATES 에서 일부러 빠져 있는데(선회 중 브레이크 = 차도 위 정지),
+        그 상태의 대기 일시정지까지 urgent 로 돌리면 pending 인 매 tick 이
+        frame=None → 인지 두절 폴백 **브레이크**가 되어 로봇이 차도 위에 서고,
+        인지를 안 읽으니 선회가 끝나지도 못해(핸들러 미도달 — timeout→ESTOP 도
+        안 걸린다) 명령이 만료될 때까지 그대로다 — 뺀 설계를 정면으로 우회하는
+        경로였다. 적용 불가 상태에서는 정상 경로(인지 포함)로 선회를 계속하고,
+        poll_after_step 의 재요청이 선회가 끝난 첫 tick 에 일시정지를 적용시킨다.
+        """
+        if pending.command_type in {"COMPLETE_MISSION", "CANCEL_MISSION",
+                                    "EMERGENCY_STOP"}:
+            return True
+        if pending.command_type != "PAUSE_MISSION":
+            return False
+        return machine.state in PAUSABLE_STATES
 
     def poll_after_step(self, machine) -> int:
         """해당 tick의 모터 명령 적용 후, 목표 DriveState에 닿은 result를 낸다."""

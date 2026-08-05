@@ -4,6 +4,8 @@
   - 주행 카메라 화면에 세그멘테이션 마스크·코리도·FSM 상태 오버레이 (모델 검증용)
   - 검사 카메라(Brio 100) 미리보기 + 마지막 INSPECT 캡처·판정 결과
   - 시작 / ESTOP / ESTOP 해제 버튼, 상태·명령 실시간 표시
+  - 보고 이력: 파손·미설치를 서버로 보낼 때마다 **그때 보낸 사진**·좌표·전송 상태
+    (현장에서 보고가 나갔는지, 오탐이 아닌지를 폰 화면만 보고 판단할 수 있게)
 
 주행 루프는 main.py와 동일한 조립(load_config·build_devices·apply_command 재사용)을
 백그라운드 스레드 1개에서 돌린다 — 하드웨어 명령은 여전히 그 스레드 한 곳에서만
@@ -30,7 +32,7 @@ import sys
 import threading
 import time
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -58,6 +60,16 @@ INSPECT_STALE_SEC = 2.0            # FSM INSPECT가 소비할 실시간 판정�
 INSPECT_DETECT_PERIOD = 0.2        # 상시 판별 주기(초) — 모델은 15Hz까지 나오지만
                                    # GPU를 세그와 나눠 쓰므로 5Hz로 캡: 주행 루프
                                    # 우선 (무캡 시 주행 15→10Hz 하락, 0731 실측)
+
+#: 화면에 남기는 보고 이력 개수. 사진을 원본 해상도 JPEG으로 함께 들고 있으므로
+#: (건당 수십~수백 KB) 짧게 끊는다 — 전체 기록은 reports/events.jsonl 이 갖는다.
+REPORT_HISTORY = 5
+
+# 상시 파손 보고의 확정 프레임 수·쿨다운은 **config.yaml이 단일 출처**다
+# (reporting.defect_confirm_frames / defect_cooldown_sec) — main.py의 같은 경로와
+# 같은 값을 써야 두 실행 경로의 보고 정책이 갈라지지 않는다.
+# ※ 0805까지는 이 경로가 이 도구의 수동 모드에만 있어 여기 모듈 상수로 두었다.
+#   자율 모드에도 같은 경로가 생기면서 main.py와 공유하는 정책이 되었다.
 
 
 def _find_thermal_zones() -> dict:
@@ -352,10 +364,17 @@ class DrivingSession(threading.Thread):
             self._inspect_worker.start()
 
         # GPS (u-blox 7) — 위치 표시용. 뽑혀 있어도 무해 (connected=False 표시만).
-        gps_config = config["hardware"]["gps"]
-        self._gps = GpsReader(device=str(gps_config["device"]),
-                              baud=int(gps_config["baud"]))
-        self._gps.start()
+        # 원격 미션 모드에서는 통신 런타임의 리더를 **공유**한다 — 같은 시리얼
+        # 장치를 두 리더가 열면 NMEA 문장을 나눠 읽어 양쪽 좌표가 다 깨진다.
+        # 공유한 리더의 수명(start/stop)은 런타임 소유다.
+        self._owns_gps = comms_runtime is None
+        if comms_runtime is not None:
+            self._gps = comms_runtime.gps_reader
+        else:
+            gps_config = config["hardware"]["gps"]
+            self._gps = GpsReader(device=str(gps_config["device"]),
+                                  baud=int(gps_config["baud"]))
+            self._gps.start()
 
         from perception.segmentation import PostParams
         self._post = PostParams.from_config(
@@ -370,9 +389,24 @@ class DrivingSession(threading.Thread):
         self._crosswalk_gate = reporting.ReportGate(
             confirm_frames=int(report_config["crosswalk_confirm_frames"]),
             cooldown_sec=float(report_config["crosswalk_cooldown_sec"]))
+        # 파손 보고의 **단일 출구 게이트** — 상시 경로와 INSPECT 정차 경로가 공유한다.
+        # 두 경로가 같은 블록을 두 번 보고하는 것을 막는 것이 이 게이트의 일이라
+        # 로컬 기록과 서버 전송에 함께 걸린다 (main.py의 defect_gate와 같은 역할).
         self._defect_gate = reporting.ReportGate(
             confirm_frames=1,
             cooldown_sec=float(report_config["defect_cooldown_sec"]))
+        # 상시 경로만 쓰는 연속 확정 — 주행 중 프레임이라 블러 오탐 1프레임을 걸러야
+        # 한다. 쿨다운은 위 공유 게이트가 담당하므로 0이다(두 벌이면 창이 곱해진다).
+        self._defect_screen_confirm = reporting.ReportGate(
+            confirm_frames=int(report_config["defect_confirm_frames"]),
+            cooldown_sec=0.0)
+        self._defect_verdict_at = 0.0   # 게이트에 먹인 마지막 판정 시각
+        # 보고 이력 — 현장에서 '방금 무엇을 어떤 사진으로 보냈나'를 화면으로 확인하는 창.
+        # 주행 스레드만 쓰고 웹 스레드는 읽기만 한다: 갱신은 새 리스트/딕트를 만들어
+        # 통째로 바꿔치기하므로(GIL) 락이 없어도 읽는 쪽이 반쪽 상태를 보지 않는다.
+        self.recent_reports = []           # 최신이 앞 (사진 제외 — status()가 그대로 낸다)
+        self._report_jpegs = {}            # seq → 보고에 쓴 사진의 JPEG (화면 표시용)
+        self._report_seq = 0
         # 추종 세션 계측 — main.py와 같은 형식으로 events.jsonl에 남긴다
         self._trace_session = reporting.TraceSession()
         self._counted_verdict_at = 0.0   # 중복 집계 방지용 마지막 집계 판정 시각
@@ -431,7 +465,8 @@ class DrivingSession(threading.Thread):
         self._controller.stop()
         if self._inspect_worker is not None:
             self._inspect_worker.stop()
-        self._gps.stop()
+        if self._owns_gps:   # 공유 리더는 런타임(shutdown)이 세운다
+            self._gps.stop()
 
     # ---- 상태 조회 ----
 
@@ -515,6 +550,7 @@ class DrivingSession(threading.Thread):
             "board_temp": _read_board_temp(),
             "last_transition": self.last_transition,
             "last_inspection": self.last_inspection,
+            "reports": self.recent_reports,
             "fatal_error": self.fatal_error,
         }
 
@@ -625,23 +661,40 @@ class DrivingSession(threading.Thread):
                 if not self.manual_mode and self._machine.state is DriveState.TRACE:
                     self._report_trace_detection(now)
 
+                # 파손 상시 보고 — **두 모드 공통**이다.
+                # ※ 0805 개편. 종전에는 수동 모드에만 있었고 자율 모드는 INSPECT 정차
+                #   경로에만 의존했다. 그래서 세그가 블록을 못 잡아 TRACE→INSPECT에
+                #   도달하지 못하면 자율 모드에서 파손이 **한 건도** 보고되지 않았다
+                #   (0805 오전 실측: TRACE 15표본 / INSPECT 0회). 미설치 보고는 바로
+                #   아래처럼 FSM과 무관하게 나가는데 파손만 FSM에 매여 있던 비대칭이다.
+                #   정차 판정은 그대로 돌고(더 깨끗한 사진), 중복은 공유 게이트가 막는다.
+                self._report_defect_from_worker(now)
+
                 # 횡단보도 점자블록 미설치 보고 — main.py와 같은 규칙(연속 프레임 확정 +
                 # 쿨다운). 수동 모드에서도 남긴다: 사람이 몰고 다니며 미설치 구역을
                 # 수집하는 것이 이 도구의 정당한 용법이고, 판정은 주행 상태와 무관하다
                 if frame is not None and self._crosswalk_gate.should_report(
                         frame.braille_missing_at_crosswalk, now):
-                    reporting.write_report(
+                    gps = self._gps.status()
+                    local_image = reporting.write_report(
                         self._report_dir, reporting.KIND_MISSING,
-                        self._gps.status(), image=image,
+                        gps, image=image,
                         save_images=self._save_images,
                         extra={"note": "횡단보도-인도 이음부 점자블록 미설치"})
                     # 서버 보고도 main.py와 같다 — 게이트를 공유한다(프레임마다
                     # event_id가 달라 서버 멱등 처리로는 중복을 못 묶는다).
+                    server = "통신 꺼짐 — 로컬 기록만"
                     if self._comms is not None:
                         try:
                             self._comms.report_missing_braille(image)
+                            server = "서버 전송 요청"
                         except Exception:
                             logger.exception("[미설치] 서버 보고 실패 — 주행은 계속한다")
+                            server = "전송 실패 — 로그 확인"
+                    self._note_report(
+                        reporting.KIND_MISSING, "미설치", image, "주행 카메라",
+                        gps, local_image, server,
+                        detail="횡단보도-인도 이음부 점자블록 미설치")
 
                 # 자동 모드에서 정차 후 settle_sec이 지난 시점의 워커 최신
                 # 판정만 소비해 FSM에 통지한다 — 진입(entered_at)당 정확히 1회.
@@ -710,6 +763,74 @@ class DrivingSession(threading.Thread):
         self._stop_requested.wait(max(0.0, period - (time.monotonic() - now)))
         return True
 
+    def _note_report(self, kind: str, label: str, image, camera: str,
+                     gps: dict, local_image, server: str, detail: str = "") -> None:
+        """보고 1건을 화면 이력에 남긴다 — 실제로 보낸 사진을 그대로 들고.
+
+        현장에서 '보고가 나갔나'를 확인할 방법이 로그뿐이면 폰으로 대시보드만 보고
+        있는 사람은 알 수가 없다. 그래서 판정·좌표·전송 상태에 **그때 보낸 프레임**을
+        붙여 둔다: 오탐이면 화면에서 바로 보이고, 잘 찍혔으면 안심하고 계속 간다.
+
+        사진은 서버로 간 것과 같은 원본을 별도 JPEG으로 인코딩한 것이다(증거 파일을
+        다시 읽지 않는다 — 업로드 후 지워질 수도 있고, 여기서 파일 I/O를 하면 주행
+        루프가 그만큼 늦는다). 인코딩 실패는 이력만 사진 없이 남긴다.
+        """
+        self._report_seq += 1
+        seq = self._report_seq
+        jpeg = None
+        if image is not None:
+            try:
+                ok, buffer = self._cv2.imencode(
+                    ".jpg", image, [self._cv2.IMWRITE_JPEG_QUALITY, PREVIEW_JPEG_QUALITY])
+                jpeg = buffer.tobytes() if ok else None
+            except Exception:
+                logger.warning("[보고] 이력 사진 인코딩 실패 — 이력만 남긴다", exc_info=True)
+        gps = gps or {}
+        entry = {
+            "seq": seq,
+            "kind": kind,
+            "label": label,
+            "at": time.strftime("%H:%M:%S"),
+            "camera": camera,
+            "detail": detail,
+            "server": server,
+            "fix": bool(gps.get("fix")),
+            "lat": gps.get("lat"),
+            "lon": gps.get("lon"),
+            "sats": gps.get("sats"),
+            "local_image": local_image,
+            "has_image": jpeg is not None,
+            "bytes": len(jpeg) if jpeg else 0,
+        }
+        reports = ([entry] + self.recent_reports)[:REPORT_HISTORY]
+        # 이력에서 밀려난 사진은 같이 버린다 — 안 그러면 주행 내내 메모리에 쌓인다.
+        jpegs = {r["seq"]: self._report_jpegs.get(r["seq"]) for r in reports}
+        if jpeg is not None:
+            jpegs[seq] = jpeg
+        self._report_jpegs = jpegs
+        self.recent_reports = reports
+
+    def _send_defect_to_server(self, worker, verdict, tag: str) -> str:
+        """파손 1건을 통신 런타임에 넘긴다 → 화면에 띄울 전송 상태 문자열.
+
+        돌려주는 값은 '업로드 완료'가 아니라 '워커에 태웠다'다 — 사진 업로드는 통신
+        런타임의 백그라운드 스레드가 하고 이 도구는 그 완료를 관측하지 않는다(관측하려면
+        outbox·evidence를 들여다봐야 하는데, 그건 주행 루프가 할 일이 아니다).
+        """
+        if self._comms is None:
+            return "통신 꺼짐 — 로컬 기록만"
+        image = worker.latest_image
+        if image is None:
+            logger.warning("%s 원본 프레임이 없어 서버 보고를 건너뛴다", tag)
+            return "원본 프레임 없음 — 전송 안 함"
+        try:
+            self._comms.report_inspection(
+                verdict, image, worker.latest_captured_at or utc_now())
+        except Exception:
+            logger.exception("%s 결함 보고 실패 — 주행은 계속한다", tag)
+            return "전송 실패 — 로그 확인"
+        return "서버 전송 요청"
+
     def _report_trace_detection(self, now: float) -> None:
         """TRACE 상시 탐지 — 워커의 신선한 판정이 불량이면 FSM에 정차 판정을 요청한다.
 
@@ -730,10 +851,68 @@ class DrivingSession(threading.Thread):
         if worker.verdict_at != self._counted_verdict_at:
             self._counted_verdict_at = worker.verdict_at
             self._trace_session.count_detection(bool(verdict.is_defect))
+        # 블록이 잡혔으면 파손 여부와 무관하게 추종 유지 신호를 낸다 — main.py의
+        # run_detection과 같은 규칙이다(주행캠 세그가 놓치는 틱에 추종이 끊기지
+        # 않게 한다). 여기 워커는 상시 5Hz라 main보다 촘촘히 들어온다.
+        if verdict.band_count > 0:
+            self._machine.notify_braille_seen()
         if verdict.is_defect:
             logger.info("[탐지] 추종 중 파손 후보 — %s → 정차 정밀 판정 요청",
                         verdict.reason)
             self._machine.notify_defect_found()
+
+    def _report_defect_from_worker(self, now: float) -> None:
+        """워커 판정으로 파손 1건을 보고한다 — **자동·수동 두 모드 공통**의 상시 경로.
+
+        ※ 0805 개편. 종전에는 수동 모드 전용이었고, 자율 모드는 INSPECT 정차 경로
+        (_record_inspection)에만 의존했다. 그래서 세그가 블록을 못 잡아 TRACE→INSPECT에
+        도달하지 못하면 파손을 눈으로 보고 있어도 **한 건도** 보고되지 않았다
+        (0805 오전 실측: TRACE 15표본 / INSPECT 0회). 미설치 보고는 인지 프레임만 보고
+        FSM과 무관하게 나가는데 파손만 FSM에 매여 있던 비대칭을 없앤 것이다.
+
+        정차 판정 경로는 그대로 남는다 — 정지 화면이라 사진이 더 깨끗하다. 둘의 중복은
+        **공유 게이트(_defect_gate)** 가 막고, 어느 쪽이 먼저 보고하는지는
+        `reporting.defect_confirm_frames`가 정한다(그 키 주석에 산식이 있다):
+        확정 시간이 inspect.settle_sec보다 짧으면 이 경로가 먼저 보고하고(주행 중
+        프레임), 길면 정차 경로가 이기고 이 경로는 폴백으로 남는다.
+
+        게이트는 **판정이 갱신된 틱에만** 먹인다: 주행 루프(10Hz)가 워커(5Hz)보다
+        빠르므로 매 틱 먹이면 판정 하나가 연속 2프레임으로 세어져 확정이 무의미해진다
+        (_report_trace_detection의 계측이 _counted_verdict_at으로 막는 것과 같은 함정).
+        """
+        worker = self._inspect_worker
+        if worker is None:
+            return
+        verdict = worker.latest_verdict
+        if verdict is None or now - worker.verdict_at > INSPECT_STALE_SEC:
+            # 낡은 판정으로 보고하지 않는다 — 검사 카메라가 멈춘 뒤 마지막 불량
+            # 판정이 쿨다운마다 재보고되면 있지도 않은 결함이 서버에 쌓인다.
+            return
+        if worker.verdict_at == self._defect_verdict_at:
+            return
+        self._defect_verdict_at = worker.verdict_at
+        # 확정 게이트는 **정상 판정도** 먹여야 streak이 리셋된다 — 안 먹이면 띄엄띄엄
+        # 잡힌 오탐이 누적돼 확정된다.
+        if not self._defect_screen_confirm.should_report(bool(verdict.is_defect), now):
+            return
+        if not self._defect_gate.should_report(True, now):
+            return          # 정차 경로가 방금 같은 블록을 보고했다 (공유 쿨다운)
+        mode = "수동" if self.manual_mode else "자율"
+        logger.info("[상시] 파손 보고 (%s) — %s", mode, verdict.reason)
+        gps = self._gps.status()
+        local_image = reporting.write_report(
+            self._report_dir, reporting.KIND_DEFECT, gps,
+            image=None, save_images=self._save_images,
+            extra={"reason": verdict.reason, "bands": verdict.band_count,
+                   "defect_bands": verdict.defect_band_count,
+                   "partials": verdict.partial_count,
+                   # 로컬 기록에만 남긴다 — 나중에 증거 사진의 블러를 해석할 때
+                   # '정차 판정인가 주행 중 상시 탐지인가'를 가려야 한다.
+                   "source": f"webtest-screen-{'manual' if self.manual_mode else 'auto'}"})
+        server = self._send_defect_to_server(worker, verdict, f"[상시·{mode}]")
+        self._note_report(
+            reporting.KIND_DEFECT, f"파손 (상시·{mode})", worker.latest_image,
+            "검사 카메라", gps, local_image, server, detail=verdict.reason)
 
     def _record_inspection(self, now: float) -> None:
         """INSPECT 정차 판정 — 상시 판별 스레드의 최신 결과를 소비한다.
@@ -761,31 +940,29 @@ class DrivingSession(threading.Thread):
             "defect_band_count": verdict.defect_band_count,
             "partial_count": verdict.partial_count, "at": now,
         }
-        # 파손 보고(사진 + GPS 태깅) — main.py와 같은 경로·같은 형식. 사진은 워커가
-        # 검출 박스를 그려 둔 최신 프레임(latest_jpeg)이 아니라 원본이어야 하지만,
-        # 워커는 인코딩된 JPEG만 보관하므로 여기서는 좌표·판정만 남긴다.
-        # (INSPECT 정차 화면 자체는 대시보드의 검사 카메라 스트림으로 눈으로 확인한다)
+        # 파손 보고(좌표 + GPS 태깅) — main.py와 같은 경로·같은 형식. 로컬에는 사진을
+        # 복사하지 않는다: 서버로 가는 증거 사진은 통신 런타임이 var/evidence 에 규격대로
+        # 쓰고, 그 프레임 자체는 아래 _note_report 가 대시보드에 띄운다.
+        #
+        # 게이트를 **로컬·서버 양쪽에** 건다. 종전에는 서버 전송이 게이트 밖이었고
+        # 근거는 '디스크 정책이 결함 유실이 되면 안 된다'였다 — 그 근거는 보고 경로가
+        # 이것 하나였을 때 성립했다. 이제는 상시 경로가 함께 있어, 게이트를 서버까지
+        # 걸지 않으면 같은 파손이 두 번 발행된다(_report_defect_from_worker와 같은
+        # 게이트를 공유하는 것이 중복 제거의 전제다).
+        gps = self._gps.status()
         if verdict.is_defect and self._defect_gate.should_report(True, now):
-            reporting.write_report(
-                self._report_dir, reporting.KIND_DEFECT, self._gps.status(),
+            local_image = reporting.write_report(
+                self._report_dir, reporting.KIND_DEFECT, gps,
                 image=None, save_images=self._save_images,
                 extra={"reason": verdict.reason, "bands": verdict.band_count,
                        "defect_bands": verdict.defect_band_count,
                        "partials": verdict.partial_count,
-                       "source": "webtest"})
-        # 서버 보고 — 로컬 쿨다운과 분리한다(main.py 와 같은 이유: 디스크 정책 하나가
-        # 결함 유실이 되면 안 된다. 서버 중복은 event_id 멱등 처리가 받는다).
-        # 사진은 워커가 래치한 **원본** 프레임이고 시각은 그 캡처 직전 값이다.
-        if self._comms is not None and verdict.is_defect:
-            image = worker.latest_image
-            if image is None:
-                logger.warning("[INSPECT] 원본 프레임이 없어 서버 보고를 건너뛴다")
-            else:
-                try:
-                    self._comms.report_inspection(
-                        verdict, image, worker.latest_captured_at or utc_now())
-                except Exception:
-                    logger.exception("[INSPECT] 결함 보고 실패 — 주행은 계속한다")
+                       "source": "webtest-inspect"})
+            # 사진은 워커가 래치한 **원본** 프레임이고 시각은 그 캡처 직전 값이다.
+            server = self._send_defect_to_server(worker, verdict, "[INSPECT]")
+            self._note_report(
+                reporting.KIND_DEFECT, "파손 (INSPECT 정차)", worker.latest_image,
+                "검사 카메라", gps, local_image, server, detail=verdict.reason)
         self._machine.notify_inspection_done()
 
 
@@ -823,6 +1000,18 @@ def create_app(session: DrivingSession) -> FastAPI:
     @app.get("/api/status")
     async def status():
         return session.status()
+
+    @app.get("/report/{seq}.jpg")
+    async def report_image(seq: int):
+        """보고 이력에 붙은 사진 — 그 건에서 실제로 서버로 보낸 프레임이다.
+
+        이력에서 밀려나면 사진도 함께 버려지므로 404 가 정상 응답이다(화면은
+        has_image 를 보고 링크를 걸지만, 그 사이 새 보고가 들어올 수 있다).
+        """
+        jpeg = session._report_jpegs.get(seq)
+        if jpeg is None:
+            return JSONResponse({"error": "만료된 보고 사진"}, status_code=404)
+        return Response(content=jpeg, media_type="image/jpeg")
 
     @app.post("/api/start")
     async def start():

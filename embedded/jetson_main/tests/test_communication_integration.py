@@ -135,6 +135,48 @@ def test_complete_mission_stops_then_publishes_terminal_event(wired, clear_frame
     assert completed["status"] == "COMPLETED"
 
 
+def test_pause_during_escape_is_not_urgent_and_applies_after_the_turn(wired, clear_frame):
+    """ESCAPE(차도 이탈 선회) 중의 대기 일시정지가 urgent 정지 경로를 타면 안 된다.
+
+    urgent 경로는 frame=None 으로 step 을 돌므로, ESCAPE 에서는 인지 두절 폴백
+    **브레이크**가 되어 로봇이 차도 위에 선다 — PAUSABLE_STATES 에서 ESCAPE 를 뺀
+    설계를 우회하는 경로였다. 일시정지는 선회가 끝난 첫 tick 에 적용되어야 한다.
+    """
+    client, state, machine, runner = wired
+    client.commands.put(mqtt_command("start", "START_MISSION", {
+        "mission_id": "MIS-1", "zone_id": "A-01",
+    }))
+    apply_one(client, machine, runner, clear_frame, 1.0)
+    assert machine.state is DriveState.CRUISE
+
+    risk = SegmentationFrame(timestamp=2.0, sidewalk_detected=True,
+                             roadway_encroachment_risk=True)
+    apply_one(client, machine, runner, risk, 2.0)
+    assert machine.state is DriveState.ESCAPE
+
+    client.commands.put(mqtt_command("pause", "PAUSE_MISSION", {"reason": "op"}))
+    # 선회 중에는 urgent 가 아니다 — main 은 인지를 계속 읽으며 선회를 잇는다.
+    assert not runner.poll_before_step(machine)
+    command = machine.step(risk, None, 2.1)
+    runner.poll_after_step(machine)
+    assert machine.state is DriveState.ESCAPE   # 일시정지가 선회를 끊지 않았다
+    assert not command.brake                    # 차도 위 브레이크가 없다
+    assert command.throttle_pct != 0.0          # 선회 주행이 계속된다
+
+    # 차도 위험 해소 → clear_sec 유지 → CRUISE 복귀. 재요청된 일시정지가
+    # 복귀 후 첫 tick 에 적용된다 (poll_after_step 의 재요청 경로).
+    apply_one(client, machine, runner, clear_frame, 2.3)
+    assert machine.state is DriveState.ESCAPE   # clear 타이머 진행 중
+    apply_one(client, machine, runner, clear_frame, 2.8)
+    assert machine.state is DriveState.CRUISE
+    assert runner.poll_before_step(machine)     # 이제야 urgent — 즉시 정지 가능 상태
+    paused = machine.step(clear_frame, None, 2.9)
+    runner.poll_after_step(machine)
+    assert machine.state is DriveState.PAUSED
+    assert paused.brake
+    assert client.results()[-1]["status"] == "COMPLETED"
+
+
 def _cancel(command_id, mission_id, *, expires_at="2099-01-01T00:00:00.000Z"):
     """백엔드가 보내는 CANCEL_MISSION 모양 그대로 (parameters.mission_id 포함)."""
     command = mqtt_command(command_id, "CANCEL_MISSION", {
@@ -741,7 +783,7 @@ incident:
         runtime.client.outbox.close()
 
 
-def _build_runtime(tmp_path, extra_yaml: str):
+def _build_runtime(tmp_path, extra_yaml: str, **build_kwargs):
     """실제 main 경로와 같은 조립. `extra_yaml` 만 comms.yaml 뒤에 붙인다."""
     comms_config = tmp_path / "comms.yaml"
     comms_config.write_text(
@@ -766,7 +808,8 @@ incident:
         encoding="utf-8",
     )
     robot_config = {"hardware": {"gps": {"device": "missing-test-device", "baud": 9600}}}
-    return CommunicationRuntime.build(str(comms_config), robot_config, live=False)
+    return CommunicationRuntime.build(str(comms_config), robot_config, live=False,
+                                      **build_kwargs)
 
 
 def test_runtime_build_gives_the_uploader_the_configured_endpoint(tmp_path):
@@ -803,6 +846,38 @@ def test_runtime_build_skips_evidence_when_upload_is_unconfigured(tmp_path):
         assert runtime._evidence is None
     finally:
         runtime.client.outbox.close()
+
+
+def test_runtime_build_shares_an_external_gps_reader(tmp_path):
+    """주행 쪽이 넘긴 GPS 리더는 그대로 쓰고, 수명(start/stop)은 넘겨받지 않는다.
+
+    여기서 리더를 또 만들면 같은 시리얼 장치를 두 리더가 열고 NMEA 문장을 나눠
+    읽어 **양쪽 좌표가 다** 깨진다 — 실운영 조합(--perception real --comms-config)
+    에서 지도 핀·telemetry 위치가 통째로 무효가 되는 원인이었다.
+    """
+    class _StubReader:
+        def start(self):
+            raise AssertionError("빌린 리더를 start 하면 안 된다 — 수명은 호출자 소유")
+
+        def stop(self):
+            raise AssertionError("빌린 리더를 stop 하면 안 된다 — 수명은 호출자 소유")
+
+        def status(self):
+            return {}
+
+    stub = _StubReader()
+    runtime = _build_runtime(tmp_path, "", gps_reader=stub)
+    try:
+        assert runtime.gps_reader is stub          # 새로 만들지 않고 공유한다
+        assert runtime._owns_gps_reader is False   # start()/shutdown() 이 건드리지 않는다
+    finally:
+        runtime.client.outbox.close()
+
+    owned = _build_runtime(tmp_path, "")
+    try:
+        assert owned._owns_gps_reader is True      # 안 넘기면 종전대로 스스로 소유
+    finally:
+        owned.client.outbox.close()
 
 
 def _incident_kwargs(**overrides):
