@@ -1,4 +1,5 @@
 import { DefectFilterDropdown } from './DefectFilterDropdown'
+import { defectTypeTone } from './defectMapState'
 import {
   DEFECT_TYPES,
   DEFECT_TYPE_LABELS,
@@ -14,6 +15,11 @@ interface DefectFilterProps {
   filters: DefectFilters
   onChange: (filters: DefectFilters) => void
   disabled?: boolean
+  /**
+   * "필터 초기화"를 눌렀다는 신호. 검색어를 비우는 것은 `onChange`로 전달되지만,
+   * 아직 올려보내지 않은(디바운스 대기 중인) 입력까지 버리려면 상위가 알아야 한다.
+   */
+  onReset?: () => void
 }
 
 /**
@@ -37,6 +43,7 @@ export function DefectFilter({
   filters,
   onChange,
   disabled = false,
+  onReset,
 }: DefectFilterProps) {
   const update = (partial: Partial<DefectFilters>) => {
     onChange({ ...filters, ...partial })
@@ -48,23 +55,26 @@ export function DefectFilter({
       aria-label="결함 필터"
       onSubmit={(event) => event.preventDefault()}
     >
-      <fieldset className="defect-filter-group" disabled={disabled}>
-        <legend>
-          시작 날짜
+      <div className="defect-filter-group">
+        <div className="defect-filter-group-heading">
+          <label htmlFor="defect-filter-from">시작 날짜</label>
           {filters.from.length > 0 && (
             <button
               type="button"
               className="defect-filter-clear-date"
+              disabled={disabled}
               onClick={() => update({ from: '' })}
             >
               전체 기간
             </button>
           )}
-        </legend>
+        </div>
         <input
+          id="defect-filter-from"
           type="date"
           className="defect-filter-date-input"
           value={toDateInputValue(filters.from)}
+          disabled={disabled}
           aria-describedby="defect-filter-from-hint"
           onChange={(event) =>
             update({ from: fromDateInputValue(event.target.value) })
@@ -72,7 +82,7 @@ export function DefectFilter({
         />
         {/* 서버는 이 조건을 last_seen_at에 건다. "최초 발견"으로 읽으면 오해한다. */}
         <small id="defect-filter-from-hint">이 날짜 이후 관측된 결함</small>
-      </fieldset>
+      </div>
 
       {/*
         조건 셋은 접어둔다. 펼쳐 두면 체크박스 14개가 패널을 다 먹어서
@@ -85,14 +95,13 @@ export function DefectFilter({
         selected={filters.workflowStatuses}
         disabled={disabled}
         onChange={(workflowStatuses) => update({ workflowStatuses })}
-        renderMark={(status) => (
-          <span
-            className={`defect-status-dot defect-status-dot-${status.toLowerCase()}`}
-            aria-hidden="true"
-          />
-        )}
       />
 
+      {/*
+        지도 마커는 결함 유형으로 색이 갈린다(`defectTypeTone`). 그 색을 이 목록에도
+        찍어 "지도의 빨간 핀 = 파손"을 필터에서 읽을 수 있게 한다. 처리 상태에 점이
+        있던 것은 마커가 상태 색이던 시절의 잔재라 걷어냈다.
+      */}
       <DefectFilterDropdown
         label="결함 유형"
         options={DEFECT_TYPES}
@@ -100,6 +109,12 @@ export function DefectFilter({
         selected={filters.defectTypes}
         disabled={disabled}
         onChange={(defectTypes) => update({ defectTypes })}
+        renderMark={(defectType) => (
+          <span
+            className={`defect-type-dot defect-type-dot-${defectTypeTone(defectType)}`}
+            aria-hidden="true"
+          />
+        )}
       />
 
       <DefectFilterDropdown
@@ -111,17 +126,22 @@ export function DefectFilter({
         onChange={(severities) => update({ severities })}
       />
 
-      <fieldset className="defect-filter-group" disabled={disabled}>
-        <legend>
+      <div className="defect-filter-group">
+        <label
+          className="defect-filter-group-heading"
+          htmlFor="defect-filter-min-confidence"
+        >
           최소 AI 신뢰도
           {filters.minConfidence !== null
             && ` ${Math.round(filters.minConfidence * 100)}%`}
-        </legend>
+        </label>
         <input
+          id="defect-filter-min-confidence"
           type="range"
           min={0}
           max={100}
           step={5}
+          disabled={disabled}
           value={
             filters.minConfidence === null
               ? 0
@@ -133,14 +153,17 @@ export function DefectFilter({
             update({ minConfidence: percent === 0 ? null : percent / 100 })
           }}
         />
-      </fieldset>
+      </div>
 
       {/* 검색어까지 함께 지운다. 검색창이 위에 보이므로 지워진 것도 바로 보인다. */}
       <button
         className="secondary-button defect-filter-reset"
         type="button"
         disabled={disabled}
-        onClick={() => onChange(EMPTY_DEFECT_FILTERS)}
+        onClick={() => {
+          onChange(EMPTY_DEFECT_FILTERS)
+          onReset?.()
+        }}
       >
         필터 초기화
       </button>
