@@ -20,7 +20,7 @@ config.yaml perception.braille에서 온다 — 기본값·운영점 근거는 m
 
 import time
 from dataclasses import dataclass
-from typing import Callable, List, Sequence, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
 # Detection: (신뢰도, 클래스명, (x1, y1, x2, y2)) — 원본의 boxes 행 1개에 대응
 Detection = Tuple[float, str, Tuple[float, float, float, float]]
@@ -58,7 +58,16 @@ class BrailleParams:
 
 @dataclass(frozen=True)
 class BrailleVerdict:
-    """검사 1회의 판정 결과 — 3단계 통신(사진+위치 보고)의 페이로드가 된다."""
+    """검사 1회의 판정 결과 — 3단계 통신(사진+위치 보고)의 페이로드가 된다.
+
+    defect_confidence / defect_box: 불량 판정의 **근거가 된 검출 1개**의 신뢰도와
+        픽셀 상자(x1, y1, x2, y2 — 추론 입력 이미지 좌표). 계약 §8.3이 DAMAGED
+        결함에 confidence·bbox_norm을 필수로 요구하므로, 이 두 값이 없으면 결함
+        event 자체를 만들 수 없다 (runtime.report_inspection이 소비).
+        불량 근거가 여러 개(불량 띠 여럿·국소 파손 여럿)면 최고 신뢰도 하나를
+        대표로 싣는다 — 개수는 defect_band_count·partial_count가 이미 말해 주고,
+        계약의 상자는 한 개다. 정상 판정에서는 둘 다 None이다.
+    """
 
     timestamp: float
     is_defect: bool
@@ -66,6 +75,8 @@ class BrailleVerdict:
     band_count: int         # IoU로 묶은 띠(경쟁 예측 그룹) 수
     defect_band_count: int  # defect_full이 이긴 띠 수
     partial_count: int      # defect_conf를 넘은 국소 파손 검출 수
+    defect_confidence: Optional[float] = None
+    defect_box: Optional[Tuple[float, float, float, float]] = None
 
 
 # ======================================================================
@@ -111,7 +122,7 @@ def decide_band_argmax(detections: Sequence[Detection], params: BrailleParams,
          max(2, min_defects)곳 이상이면 불량으로 승격.
     """
     groups = group_bands(detections, params.iou_same_band)
-    parts = [d[0] for d in detections
+    parts = [d for d in detections
              if d[1] == CLASS_DEFECT_PARTIAL and d[0] >= params.defect_conf]
 
     if not groups:
@@ -123,19 +134,24 @@ def decide_band_argmax(detections: Sequence[Detection], params: BrailleParams,
     bad = [g[0] for g in groups
            if g[0][1] == CLASS_DEFECT_FULL and g[0][0] >= params.band_conf]
     if bad:
+        # 근거 검출: 불량 띠 승자 중 최고 신뢰도 하나 (BrailleVerdict 독스트링)
+        evidence = max(bad, key=lambda d: d[0])
         note = f" +파손 {len(parts)}곳" if parts else ""
         reason = (f"불량 띠 {len(bad)}/{len(groups)} "
-                  f"(최대 {max(conf for conf, _, _ in bad):.2f}){note}")
+                  f"(최대 {evidence[0]:.2f}){note}")
         return BrailleVerdict(timestamp=timestamp, is_defect=True, reason=reason,
                               band_count=len(groups), defect_band_count=len(bad),
-                              partial_count=len(parts))
+                              partial_count=len(parts),
+                              defect_confidence=evidence[0], defect_box=evidence[2])
 
     # 띠는 정상으로 봤지만 국소 파손이 여러 곳이면 승격시킨다 (원본 그대로)
     if len(parts) >= max(2, params.min_defects):
-        reason = f"국소 파손 {len(parts)}곳 (최대 {max(parts):.2f})"
+        evidence = max(parts, key=lambda d: d[0])
+        reason = f"국소 파손 {len(parts)}곳 (최대 {evidence[0]:.2f})"
         return BrailleVerdict(timestamp=timestamp, is_defect=True, reason=reason,
                               band_count=len(groups), defect_band_count=0,
-                              partial_count=len(parts))
+                              partial_count=len(parts),
+                              defect_confidence=evidence[0], defect_box=evidence[2])
 
     reason = (f"정상 띠 {len(groups)}개"
               + (f", 파손 {len(parts)}곳" if parts else ""))
@@ -177,11 +193,20 @@ class BrailleInspector:
         관제 화면(웹 테스트)과 3단계 통신의 증빙 사진이 소비한다 — 판정 알고리즘은
         inspect()와 완전히 동일하다 (같은 추론 1회를 공유).
         """
+        verdict, plotted, _ = self.inspect_detailed(image_bgr)
+        return verdict, plotted
+
+    def inspect_detailed(self, image_bgr):
+        """inspect_annotated + **검출 목록**까지 돌려준다 (verdict, plotted, detections).
+
+        지금 검출 목록을 쓰는 호출자는 없다(inspect_annotated 가 버린다) — 판정에
+        쓴 중간값을 밖으로 낼 자리를 남겨 둔 것뿐이다. 판정 알고리즘은 건드리지 않는다.
+        """
         result = self._model.predict(image_bgr, imgsz=self._imgsz, conf=self._conf,
                                      iou=self._iou, verbose=False)[0]
         detections = _detections_from_result(result)
         verdict = decide_band_argmax(detections, self._params, timestamp=self._clock())
-        return verdict, result.plot()
+        return verdict, result.plot(), detections
 
 
 def _detections_from_result(result) -> List[Detection]:

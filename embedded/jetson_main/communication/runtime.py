@@ -177,7 +177,7 @@ class CommunicationRuntime:
 
     def __init__(self, *, client, state, state_publisher, telemetry,
                  commands, projector, signals, gps_reader,
-                 events, evidence, uploader) -> None:
+                 events, evidence, uploader, owns_gps_reader=True) -> None:
         self.client = client
         self.state = state
         self._state_publisher = state_publisher
@@ -186,12 +186,29 @@ class CommunicationRuntime:
         self._projector = projector
         self._signals = signals
         self._gps_reader = gps_reader
+        # 리더를 빌린 경우(주행 쪽이 이미 열었다) 수명은 그쪽 소유다 — 여기서
+        # start/stop 하지 않는다. 같은 시리얼 장치를 두 리더가 열면 커널 tty 버퍼의
+        # 바이트를 나눠 읽어 NMEA 문장이 양쪽 다 조각나고, 체크섬 실패로 좌표가
+        # 간헐적으로 전부 무효가 된다 (지도 핀·telemetry 위치 동시 타격).
+        self._owns_gps_reader = bool(owns_gps_reader)
         self._events = events
         self._evidence = evidence
         self._uploader = uploader
 
+    @property
+    def gps_reader(self):
+        """이 런타임이 쓰는 GPS 리더 — 같은 장치를 두 번 열지 않게 공유용으로 노출한다."""
+        return self._gps_reader
+
     @classmethod
-    def build(cls, comms_config_path: str, robot_config: dict, *, live: bool):
+    def build(cls, comms_config_path: str, robot_config: dict, *, live: bool,
+              gps_reader=None):
+        """`gps_reader` 를 주면 그 리더를 **공유**한다 (수명은 호출자 소유).
+
+        main·web_test 는 좌표 태깅용 리더를 이미 열어 두므로 그걸 넘겨야 한다 —
+        여기서 또 만들면 같은 시리얼 장치를 두 리더가 읽어 NMEA 가 양쪽 다 깨진다
+        (0804 좌표 무효의 원인 후보). 안 주면 종전대로 스스로 만들고 소유한다.
+        """
         config_path = Path(comms_config_path).resolve()
         document = load_document(config_path)
         # 상대 outbox_path·ca_cert 는 MqttConfig 가 config 기준으로 풀어 준다.
@@ -200,8 +217,10 @@ class CommunicationRuntime:
 
         client = MqttClient(mqtt_config)
         signals = RuntimeSignals(live=live)
-        gps_cfg = robot_config["hardware"]["gps"]
-        gps_reader = GpsReader(str(gps_cfg["device"]), int(gps_cfg["baud"]))
+        owns_gps_reader = gps_reader is None
+        if gps_reader is None:
+            gps_cfg = robot_config["hardware"]["gps"]
+            gps_reader = GpsReader(str(gps_cfg["device"]), int(gps_cfg["baud"]))
         gps = GpsTelemetryAdapter(gps_reader)
         state = RobotState(
             health_probes={
@@ -272,10 +291,12 @@ class CommunicationRuntime:
             events=events,
             evidence=evidence,
             uploader=uploader,
+            owns_gps_reader=owns_gps_reader,
         )
 
     def start(self) -> None:
-        self._gps_reader.start()
+        if self._owns_gps_reader:
+            self._gps_reader.start()
         self._close_orphan_mission()
         self.client.start()
 
@@ -421,7 +442,8 @@ class CommunicationRuntime:
         return published
 
     def shutdown(self) -> None:
-        self._gps_reader.stop()
+        if self._owns_gps_reader:
+            self._gps_reader.stop()
         if self._uploader is not None:
             # 밀린 업로드를 끝내고 그 결과까지 발행한 뒤에 소켓을 닫는다.
             self._publish_uploaded(self._uploader.close())
