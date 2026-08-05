@@ -1,6 +1,6 @@
 # LLM Client·정책 게이트
 
-- 기준일: 2026-07-30
+- 기준일: 2026-08-05
 - 적용 범위: 결함 보고서 초안 생성
 - 구현 기준: `com.gilbom.llm`, `com.gilbom.report.generation`
 
@@ -30,7 +30,7 @@
 | 호출 경로 | `POST /chat/completions` |
 | Outbound | `gms.ssafy.io:443` |
 | 보고서 모델 | `gpt-5.4-mini`, `gpt-5.4` |
-| Prompt 버전 | `report-v1` |
+| Prompt 버전 | 운영 `report-v2`, 롤백 호환 `report-v1` |
 | 최대 출력 | 1,500 tokens |
 | 최대 입력 | 보수적 비용 예약 기준 8,000 tokens |
 | 동시 호출 | 인스턴스당 기본 5, 허용 범위 1~20 |

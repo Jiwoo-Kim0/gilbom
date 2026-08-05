@@ -138,6 +138,7 @@ class GmsLlmClientTest {
         LlmProperties properties =
                 LlmPolicyGateTest.approvedProperties();
         properties.setApiKey(API_KEY);
+        properties.setPromptVersion("report-v2");
         properties.setImageInputEnabled(true);
         properties.setImageDeidentificationApproved(true);
         GmsLlmClient client = client(builder, properties);
@@ -155,6 +156,12 @@ class GmsLlmClientTest {
                                     ((org.springframework.mock.http.client
                                             .MockClientHttpRequest) request)
                                             .getBodyAsString());
+                    assertThat(root.at(
+                            "/messages/0/content").asText())
+                            .contains(
+                                    "Summarize the report itself",
+                                    "combining its metadata",
+                                    "담당: <관련 기능 부서 또는 역할>");
                     String text = root.at(
                             "/messages/1/content/0/text").asText();
                     com.fasterxml.jackson.databind.JsonNode input =
