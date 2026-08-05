@@ -285,6 +285,65 @@ test('시간 기반 Mission을 경로 UI 없이 생성하고 진행 정보를 �
   await page.locator('#mission-filter-scope').selectOption('ACTIVE')
   await page.getByRole('button', { name: '조회' }).click()
   await expect.poll(() => requestedMissionScopes.at(-1)).toBe('ACTIVE')
+  await expect(page.locator('.mission-master-detail')).toHaveCSS(
+    'display',
+    'block',
+  )
+  await page.getByRole('button', {
+    name: 'MIS-TIME-001 상세 보기',
+  }).click()
+  const missionDetailDialog = page.getByRole('dialog', {
+    name: 'MIS-TIME-001',
+  })
+  await expect(missionDetailDialog).toBeVisible()
+  await expect(missionDetailDialog.locator('.mission-detail-map-primary'))
+    .toBeVisible()
+  await expect(missionDetailDialog.getByTestId('mission-command-actions'))
+    .toBeVisible()
+  const detailLayout = await missionDetailDialog.evaluate((dialog) => {
+    const map = dialog.querySelector<HTMLElement>(
+      '.mission-detail-map-primary',
+    )
+    const command = dialog.querySelector<HTMLElement>(
+      '[data-testid="mission-command-actions"]',
+    )
+    const buttons = Array.from(dialog.querySelectorAll<HTMLElement>(
+      '.mission-command-grid .command-action-button',
+    ))
+    const dialogRect = dialog.getBoundingClientRect()
+    const mapRect = map?.getBoundingClientRect()
+    const commandRect = command?.getBoundingClientRect()
+    const style = window.getComputedStyle(dialog)
+    return {
+      paddingLeft: style.paddingLeft,
+      paddingRight: style.paddingRight,
+      mapLeft: mapRect ? mapRect.left - dialogRect.left : null,
+      mapRight: mapRect ? dialogRect.right - mapRect.right : null,
+      commandLeft: commandRect ? commandRect.left - dialogRect.left : null,
+      commandRight: commandRect ? dialogRect.right - commandRect.right : null,
+      buttonHeights: buttons.map((button) => button.offsetHeight),
+      buttonWidths: buttons.map((button) => button.offsetWidth),
+    }
+  })
+  expect(detailLayout.paddingLeft).toBe(detailLayout.paddingRight)
+  expect(detailLayout.mapLeft).toBeCloseTo(detailLayout.mapRight ?? 0, 0)
+  expect(detailLayout.commandLeft).toBeCloseTo(detailLayout.commandRight ?? 0, 0)
+  expect(new Set(detailLayout.buttonHeights).size).toBe(1)
+  expect(new Set(detailLayout.buttonWidths).size).toBe(1)
+  expect(await missionDetailDialog.evaluate((dialog) => {
+    const map = dialog.querySelector('.mission-detail-map-primary')
+    const command = dialog.querySelector('[data-testid="mission-command-actions"]')
+    const detailHeading = dialog.querySelector('.mission-detail-heading')
+    if (!map || !command || !detailHeading) {
+      return false
+    }
+    return Boolean(
+      map.compareDocumentPosition(command) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ) && Boolean(
+      command.compareDocumentPosition(detailHeading)
+      & Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+  })).toBe(true)
   await expect(page.getByText('25.0%').first()).toBeVisible()
   await expect(page.getByText('계획').last()).toBeVisible()
   await expect(page.getByText('1시간 0분', { exact: true })).toBeVisible()
@@ -303,14 +362,51 @@ test('시간 기반 Mission을 경로 UI 없이 생성하고 진행 정보를 �
   await expect(completeModal.getByText(completeSafetyMessage, { exact: true }))
     .toHaveCount(1)
   await completeModal.getByRole('button', { name: '확인창 닫기' }).click()
+  await missionDetailDialog.getByRole('button', {
+    name: '임무 상세 창 닫기',
+  }).click()
+  await expect(missionDetailDialog).toBeHidden()
 
   await page.getByRole('button', { name: '새 임무' }).click()
+  const createMissionDialog = page.getByRole('dialog', {
+    name: '순찰 임무 생성',
+  })
+  await expect(createMissionDialog).toBeVisible()
+  await expect(page.locator('body')).toHaveClass(/\bmodal-open\b/)
+  const createMissionForm = createMissionDialog.locator('.mission-create-form')
+  await expect(createMissionForm).toHaveCSS('justify-content', 'space-between')
+  await expect(createMissionForm).toHaveCSS('align-items', 'start')
+  const selectionFields = createMissionDialog.locator(
+    '.mission-create-selection-fields',
+  )
+  await expect(selectionFields.locator('.admin-form-field')).toHaveCount(2)
+  await expect(selectionFields).toHaveCSS('justify-content', 'space-between')
+  await expect(selectionFields).toHaveCSS('align-items', 'start')
+  await expect(selectionFields).toHaveCSS(
+    'grid-template-columns',
+    /\d+(?:\.\d+)?px \d+(?:\.\d+)?px/,
+  )
+  await expect(createMissionDialog.getByText(
+    'Online상태의 Mission이 부여되지 않은 로봇만 선택이 가능합니다.',
+  )).toBeVisible()
+  await expect(createMissionDialog.getByText('활성 구역 선택')).toHaveCount(0)
+  await expect(createMissionDialog.getByText(
+    '등록된 ACTIVE 구역만 표시됩니다.',
+  )).toHaveCount(0)
+  await expect(createMissionDialog.getByText(
+    '진행률과 예상 완료 시각 계산의 기준입니다.',
+  )).toHaveCount(0)
+  await expect(createMissionDialog.getByText(
+    '선택 사항 · 즉시 생성 시 비워두세요.',
+  )).toHaveCount(0)
   await expect.poll(() => robotCatalogRequestCount).toBeGreaterThan(1)
   await page.locator('#mission-create-robot').selectOption(ROBOT_ID)
   await page.locator('#mission-create-area').selectOption(AREA_ID)
   await page.locator('#mission-create-duration').fill('45')
   await expect(page.getByRole('button', { name: '임무 생성' })).toBeEnabled()
   await page.getByRole('button', { name: '임무 생성' }).click()
+  await expect(createMissionDialog).toBeHidden()
+  await expect(page.locator('body')).not.toHaveClass(/\bmodal-open\b/)
 
   await expect(
     page.getByRole('status').filter({

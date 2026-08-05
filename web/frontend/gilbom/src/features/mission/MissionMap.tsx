@@ -13,6 +13,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import carMarkerImage from '../../assets/car.png'
 import { loadNaverMapsScript } from '../../lib/naverMaps'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { useRobotRealtime } from '../robot/useRobotRealtime'
@@ -254,7 +255,7 @@ function createMissionMapOverlay(
     private areaPaths: SVGPathElement[] = []
     private trajectoryLine: SVGPolylineElement | null = null
     private markerGroup: SVGGElement | null = null
-    private markerDirection: SVGPathElement | null = null
+    private markerDirection: SVGImageElement | null = null
 
     constructor() {
       super()
@@ -387,17 +388,19 @@ function createMissionMapOverlay(
           'data-testid',
           'mission-current-position',
         )
-        const circle = document.createElementNS(
-          'http://www.w3.org/2000/svg',
-          'circle',
-        )
-        circle.setAttribute('r', '15')
         this.markerDirection = document.createElementNS(
           'http://www.w3.org/2000/svg',
-          'path',
+          'image',
         )
-        this.markerDirection.setAttribute('d', 'M 0 -10 L 5 7 L 0 4 L -5 7 Z')
-        this.markerGroup.append(circle, this.markerDirection)
+        this.markerDirection.classList.add('mission-map-current-car')
+        this.markerDirection.setAttribute('data-testid', 'mission-current-car')
+        this.markerDirection.setAttribute('href', carMarkerImage)
+        this.markerDirection.setAttribute('x', '-16')
+        this.markerDirection.setAttribute('y', '-23')
+        this.markerDirection.setAttribute('width', '32')
+        this.markerDirection.setAttribute('height', '46')
+        this.markerDirection.setAttribute('preserveAspectRatio', 'xMidYMid meet')
+        this.markerGroup.append(this.markerDirection)
       } else if (this.snapshot.currentPosition === null) {
         this.markerGroup?.remove()
         this.markerGroup = null
@@ -740,17 +743,25 @@ function MissionFallbackMap({ snapshot }: { snapshot: MissionMapResponse }) {
         ) : null}
         {current !== null && currentPoint !== null ? (
           <g
-            className="mission-map-current"
+            className={`mission-map-current${
+              current.connectivityStatus === 'ONLINE' ? '' : ' is-offline'
+            }`}
             transform={`translate(${currentPoint.x} ${currentPoint.y})`}
             data-testid="mission-current-position"
             data-latitude={current.latitude}
             data-longitude={current.longitude}
             data-heading={current.headingDeg ?? ''}
           >
-            <circle r="13" />
-            <path
-              d="M 0 -9 L 5 6 L 0 3 L -5 6 Z"
+            <image
+              className="mission-map-current-car"
+              href={carMarkerImage}
+              x="-16"
+              y="-23"
+              width="32"
+              height="46"
+              preserveAspectRatio="xMidYMid meet"
               transform={`rotate(${current.headingDeg ?? 0})`}
+              data-testid="mission-current-car"
             />
           </g>
         ) : null}
@@ -878,7 +889,7 @@ export function MissionMap({
           실제 궤적 ({displayedSnapshot?.trajectory.length ?? 0})
         </span>
         <span className="mission-map-legend-current">
-          <span aria-hidden="true" />
+          <img src={carMarkerImage} alt="" aria-hidden="true" />
           현재 위치
         </span>
       </div>
