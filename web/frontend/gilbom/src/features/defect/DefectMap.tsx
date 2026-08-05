@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { RefObject } from 'react'
 import { loadNaverMapsScript } from '../../lib/naverMaps'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { DefectDetailCard } from './DefectDetailCard'
@@ -209,6 +210,8 @@ interface DefectMapProps {
   onSelect: (defectId: string | null) => void
   /** 카드에서 상태를 바꾸면 목록·지도를 다시 읽는다. */
   onChanged: () => void
+  /** 목록에서 결함을 고르면 페이지가 이 카드로 스크롤한다. */
+  cardRef?: RefObject<HTMLElement | null>
 }
 
 export function DefectMap({
@@ -216,6 +219,7 @@ export function DefectMap({
   selectedDefectId,
   onSelect,
   onChanged,
+  cardRef,
 }: DefectMapProps) {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<naver.maps.Map | null>(null)
@@ -469,7 +473,11 @@ export function DefectMap({
   }, [features])
 
   return (
-    <article className="content-card defect-map-card" aria-label="결함 지도">
+    <article
+      className="content-card defect-map-card"
+      aria-label="결함 지도"
+      ref={cardRef}
+    >
       <div className="defect-map-legend">
         {legendItems.map(({ tone, label }) => (
           <span
