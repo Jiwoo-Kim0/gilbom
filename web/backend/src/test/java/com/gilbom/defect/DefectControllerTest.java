@@ -222,13 +222,17 @@ class DefectControllerTest {
         verifyNoInteractions(commandService);
     }
 
+    /**
+     * 전이 판정은 service가 하고 controller는 409로 옮기기만 한다. 지금 규칙에서
+     * 실제로 막히는 요청(NEW로 되돌리기)을 본문에 담아 이야기를 맞춰둔다.
+     */
     @Test
     void mapsDisallowedTransitionToConflict() throws Exception {
         when(commandService.changeStatus(
                 eq(USER_ID), eq(DEFECT_ID), any(), any()))
                 .thenThrow(new BusinessException(
                         ErrorCode.DEFECT_STATE_CONFLICT,
-                        "허용되지 않는 상태 전이입니다."));
+                        "신규 상태로는 되돌릴 수 없습니다."));
 
         mockMvc.perform(patch("/api/v1/defects/{defectId}/status", DEFECT_ID)
                         .with(user(USER_ID.toString())
@@ -236,9 +240,8 @@ class DefectControllerTest {
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"workflowStatus":"RESOLVED",
-                                 "resolution":"REPAIRED",
-                                 "reason":"현장 보수 완료 확인"}
+                                {"workflowStatus":"NEW",
+                                 "reason":"오탐 판정을 되돌린다"}
                                 """))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code", is("DEFECT_STATE_CONFLICT")));

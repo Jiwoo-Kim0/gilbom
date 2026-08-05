@@ -9,7 +9,7 @@ export type { PageResponse }
 
 // ---------------------------------------------------------------- enum
 
-/** `DefectWorkflow`의 상태. 전이 규칙은 {@link ALLOWED_TRANSITIONS} 참고. */
+/** `DefectWorkflow`의 상태. 전이 규칙은 {@link allowedTransitions} 참고. */
 export const WORKFLOW_STATUSES = [
   'NEW',
   'ACCEPTED',
@@ -50,19 +50,31 @@ export const CATEGORIES = ['BRAILLE_BLOCK'] as const
 export type Category = (typeof CATEGORIES)[number]
 
 /**
- * 서버 `DefectWorkflow.ALLOWED_TRANSITIONS`를 그대로 옮긴 것이다.
- * 화면은 허용된 다음 상태만 보여주고, 최종 판정은 서버가 409로 한다.
+ * 사람이 지정할 수 있는 처리 상태. 서버 `DefectWorkflow.ASSIGNABLE_STATUSES`와 같다.
+ *
+ * <p>`NEW`는 결함이 적재될 때 시스템이 매기는 상태라 빠져 있다. 되돌리면 관측 이력과
+ * 어긋나고, 서버도 409로 막는다.
  */
-export const ALLOWED_TRANSITIONS: Record<WorkflowStatus, WorkflowStatus[]> = {
-  NEW: ['ACCEPTED', 'FALSE_POSITIVE', 'REJECTED'],
-  ACCEPTED: ['IN_PROGRESS', 'FALSE_POSITIVE', 'REJECTED'],
-  IN_PROGRESS: ['RESOLVED', 'FALSE_POSITIVE', 'REJECTED'],
-  RESOLVED: [],
-  FALSE_POSITIVE: [],
-  REJECTED: [],
+export const ASSIGNABLE_STATUSES: WorkflowStatus[] = [
+  'ACCEPTED',
+  'IN_PROGRESS',
+  'RESOLVED',
+  'FALSE_POSITIVE',
+  'REJECTED',
+]
+
+/**
+ * 지금 상태에서 고를 수 있는 다음 상태.
+ *
+ * <p>단계에 묶지 않는다(서버 `DefectWorkflow` 주석 참고). 현장 처리가 순서대로
+ * 흐르지 않아서, 접수 없이 바로 완료하거나 완료한 뒤 처리 중으로 되돌리는 일이 있다.
+ * 지금과 같은 상태만 뺀다. 최종 판정은 서버가 409로 한다.
+ */
+export function allowedTransitions(from: WorkflowStatus): WorkflowStatus[] {
+  return ASSIGNABLE_STATUSES.filter((status) => status !== from)
 }
 
-/** 종결 상태는 더 전이하지 않고 내용 수정도 막힌다. */
+/** 종결 상태는 내용 수정이 막힌다. 처리 상태 변경은 막지 않는다. */
 export const TERMINAL_STATUSES: WorkflowStatus[] = [
   'RESOLVED',
   'FALSE_POSITIVE',

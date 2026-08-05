@@ -21,7 +21,7 @@ import {
   getDefectObservations,
 } from './defectApi'
 import {
-  ALLOWED_TRANSITIONS,
+  allowedTransitions,
   DEFECT_TYPE_LABELS,
   isTerminal,
   RESOLUTIONS,
@@ -287,7 +287,7 @@ export function DefectDetailCard({
 
   const defect = detail?.defect ?? null
   const allowed: WorkflowStatus[] = defect
-    ? ALLOWED_TRANSITIONS[defect.workflowStatus]
+    ? allowedTransitions(defect.workflowStatus)
     : []
   // 수정을 막는 사유. null이면 수정할 수 있다. 서버 requireChangeable와 같은 규칙이라
   // 여기서 걸러내면 저장 눌러서 409를 받는 일이 없다.
@@ -298,7 +298,9 @@ export function DefectDetailCard({
       return '병합된 결함은 대표 결함에서 수정해야 합니다.'
     }
     if (isTerminal(defect.workflowStatus)) {
-      return '종결된 결함은 수정할 수 없습니다.'
+      // 상태 전이는 열려 있으므로 되살린 뒤 고칠 수 있다. 막다른 길처럼 보이지 않게
+      // 다음 행동을 함께 알려준다.
+      return '종결된 결함은 처리 상태를 먼저 바꿔야 수정할 수 있습니다.'
     }
     return null
   })()
@@ -588,11 +590,7 @@ export function DefectDetailCard({
           </dl>
 
           <div className="defect-card-actions">
-            {allowed.length === 0 ? (
-              <p className="defect-card-terminal">
-                종결된 결함이라 상태를 더 바꿀 수 없습니다.
-              </p>
-            ) : (
+            {canUpdate && (
               <>
                 <label className="defect-card-field">
                   <span>처리 상태 변경</span>
