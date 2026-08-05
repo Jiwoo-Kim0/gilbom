@@ -3,6 +3,8 @@ package com.gilbom.report.generation;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
 
@@ -36,7 +38,7 @@ public class ReportLlmResultRenderer {
             Map<String, Object> evidenceSnapshot
     ) {
         String renderedSummary =
-                narrative(result.summary());
+                narrative(result.summary(), prepared);
         StringBuilder body = new StringBuilder();
         body.append("# ").append(inline(reportTitle))
                 .append("\n\n## 요약\n")
@@ -56,9 +58,7 @@ public class ReportLlmResultRenderer {
                             "Validated defect evidence is missing");
                 }
                 body.append("- 결함 ID: ")
-                        .append(evidence.defectId())
-                        .append(" · 사건 코드: ")
-                        .append(inline(defect.incidentCode()))
+                        .append(inline(evidence.incidentCode()))
                         .append(" · 결함 유형: ")
                         .append(ReportKoreanLabels.defectType(
                                 defect.defectType()))
@@ -69,7 +69,9 @@ public class ReportLlmResultRenderer {
                         .append(ReportKoreanLabels.workflowStatus(
                                 evidence.workflowStatus()))
                         .append(" — ")
-                        .append(narrative(defect.rationale()))
+                        .append(narrative(
+                                defect.rationale(),
+                                prepared))
                         .append('\n');
             }
         }
@@ -84,17 +86,22 @@ public class ReportLlmResultRenderer {
                                 action.priority()))
                         .append("] ")
                         .append(narrative(
-                                action.recommendation()));
+                                action.recommendation(),
+                                prepared));
                 if (!action.relatedDefectIds().isEmpty()) {
                     body.append(" — 관련 결함 ID: ")
                             .append(action.relatedDefectIds()
                                     .stream()
-                                    .map(UUID::toString)
+                                    .map(defectId -> incidentCode(
+                                            defectId,
+                                            prepared))
                                     .collect(java.util.stream.Collectors
                                             .joining(", ")));
                 }
                 body.append(" — ")
-                        .append(narrative(action.rationale()))
+                        .append(narrative(
+                                action.rationale(),
+                                prepared))
                         .append('\n');
             }
         }
@@ -187,8 +194,35 @@ public class ReportLlmResultRenderer {
                 .trim();
     }
 
-    private static String narrative(String value) {
-        return inline(
-                ReportKoreanLabels.translateNarrative(value));
+    private static String narrative(
+            String value,
+            PreparedReportLlmInput prepared
+    ) {
+        String translated =
+                ReportKoreanLabels.translateNarrative(value);
+        for (Map.Entry<UUID, DefectEvidence> entry
+                : prepared.evidenceById().entrySet()) {
+            translated = Pattern.compile(
+                            Pattern.quote(
+                                    entry.getKey().toString()),
+                            Pattern.CASE_INSENSITIVE)
+                    .matcher(translated)
+                    .replaceAll(Matcher.quoteReplacement(
+                            entry.getValue().incidentCode()));
+        }
+        return inline(translated);
+    }
+
+    private static String incidentCode(
+            UUID defectId,
+            PreparedReportLlmInput prepared
+    ) {
+        DefectEvidence evidence =
+                prepared.evidenceById().get(defectId);
+        if (evidence == null) {
+            throw new IllegalStateException(
+                    "Validated defect evidence is missing");
+        }
+        return inline(evidence.incidentCode());
     }
 }

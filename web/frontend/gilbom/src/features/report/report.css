@@ -380,7 +380,7 @@
 }
 
 .report-evidence-section {
-  margin-top: 28px;
+  margin: 28px 0 1.85em;
   padding-top: 24px;
   border-top: 1px solid var(--line);
 }

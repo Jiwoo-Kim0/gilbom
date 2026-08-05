@@ -1,10 +1,44 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  formatReportContentIdentifiers,
   formatReportDisplayTitle,
   toReportPeriodEndInstant,
   toReportPeriodStartInstant,
 } from '../src/features/report/reportFormat.ts'
+
+test('구형 보고서의 내부 UUID를 사용자용 결함 ID로 정규화한다', () => {
+  const defectId = '76d5ee01-b36b-4fa3-973c-ab7a46a824b4'
+  const incidentCode = 'INC-20260805-000004'
+  const content = [
+    '## 주요 결함',
+    `- 결함 ID: ${defectId} · 사건 코드: ${incidentCode} · 결함 유형: 파손`,
+    '',
+    '## 조치 권고',
+    `- 현장 확인 — 관련 결함 ID: ${defectId}`,
+  ].join('\n')
+
+  const formatted = formatReportContentIdentifiers(content)
+
+  assert.equal(formatted.includes(defectId), false)
+  assert.equal(
+    formatted.includes(`결함 ID: ${incidentCode} · 결함 유형: 파손`),
+    true,
+  )
+  assert.equal(
+    formatted.includes(`관련 결함 ID: ${incidentCode}`),
+    true,
+  )
+})
+
+test('검증 가능한 UUID와 사건 코드 쌍이 없으면 본문을 변경하지 않는다', () => {
+  const content = [
+    'UUID 76d5ee01-b36b-4fa3-973c-ab7a46a824b4',
+    '<script>alert(1)</script>',
+  ].join('\n')
+
+  assert.equal(formatReportContentIdentifiers(content), content)
+})
 
 test('단건 결함 보고서 제목을 결함코드 보고서 버전 형식으로 고정한다', () => {
   assert.equal(

@@ -61,6 +61,39 @@ export function toReportPeriodEndInstant(value: string): string | undefined {
 }
 
 const INCIDENT_CODE_PATTERN = /\bINC-[A-Z0-9]+(?:-[A-Z0-9]+)+\b/
+const LEGACY_DEFECT_IDENTIFIER_PATTERN = new RegExp(
+  [
+    '결함 ID:[ \\t]*',
+    '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})',
+    '[ \\t]*·[ \\t]*사건 코드:[ \\t]*',
+    '(INC-[A-Z0-9]+(?:-[A-Z0-9]+)+)',
+  ].join(''),
+  'gi',
+)
+
+/**
+ * 구형 LLM 보고서가 내부 UUID를 "결함 ID"로 노출한 표기를 사용자용 사건 코드로
+ * 바꾼다. UUID와 사건 코드의 쌍이 본문에서 확인된 경우에만 치환한다.
+ */
+export function formatReportContentIdentifiers(content: string): string {
+  const incidentCodeByDefectId = new Map<string, string>()
+  const normalized = content.replace(
+    LEGACY_DEFECT_IDENTIFIER_PATTERN,
+    (_match, defectId: string, incidentCode: string) => {
+      incidentCodeByDefectId.set(defectId.toLowerCase(), incidentCode)
+      return `결함 ID: ${incidentCode}`
+    },
+  )
+
+  let formatted = normalized
+  for (const [defectId, incidentCode] of incidentCodeByDefectId) {
+    formatted = formatted.replace(
+      new RegExp(defectId, 'gi'),
+      incidentCode,
+    )
+  }
+  return formatted
+}
 
 /**
  * 단건 결함 보고서는 모델이 만든 긴 제목을 화면 제목으로 사용하지 않는다.

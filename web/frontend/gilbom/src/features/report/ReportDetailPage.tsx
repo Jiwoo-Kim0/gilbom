@@ -39,6 +39,7 @@ import {
 } from './reportApi'
 import {
   actorLabel,
+  formatReportContentIdentifiers,
   formatReportDateTime,
   formatReportDisplayTitle,
   formatReportPeriod,
@@ -406,7 +407,7 @@ export function ReportDetailPage() {
                     canView={canViewDefectEvidence}
                   />
                   <SafeReportDocument
-                    text={version.content}
+                    text={formatReportContentIdentifiers(version.content)}
                     documentTitle={version.title}
                   />
                 </>

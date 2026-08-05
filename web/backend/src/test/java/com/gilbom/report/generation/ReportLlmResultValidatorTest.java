@@ -67,16 +67,16 @@ class ReportLlmResultValidatorTest {
                 .contains("유형별 결함: 파손 1건")
                 .contains("## 주요 결함")
                 .contains(
-                        "결함 ID: "
-                                + ReportLlmTestFixtures.DEFECT_ID)
+                        "결함 ID: INC-20260715-000001")
+                .contains(
+                        "관련 결함 ID: INC-20260715-000001")
+                .doesNotContain(
+                        ReportLlmTestFixtures.DEFECT_ID.toString())
                 .contains("결함 유형: 파손")
                 .contains("위험도: 높음")
                 .contains("처리 상태: 신규")
                 .contains("## 조치 권고")
                 .contains("[조치 우선순위: 높음]")
-                .contains(
-                        "관련 결함 ID: "
-                                + ReportLlmTestFixtures.DEFECT_ID)
                 .doesNotContain("DAMAGED")
                 .doesNotContain("HIGH")
                 .doesNotContain("NEW")
@@ -191,9 +191,11 @@ class ReportLlmResultValidatorTest {
         assertThat(content.body())
                 .contains(
                         "defectId "
-                                + ReportLlmTestFixtures.DEFECT_ID
+                                + "INC-20260715-000001"
                                 + "는 파손, 높음, 신규 상태이며 "
                                 + "일반 수준")
+                .doesNotContain(
+                        ReportLlmTestFixtures.DEFECT_ID.toString())
                 .doesNotContain("DAMAGED")
                 .doesNotContain("HIGH")
                 .doesNotContain("NEW")

@@ -25,6 +25,7 @@ import {
   updateReport,
 } from './reportApi'
 import {
+  formatReportContentIdentifiers,
   toDateTimeLocal,
 } from './reportFormat'
 import { getReportActionPolicy } from './reportPolicy'
@@ -103,7 +104,9 @@ export function ReportEditorPage() {
         setSummary(loaded.currentVersion.summary ?? '')
         setPeriodFrom(toDateTimeLocal(loaded.currentVersion.periodFrom))
         setPeriodTo(toDateTimeLocal(loaded.currentVersion.periodTo))
-        setContent(loaded.currentVersion.content)
+        setContent(formatReportContentIdentifiers(
+          loaded.currentVersion.content,
+        ))
         setStatistics(loaded.currentVersion.statistics)
       })
       .catch((loadError: unknown) => {
@@ -160,7 +163,9 @@ export function ReportEditorPage() {
       setSummary(conflictDetail.currentVersion.summary ?? '')
       setPeriodFrom(toDateTimeLocal(conflictDetail.currentVersion.periodFrom))
       setPeriodTo(toDateTimeLocal(conflictDetail.currentVersion.periodTo))
-      setContent(conflictDetail.currentVersion.content)
+      setContent(formatReportContentIdentifiers(
+        conflictDetail.currentVersion.content,
+      ))
       setStatistics(conflictDetail.currentVersion.statistics)
       setChangeNote('')
     }
