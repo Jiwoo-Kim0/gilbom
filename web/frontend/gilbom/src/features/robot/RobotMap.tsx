@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import carMarkerImage from '../../assets/car.png'
 import { loadNaverMapsScript } from '../../lib/naverMaps'
 import type { RobotMarker, RobotStatus } from './robotTypes'
 
@@ -19,14 +20,12 @@ const DEFAULT_ZOOM = 14
 
 const naverMapClientId = import.meta.env.VITE_NAVER_MAP_CLIENT_ID
 
-const HEADING_ARROWS = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'] as const
-
-function headingArrow(headingDeg: number | null): string {
+function headingIndex(headingDeg: number | null): number {
   if (headingDeg === null || !Number.isFinite(headingDeg)) {
-    return HEADING_ARROWS[0]
+    return 0
   }
   const normalized = ((headingDeg % 360) + 360) % 360
-  return HEADING_ARROWS[Math.round(normalized / 45) % HEADING_ARROWS.length]
+  return Math.round(normalized / 45) % 8
 }
 
 function createMarkerIcon(
@@ -34,15 +33,16 @@ function createMarkerIcon(
   status: RobotStatus,
   headingDeg: number | null,
 ): naver.maps.MarkerIcon {
-  // Nginx CSP가 style-src 'self'를 유지하므로 Marker HTML에도 style 속성을
-  // 넣지 않는다. 방향은 8방위 문자로 표현하고 정확한 각도는 title에 남긴다.
+  const direction = headingIndex(headingDeg)
   return {
     content:
       `<span class="robot-map-marker robot-map-marker-${status}">`
-      + `<span class="robot-map-marker-arrow">${headingArrow(headingDeg)}</span>`
+      + `<img class="robot-map-marker-car robot-map-marker-heading-${direction}" `
+      + `src="${carMarkerImage}" alt="">`
+      + '<span class="robot-map-marker-status" aria-hidden="true"></span>'
       + '</span>',
-    size: new maps.Size(28, 28),
-    anchor: new maps.Point(14, 14),
+    size: new maps.Size(44, 44),
+    anchor: new maps.Point(22, 22),
   }
 }
 
