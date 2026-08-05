@@ -14,8 +14,8 @@ class LlmPromptCatalogTest {
             new LlmPromptCatalog();
 
     @Test
-    void reportV2DefinesSummaryImageJudgmentAndActionOwnership() {
-        String prompt = catalog.systemPrompt("report-v2");
+    void reportV3DefinesVerifiedIdentifiersAndKoreanTerminology() {
+        String prompt = catalog.systemPrompt("report-v3");
 
         assertThat(prompt)
                 .contains(
@@ -26,15 +26,23 @@ class LlmPromptCatalogTest {
                         "supports, qualifies, or conflicts",
                         "담당: <관련 기능 부서 또는 역할>",
                         "조치: <구체적인 연락·현장 통제·점검·수리·후속 확인 방법>",
-                        "verification or closure method");
+                        "verification or closure method",
+                        "Copy them character-for-character",
+                        "MISSING=미설치",
+                        "MEDIUM=보통",
+                        "NEW=신규",
+                        "NORMAL=일반",
+                        "Never expose raw enum tokens");
     }
 
     @Test
-    void keepsReportV1ForRollbackAndRejectsUnknownVersion() {
+    void keepsOlderPromptsForRollbackAndRejectsUnknownVersion() {
         assertThat(catalog.systemPrompt("report-v1"))
                 .contains("return exactly these top-level fields");
+        assertThat(catalog.systemPrompt("report-v2"))
+                .contains("matching image");
         assertThatThrownBy(
-                () -> catalog.systemPrompt("report-v3"))
+                () -> catalog.systemPrompt("report-v4"))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(exception -> assertThat(
                         ((BusinessException) exception)

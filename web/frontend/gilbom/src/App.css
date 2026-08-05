@@ -225,7 +225,6 @@
 
 .main-content {
   width: 100%;
-  max-width: 1180px;
   margin: 0;
   padding: 40px var(--app-content-gutter) 56px;
 }
@@ -395,7 +394,7 @@
 /* 지도가 넓은 쪽을 쓰고 조건 패널이 오른쪽에 붙는다. */
 .defect-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
+  grid-template-columns: minmax(0, 1fr) 260px;
   gap: 18px;
   align-items: start;
 }
@@ -633,39 +632,19 @@
 
 .defect-map-card {
   display: grid;
-  gap: 16px;
   padding: 20px;
   /* 목록에서 결함을 고르면 이 카드로 스크롤한다. 화면 맨 위에 딱 붙지 않게 띄운다. */
   scroll-margin-top: 24px;
 }
 
-.defect-map-legend {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.defect-legend-item {
-  display: flex;
-  gap: 8px;
-  height: 38px;
-  padding: 0 14px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  align-items: center;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 700;
-}
-
 .defect-map-placeholder {
-  min-height: 420px;
+  min-height: clamp(520px, 62vh, 700px);
   border-radius: 14px;
 }
 
 .defect-map-canvas-wrap {
   position: relative;
-  min-height: 420px;
+  height: clamp(520px, 62vh, 700px);
   border-radius: 14px;
   overflow: hidden;
 }
@@ -673,7 +652,6 @@
 .defect-map-canvas {
   width: 100%;
   height: 100%;
-  min-height: 420px;
 }
 
 /*
@@ -698,16 +676,20 @@
   transform: rotate(-45deg);
 }
 
-.defect-marker-received {
-  background: #6f6a5e;
+.defect-marker-damaged {
+  background: #d64545;
 }
 
-.defect-marker-progress {
-  background: #b8863b;
+.defect-marker-missing {
+  background: #2878c8;
 }
 
-.defect-marker-done {
-  background: #7a5c0c;
+.defect-marker-installation-invalid {
+  background: #c47a16;
+}
+
+.defect-marker-unknown-anomaly {
+  background: #7656b1;
 }
 
 .defect-marker.is-selected {
@@ -2868,14 +2850,22 @@ button:disabled {
   cursor: pointer;
 }
 
-.defect-cluster-received {
-  background: #6f6a5e;
+.defect-cluster-damaged {
+  background: #d64545;
 }
 
-.defect-cluster-progress {
-  background: #b8863b;
+.defect-cluster-missing {
+  background: #2878c8;
 }
 
-.defect-cluster-done {
-  background: #7a5c0c;
+.defect-cluster-installation-invalid {
+  background: #c47a16;
+}
+
+.defect-cluster-unknown-anomaly {
+  background: #7656b1;
+}
+
+.defect-cluster-mixed {
+  background: #4b5563;
 }

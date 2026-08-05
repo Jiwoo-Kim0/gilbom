@@ -11,7 +11,6 @@ const columns = [
   '유형',
   '심각도',
   '위치',
-  '최근 관측',
   '반복',
   '신뢰도',
   '상태',
@@ -117,6 +116,8 @@ export function DefectList({
   const items = page?.content ?? []
   const currentPage = page?.page ?? 0
   const totalPages = page?.totalPages ?? 0
+  const showsFirstSeenAt = sort.startsWith('firstSeenAt,')
+  const dateColumnLabel = showsFirstSeenAt ? '최초 발견' : '최근 관측'
 
   return (
     <article className="content-card defect-list-card">
@@ -156,7 +157,7 @@ export function DefectList({
               <span className="sr-only">병합 선택</span>
             </span>
           )}
-          {columns.map((column) => (
+          {[...columns.slice(0, 4), dateColumnLabel, ...columns.slice(4)].map((column) => (
             <span key={column} role="columnheader">
               {column}
             </span>
@@ -244,7 +245,9 @@ export function DefectList({
               {formatLocationShort(defect)}
             </span>
             <span role="cell" className="defect-cell-number">
-              {formatDateTime(defect.lastSeenAt)}
+              {formatDateTime(
+                showsFirstSeenAt ? defect.firstSeenAt : defect.lastSeenAt,
+              )}
             </span>
             <span role="cell" className="defect-cell-number">
               {defect.observationCount}회

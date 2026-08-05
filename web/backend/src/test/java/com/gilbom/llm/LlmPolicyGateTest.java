@@ -59,13 +59,13 @@ class LlmPolicyGateTest {
     }
 
     @Test
-    void allowsCurrentReportV2AndRejectsUnknownPromptVersion() {
+    void allowsCurrentReportV3AndRejectsUnknownPromptVersion() {
         LlmProperties properties = approvedProperties();
-        properties.setPromptVersion("report-v2");
+        properties.setPromptVersion("report-v3");
 
         assertThat(gate.evaluate(properties).enabled()).isTrue();
 
-        properties.setPromptVersion("report-v3");
+        properties.setPromptVersion("report-v4");
         assertThat(gate.evaluate(properties).violations())
                 .contains(
                         LlmPolicyViolation

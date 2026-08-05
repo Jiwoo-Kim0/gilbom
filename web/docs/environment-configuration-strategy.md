@@ -224,7 +224,7 @@ storage key와 SHA-256만 저장하며 presigned URL은 저장하지 않는다.
 | `GILBOM_LLM_DAILY_REQUEST_LIMIT` |  | 양수인 환경별 요청 상한 |
 | `GILBOM_LLM_DAILY_BUDGET` |  | 양수인 일별 크레딧 승인 예산 |
 | `GILBOM_LLM_MAX_CONCURRENT_REQUESTS` |  | 기본 `5`, 인스턴스별 `1..20` 동시 외부 호출 상한 |
-| `GILBOM_LLM_PROMPT_VERSION` |  | 운영 `report-v2`; 롤백용 `report-v1`도 허용 |
+| `GILBOM_LLM_PROMPT_VERSION` |  | 운영 `report-v3`; 롤백용 `report-v1`, `report-v2`도 허용 |
 | `GILBOM_LLM_POLICY_APPROVED` |  | 전체 LLM 운영 정책 승인 여부 |
 | `GILBOM_LLM_TRAINING_EXCLUSION_APPROVED` |  | 입력·출력 학습 제외 확인 여부 |
 | `GILBOM_LLM_DATA_RETENTION_APPROVED` |  | 보존 기간·삭제 정책 승인 여부 |

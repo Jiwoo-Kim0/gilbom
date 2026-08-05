@@ -5,6 +5,15 @@ import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { DefectDetailCard } from './DefectDetailCard'
 import { getDefectMap } from './defectApi'
 import {
+  bboxForDefectMapFilter,
+  defectMapFilterKey,
+  defectTypeTone,
+} from './defectMapState'
+import type {
+  DefectMapViewport,
+  DefectTypeTone,
+} from './defectMapState'
+import {
   DEFECT_TYPE_LABELS,
   RISK_LEVEL_LABELS,
   WORKFLOW_STATUS_LABELS,
@@ -12,17 +21,9 @@ import {
 import type {
   DefectFilters,
   DefectMapFeature,
-  WorkflowStatus,
 } from './defectTypes'
 
-/** 범례는 세 갈래로 접는다. 6개 상태를 그대로 칠하면 지도에서 구분이 안 된다. */
-export type DefectStatusTone = 'progress' | 'received' | 'done'
-
-const legendItems: { tone: DefectStatusTone; label: string }[] = [
-  { tone: 'received', label: '접수 전·접수' },
-  { tone: 'progress', label: '처리 중' },
-  { tone: 'done', label: '종결' },
-]
+type DefectClusterTone = DefectTypeTone | 'mixed'
 
 /**
  * 화면상 이 픽셀 안에 들어오는 마커들을 한 덩어리로 묶는다.
@@ -87,19 +88,22 @@ function clusterFeatures(
 }
 
 /**
- * 묶인 마커의 아이콘. 개수를 숫자로 보여주고, 안에 든 결함 중 가장 급한 상태를
- * 색으로 쓴다. 처리 중인 결함이 섞여 있는데 종결 색으로 보이면 안 된다.
+ * 묶인 마커의 아이콘. 같은 유형만 모였으면 해당 유형의 색을 유지하고, 여러 유형이
+ * 섞였으면 중립색을 사용한다.
  */
 function createClusterIcon(
   maps: typeof naver.maps,
   cluster: MarkerCluster,
 ): naver.maps.MarkerIcon {
-  const tones = cluster.features.map(
-    (feature) => toneOf(feature.properties.workflowStatus),
+  const tones = new Set(
+    cluster.features.map(
+      (feature) => defectTypeTone(feature.properties.defectType),
+    ),
   )
-  const tone: DefectStatusTone = tones.includes('received')
-    ? 'received'
-    : (tones.includes('progress') ? 'progress' : 'done')
+  const [firstTone] = tones
+  const tone: DefectClusterTone = tones.size === 1 && firstTone !== undefined
+    ? firstTone
+    : 'mixed'
   // style 속성은 CSP(style-src 'self')에 막힌다. 모양은 App.css에만 둔다.
   return {
     content:
@@ -113,19 +117,6 @@ function createClusterIcon(
 
 /** App.css의 `.defect-marker-box` 크기와 같아야 앵커가 중심에 맞는다. */
 const MARKER_BOX_SIZE = 34
-
-function toneOf(status: WorkflowStatus): DefectStatusTone {
-  switch (status) {
-    case 'IN_PROGRESS':
-      return 'progress'
-    case 'RESOLVED':
-    case 'FALSE_POSITIVE':
-    case 'REJECTED':
-      return 'done'
-    default:
-      return 'received'
-  }
-}
 
 // 구미시청 인근 — 조회 결과가 없을 때의 기본 뷰포트.
 const DEFAULT_CENTER = { lat: 36.1195, lng: 128.3446 }
@@ -185,7 +176,7 @@ const naverMapClientId = import.meta.env.VITE_NAVER_MAP_CLIENT_ID
 
 function createMarkerIcon(
   maps: typeof naver.maps,
-  tone: DefectStatusTone,
+  tone: DefectTypeTone,
   selected: boolean,
 ): naver.maps.MarkerIcon {
   // style 속성을 쓰면 Nginx CSP(style-src 'self')가 차단해 마커가 보이지 않는다.
@@ -226,10 +217,36 @@ export function DefectMap({
   const [mapStatus, setMapStatus] = useState<'loading' | 'ready' | 'error'>(
     () => (naverMapClientId ? 'loading' : 'error'),
   )
-  /** "minLon,minLat,maxLon,maxLat". 첫 조회는 뷰포트 제한 없이 전체를 본다. */
-  const [bbox, setBbox] = useState('')
-  const [features, setFeatures] = useState<DefectMapFeature[]>([])
-  const [error, setError] = useState<string | null>(null)
+  /*
+   * bbox는 해당 필터에서 지도를 맞춘 뒤에만 유효하다. 날짜나 검색 조건이 바뀌면
+   * 이전 화면 범위를 재사용하지 않고 전체 범위로 다시 조회해야 새 결과가 지도
+   * 밖에 있다는 이유로 사라지지 않는다.
+   */
+  const filterKey = useMemo(
+    () => defectMapFilterKey(filters),
+    [filters],
+  )
+  const filterKeyRef = useRef(filterKey)
+  const [viewport, setViewport] = useState<DefectMapViewport>({
+    filterKey,
+    bbox: '',
+  })
+  const bbox = bboxForDefectMapFilter(viewport, filterKey)
+  const requestKey = `${filterKey}\u0000${bbox}`
+  const [featureSnapshot, setFeatureSnapshot] = useState<{
+    key: string
+    features: DefectMapFeature[]
+    error: string | null
+  } | null>(null)
+  // 새 응답이 오는 동안에는 기존 마커를 유지하되, 새 필터의 결과로 오인하지 않는다.
+  const features = useMemo(
+    () => featureSnapshot?.features ?? [],
+    [featureSnapshot],
+  )
+  const queryLoading = featureSnapshot?.key !== requestKey
+  const error = featureSnapshot?.key === requestKey
+    ? featureSnapshot.error
+    : null
   const [scale, setScale] = useState<MapScale | null>(null)
   // 확대·이동이 끝나면 화면 좌표가 달라져 마커 묶음을 다시 계산해야 한다.
   const [idleToken, setIdleToken] = useState(0)
@@ -238,7 +255,11 @@ export function DefectMap({
    * 다를 수 있어, 처음에는 전체를 조회해 그 범위로 이동한다. 이 전에 뷰포트
    * bbox를 적용하면 엉뚱한 범위로 걸러 0건이 되고 지도가 영영 비어 보인다.
    */
-  const fittedRef = useRef(false)
+  const fittedFilterKeyRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    filterKeyRef.current = filterKey
+  }, [filterKey])
 
   useEffect(() => {
     if (!naverMapClientId) return
@@ -271,7 +292,7 @@ export function DefectMap({
         mapRef.current = map
         setMapStatus('ready')
 
-        // 축척은 조회를 유발하지 않으므로 아래 fittedRef 가드와 debounce를 타지
+        // 축척은 조회를 유발하지 않으므로 아래 fittedFilterKeyRef 가드와 debounce를 타지
         // 않는다. 가드는 첫 조회 결과를 지우지 않으려고 bbox에만 거는 것이다.
         const refreshScale = () => {
           const next = computeScale(
@@ -299,15 +320,18 @@ export function DefectMap({
           // bbox를 걸어버리면 첫 조회 결과를 스스로 지운다.
           // 묶음은 화면 좌표 기준이라 bbox 재조회와 무관하게 다시 계산해야 한다.
           setIdleToken((token) => token + 1)
-          if (!fittedRef.current) return
+          if (fittedFilterKeyRef.current !== filterKeyRef.current) return
           window.clearTimeout(timer)
           timer = window.setTimeout(() => {
+            const activeFilterKey = filterKeyRef.current
+            if (fittedFilterKeyRef.current !== activeFilterKey) return
             const bounds = map.getBounds()
             const southWest = bounds.getSW()
             const northEast = bounds.getNE()
             // 서버 계약 순서는 minLon,minLat,maxLon,maxLat다.
-            setBbox(
-              [
+            setViewport({
+              filterKey: activeFilterKey,
+              bbox: [
                 southWest.lng(),
                 southWest.lat(),
                 northEast.lng(),
@@ -315,7 +339,7 @@ export function DefectMap({
               ]
                 .map((value) => value.toFixed(6))
                 .join(','),
-            )
+            })
           }, VIEWPORT_DEBOUNCE_MS)
         })
       })
@@ -335,26 +359,37 @@ export function DefectMap({
     getDefectMap({ ...filters, bbox })
       .then((response) => {
         if (!cancelled) {
-          setFeatures(response.features)
-          setError(null)
+          setFeatureSnapshot({
+            key: requestKey,
+            features: response.features,
+            error: null,
+          })
         }
       })
       .catch((cause: unknown) => {
         if (!cancelled) {
-          setFeatures([])
-          setError(getApiErrorMessage(cause))
+          setFeatureSnapshot({
+            key: requestKey,
+            features: [],
+            error: getApiErrorMessage(cause),
+          })
         }
       })
 
     return () => {
       cancelled = true
     }
-  }, [filters, bbox])
+  }, [filters, bbox, requestKey])
 
   // 첫 조회 결과가 도착하면 그 결함들이 모두 보이도록 지도를 한 번 맞춘다.
   // 이후의 이동·확대는 사용자 조작을 따르고 뷰포트 bbox로 다시 조회한다.
   useEffect(() => {
-    if (mapStatus !== 'ready' || fittedRef.current) return
+    if (
+      mapStatus !== 'ready'
+      || bbox !== ''
+      || featureSnapshot?.key !== requestKey
+      || fittedFilterKeyRef.current === filterKey
+    ) return
     if (features.length === 0 || !mapRef.current || !window.naver) return
 
     const { maps } = window.naver
@@ -362,6 +397,8 @@ export function DefectMap({
     const longitudes = features.map((feature) => feature.geometry.coordinates[0])
     // 한 점뿐이면 fitBounds가 과도하게 확대되므로 약간의 여백을 준다.
     const padding = 0.002
+    // fitBounds가 동기로 idle을 발생시켜도 새 필터의 bbox를 받을 수 있게 먼저 기록한다.
+    fittedFilterKeyRef.current = filterKey
     mapRef.current.fitBounds(
       new maps.LatLngBounds(
         new maps.LatLng(
@@ -374,8 +411,14 @@ export function DefectMap({
         ),
       ),
     )
-    fittedRef.current = true
-  }, [features, mapStatus])
+  }, [
+    bbox,
+    featureSnapshot?.key,
+    features,
+    filterKey,
+    mapStatus,
+    requestKey,
+  ])
 
   // 마커는 조회 결과와 선택 상태에 따라 통째로 다시 만든다.
   useEffect(() => {
@@ -421,7 +464,7 @@ export function DefectMap({
           ? createClusterIcon(maps, cluster)
           : createMarkerIcon(
               maps,
-              toneOf(workflowStatus),
+              defectTypeTone(defectType),
               defectId === selectedDefectId,
             ),
         title: grouped
@@ -460,36 +503,12 @@ export function DefectMap({
     }
   }, [features, mapStatus, selectedDefectId, onSelect, idleToken])
 
-  const countByTone = useMemo(() => {
-    const counts: Record<DefectStatusTone, number> = {
-      progress: 0,
-      received: 0,
-      done: 0,
-    }
-    for (const feature of features) {
-      counts[toneOf(feature.properties.workflowStatus)] += 1
-    }
-    return counts
-  }, [features])
-
   return (
     <article
       className="content-card defect-map-card"
       aria-label="결함 지도"
       ref={cardRef}
     >
-      <div className="defect-map-legend">
-        {legendItems.map(({ tone, label }) => (
-          <span
-            key={tone}
-            className={`defect-legend-item defect-legend-item-${tone}`}
-          >
-            <span className="defect-status-dot" aria-hidden="true" />
-            {label} ({mapStatus === 'ready' ? countByTone[tone] : '—'})
-          </span>
-        ))}
-      </div>
-
       {mapStatus === 'error' ? (
         <div className="defect-map-placeholder map-placeholder empty-state">
           <span className="empty-state-icon" aria-hidden="true">
@@ -525,7 +544,7 @@ export function DefectMap({
               <span>{scale.label}</span>
             </div>
           )}
-          {mapStatus === 'loading' && (
+          {(mapStatus === 'loading' || queryLoading) && (
             <p className="defect-map-loading">지도를 불러오는 중입니다…</p>
           )}
           {error !== null && (

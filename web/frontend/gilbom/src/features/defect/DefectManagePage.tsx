@@ -91,7 +91,11 @@ export function DefectManagePage() {
 
   const filters = useMemo(() => readFilters(searchParams), [searchParams])
   const page = Number(searchParams.get('page') ?? '0')
-  const sort = searchParams.get('sort') ?? DEFAULT_SORT
+  const requestedSort = searchParams.get('sort') ?? DEFAULT_SORT
+  // 이전 링크의 내림차순 값도 화면 라벨의 의미대로 오래된 최초 발견부터 정렬한다.
+  const sort = requestedSort === 'firstSeenAt,desc'
+    ? 'firstSeenAt,asc'
+    : requestedSort
 
   const [selectedDefectId, setSelectedDefectId] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)

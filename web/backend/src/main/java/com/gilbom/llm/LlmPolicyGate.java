@@ -17,7 +17,7 @@ public class LlmPolicyGate {
     public static final Set<String> ALLOWED_REPORT_MODELS =
             Set.of("gpt-5.4-mini", "gpt-5.4");
     public static final Set<String> ALLOWED_PROMPT_VERSIONS =
-            Set.of("report-v1", "report-v2");
+            Set.of("report-v1", "report-v2", "report-v3");
 
     public LlmPolicyDecision evaluate(LlmProperties properties) {
         if (!properties.isEnabled()) {
