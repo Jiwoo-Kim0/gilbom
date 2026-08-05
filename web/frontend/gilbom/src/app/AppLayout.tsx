@@ -22,7 +22,7 @@ export function AppLayout() {
   const pageTitle = location.pathname.startsWith('/reports')
     ? '리포트'
     : (pageTitles[location.pathname] ?? '길봄 관리자')
-  const primaryRole = user?.roles.at(0)?.roleName ?? '권한 미지정'
+  const displayName = user?.displayName ?? '관리자'
 
   return (
     <>
@@ -30,14 +30,7 @@ export function AppLayout() {
         본문으로 바로가기
       </a>
       <div className="app-shell">
-        <NavigationBar
-          user={{
-            name: user?.displayName ?? '관리자',
-            title: '',
-            role: primaryRole,
-            permissions: user?.permissions ?? [],
-          }}
-        />
+        <NavigationBar permissions={user?.permissions ?? []} />
 
         <div className="app-frame">
           <header className="topbar">
@@ -47,9 +40,9 @@ export function AppLayout() {
             </div>
             <NavLink className="account-link" to="/my">
               <span className="account-avatar" aria-hidden="true">
-                {user?.displayName.slice(0, 1) ?? 'A'}
+                {displayName.slice(0, 1)}
               </span>
-              <span>내 계정</span>
+              <span>{displayName}</span>
             </NavLink>
           </header>
 

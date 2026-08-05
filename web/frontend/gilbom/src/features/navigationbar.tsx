@@ -20,16 +20,8 @@ import {
   type FrontendPermission,
 } from './auth/permissions'
 
-export interface NavigationBarUser {
-  name: string
-  title: string
-  role: string
-  permissions: readonly string[]
-  avatarUrl?: string
-}
-
 interface NavigationBarProps {
-  user: NavigationBarUser
+  permissions: readonly string[]
 }
 
 type NavigationItem = {
@@ -90,11 +82,10 @@ const navigationItems: readonly NavigationItem[] = [
   },
 ] as const
 
-export function NavigationBar({ user }: NavigationBarProps) {
-  const initials = user.name.slice(0, 1)
+export function NavigationBar({ permissions }: NavigationBarProps) {
   const visibleNavigationItems = navigationItems.filter((item) => (
     item.requiredPermission === null
-    || hasPermission(user.permissions, item.requiredPermission)
+    || hasPermission(permissions, item.requiredPermission)
   ))
 
   return (
@@ -123,24 +114,6 @@ export function NavigationBar({ user }: NavigationBarProps) {
           </NavLink>
         ))}
       </nav>
-
-      <div className="nb-footer">
-        <div className="nb-profile">
-          {user.avatarUrl ? (
-            <img className="nb-avatar" src={user.avatarUrl} alt="" />
-          ) : (
-            <span className="nb-avatar nb-avatar-fallback" aria-hidden="true">
-              {initials}
-            </span>
-          )}
-          <span className="nb-profile-text">
-            <strong>
-              {user.name}{user.title ? ` ${user.title}` : ''}
-            </strong>
-            <small>{user.role}</small>
-          </span>
-        </div>
-      </div>
     </aside>
   )
 }
