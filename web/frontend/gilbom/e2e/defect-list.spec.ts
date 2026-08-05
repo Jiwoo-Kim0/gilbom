@@ -125,6 +125,17 @@ test.describe('결함 목록 표', () => {
       return color
     })
     expect(colors[1], '미설치 점은 미설치 마커와 같은 색이다').toBe(markerColor)
+
+    // 범례가 지도에 딱 붙으면 칩이 지도 테두리에 얹힌 것처럼 보인다.
+    const gap = await page.evaluate(() => {
+      const legendRect = document
+        .querySelector('.defect-map-legend')!
+        .getBoundingClientRect()
+      const map = document.querySelector('.defect-map-canvas-wrap')
+        ?? document.querySelector('.defect-map-placeholder')!
+      return Math.round(map.getBoundingClientRect().top - legendRect.bottom)
+    })
+    expect(gap, '범례와 지도 사이 간격').toBeGreaterThanOrEqual(8)
   })
 
   test('행을 고르면 지도까지 화면이 올라간다', async ({ page }) => {
