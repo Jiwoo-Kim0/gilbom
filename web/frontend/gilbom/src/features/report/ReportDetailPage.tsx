@@ -396,7 +396,6 @@ export function ReportDetailPage() {
                 </div>
               ) : (
                 <>
-                  <SafeReportText text={version.content} />
                   <ReportEvidenceGallery
                     key={[
                       version.versionNo,
@@ -405,6 +404,7 @@ export function ReportDetailPage() {
                     defectIds={version.evidenceSnapshot.defectIds}
                     canView={canViewDefectEvidence}
                   />
+                  <SafeReportText text={version.content} />
                 </>
               )}
             </div>
