@@ -275,6 +275,10 @@ test('시간 기반 Mission을 경로 UI 없이 생성하고 진행 정보를 �
     name: '순찰 임무 관리',
   }))
     .toBeVisible()
+  await expect(page.getByText(
+    '순찰할 로봇에게 임무를 부여합니다.',
+    { exact: true },
+  )).toBeVisible()
   await expect(page.locator('#mission-filter-scope')).toHaveValue('ACTIVE')
   expect(requestedMissionScopes).toContain('ACTIVE')
 

@@ -725,7 +725,7 @@ export function MissionManagePage() {
         <div>
           <p className="eyebrow">PATROL MISSION</p>
           <h2 id="mission-page-title">순찰 임무 관리</h2>
-
+          <p>순찰할 로봇에게 임무를 부여합니다.</p>
         </div>
         <div className="mission-page-actions">
 
