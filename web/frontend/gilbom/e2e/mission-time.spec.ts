@@ -278,6 +278,28 @@ test('시간 기반 Mission을 경로 UI 없이 생성하고 진행 정보를 �
   await expect(page.locator('#mission-filter-scope')).toHaveValue('ACTIVE')
   expect(requestedMissionScopes).toContain('ACTIVE')
 
+  const missionFilter = page.locator('.mission-filter-grid')
+  const missionFilterActions = missionFilter.locator('.mission-filter-actions')
+  await expect(missionFilterActions).toHaveCSS('grid-column-start', '1')
+  await expect(missionFilterActions).toHaveCSS('grid-column-end', '-1')
+  await expect(missionFilterActions).toHaveCSS('justify-content', 'flex-end')
+  const filterButtonSpacing = await missionFilterActions
+    .getByRole('button')
+    .evaluateAll((buttons) => buttons.map((button) => {
+      const style = window.getComputedStyle(button)
+      return {
+        height: button.getBoundingClientRect().height,
+        paddingLeft: style.paddingLeft,
+        paddingRight: style.paddingRight,
+      }
+    }))
+  expect(new Set(filterButtonSpacing.map(({ height }) => height)).size).toBe(1)
+  expect(filterButtonSpacing.every(({ paddingLeft, paddingRight }) => (
+    paddingLeft === paddingRight
+  ))).toBe(true)
+  expect(new Set(filterButtonSpacing.map(({ paddingLeft }) => paddingLeft)).size)
+    .toBe(1)
+
   await page.locator('#mission-filter-scope').selectOption('TERMINAL')
   await page.getByRole('button', { name: '조회' }).click()
   await expect.poll(() => requestedMissionScopes.at(-1)).toBe('TERMINAL')

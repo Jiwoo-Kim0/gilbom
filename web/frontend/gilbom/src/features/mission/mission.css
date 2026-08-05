@@ -267,19 +267,30 @@
 }
 
 .mission-filter-grid {
+  --mission-filter-space: clamp(1rem, 2vw, 1.25rem);
+  --mission-filter-action-height: 2.625rem;
+  --mission-filter-action-inline-space: clamp(0.875rem, 1.5vw, 1rem);
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  gap: var(--mission-filter-space);
   align-items: end;
-  padding: 20px;
+  padding: var(--mission-filter-space);
 }
 
 .mission-filter-actions {
+  width: 100%;
+  grid-column: 1 / -1;
+  align-items: center;
   justify-content: flex-end;
+  justify-self: end;
 }
 
 .mission-filter-actions button {
-  gap: 7px;
+  min-height: var(--mission-filter-action-height);
+  gap: 0.5rem;
+  padding-inline: var(--mission-filter-action-inline-space);
+  align-items: center;
+  justify-content: center;
 }
 
 .mission-master-detail {
@@ -872,7 +883,8 @@
   }
 
   .mission-filter-actions {
-    grid-column: 1;
+    grid-column: 1 / -1;
+    justify-content: flex-end;
   }
 
   .mission-detail-heading {
