@@ -5,6 +5,7 @@ import { DefectFilter } from './DefectFilter'
 import { DefectList } from './DefectList'
 import { DefectMap } from './DefectMap'
 import { DefectMergeModal } from './DefectMergeModal'
+import { DefectSearchBar } from './DefectSearchBar'
 import { getDefects } from './defectApi'
 import { useDefectRealtime } from './useDefectRealtime'
 import { useAuthentication } from '../auth/authenticationContext'
@@ -34,8 +35,8 @@ function readFilters(params: URLSearchParams): DefectFilters {
   return {
     ...EMPTY_DEFECT_FILTERS,
     q: params.get('q') ?? '',
-    from: params.get('from') ?? '',
-    to: params.get('to') ?? '',
+    // 기간(from·to)은 화면에서 받지 않으므로 URL에서도 읽지 않는다. 필터 패널에
+    // 보이지 않는 기간 조건이 링크에 남아 "왜 안 나오지"가 되는 것을 막는다.
     // 상태 조건이 없으면 첫 진입이다. 종결된 결함은 조치할 것이 없어 지도와
     // 목록을 가리기만 하므로 기본으로는 빼둔다. 사용자가 체크를 전부 풀면
     // writeFilters가 allStatus 표식을 남기고, 그때는 진짜 전체를 보여준다.
@@ -60,12 +61,6 @@ function writeFilters(
   const params = new URLSearchParams()
   if (filters.q.length > 0) {
     params.set('q', filters.q)
-  }
-  if (filters.from.length > 0) {
-    params.set('from', filters.from)
-  }
-  if (filters.to.length > 0) {
-    params.set('to', filters.to)
   }
   if (filters.workflowStatuses.length === 0) {
     // "아직 안 고름"과 "전부 풀었음"을 구분한다. 이 표식이 없으면 체크를 전부
@@ -222,12 +217,15 @@ export function DefectManagePage() {
           {RISK_LEVEL_LABELS[lastEvent.riskLevel] ?? lastEvent.riskLevel}
         </p>
       )}
+      <DefectSearchBar
+        value={filters.q}
+        onChange={(q) => applyFilters({ ...filters, q })}
+        disabled={loading && result === null}
+      />
+
+      {/* 지도가 왼쪽, 조건 패널이 오른쪽이다. DOM 순서도 그대로 두고 좁은 화면에서만
+          CSS order로 패널을 위로 올린다. */}
       <div className="defect-layout">
-        <DefectFilter
-          filters={filters}
-          onChange={applyFilters}
-          disabled={loading && result === null}
-        />
         {/* 지도는 목록 페이지와 별개로 뷰포트 bbox 기준의 GeoJSON을 직접 조회한다.
             목록 20건에 묶이지 않고 화면에 보이는 범위 전체를 그린다. */}
         <DefectMap
@@ -235,6 +233,11 @@ export function DefectManagePage() {
           selectedDefectId={selectedDefectId}
           onSelect={setSelectedDefectId}
           onChanged={refresh}
+        />
+        <DefectFilter
+          filters={filters}
+          onChange={applyFilters}
+          disabled={loading && result === null}
         />
       </div>
       {canMerge && checkedVisible.length > 0 && (

@@ -252,6 +252,11 @@ export type DefectMergeResult = {
 
 export type DefectFilters = {
   q: string
+  /**
+   * 서버가 받는 기간이지만 결함 화면은 노출하지 않는다. 조치 대상은 "언제 것인지"보다
+   * 상태·심각도로 고르는 것이라 기간 조건이 실효가 없었다. 요약처럼 기간을 못박아
+   * 조회하는 쪽에서만 채운다.
+   */
   from: string
   to: string
   workflowStatuses: WorkflowStatus[]
