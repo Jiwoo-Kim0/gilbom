@@ -33,6 +33,35 @@ export type FrontendPermission =
   | typeof DEFECT_MERGE
   | typeof DEFECT_EXPORT
 
+const ENFORCED_PERMISSION_CODES: ReadonlySet<string> = new Set([
+  ADMIN_SETTINGS_MANAGE,
+  AUDIT_LOG_VIEW,
+  ROBOT_STATUS_VIEW,
+  ROBOT_REGISTER,
+  ROBOT_COMMAND_VIEW,
+  ROBOT_COMMAND_EXECUTE,
+  MISSION_VIEW,
+  MISSION_MANAGE,
+  REPORT_VIEW,
+  REPORT_CREATE,
+  REPORT_UPDATE,
+  REPORT_APPROVE,
+  DEFECT_STATUS_VIEW,
+  DEFECT_STATUS_UPDATE,
+  DEFECT_MERGE,
+  DEFECT_EXPORT,
+])
+
+/**
+ * 실제 API 인가 또는 기능 동작에 연결된 권한만 역할 편집 화면에 노출한다.
+ * 서버 catalog에만 있고 구현된 소비자가 없는 permission은 체크리스트에서 제외한다.
+ */
+export function isEnforcedPermissionCode(
+  permissionCode: string,
+): permissionCode is FrontendPermission {
+  return ENFORCED_PERMISSION_CODES.has(permissionCode)
+}
+
 export function hasPermission(
   permissions: readonly string[],
   requiredPermission: FrontendPermission,
