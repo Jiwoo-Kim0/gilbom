@@ -66,7 +66,7 @@ install -d -m 0700 "$BACKUP_DIR"
 # 암호화 수단이 없으면 dump를 뜨기 전에 멈춘다. 평문 dump를 만들어 놓고 실패하면
 # 개인정보가 든 파일이 디스크에 남는다.
 gilbom_backup_require_gpg
-recipient_fingerprint="$(gilbom_backup_recipient_fingerprint)"
+recipient_fingerprints="$(gilbom_backup_recipient_fingerprints)"
 
 compose() {
   if [ -n "$ENV_FILE" ]; then
@@ -128,7 +128,7 @@ manifest_file="$encrypted_file.manifest.json"
 gilbom_backup_write_manifest \
   "$manifest_file" \
   "$BACKUP_NAME" \
-  "$recipient_fingerprint" \
+  "$recipient_fingerprints" \
   "$encrypted_file" \
   "$encrypted_file.sha256"
 

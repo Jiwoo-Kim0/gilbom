@@ -25,8 +25,9 @@ gilbom_backup_require_gpg() {
     || gilbom_backup_fail "backup recipient public key is empty"
 }
 
-# 수신자 공개키의 지문이다. manifest에 남겨 어느 키로 잠갔는지 나중에 알 수 있게 한다.
-gilbom_backup_recipient_fingerprint() {
+# 수신자 공개키의 지문 목록이다. 파일에 공개키가 여러 개 들어 있으면 전부 돌려준다.
+# manifest에 남겨 어느 키들로 잠갔는지 나중에 알 수 있게 한다.
+gilbom_backup_recipient_fingerprints() {
   home="$(mktemp -d)"
   chmod 0700 "$home"
   gpg --batch --quiet --no-options --homedir "$home" \
@@ -35,28 +36,52 @@ gilbom_backup_recipient_fingerprint() {
       rm -rf "$home"
       gilbom_backup_fail "backup recipient public key could not be imported"
     }
-  fingerprint="$(
+  # pub 줄 바로 뒤의 fpr만 취한다. subkey 지문까지 넣으면 같은 키를 두 번 지정한다.
+  fingerprints="$(
     gpg --batch --quiet --no-options --homedir "$home" \
       --list-keys --with-colons 2>/dev/null \
-      | awk -F: '$1 == "fpr" { print $10; exit }'
+      | awk -F: '
+          $1 == "pub" { want = 1; next }
+          $1 == "fpr" && want { print $10; want = 0 }
+        '
   )"
   rm -rf "$home"
-  [ -n "$fingerprint" ] \
+  [ -n "$fingerprints" ] \
     || gilbom_backup_fail "backup recipient fingerprint could not be read"
-  printf '%s\n' "$fingerprint"
+  printf '%s\n' "$fingerprints"
 }
 
 # 평문을 남기지 않는다. 성공하면 원본을 지운다.
+#
+# 등록된 공개키 전부를 수신자로 넣는다. 개인키 하나를 잃거나 담당자 한 명이 빠져도
+# 나머지 사람이 열 수 있어야 하기 때문이다. 수신자를 늘려도 개인키는 서로 오가지 않는다.
 gilbom_backup_encrypt_file() {
   plain=$1
   encrypted="$plain.gpg"
   # 임시 homedir을 쓰는 이유: root의 기본 keyring을 건드리지 않기 위해서다.
-  # --recipient-file은 keyring 등록 없이 파일의 공개키로 바로 잠근다.
   home="$(mktemp -d)"
   chmod 0700 "$home"
+  gpg --batch --quiet --no-options --homedir "$home" \
+    --import "$BACKUP_RECIPIENT_KEY_FILE" >/dev/null 2>&1 \
+    || {
+      rm -rf "$home"
+      gilbom_backup_fail "backup recipient public key could not be imported"
+    }
+
+  set --
+  for fingerprint in $(gilbom_backup_recipient_fingerprints)
+  do
+    set -- "$@" --recipient "$fingerprint"
+  done
+  [ "$#" -gt 0 ] || {
+    rm -rf "$home"
+    gilbom_backup_fail "no backup recipient was resolved"
+  }
+
+  # 공개키를 방금 직접 넣었으므로 신뢰도 판정은 의미가 없다.
   gpg --batch --yes --quiet --no-options --homedir "$home" \
     --trust-model always \
-    --recipient-file "$BACKUP_RECIPIENT_KEY_FILE" \
+    "$@" \
     --output "$encrypted" \
     --encrypt "$plain" \
     || {
@@ -92,7 +117,8 @@ gilbom_backup_write_manifest() {
     printf '  "createdAt": "%s",\n' "$created"
     printf '  "host": "%s",\n' "$(hostname)"
     printf '  "encryption": "gpg-public-key",\n'
-    printf '  "recipientFingerprint": "%s",\n' "$fingerprint"
+    printf '  "recipientFingerprints": "%s",\n' \
+      "$(printf '%s' "$fingerprint" | tr '\n' ' ' | sed 's/ *$//')"
     printf '  "files": [\n'
     first=true
     for artifact in "$@"; do

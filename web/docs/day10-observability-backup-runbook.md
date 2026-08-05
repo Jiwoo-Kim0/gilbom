@@ -98,53 +98,33 @@ release_sha="$(sudo cat /var/lib/gilbom/releases/current.sha)"
 sudo ls "/opt/gilbom/artifacts/$release_sha"
 ```
 
-목록에 `gilbom-web-<sha>.tar.zst`가 **있는지 없는지로 경로가 갈린다.**
+목록에 `gilbom-web-<sha>.tar.zst`가 있어야 한다. archive에는 Git이 추적하는 파일만
+들어 있어 `runtime.env`, `image.env`, `/opt/gilbom/secrets`, named volume은 보존된다.
 
-**(가) 소스 archive가 있는 경우** — 수동으로 승격한 release다. 그대로 푼다.
-
-```sh
-sudo sh -c '
-  sha="$(cat /var/lib/gilbom/releases/current.sha)"
-  cd "/opt/gilbom/artifacts/$sha"
-  sha256sum -c SHA256SUMS
-  zstd -dc "gilbom-web-$sha.tar.zst" \
-    | tar --extract --file - --directory /opt/gilbom/deploy --no-same-owner
-'
-```
-
-**(나) 없는 경우** — Jenkins 배포다. `promote-ci-release-artifacts.sh`의 허용 목록에
-소스 archive가 없어서 host에 존재하지 않는다. 배포된 SHA로 로컬에서 같은 archive를 만들어
-SFTP로 옮긴다. `build-release-artifacts.sh`와 같은 방식이라 내용은 공식 archive와 같다.
+아래로 배포본과 source tree가 같은 revision인지 확인한다.
 
 ```sh
-# 로컬 (저장소 root)
-sha=<current.sha 값>
-git archive --format=tar "$sha:web" | gzip -9 > "/tmp/gilbom-web-$sha.tar.gz"
-
-# 운영 상태 파일이 섞이지 않았는지 — Day 8과 같은 검사
-tar -tzf "/tmp/gilbom-web-$sha.tar.gz" \
-  | grep -E '(^|/)(runtime\.env|image\.env)$|(^|/)secrets/[^/]+$' \
-  | grep -Ev '(^|/)secrets/\.gitignore$' \
-  && echo "운영 상태가 섞여 있다. 전송하지 않는다." || echo "안전"
-
-sha256sum "/tmp/gilbom-web-$sha.tar.gz"
+sudo test "$(sudo cat /opt/gilbom/deploy/.release-source.sha)" = "$release_sha"
+sudo test -f \
+  "/opt/gilbom/artifacts/$release_sha/gilbom-web-$release_sha.tar.zst"
+sudo test -f /opt/gilbom/deploy/infra/scripts/install-day10-host.sh \
+  || echo "이 release에는 Day 10이 없다. master 기준으로 CI를 다시 돌려야 한다."
+sudo sh /opt/gilbom/deploy/scripts/verify-day10-observability.sh
+sudo docker compose --project-directory /opt/gilbom/deploy \
+  --env-file /opt/gilbom/deploy/runtime.env \
+  --env-file /opt/gilbom/deploy/image.env \
+  -f /opt/gilbom/deploy/compose.prod.yaml \
+  config --quiet && echo "운영 compose 정상"
 ```
 
-SFTP로 `/home/ubuntu`에 올린 뒤 EC2에서 checksum을 대조하고 푼다.
+`.release-source.sha`가 없으면 구 열두 파일 배포기가 아직 설치된 host다. source
+archive를 임의로 풀지 말고 [`cd-automation.md`](cd-automation.md)의
+“새 Artifact 형식 최초 반영”대로 승격 helper와 배포 entrypoint를 한 번 먼저
+갱신한 후 CI·CD를 다시 실행한다. 새 계약에서는 수동 SFTP 우회를 사용하지 않는다.
 
-```sh
-sha256sum "gilbom-web-$sha.tar.gz"          # 로컬 값과 일치해야 한다
-sudo tar --extract --gzip --file "gilbom-web-$sha.tar.gz" \
-  --directory /opt/gilbom/deploy --no-same-owner
-rm -f "gilbom-web-$sha.tar.gz"
-```
-
-> **(나)는 우회다.** 감사 흔적이 남는 정공법은 CI 승격 목록에 소스 archive를 포함시키는
-> 것이고, 그건 배포 파이프라인 소유자의 몫이다.
-
-어느 쪽이든 > **archive를 다시 풀었으면 monitoring stack을 반드시 재생성한다.**
-> `tar`가 디렉터리를 새 inode로 바꾸는데, container의 bind mount는 기동 시점 inode에
-> 고정돼 있다. 그래서 그 뒤로 container는 **떨어져 나간 옛 디렉터리를 계속 본다.**
+> **배포 뒤에는 monitoring stack을 재생성한다.** 배포기가 `/opt/gilbom/deploy`를
+> 통째로 교체하면 디렉터리가 새 inode가 되는데, container의 bind mount는 기동 시점
+> inode에 고정돼 있다. 그래서 그 뒤로 container는 **떨어져 나간 옛 디렉터리를 계속 본다.**
 >
 > 증상이 고약하다 — Prometheus는 정상 기동하고 로그에도 오류가 없는데 alert rule이
 > **0개**가 된다. host에서 `ls`하면 파일이 다 있고 `promtool check rules`도 통과한다.
@@ -163,30 +143,6 @@ rm -f "gilbom-web-$sha.tar.gz"
 > sudo docker exec gilbom-monitoring-prometheus-1 ls /etc/prometheus/rules/
 > curl -s http://127.0.0.1:9090/api/v1/rules | jq '[.data.groups[].rules[]] | length'
 > ```
-
-archive에는 Git이 추적하는 파일만 들어 있어 `runtime.env`, `image.env`,
-`/opt/gilbom/secrets`, named volume은 보존된다. 푼 뒤 확인한다.
-
-```sh
-cd /opt/gilbom/deploy
-test -f infra/scripts/install-day10-host.sh \
-sudo test "$(sudo cat /opt/gilbom/deploy/.release-source.sha)" = "$release_sha"
-sudo test -f \
-  "/opt/gilbom/artifacts/$release_sha/gilbom-web-$release_sha.tar.zst"
-sudo test -f /opt/gilbom/deploy/infra/scripts/install-day10-host.sh \
-  || echo "이 release에는 Day 10이 없다. master 기준으로 CI를 다시 돌려야 한다."
-sudo sh /opt/gilbom/deploy/scripts/verify-day10-observability.sh
-sudo docker compose --project-directory /opt/gilbom/deploy \
-  --env-file /opt/gilbom/deploy/runtime.env \
-  --env-file /opt/gilbom/deploy/image.env \
-  -f /opt/gilbom/deploy/compose.prod.yaml \
-  config --quiet && echo "운영 compose 정상"
-```
-
-`.release-source.sha`가 없으면 구 열두 파일 배포기가 아직 설치된 host다. source
-archive를 임의로 풀지 말고 [`cd-automation.md`](cd-automation.md)의
-“새 Artifact 형식 최초 반영”대로 승격 helper와 배포 entrypoint를 한 번 먼저
-갱신한 후 CI·CD를 다시 실행한다. 새 계약에서는 수동 SFTP 우회를 사용하지 않는다.
 
 ### 설치
 
@@ -242,15 +198,6 @@ Mattermost webhook을 Secret 파일로 넣는다. 값은 저장소에 남기지 
 이미 다른 운영자가 연동한 비어 있지 않은 파일은 덮어쓰지 않고 그대로 사용한다.
 
 ```sh
-<<<<<<< HEAD
-sudo install -d -m 0700 /opt/gilbom/secrets
-sudo sh -c 'umask 077; printf "%s\n" "<Mattermost incoming webhook URL>" \
-  > /opt/gilbom/secrets/alertmanager_mattermost_webhook'
-
-# Alertmanager container는 nobody(65534)로 돈다. root 소유 0400이면 읽지 못하고,
-# 그 상태에서도 Alertmanager는 정상으로 보인다. 알람만 조용히 사라진다.
-sudo chown 65534:65534 /opt/gilbom/secrets/alertmanager_mattermost_webhook
-=======
 sudo install -d -o root -g root -m 0700 /opt/gilbom/secrets
 if sudo test -s /opt/gilbom/secrets/alertmanager_mattermost_webhook; then
   echo "기존 Mattermost webhook을 보존한다."
@@ -262,17 +209,22 @@ else
   unset webhook_url
 fi
 sudo chown root:root /opt/gilbom/secrets/alertmanager_mattermost_webhook
->>>>>>> 252a717efd57afc1cfaaa6df398ffe0d9ee01080
 sudo chmod 0400 /opt/gilbom/secrets/alertmanager_mattermost_webhook
 sudo stat -c '%a %U:%G' /opt/gilbom/secrets/alertmanager_mattermost_webhook
 ```
 
-`400 nobody:nogroup`이 나와야 한다. 명령 이력에 URL을 남기지 않으려면 첫 줄 앞에
-공백을 하나 넣는다.
+`400 root:root`가 나와야 한다. `read -s`를 쓰므로 URL은 화면에도 명령 이력에도 남지 않는다.
 
-> **0444로 여는 방식은 쓰지 않는다.** Grafana 비밀번호 파일이 그렇게 돼 있지만,
-> 그러면 host의 모든 사용자가 webhook URL을 읽을 수 있다. 소유자를 container 사용자로
-> 바꾸고 0400을 유지하는 쪽이 더 좁다.
+> **Alertmanager는 UID 0으로 돈다.** 이 image의 기본 사용자는 `nobody`인데, 그러면 root
+> 소유 `0400` secret을 읽지 못한다. 실제로 그 상태에서 알람이 한 번도 전달되지 않은 적이
+> 있고, Prometheus·Alertmanager 화면은 정상으로 보여서 알아채기 어려웠다.
+>
+> host 파일 소유자를 container 사용자로 맞추는 방법은 보안 정리가 지나갈 때마다 무너진다.
+> Compose는 파일 secret의 `uid`·`gid`·`mode`를 무시한다. `0444`로 여는 것은 host의 모든
+> 사용자에게 webhook URL을 주는 것이라 더 나쁘다.
+>
+> 그래서 UID 0으로 돌리되 `cap_drop: ALL`과 read-only rootfs를 유지한다. 이 container는
+> secret 파일 하나와 자기 데이터 volume 외에는 아무것도 마운트하지 않는다.
 
 ---
 
@@ -280,7 +232,10 @@ sudo stat -c '%a %U:%G' /opt/gilbom/secrets/alertmanager_mattermost_webhook
 
 **개인키는 이 서버에 두지 않는다.** EC2가 통째로 털려도 반출본을 열 수 없어야 한다.
 
-키 보관자의 PC에서 (한 번만):
+**보관자는 최소 두 명이다.** 한 명만 두면 그 사람이 빠질 때 모든 backup을 열 수 없다.
+각자 자기 키를 만들고 **공개키만** 보내며, 개인키는 서로 오가지 않는다.
+
+각 보관자의 PC에서 (한 번만):
 
 ```sh
 gpg --full-generate-key            # RSA 4096 또는 ed25519
