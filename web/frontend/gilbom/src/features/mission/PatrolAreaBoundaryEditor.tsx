@@ -1,7 +1,5 @@
 import {
   MapPin,
-  RotateCcw,
-  Undo2,
   X,
 } from 'lucide-react'
 import {
@@ -9,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from 'react'
 import { loadNaverMapsScript } from '../../lib/naverMaps'
 import { orderBoundaryPointsForPolygon } from './patrolAreaBoundary'
@@ -31,7 +30,7 @@ type PatrolAreaBoundaryEditorProps = {
   points: GeoJsonCoordinate[]
   disabled?: boolean
   onChange: (points: GeoJsonCoordinate[]) => void
-  onRequestFallback: () => void
+  actions?: ReactNode
 }
 
 type PatrolAreaBoundaryOverlay = naver.maps.OverlayView & {
@@ -195,7 +194,7 @@ export function PatrolAreaBoundaryEditor({
   points,
   disabled = false,
   onChange,
-  onRequestFallback,
+  actions,
 }: PatrolAreaBoundaryEditorProps) {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<naver.maps.Map | null>(null)
@@ -354,14 +353,6 @@ export function PatrolAreaBoundaryEditor({
     )))
   }
 
-  function removeLastPoint() {
-    onChange(points.slice(0, -1))
-  }
-
-  function resetPoints() {
-    onChange([])
-  }
-
   return (
     <section
       className="patrol-boundary-editor"
@@ -378,22 +369,18 @@ export function PatrolAreaBoundaryEditor({
             </p>
           </div>
         </div>
-        <span>{points.length}/{MAX_BOUNDARY_POINTS}개 점</span>
+        <div className="patrol-boundary-editor-heading-tools">
+          <span>{points.length}/{MAX_BOUNDARY_POINTS}개 점</span>
+          {actions}
+        </div>
       </div>
 
       {status === 'fallback' ? (
-        <div className="patrol-boundary-fallback" role="status">
+        <div className="patrol-boundary-fallback" role="alert">
           <p>
-            지도 SDK를 사용할 수 없습니다. 중심 좌표와 가로폭을 직접 입력해주세요.
+            지도 SDK를 사용할 수 없어 경계를 지정할 수 없습니다. 잠시 후 다시
+            시도하거나 지도 API 설정을 확인해주세요.
           </p>
-          <button
-            className="secondary-button"
-            type="button"
-            onClick={onRequestFallback}
-            disabled={disabled}
-          >
-            좌표 직접 입력으로 전환
-          </button>
         </div>
       ) : (
         <div className="patrol-boundary-map-wrap">
@@ -412,33 +399,11 @@ export function PatrolAreaBoundaryEditor({
         </div>
       )}
 
-      <div className="patrol-boundary-editor-actions">
-        <span>
-          {points.length < 3
-            ? `경계점을 ${3 - points.length}개 더 지정해주세요.`
-            : '교차 없이 자동 정렬된 Polygon입니다.'}
-        </span>
-        <div>
-          <button
-            className="secondary-button button-with-icon"
-            type="button"
-            onClick={removeLastPoint}
-            disabled={disabled || points.length === 0}
-          >
-            <Undo2 size={15} aria-hidden="true" />
-            마지막 점 취소
-          </button>
-          <button
-            className="secondary-button button-with-icon"
-            type="button"
-            onClick={resetPoints}
-            disabled={disabled || points.length === 0}
-          >
-            <RotateCcw size={15} aria-hidden="true" />
-            전체 초기화
-          </button>
-        </div>
-      </div>
+      <p className="patrol-boundary-editor-status" role="status">
+        {points.length < 3
+          ? `경계점을 ${3 - points.length}개 더 지정해주세요.`
+          : '교차 없이 자동 정렬된 Polygon입니다.'}
+      </p>
 
       {points.length > 0 ? (
         <ol

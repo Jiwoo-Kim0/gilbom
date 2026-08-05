@@ -522,8 +522,42 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
   ).toBeVisible()
   await page.getByRole('button', { name: '새 구역 등록' }).click()
 
+  const registrationDialog = page.getByRole('dialog', {
+    name: '순찰 구역 등록',
+  })
+  await expect(registrationDialog).toBeVisible()
+  await expect(page.locator('body')).toHaveClass(/\bmodal-open\b/)
+  await expect(
+    registrationDialog.getByText('중심 좌표 직접 입력'),
+  ).toHaveCount(0)
+  await expect(
+    registrationDialog.getByText(
+      '지도에서 경계점을 3개 이상 선택해 실제 순찰 구역을 등록합니다.',
+    ),
+  ).toHaveCount(0)
+  await expect(
+    registrationDialog.getByRole('button', { name: '마지막 점 취소' }),
+  ).toBeVisible()
+  await expect(
+    registrationDialog.getByRole('button', { name: '전체 초기화' }),
+  ).toBeVisible()
+  await expect(
+    registrationDialog.getByRole('button', { name: '취소', exact: true }),
+  ).toHaveCount(0)
+
+  const formFields = registrationDialog.locator('.mission-area-form-fields')
+  await expect(formFields.locator('.admin-form-field')).toHaveCount(2)
+  await expect(formFields).toHaveCSS(
+    'grid-template-columns',
+    /\d+(?:\.\d+)?px \d+(?:\.\d+)?px/,
+  )
+
   const editor = page.getByTestId('patrol-area-boundary-editor')
   await expect(editor).toBeVisible()
+  const editorToolbar = editor.locator('.mission-area-editor-toolbar')
+  await expect(editorToolbar).toBeVisible()
+  await expect(editorToolbar.getByRole('button')).toHaveCount(3)
+  await expect(editorToolbar).toHaveCSS('justify-content', 'flex-end')
   const map = page.getByTestId('patrol-boundary-naver-map')
   await expect(map).toBeVisible()
   await expect.poll(() => page.evaluate(() => {
@@ -674,6 +708,9 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
   await expect(createAreaButton).toBeEnabled()
   await page.locator('#patrol-area-name').fill('시연 순찰 구역')
   await createAreaButton.click()
+
+  await expect(registrationDialog).toBeHidden()
+  await expect(page.locator('body')).not.toHaveClass(/\bmodal-open\b/)
 
   await expect(
     page.getByRole('status').filter({

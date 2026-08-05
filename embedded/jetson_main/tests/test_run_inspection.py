@@ -10,7 +10,8 @@ import pytest
 
 from driving.state_machine import StateMachine, StateMachineParams
 from driving.states import DriveState
-from main import detection_due, run_inspection
+import reporting
+from main import detection_due, run_detection, run_inspection
 from perception.braille import BrailleVerdict
 from perception.interfaces import SegmentationFrame
 
@@ -45,9 +46,119 @@ class StubInspector:
 class StubMachine:
     def __init__(self):
         self.done_calls = 0
+        self.defect_calls = 0
+        self.seen_calls = 0
 
     def notify_inspection_done(self):
         self.done_calls += 1
+
+    def notify_defect_found(self):
+        self.defect_calls += 1
+
+    def notify_braille_seen(self):
+        self.seen_calls += 1
+
+
+class TestTraceScreenReports:
+    """상시 탐지 경로가 **직접 보고한다** — 0805 자율 모드 미보고의 수정.
+
+    종전에는 파손 보고가 INSPECT 정차 경로에만 있었다. 그래서 세그가 블록을 못 잡아
+    TRACE→INSPECT에 도달하지 못하면 파손을 눈으로 보고 있어도 한 건도 보고되지 않았다
+    (0805 오전 실측: TRACE 15표본 / INSPECT 0회). 미설치 보고가 FSM과 무관하게 나가는
+    것과 같은 등급으로 맞춘 것이 이 경로다.
+    """
+
+    def gates(self, params_confirm: int):
+        """(확정 게이트, 공유 출구 게이트) — main.py의 조립과 같은 모양."""
+        return (reporting.ReportGate(confirm_frames=params_confirm, cooldown_sec=0.0),
+                reporting.ReportGate(confirm_frames=1, cooldown_sec=5.0))
+
+    def collect(self):
+        reports = []
+        return reports, (lambda verdict, image, captured_at, source:
+                         reports.append((image, source)))
+
+    def test_reports_after_the_confirm_streak(self):
+        confirm, _ = self.gates(2)
+        reports, on_defect = self.collect()
+        machine = StubMachine()
+        camera = StubCamera(["frame0", "frame1"])
+        inspector = StubInspector(is_defect=True)
+
+        run_detection(camera, inspector, machine, screen_confirm=confirm,
+                      on_defect=on_defect, clock=lambda: 100.0)
+        assert reports == []                      # 1프레임으로는 보고하지 않는다
+        run_detection(camera, inspector, machine, screen_confirm=confirm,
+                      on_defect=on_defect, clock=lambda: 100.2)
+        assert [source for _, source in reports] == ["trace-screen"]
+        assert reports[0][0] == "frame1"          # 판정에 쓴 그 원본 프레임이다
+        assert machine.defect_calls == 2          # 정차 요청은 매번 나간다
+
+    def test_normal_verdict_resets_the_streak(self):
+        """정상 판정도 게이트에 먹여야 한다 — 안 먹이면 띄엄띄엄 잡힌 오탐이 확정된다."""
+        confirm, _ = self.gates(2)
+        reports, on_defect = self.collect()
+        machine = StubMachine()
+
+        run_detection(StubCamera(["a"]), StubInspector(is_defect=True), machine,
+                      screen_confirm=confirm, on_defect=on_defect,
+                      clock=lambda: 100.0)
+        run_detection(StubCamera(["b"]), StubInspector(is_defect=False), machine,
+                      screen_confirm=confirm, on_defect=on_defect,
+                      clock=lambda: 100.2)       # 끊겼다 → streak 리셋
+        run_detection(StubCamera(["c"]), StubInspector(is_defect=True), machine,
+                      screen_confirm=confirm, on_defect=on_defect,
+                      clock=lambda: 100.4)
+        assert reports == []                      # 연속 2회가 아니므로 확정 안 됨
+
+    def test_without_a_gate_it_only_notifies(self):
+        """게이트를 안 주면 종전처럼 통지만 한다 — 보고 정책을 모르는 호출자용 기본값."""
+        machine = StubMachine()
+        result = run_detection(StubCamera(["frame"]), StubInspector(is_defect=True),
+                              machine)
+        assert result is True
+        assert machine.defect_calls == 1
+        assert machine.seen_calls == 1             # 블록을 봤으니 추종 유지 신호도 낸다
+
+    def test_the_loop_wires_the_report_hook(self):
+        """main 루프가 run_detection에 **보고 훅을 실제로 넘기는지** 구문으로 확인한다.
+
+        위 테스트들은 run_detection에 훅을 직접 넘기므로 함수의 동작만 본다. 0805에
+        비어 있던 것은 함수가 아니라 **호출 지점의 인자**였고(보고 훅이 없어서 상시
+        경로가 통지만 했다), 그건 함수 단위 테스트로 잡히지 않는다. main 루프는
+        카메라·모터가 필요해 이 하니스에서 구동할 수 없으므로 배선을 구문으로 잠근다.
+        """
+        import ast
+        import pathlib
+
+        import main as main_module
+
+        tree = ast.parse(pathlib.Path(main_module.__file__).read_text(encoding="utf-8"))
+        wired = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name) and node.func.id == "run_detection"
+            and {kw.arg for kw in node.keywords} >= {"screen_confirm", "on_defect"}
+        ]
+        assert wired, "main 루프가 run_detection에 보고 훅을 넘기지 않는다 (통지만 한다)"
+
+    def test_shared_gate_blocks_the_inspect_path_afterwards(self):
+        """상시 경로가 보고한 뒤 INSPECT 경로는 **같은 게이트**에 막힌다 (중복 방지)."""
+        confirm, shared = self.gates(1)
+        reports, on_defect = self.collect()
+
+        def gated(verdict, image, captured_at, source="inspect"):
+            if shared.should_report(True, 100.0):
+                reports.append((image, source))
+
+        run_detection(StubCamera(["moving"]), StubInspector(is_defect=True),
+                      StubMachine(), screen_confirm=confirm, on_defect=gated,
+                      clock=lambda: 100.0)
+        assert [source for _, source in reports] == ["trace-screen"]
+
+        run_inspection(StubCamera(["stopped"]), StubInspector(is_defect=True),
+                       StubMachine(), on_defect=gated)
+        assert len(reports) == 1                  # 쿨다운이 두 번째를 막았다
 
 
 class TestCaptureFlush:
@@ -155,17 +266,34 @@ class TestDetectionScheduling:
 
     def test_skipped_while_approaching(self, params):
         arrived = params.inspect_enter_proximity
-        assert not detection_due(self.frame(0.0), arrived)
-        assert not detection_due(self.frame(arrived / 2), arrived)
+        assert not detection_due(self.frame(0.0), arrived, False)
+        assert not detection_due(self.frame(arrived / 2), arrived, False)
 
     def test_runs_once_arrived(self, params):
         arrived = params.inspect_enter_proximity
-        assert detection_due(self.frame(arrived), arrived)      # 등호 경계 포함
-        assert detection_due(self.frame(1.0), arrived)
+        assert detection_due(self.frame(arrived), arrived, False)   # 등호 경계 포함
+        assert detection_due(self.frame(1.0), arrived, False)
 
     def test_no_frame_is_not_due(self, params):
         # 인지 두절 틱에 카메라를 읽으러 가지 않는다 (가드가 이미 정지시킨 상태다)
-        assert not detection_due(None, params.inspect_enter_proximity)
+        assert not detection_due(None, params.inspect_enter_proximity, False)
+
+    def test_arrival_latch_survives_a_segmentation_miss(self, params):
+        """도착한 뒤에는 **주행캠이 블록을 놓쳐도** 탐지를 계속 돌린다.
+
+        근접도는 세그가 블록을 잡고 있을 때만 유효한 값이다(미검출 틱에는 0.0). 래치가
+        없으면 세그가 놓치는 순간 탐지가 멈추고 → 탐지캠 유지 신호(notify_braille_seen)가
+        끊기고 → 추종이 '블록 소실 확정'으로 끝난다. 즉 세그를 보완하려고 만든 신호가
+        세그에 의존해 같이 죽는다 — 그것을 막는 것이 이 래치다.
+        """
+        arrived = params.inspect_enter_proximity
+        lost = SegmentationFrame(timestamp=0.0, sidewalk_detected=True)  # 블록 미검출
+        assert lost.braille_proximity == 0.0        # 근접도가 0으로 떨어진다
+        assert not detection_due(lost, arrived, False)   # 래치 없으면 멈춘다
+        assert detection_due(lost, arrived, True)        # 래치가 있으면 계속 돈다
+        # 인지 두절(frame=None)에도 래치가 살아 있으면 돈다 — 상태 이탈 시 호출부가
+        # 래치를 풀므로(TRACE를 떠나면 False), 여기서 프레임을 다시 요구하지 않는다.
+        assert detection_due(None, arrived, True)
 
 
 def inspecting_machine(params: StateMachineParams, t: float) -> StateMachine:

@@ -245,8 +245,9 @@ def capture_verdict(camera, inspector, flush_frames: int = 0):
         return None, image
 
 
-def run_detection(camera, inspector, machine) -> Optional[bool]:
-    """TRACE 상시 탐지 1주기: 주행 중 캡처 → 판정 → 파손 후보면 FSM에 통지.
+def run_detection(camera, inspector, machine, screen_confirm=None,
+                  on_defect=None, clock=time.monotonic) -> Optional[bool]:
+    """TRACE 상시 탐지 1주기: 주행 중 캡처 → 판정 → 파손이면 **보고 + FSM 통지**.
 
     돌려주는 값은 계측용이다(reporting.TraceSession) — 파손 후보였나(True/False),
     또는 추론 자체가 못 돈 경우 None.
@@ -254,22 +255,52 @@ def run_detection(camera, inspector, machine) -> Optional[bool]:
     통지를 받은 FSM은 INSPECT로 정차해 같은 모델로 정밀 판정을 다시 한다 — 단
     정차 쿨다운(driving.inspect.cooldown_sec) 안이면 통지를 무시하고 추종을 계속한다
     (같은 파손 위에서 정차가 무한 반복되는 것을 막는다). 주행 중 판정을 그대로
-    신뢰하지 않는 이유는 모션 블러다 — defect_partial(≈55px)부터 먼저 무너지므로
-    여기서는 '멈춰 볼 가치가 있는가'만 판단한다(1차 스크리닝).
+    신뢰하지 않는 이유는 모션 블러다 — defect_partial(≈55px)부터 먼저 무너진다.
+
+    **보고를 여기서도 낸다 (0805 개편).** 종전에는 파손 보고가 INSPECT 정차 경로에만
+    있었고, 그래서 세그가 블록을 못 잡아 TRACE→INSPECT에 도달하지 못하면 파손을 눈으로
+    보고 있어도 **한 건도** 보고되지 않았다(0805 오전 실측: TRACE 15표본 / INSPECT 0회).
+    미설치 보고는 인지 프레임만 보고 FSM과 무관하게 나가는데 파손만 FSM에 매여 있었던
+    비대칭을 없앤 것이다. 정차 판정은 여전히 돌고(더 깨끗한 사진), 중복은 두 경로가
+    공유하는 게이트가 막는다 — 근거는 config `reporting.defect_confirm_frames`.
+
+    screen_confirm: 연속 확정 게이트(주행 중 블러 오탐 1프레임 배제). None이면 보고를
+        건너뛰고 종전처럼 통지만 한다 — 보고 정책을 모르는 호출자(테스트·dry-run)를
+        위한 기본값이다.
+    on_defect(verdict, image, captured_at, source): 보고 훅. run_inspection과 **같은**
+        훅을 받는다 — 두 경로가 같은 출구를 쓰는 것이 중복 제거의 전제다.
     검사기가 없는 mock 인지에서는 아무 일도 하지 않는다 — TRACE는 소실·타임아웃으로
     정상 종료되므로 흐름 검증에 지장이 없다.
     """
-    verdict, _ = capture_verdict(camera, inspector, flush_frames=0)
+    captured_at = utc_now()
+    verdict, image = capture_verdict(camera, inspector, flush_frames=0)
     if verdict is None:
         return None
     logger.debug("[탐지] %s — %s", "후보" if verdict.is_defect else "정상", verdict.reason)
+    # 블록이 하나라도 잡혔으면 **파손 여부와 무관하게** 추종 유지 신호를 낸다.
+    # 주행 카메라는 하향각이 낮아 블록에 올라탄 뒤에도 세그가 자주 놓치는데, 그 틱에
+    # 추종이 끊기면 '블록을 따라가며 순차 탐지'가 성립하지 않는다(0805 실기).
+    # 새 추론이 아니다 — 방금 돌린 그 판정의 band_count를 읽는 것뿐이다(추가 비용 0).
+    if verdict.band_count > 0:
+        machine.notify_braille_seen()
+    # 확정 게이트는 **파손이 아닐 때도** 먹여야 한다 — 연속 판정이 끊긴 것을 알려야
+    # streak이 리셋된다. 안 먹이면 띄엄띄엄 잡힌 오탐이 누적돼 확정된다.
+    confirmed = (screen_confirm is not None
+                 and screen_confirm.should_report(bool(verdict.is_defect), clock()))
     if verdict.is_defect:
         logger.info("[탐지] 파손 후보 — %s → 정차 판정 요청", verdict.reason)
         machine.notify_defect_found()
+        if confirmed and on_defect is not None:
+            if image is None:
+                # 계약이 증거 사진을 요구한다 — 프레임이 없으면 보고를 만들 수 없다.
+                logger.warning("[탐지] 원본 프레임이 없어 상시 보고를 건너뛴다")
+            else:
+                logger.info("[탐지] 주행 중 파손 확정 → 보고 (정차 판정과 게이트 공유)")
+                on_defect(verdict, image, captured_at, "trace-screen")
     return bool(verdict.is_defect)
 
 
-def detection_due(frame, arrived_proximity: float) -> bool:
+def detection_due(frame, arrived_proximity: float, arrived_latched: bool) -> bool:
     """이번 틱에 탐지 추론을 돌릴 상황인가 — 블록에 **도착했는가**로 판단한다.
 
     TRACE는 이제 발견 즉시 시작되고 접근 구간까지 포함한다(블록 최우선 이동). 그
@@ -282,8 +313,15 @@ def detection_due(frame, arrived_proximity: float) -> bool:
          가능하던 비용과 같은 비용이 아니다.
     기준은 새 임계값이 아니라 FSM이 '블록에 붙었다'로 쓰는 것과 같은 값
     (driving.inspect.enter_proximity — 추종 비중과 탐지 저속이 완성되는 지점)이다.
+
+    **한 번 도착했으면 그 뒤로는 주행캠 근접도를 다시 묻지 않는다**(arrived_latched).
+    근접도는 세그가 블록을 잡고 있을 때만 유효한 값이라(미검출 틱에는 0.0), 래치가
+    없으면 세그가 놓치는 순간 탐지가 멈추고 → 탐지캠 유지 신호가 끊기고 → 추종이
+    소실로 종료된다. 즉 세그를 보완하려고 만든 신호가 세그에 의존해 같이 죽는다.
+    래치는 TRACE를 떠날 때 풀린다(호출부).
     """
-    return frame is not None and frame.braille_proximity >= arrived_proximity
+    return arrived_latched or (frame is not None
+                               and frame.braille_proximity >= arrived_proximity)
 
 
 def run_inspection(camera, inspector, machine, flush_frames: int = 0,
@@ -379,30 +417,45 @@ def main() -> None:
         cooldown_sec=float(report_cfg["crosswalk_cooldown_sec"]))
     # 파손 보고는 INSPECT 정차 판정 1회당 1건이므로 프레임 확정이 필요 없다 —
     # 쿨다운만 걸어 같은 타일 재판정의 중복 보고를 막는다.
+    # 파손 보고의 **단일 출구 게이트** — 상시 탐지 경로와 INSPECT 정차 경로가 공유한다.
+    # 두 경로가 같은 블록을 두 번 보고하는 것을 막는 것이 이 게이트의 일이고, 그래서
+    # 로컬 기록과 서버 전송에 **함께** 적용한다.
+    # ※ 종전에는 서버 전송이 게이트 밖이었다('디스크 정책이 결함 유실이 되면 안 된다').
+    #   그 근거는 보고 경로가 INSPECT 하나였을 때 성립했다 — 이제는 경로가 둘이라
+    #   게이트를 서버까지 걸지 않으면 같은 파손이 두 번 발행된다. 디스크 정책 자체
+    #   (save_images)는 여전히 별개이므로 원래 우려는 남지 않는다.
     defect_gate = reporting.ReportGate(
         confirm_frames=1, cooldown_sec=float(report_cfg["defect_cooldown_sec"]))
+    # 상시 경로만 쓰는 연속 확정 — 주행 중 프레임이라 모션 블러 오탐을 걸러야 한다.
+    # 쿨다운은 위 공유 게이트가 담당하므로 여기서는 0이다(두 벌로 두면 창이 곱해진다).
+    defect_screen_confirm = reporting.ReportGate(
+        confirm_frames=int(report_cfg["defect_confirm_frames"]), cooldown_sec=0.0)
 
     def gps_status():
         return gps.status() if gps is not None else None
 
-    def report_defect(verdict, image, captured_at) -> None:
-        # 로컬 기록과 서버 전송은 **각각 독립**이다. 쿨다운은 로컬 기록에만 건다:
-        # 서버 쪽 중복은 event_id 멱등 처리가 받고(계약 §3.4), 여기서 같은 게이트로
-        # 묶으면 로컬 디스크 정책 하나가 결함 보고 유실로 이어진다.
-        if defect_gate.should_report(True, time.monotonic()):
-            reporting.write_report(
-                report_dir, reporting.KIND_DEFECT, gps_status(), image=image,
-                save_images=save_images,
-                extra={"reason": verdict.reason, "bands": verdict.band_count,
-                       "defect_bands": verdict.defect_band_count,
-                       "partials": verdict.partial_count})
+    def report_defect(verdict, image, captured_at, source: str = "inspect") -> None:
+        """파손 1건 보고 — 로컬 기록 + 서버 전송. 두 경로의 공통 출구다.
+
+        `source`는 로컬 기록에만 남는다(서버 payload는 계약이 정한 형식 그대로다) —
+        나중에 events.jsonl에서 '정차 판정이 낸 건가, 주행 중 상시 탐지가 낸 건가'를
+        가릴 수 있어야 증거 사진의 블러를 해석할 수 있다.
+        """
+        if not defect_gate.should_report(True, time.monotonic()):
+            return
+        reporting.write_report(
+            report_dir, reporting.KIND_DEFECT, gps_status(), image=image,
+            save_images=save_images,
+            extra={"reason": verdict.reason, "bands": verdict.band_count,
+                   "defect_bands": verdict.defect_band_count,
+                   "partials": verdict.partial_count, "source": source})
         if comms_runtime is not None:
             try:
                 comms_runtime.report_inspection(verdict, image, captured_at)
             except Exception:
                 # 업로드·발행 실패가 주행을 멈추게 하지 않는다. event는 Outbox가
                 # 재전송하고, 그마저 실패해도 로봇은 계속 순찰해야 한다.
-                logger.exception("[INSPECT] 결함 보고 실패 — 주행은 계속한다")
+                logger.exception("[결함] 보고 실패 — 주행은 계속한다")
 
     trace_session = reporting.TraceSession()
 
@@ -459,6 +512,7 @@ def main() -> None:
     started = time.monotonic()
     inspected_entry = None   # INSPECT 1회 실행 마커 — 같은 진입(entered_at)에 재실행 금지
     last_detect_at = None    # TRACE 상시 탐지의 직전 추론 시각 (주기 제한)
+    arrived_latched = False   # 이번 추종에서 블록에 도착했는가 — 근거는 detection_due()
     mission_started = False  # 최초 CRUISE 진입 여부 — 시작 요청 유지의 종료 조건
 
     def mock_finished() -> bool:
@@ -545,14 +599,18 @@ def main() -> None:
             # 않는다 — 근거는 detection_due(). 매 틱 돌리지 않는 이유는 imgsz 960 추론이
             # 단일 스레드 루프 전체를 수백 ms 멈춰 세우기 때문이다 — 그 사이 인지·조향
             # 갱신도 함께 멈춘다. 파손 후보가 나오면 FSM이 INSPECT로 정차한다.
-            if machine.state is DriveState.TRACE and detection_due(frame,
-                                                                   arrived_proximity):
+            if machine.state is DriveState.TRACE and detection_due(
+                    frame, arrived_proximity, arrived_latched):
+                arrived_latched = True   # 도착 뒤에는 주행캠 근접도를 다시 묻지 않는다
                 if last_detect_at is None or now - last_detect_at >= detect_period_sec:
                     last_detect_at = now
                     trace_session.count_detection(
-                        run_detection(inspect_camera, inspector, machine))
+                        run_detection(inspect_camera, inspector, machine,
+                                      screen_confirm=defect_screen_confirm,
+                                      on_defect=report_defect))
             elif machine.state is not DriveState.TRACE:
                 last_detect_at = None   # 추종을 떠나면 주기를 새로 시작한다
+                arrived_latched = False  # 다음 추종은 다시 '도착'부터 판단한다
 
             # INSPECT: 정밀 판정도 I/O → FSM 밖(여기)이 유일한 실행 지점.
             # entered_at 마커로 진입 1회당 정확히 1번만 돌되, 정지 '명령'과 물리적

@@ -54,6 +54,72 @@
   border-color: color-mix(in srgb, var(--brand) 28%, var(--line));
 }
 
+.mission-area-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  padding: 24px;
+  align-items: center;
+  justify-content: center;
+  background: rgb(15 23 42 / 58%);
+  backdrop-filter: blur(2px);
+}
+
+.mission-area-modal {
+  width: min(960px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 24px 64px rgb(15 23 42 / 28%);
+}
+
+.mission-area-modal-heading {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 16px;
+  padding: 20px 24px;
+  align-items: flex-start;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.mission-area-modal-heading h3 {
+  margin: 3px 0 0;
+}
+
+.mission-area-modal .mission-create-description {
+  padding: 20px 24px 0;
+}
+
+.mission-area-modal > .page-alert {
+  margin: 18px 24px 0;
+}
+
+.mission-area-editor-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.mission-area-form-fields {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+.mission-area-form-fields > * {
+  min-width: 0;
+}
+
 .mission-area-code-check .secondary-button {
   min-height: 43px;
 }
@@ -653,6 +719,46 @@
 }
 
 @media (max-width: 560px) {
+  .mission-area-modal-backdrop {
+    padding: 0;
+    align-items: stretch;
+  }
+
+  .mission-area-modal {
+    max-height: 100vh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .mission-area-modal-heading {
+    padding: 18px;
+  }
+
+  .mission-area-modal .mission-create-description {
+    padding: 18px 18px 0;
+  }
+
+  .mission-area-modal > .page-alert {
+    margin: 16px 18px 0;
+  }
+
+  .mission-area-editor-toolbar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mission-area-editor-toolbar button {
+    width: 100%;
+  }
+
+  .mission-area-editor-toolbar .mission-create-submit {
+    grid-column: 1 / -1;
+  }
+
+  .mission-area-form-fields {
+    grid-template-columns: 1fr;
+  }
+
   .mission-page-actions {
     width: 100%;
   }

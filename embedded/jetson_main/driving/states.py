@@ -22,7 +22,8 @@ class DriveState(Enum):
     AVOID = "AVOID"          # 장애물: 정지 없이 좌/우 회피 선회 (IMU 불필요)
     ESCAPE = "ESCAPE"        # 차도 이탈 선회 — 차도가 코리도에 들어옴 → 인도 쪽으로 선회
     SLOPE = "SLOPE"          # 경사 보정 주행 — 오르막 증속·내리막 감속 (IMU 게이트)
-    DEAD_END = "DEAD_END"    # 막다른 길 회차 — 좌조향 K턴 반복, yaw 누적 판정 (IMU 게이트)
+    DEAD_END = "DEAD_END"    # 막다른 길 재정향 — 후진→유리한 쪽 선회, 시각 판정.
+                             # 몇 번 반복해도 안 풀리면 U턴(yaw 목표각)으로 승격
     ESTOP = "ESTOP"          # 비상 정지 — 수동 해제만 허용
 
 
@@ -46,13 +47,34 @@ class AvoidPhase(Enum):
 
 @unique
 class DeadEndPhase(Enum):
-    """DEAD_END 회차 하위 국면 — AvoidPhase와 같은 원리(상태 전이 아님).
+    """DEAD_END 재정향 하위 국면 — AvoidPhase와 같은 원리(상태 전이 아님).
 
-    큰 좌조향 전진 호와 정렬 후진을 교대하며 yaw를 누적한다 (K턴).
+    **후진 먼저**, 그 다음 유리한 쪽으로 선회 전진을 교대한다.
+
+    종전에는 '좌조향 전진 호 ↔ 정렬 후진'으로 yaw를 180°까지 누적하는 K턴이었고,
+    완료 판정이 yaw 단독이었다. 0804 실내에서 그 판정이 부호 하나로 무너져
+    (yaw_sign 오설정 → 좌회전 누적이 음수 → 목표 +165°에 도달 불가) 매번
+    timeout 30초를 채웠다. AvoidPhase·TurnPhase가 이미 겪고 시각 판정으로
+    옮겨간 것과 같은 실패다 — 그래서 완료 기준을 '목표 각도'가 아니라
+    **'갈 수 있는 경로가 다시 생겼는가'(시각)** 로 바꿨다. yaw는 무한 회전을
+    막는 상한으로만 남는다.
+
+    후진이 먼저인 이유: 벽에 코가 닿은 상태에서는 조향을 아무리 꺾어도 호를
+    그릴 공간이 없다. 종전 구조는 그 상태에서 전진 호부터 시도해 헛바퀴를 돌았다.
     """
 
-    FORWARD_ARC = "FORWARD_ARC"      # 좌 최대급 조향 전진 — yaw가 실제로 늘어나는 국면
-    REVERSE_ALIGN = "REVERSE_ALIGN"  # 조향 정렬 + 후진 — 다음 호를 위한 공간 확보
+    REVERSE = "REVERSE"      # 조향 정렬 + 후진 — 선회할 공간부터 확보 (후방은 카메라 사각)
+    TURN_ARC = "TURN_ARC"    # 유리한 쪽으로 깊은 조향 전진 — 새 경로를 찾는 국면
+    STRAIGHTEN = "STRAIGHTEN"  # 바퀴 중앙 정렬 — 탈출 직후 **추종을 시작하기 전에**
+                             # 조향을 중앙으로 되돌린다. 조향 슬루율 제한 때문에 -40°에서
+                             # 한 번에 안 돌아오는데, 그 사이 CRUISE가 스로틀 100%로
+                             # 전진하면 방금 피한 쪽으로 호를 그리며 다시 들어간다
+                             # (0804 실측: 꼬리 0.6초 × 0.32m/s ≈ 19cm를 30° 꺾인 채 주행,
+                             #  '재정향 완료 → 0.3초 뒤 다시 AVOID'의 원인).
+    UTURN = "UTURN"          # 회차 — 후진↔선회를 몇 번 반복해도 안 풀릴 때의 마지막 수단.
+                             # 여기서만 완료 기준이 yaw 목표각이다(방향을 되돌리는 것이
+                             # 목적이므로 '경로가 보인다'로는 끝낼 수 없다). yaw_sign이
+                             # 정정된 뒤에야 성립하는 판정이다 (0804).
 
 
 @dataclass(frozen=True)
@@ -121,7 +143,8 @@ TRANSITION_TABLE: Tuple[Transition, ...] = (
     Transition(DriveState.ESCAPE, DriveState.CRUISE,
                "차도가 코리도에서 빠진 뒤 clear_sec 유지 → 인도 추종 복귀", True),
     Transition(DriveState.ESCAPE, DriveState.ESTOP,
-               "선회 timeout_sec 초과(선회로 벗어나지 못함) → 정지 + 수동 대기", True),
+               "선회 timeout_sec 초과(선회로 벗어나지 못함 — 인지 두절로 눈이 먼 채여도 "
+               "같은 상한이 계속 간다) → 정지 + 수동 대기", True),
     Transition(DriveState.CRUISE, DriveState.IDLE,
                "인도 경계 소실·인지 두절이 유예창 이상 지속 → 정지 + 수동 폴백 대기 "
                "(이동 상태 공통. 유예 중에는 복구 주행 — 저속 + 소실 시점 조향 유지)", True),

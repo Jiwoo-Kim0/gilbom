@@ -1,7 +1,6 @@
 import {
   Filter,
   Plus,
-  RefreshCw,
   RotateCcw,
   Search,
   X,
@@ -289,6 +288,7 @@ export function RobotManagePage() {
           <h2 id="robot-page-title">로봇 상태 모니터링</h2>
           <p>권한 범위 내 로봇의 최신 위치 및 운영 데이터를 추적합니다.</p>
         </div>
+
         <div className="robot-page-actions">
           {canRegister ? (
             <button
@@ -300,15 +300,6 @@ export function RobotManagePage() {
               로봇 등록
             </button>
           ) : null}
-          <button
-            className="secondary-button"
-            type="button"
-            onClick={() => void loadSnapshot()}
-            disabled={loading}
-          >
-            <RefreshCw size={16} aria-hidden="true" />
-            새로고침
-          </button>
         </div>
       </div>
 
@@ -328,23 +319,6 @@ export function RobotManagePage() {
         <span>Heartbeat {formatDateTime(lastHeartbeatAt)}</span>
       </div>
 
-      <div className="summary-grid" aria-label="로봇 현황">
-        <article className="summary-card">
-          <span>전체 로봇</span>
-          <strong>{summary?.totalRobots ?? '—'}</strong>
-          <small>현재 사용자 조회 범위</small>
-        </article>
-        <article className="summary-card">
-          <span>온라인</span>
-          <strong>{summary?.onlineRobots ?? '—'}</strong>
-          <small>오프라인 {summary?.offlineRobots ?? '—'}대</small>
-        </article>
-        <article className="summary-card">
-          <span>확인 필요</span>
-          <strong>{attentionCount ?? '—'}</strong>
-          <small>경고·심각 상태 합계</small>
-        </article>
-      </div>
 
       <form className="content-card robot-filter-bar" onSubmit={handleSearch}>
         <label htmlFor="robot-search">
@@ -385,6 +359,24 @@ export function RobotManagePage() {
       ) : null}
 
       <RobotMap markers={markerItems} />
+
+      <div className="summary-grid" aria-label="로봇 현황">
+        <article className="summary-card">
+          <span>전체 로봇</span>
+          <strong>{summary?.totalRobots ?? '—'}</strong>
+          <small>현재 사용자 조회 범위</small>
+        </article>
+        <article className="summary-card">
+          <span>온라인</span>
+          <strong>{summary?.onlineRobots ?? '—'}</strong>
+          <small>오프라인 {summary?.offlineRobots ?? '—'}대</small>
+        </article>
+        <article className="summary-card">
+          <span>확인 필요</span>
+          <strong>{attentionCount ?? '—'}</strong>
+          <small>경고·심각 상태 합계</small>
+        </article>
+      </div>
 
       <RobotFleetGrid robots={fleetItems} loading={loading} />
 

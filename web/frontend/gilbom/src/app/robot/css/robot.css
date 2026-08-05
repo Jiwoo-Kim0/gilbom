@@ -290,33 +290,61 @@
 }
 
 .robot-map-marker {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  border: 2px solid #fff;
-  border-radius: 50%;
-  place-items: center;
-  color: #fff;
-  background: var(--brand-strong);
-  box-shadow: 0 2px 6px rgba(23, 34, 28, 0.35);
+  position: relative;
+  display: block;
+  width: 44px;
+  height: 44px;
 }
 
-.robot-map-marker-warning {
+.robot-map-marker-car {
+  display: block;
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  filter: drop-shadow(0 3px 5px rgb(15 23 42 / 35%));
+}
+
+.robot-map-marker-status {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--brand-strong);
+  box-shadow: 0 1px 3px rgb(15 23 42 / 30%);
+}
+
+.robot-map-marker-warning .robot-map-marker-status {
   background: #c0392b;
 }
 
-.robot-map-marker-charging {
+.robot-map-marker-charging .robot-map-marker-status {
   background: var(--nb-gold);
 }
 
-.robot-map-marker-offline {
+.robot-map-marker-offline .robot-map-marker-status {
   background: var(--text-muted);
 }
 
-.robot-map-marker-arrow {
-  display: block;
-  font-size: 14px;
-  line-height: 1;
+.robot-map-marker-offline .robot-map-marker-car {
+  filter: grayscale(1) drop-shadow(0 3px 5px rgb(15 23 42 / 25%));
+  opacity: 0.7;
+}
+
+.robot-map-marker-heading-1 { transform: rotate(45deg); }
+.robot-map-marker-heading-2 { transform: rotate(90deg); }
+.robot-map-marker-heading-3 { transform: rotate(135deg); }
+.robot-map-marker-heading-4 { transform: rotate(180deg); }
+.robot-map-marker-heading-5 { transform: rotate(225deg); }
+.robot-map-marker-heading-6 { transform: rotate(270deg); }
+.robot-map-marker-heading-7 { transform: rotate(315deg); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .robot-map-marker-car {
+    transition: transform 180ms ease;
+  }
 }
 
 .robot-fleet-section {
@@ -344,7 +372,7 @@
 
 .robot-fleet-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
 
