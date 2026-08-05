@@ -472,6 +472,13 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
 
   await page.goto('/missions')
 
+  await page.getByRole('button', {
+    name: 'MIS-MAP-E2E 상세 보기',
+  }).click()
+  await expect(page.getByRole('dialog', {
+    name: 'MIS-MAP-E2E',
+  })).toBeVisible()
+
   await expect(page.getByRole('heading', {
     name: '임무 위치 지도',
   })).toBeVisible()
@@ -485,11 +492,13 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
   const areaShape = page.getByTestId('mission-area-shape')
   const trajectory = page.getByTestId('mission-trajectory')
   const currentMarker = page.getByTestId('mission-current-position')
+  const currentCar = page.getByTestId('mission-current-car')
   await expect(areaShape).toHaveCount(1)
   await expect(trajectory).toHaveAttribute('data-point-count', '3')
   await expect(currentMarker).toHaveAttribute('data-latitude', '37.006')
   await expect(currentMarker).toHaveAttribute('data-longitude', '127.006')
   await expect(currentMarker).toHaveAttribute('data-heading', '45')
+  await expect(currentCar).toHaveCount(1)
   await expect.poll(() => page.evaluate(() => (
     window as Window & {
       __missionMapOverlayState?: {
