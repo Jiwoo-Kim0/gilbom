@@ -97,6 +97,36 @@ test.describe('결함 목록 표', () => {
     await expect(page.locator('.defect-status-new').first()).toBeVisible()
   })
 
+  test('지도 범례가 마커 색을 설명한다', async ({ page }) => {
+    await stubDefectPage(page)
+    await openDefectPage(page, '?allStatus=1')
+
+    // 마커 색 기준이 결함 유형이므로 범례도 유형이어야 한다. 색을 설명하는 것이
+    // 화면에 하나도 없던 시기가 있었다.
+    const legend = page.getByLabel('마커 색 범례')
+    await expect(legend).toBeVisible()
+    const items = legend.locator('.defect-legend-item')
+    // 유형 4개 + 여러 유형 묶음 1개
+    await expect(items).toHaveCount(5)
+    await expect(items.nth(0)).toContainText('파손')
+    await expect(items.nth(4)).toContainText('여러 유형')
+
+    const colors = await legend.locator('.defect-type-dot').evaluateAll(
+      (dots) => dots.map((dot) => getComputedStyle(dot).backgroundColor),
+    )
+    expect(new Set(colors).size, '칩마다 다른 색이어야 한다').toBe(5)
+
+    const markerColor = await page.evaluate(() => {
+      const probe = document.createElement('span')
+      probe.className = 'defect-marker defect-marker-missing'
+      document.body.append(probe)
+      const color = getComputedStyle(probe).backgroundColor
+      probe.remove()
+      return color
+    })
+    expect(colors[1], '미설치 점은 미설치 마커와 같은 색이다').toBe(markerColor)
+  })
+
   test('행을 고르면 지도까지 화면이 올라간다', async ({ page }) => {
     await stubDefectPage(page, { count: 20 })
     await openDefectPage(page, '?allStatus=1', 20)

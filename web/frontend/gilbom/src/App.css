@@ -538,7 +538,16 @@
   accent-color: var(--brand);
 }
 
-.defect-status-dot {
+/*
+ * 결함 유형 점. 지도 마커와 같은 변수를 써서 "지도의 빨간 핀 = 파손"을 필터에서도
+ * 읽을 수 있게 한다.
+ *
+ * <p>예전에는 이 자리에 처리 상태 점(`.defect-status-dot`)이 있었다. 마커 색이 처리
+ * 상태 3단계였기 때문이다. 마커가 유형 색으로 바뀌면서 상태 점은 아무것과도 짝이
+ * 맞지 않게 되어 걷어냈다. 지도 범례용이던 `.defect-legend-item-*`도 범례가 사라져
+ * 함께 지웠다.
+ */
+.defect-type-dot {
   display: inline-block;
   width: 10px;
   height: 10px;
@@ -546,45 +555,20 @@
   background: var(--text-muted);
 }
 
-.defect-status-dot-progress,
-.defect-legend-item-progress .defect-status-dot {
-  background: var(--nb-gold);
+.defect-type-dot-damaged {
+  background: var(--defect-damaged);
 }
 
-.defect-status-dot-received,
-.defect-legend-item-received .defect-status-dot {
-  background: var(--text-muted);
+.defect-type-dot-missing {
+  background: var(--defect-missing);
 }
 
-.defect-status-dot-done,
-.defect-legend-item-done .defect-status-dot {
-  background: var(--brand-strong);
+.defect-type-dot-installation-invalid {
+  background: var(--defect-installation-invalid);
 }
 
-/*
- * 필터 드롭다운의 점은 상태 코드(`NEW`·`IN_PROGRESS`…)로 클래스를 만든다. 위의
- * received/progress/done은 지도 범례용 이름이라 하나도 걸리지 않아 전부 회색이었다.
- * 목록 배지와 같은 색으로 맞춘다.
- */
-.defect-status-dot-new {
-  background: #dfa93a;
-}
-
-.defect-status-dot-accepted {
-  background: #4b8db3;
-}
-
-.defect-status-dot-in_progress {
-  background: var(--nb-gold);
-}
-
-.defect-status-dot-resolved {
-  background: #2f9163;
-}
-
-.defect-status-dot-false_positive,
-.defect-status-dot-rejected {
-  background: #9ca3af;
+.defect-type-dot-unknown-anomaly {
+  background: var(--defect-unknown-anomaly);
 }
 
 .defect-filter-reset {
@@ -596,6 +580,36 @@
   padding: 20px;
   /* 목록에서 결함을 고르면 이 카드로 스크롤한다. 화면 맨 위에 딱 붙지 않게 띄운다. */
   scroll-margin-top: 24px;
+}
+
+/*
+ * 마커 색 범례. 오늘 마커 기준이 처리 상태에서 결함 유형으로 바뀌면서 예전 상태 범례가
+ * 사라졌고, 색을 설명하는 것이 화면에 하나도 없었다. 점 색은 필터 드롭다운과 같은
+ * `--defect-*` 변수를 쓴다.
+ */
+.defect-map-legend {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.defect-legend-item {
+  display: flex;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  align-items: center;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* 여러 유형이 묶인 클러스터 색과 같아야 한다. */
+.defect-legend-item-mixed .defect-type-dot {
+  background: var(--defect-mixed);
 }
 
 .defect-map-placeholder {
@@ -638,19 +652,19 @@
 }
 
 .defect-marker-damaged {
-  background: #d64545;
+  background: var(--defect-damaged);
 }
 
 .defect-marker-missing {
-  background: #2878c8;
+  background: var(--defect-missing);
 }
 
 .defect-marker-installation-invalid {
-  background: #c47a16;
+  background: var(--defect-installation-invalid);
 }
 
 .defect-marker-unknown-anomaly {
-  background: #7656b1;
+  background: var(--defect-unknown-anomaly);
 }
 
 .defect-marker.is-selected {
@@ -2811,21 +2825,21 @@ button:disabled {
 }
 
 .defect-cluster-damaged {
-  background: #d64545;
+  background: var(--defect-damaged);
 }
 
 .defect-cluster-missing {
-  background: #2878c8;
+  background: var(--defect-missing);
 }
 
 .defect-cluster-installation-invalid {
-  background: #c47a16;
+  background: var(--defect-installation-invalid);
 }
 
 .defect-cluster-unknown-anomaly {
-  background: #7656b1;
+  background: var(--defect-unknown-anomaly);
 }
 
 .defect-cluster-mixed {
-  background: #4b5563;
+  background: var(--defect-mixed);
 }

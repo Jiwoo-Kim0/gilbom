@@ -14,6 +14,7 @@ import type {
   DefectTypeTone,
 } from './defectMapState'
 import {
+  DEFECT_TYPES,
   DEFECT_TYPE_LABELS,
   RISK_LEVEL_LABELS,
   WORKFLOW_STATUS_LABELS,
@@ -21,6 +22,7 @@ import {
 import type {
   DefectFilters,
   DefectMapFeature,
+  DefectType,
 } from './defectTypes'
 
 type DefectClusterTone = DefectTypeTone | 'mixed'
@@ -243,6 +245,17 @@ export function DefectMap({
     () => featureSnapshot?.features ?? [],
     [featureSnapshot],
   )
+  /**
+   * 범례에 붙일 유형별 개수. 지금 지도에 그려진 것만 센다(뷰포트·필터 반영).
+   */
+  const countByType = useMemo(() => {
+    const counts = new Map<DefectType, number>()
+    for (const feature of features) {
+      const { defectType } = feature.properties
+      counts.set(defectType, (counts.get(defectType) ?? 0) + 1)
+    }
+    return counts
+  }, [features])
   const queryLoading = featureSnapshot?.key !== requestKey
   const error = featureSnapshot?.key === requestKey
     ? featureSnapshot.error
@@ -509,6 +522,32 @@ export function DefectMap({
       aria-label="결함 지도"
       ref={cardRef}
     >
+      {/*
+        마커 색이 무슨 뜻인지 화면에 설명이 있어야 한다. 유형→색은 필터 드롭다운의 점과
+        같은 CSS 변수를 쓰므로 둘이 어긋나지 않는다. 개수는 지금 그려진 마커 기준이다.
+      */}
+      <div className="defect-map-legend" aria-label="마커 색 범례">
+        {DEFECT_TYPES.map((defectType) => (
+          <span
+            key={defectType}
+            className="defect-legend-item"
+          >
+            <span
+              className={`defect-type-dot defect-type-dot-${defectTypeTone(defectType)}`}
+              aria-hidden="true"
+            />
+            {DEFECT_TYPE_LABELS[defectType]}
+            {' '}
+            ({mapStatus === 'ready' ? (countByType.get(defectType) ?? 0) : '—'})
+          </span>
+        ))}
+        {/* 묶인 마커가 여러 유형이면 회색이다. 그 색도 설명이 필요하다. */}
+        <span className="defect-legend-item defect-legend-item-mixed">
+          <span className="defect-type-dot" aria-hidden="true" />
+          여러 유형 묶음
+        </span>
+      </div>
+
       {mapStatus === 'error' ? (
         <div className="defect-map-placeholder map-placeholder empty-state">
           <span className="empty-state-icon" aria-hidden="true">

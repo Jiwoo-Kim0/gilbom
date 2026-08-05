@@ -1,4 +1,5 @@
 import { DefectFilterDropdown } from './DefectFilterDropdown'
+import { defectTypeTone } from './defectMapState'
 import {
   DEFECT_TYPES,
   DEFECT_TYPE_LABELS,
@@ -94,14 +95,13 @@ export function DefectFilter({
         selected={filters.workflowStatuses}
         disabled={disabled}
         onChange={(workflowStatuses) => update({ workflowStatuses })}
-        renderMark={(status) => (
-          <span
-            className={`defect-status-dot defect-status-dot-${status.toLowerCase()}`}
-            aria-hidden="true"
-          />
-        )}
       />
 
+      {/*
+        지도 마커는 결함 유형으로 색이 갈린다(`defectTypeTone`). 그 색을 이 목록에도
+        찍어 "지도의 빨간 핀 = 파손"을 필터에서 읽을 수 있게 한다. 처리 상태에 점이
+        있던 것은 마커가 상태 색이던 시절의 잔재라 걷어냈다.
+      */}
       <DefectFilterDropdown
         label="결함 유형"
         options={DEFECT_TYPES}
@@ -109,6 +109,12 @@ export function DefectFilter({
         selected={filters.defectTypes}
         disabled={disabled}
         onChange={(defectTypes) => update({ defectTypes })}
+        renderMark={(defectType) => (
+          <span
+            className={`defect-type-dot defect-type-dot-${defectTypeTone(defectType)}`}
+            aria-hidden="true"
+          />
+        )}
       />
 
       <DefectFilterDropdown

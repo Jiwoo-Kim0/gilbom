@@ -109,6 +109,41 @@ test.describe('결함 필터', () => {
     expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(1)
   })
 
+  test('결함 유형 목록은 지도 마커와 같은 색 점을 쓴다', async ({ page }) => {
+    await stubDefectPage(page)
+    await openDefectPage(page)
+    const filter = page.getByRole('form', { name: '결함 필터' })
+
+    await filter.getByRole('button', { name: /결함 유형/ }).click()
+    const panel = filter.getByRole('group', { name: '결함 유형' })
+    await expect(panel.getByRole('checkbox')).toHaveCount(4)
+
+    // 네 유형의 점 색이 서로 다르고, 지도 마커와 같은 변수를 쓴다.
+    const colors = await panel.locator('.defect-type-dot').evaluateAll(
+      (dots) => dots.map((dot) => getComputedStyle(dot).backgroundColor),
+    )
+    expect(colors).toHaveLength(4)
+    expect(new Set(colors).size, '유형마다 다른 색이어야 한다').toBe(4)
+
+    const markerColor = await page.evaluate(() => {
+      const probe = document.createElement('span')
+      probe.className = 'defect-marker defect-marker-damaged'
+      document.body.append(probe)
+      const color = getComputedStyle(probe).backgroundColor
+      probe.remove()
+      return color
+    })
+    expect(colors[0], '파손 점은 파손 마커와 같은 색이다').toBe(markerColor)
+
+    // 처리 상태에는 점을 두지 않는다. 마커 색이 상태와 무관해졌다.
+    await page.getByRole('heading', { level: 2 }).click()
+    await filter.getByRole('button', { name: /처리 상태/ }).click()
+    await expect(
+      filter.getByRole('group', { name: '처리 상태' })
+        .locator('.defect-status-dot, .defect-type-dot'),
+    ).toHaveCount(0)
+  })
+
   test('필터 초기화는 검색어까지 지운다', async ({ page }) => {
     await stubDefectPage(page)
     await openDefectPage(page, '?q=INC&risk=CRITICAL')

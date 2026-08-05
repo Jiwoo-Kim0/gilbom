@@ -20,6 +20,15 @@
   --nb-gold: #b8863b;
   --nb-gold-soft: #f5dfa0;
   --nb-ink: #1a1a1a;
+  /*
+   * 결함 유형 색. 지도 마커·클러스터와 필터 드롭다운의 점이 같은 값을 써야 "지도의
+   * 빨간 핀 = 파손"이 성립한다. 한 곳에서 바꾸면 셋이 함께 바뀐다.
+   */
+  --defect-damaged: #d64545;
+  --defect-missing: #2878c8;
+  --defect-installation-invalid: #c47a16;
+  --defect-unknown-anomaly: #7656b1;
+  --defect-mixed: #4b5563;
 }
 
 * {
