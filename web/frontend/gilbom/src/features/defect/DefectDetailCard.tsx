@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { X } from 'lucide-react'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
+import { BoundingBoxOverlay } from './DefectBoundingBox'
 import { DefectEditModal } from './DefectEditModal'
+import { DefectPhotoViewer } from './DefectPhotoViewer'
 import {
   createReport,
   ReportCreateAttempt,
@@ -119,46 +121,6 @@ function changedFields(
     }))
 }
 
-/**
- * AI가 검출한 영역을 사진 위에 그린다.
- *
- * <p>`bboxNorm`은 [xMin, yMin, xMax, yMax] 정규 좌표(0~1)다. viewBox를 `0 0 1 1`로
- * 두면 그 값을 그대로 rect 좌표로 쓸 수 있어 이미지 크기·종횡비 계산이 필요 없다.
- * SVG는 figure를 꽉 채우고 figure 높이는 이미지가 정하므로 항상 정확히 겹친다.
- *
- * <p>모양은 `App.css`의 클래스로만 준다. Nginx CSP가 `style-src 'self'`라
- * style 속성을 쓰면 차단된다.
- */
-function BoundingBoxOverlay({ bboxNorm }: { bboxNorm: number[] | null }) {
-  if (bboxNorm === null || bboxNorm.length !== 4) {
-    return null
-  }
-  const [xMin, yMin, xMax, yMax] = bboxNorm
-  const width = xMax - xMin
-  const height = yMax - yMin
-  // 서버가 순서를 검증하지만, 뒤집힌 값이 오면 그리지 않는다.
-  if (!(width > 0) || !(height > 0)) {
-    return null
-  }
-  return (
-    <svg
-      className="defect-bbox"
-      viewBox="0 0 1 1"
-      preserveAspectRatio="none"
-      aria-hidden="true"
-    >
-      <rect
-        x={xMin}
-        y={yMin}
-        width={width}
-        height={height}
-        // 상자 선 두께가 이미지 비율에 따라 찌그러지지 않게 한다.
-        vectorEffect="non-scaling-stroke"
-      />
-    </svg>
-  )
-}
-
 interface DefectDetailCardProps {
   defectId: string
   onClose: () => void
@@ -183,6 +145,7 @@ export function DefectDetailCard({
   const [detail, setDetail] = useState<DefectDetail | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [image, setImage] = useState<ImageState>({ kind: 'loading' })
+  const [photoOpen, setPhotoOpen] = useState(false)
 
   const [tab, setTab] = useState<CardTab>('info')
   const [observations, setObservations] = useState<
@@ -373,10 +336,21 @@ export function DefectDetailCard({
             {image.kind === 'none' && <p>연결된 이미지가 없습니다.</p>}
             {image.kind === 'error' && <p role="alert">{image.message}</p>}
             {image.kind === 'ready' && (
-              <figure className="defect-card-figure">
-                <img src={image.image.imageUrl} alt="결함 증거 이미지" />
-                <BoundingBoxOverlay bboxNorm={image.image.bboxNorm} />
-              </figure>
+              /*
+               * 카드 안 사진은 340px 폭이라 파손 부위를 눈으로 가리기 어렵다. 눌러서
+               * 크게 보는 창을 연다. button으로 감싸 키보드로도 열 수 있게 한다.
+               */
+              <button
+                type="button"
+                className="defect-card-photo-button"
+                aria-label="증거 사진 크게 보기"
+                onClick={() => setPhotoOpen(true)}
+              >
+                <figure className="defect-card-figure">
+                  <img src={image.image.imageUrl} alt="결함 증거 이미지" />
+                  <BoundingBoxOverlay bboxNorm={image.image.bboxNorm} />
+                </figure>
+              </button>
             )}
           </div>
           {image.kind === 'ready' && image.image.bboxNorm !== null && (
@@ -731,6 +705,15 @@ export function DefectDetailCard({
               </>
             )}
           </div>
+
+          {photoOpen && image.kind === 'ready' && (
+            <DefectPhotoViewer
+              imageUrl={image.image.imageUrl}
+              bboxNorm={image.image.bboxNorm}
+              incidentCode={defect.incidentCode}
+              onClose={() => setPhotoOpen(false)}
+            />
+          )}
 
           {editing && (
             <DefectEditModal

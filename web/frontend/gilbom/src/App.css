@@ -750,6 +750,228 @@
   height: auto;
 }
 
+/* 사진을 눌러 크게 볼 수 있다는 것이 보이게, 버튼 티는 내지 않는다. */
+.defect-card-photo-button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+}
+
+.defect-card-photo-button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/*
+ * 증거 사진 확대 창.
+ *
+ * 배율은 class로만 준다(CSP `style-src 'self'`). 이동은 확대된 상자를 담은
+ * `.defect-photo-scroll`의 스크롤로 한다.
+ */
+.defect-photo-backdrop {
+  position: fixed;
+  z-index: 200;
+  inset: 0;
+  display: grid;
+  padding: clamp(12px, 3vw, 32px);
+  /*
+   * 창을 화면 높이에 맞춰 늘린다(가운데 정렬로 두면 안 된다). 높이가 내용에 따라
+   * 늘어나면 사진 상자가 1400px까지 자라 화면 밖으로 나가고, 상자 안에서 스크롤되지
+   * 않아 확대한 사진을 끌어서 볼 수 없다.
+   */
+  justify-items: center;
+  /*
+   * 행 높이를 못박는다. grid 기본값 `auto`에서는 자식의 `height: 100%`가 내용 기준으로
+   * 되돌아 계산돼(순환) 창이 그대로 늘어난다.
+   */
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  background: rgb(15 18 16 / 72%);
+}
+
+.defect-photo-panel {
+  display: grid;
+  /* 가운데 줄만 남는 높이를 갖고, 그 줄 안에서 스크롤한다. */
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  width: min(1100px, 100%);
+  height: 100%;
+  min-height: 0;
+  padding: 16px;
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.defect-photo-header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.defect-photo-code {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.defect-photo-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.defect-photo-control {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  place-items: center;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.defect-photo-control:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.defect-photo-zoom-label {
+  min-width: 48px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.defect-photo-reset {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.defect-photo-scroll {
+  overflow: auto;
+  border-radius: 12px;
+  background: var(--surface-muted);
+  /* 확대 전에는 끌 것이 없다. 커서로 그것을 알린다. */
+  cursor: default;
+  overscroll-behavior: contain;
+}
+
+.defect-photo-scroll.is-dragging {
+  cursor: grabbing;
+}
+
+.defect-photo-frame {
+  position: relative;
+  /* 사진을 감싸는 크기여야 bbox 오버레이가 정확히 겹친다. */
+  width: fit-content;
+  margin: 0 auto;
+  line-height: 0;
+  /* 끌어서 이동할 때 사진 대신 글자·이미지가 선택되지 않게 한다. */
+  user-select: none;
+}
+
+.defect-photo-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/*
+ * 기준 배율은 "사진 전체가 보이는 크기"다. 폭만 맞추면 세로로 긴 사진이 열자마자
+ * 아래가 잘려, 전체를 보고 부위를 고르려고 창을 연 목적이 무너진다.
+ *
+ * 높이 상한은 창의 머리·안내 줄과 여백을 뺀 어림값이다. 부모가 auto 높이라 `100%`가
+ * 해석되지 않아 뷰포트 기준으로 잡았다. 어림이 틀려 남는 만큼은 상자 안에서
+ * 스크롤되므로 잘리지는 않는다.
+ */
+.defect-photo-zoom-100 {
+  /* 확대 단계에서는 상한을 풀어야 한다. 공통 규칙에 두면 확대가 먹지 않는다. */
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.defect-photo-zoom-100 img {
+  width: auto;
+  max-width: 100%;
+  max-height: calc(100dvh - 200px);
+}
+
+/*
+ * 배율 단계. `defectPhotoZoom.ts`의 `PHOTO_ZOOM_STEPS`와 짝이며, 한쪽만 늘리면
+ * 그 단계는 기준 배율로 보인다(단위 시험이 이 짝을 확인한다).
+ */
+.defect-photo-zoom-120 {
+  width: 120%;
+}
+
+.defect-photo-zoom-140 {
+  width: 140%;
+}
+
+.defect-photo-zoom-160 {
+  width: 160%;
+}
+
+.defect-photo-zoom-180 {
+  width: 180%;
+}
+
+.defect-photo-zoom-200 {
+  width: 200%;
+}
+
+.defect-photo-zoom-240 {
+  width: 240%;
+}
+
+.defect-photo-zoom-280 {
+  width: 280%;
+}
+
+.defect-photo-zoom-320 {
+  width: 320%;
+}
+
+.defect-photo-zoom-360 {
+  width: 360%;
+}
+
+.defect-photo-zoom-400 {
+  width: 400%;
+}
+
+/* 확대된 상태에서만 끌어서 이동할 수 있다. */
+.defect-photo-scroll:has(.defect-photo-frame:not(.defect-photo-zoom-100)) {
+  cursor: grab;
+}
+
+.defect-photo-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.defect-photo-hint kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface-muted);
+  font-size: 11px;
+}
+
 .defect-bbox {
   position: absolute;
   inset: 0;
