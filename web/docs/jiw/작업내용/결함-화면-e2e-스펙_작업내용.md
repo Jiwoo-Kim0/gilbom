@@ -31,16 +31,16 @@
 | 파일 | 내용 |
 | --- | --- |
 | `e2e/support/defectPage.ts` | 공용 스텁 — 인증·목록·지도 응답, SSE 침묵, 페이지 열기, 검색 타자 넣기 |
-| `e2e/defect-list.spec.ts` | 표 열 폭·겹침·행 높이, 배지 색, 지도 범례 색, 행 클릭 → 지도 스크롤 (4개) |
+| `e2e/defect-list.spec.ts` | 표 열 폭·겹침·행 높이, 배지 색, 지도 범례 색, 병합 줄 자리 고정, 행 클릭 → 지도 스크롤 (5개) |
 | `e2e/defect-filter.spec.ts` | 드롭다운·URL 반영·시작 날짜·라벨 간격·유형 색·초기화 (6개) |
 | `e2e/defect-search.spec.ts` | 디바운스·Enter·한글 IME·초기화 취소·조건 동시 변경 (6개) |
 | `package.json` | `npm run test:e2e:defect` |
 
 전부 **서버 없이** 돈다. `page.route`로 API를 가짜 응답으로 막는다. 실제 API 계약은
-백엔드 테스트(817개)가 지키고, 여기서는 화면만 본다.
+백엔드 테스트(821개)가 지키고, 여기서는 화면만 본다.
 
-결과: 16개 전부 통과. **네 번 연속 돌려 흔들림이 없는 것까지 확인했다**(§5).
-(처음 14개로 시작했고, 유형 색 점과 지도 범례를 넣을 때 두 개를 더했다.)
+결과: 17개 전부 통과. **네 번 연속 돌려 흔들림이 없는 것까지 확인했다**(§5).
+(처음 14개로 시작했고, 유형 색 점·지도 범례·병합 줄 작업에서 세 개를 더했다.)
 
 ---
 
@@ -135,18 +135,40 @@ await cdp.send('Input.insertText', { text: '강' })   // 확정
 
 ## 5. 어떻게 돌리나
 
+**폴더는 `web/frontend/gilbom`**이다(그 안 `package.json`에 스크립트가 있다).
+**EC2에서 돌리는 것이 아니다** — 이 시험은 자기가 dev 서버(`npm run dev`,
+`127.0.0.1:4174`)를 띄워 Chromium으로 조작한다. API는 전부 `page.route` 스텁이라
+**백엔드도 DB도 필요 없다.**
+
 ```bash
 cd web/frontend/gilbom
+npm ci
+npx playwright install --with-deps chromium   # 최초 한 번
 npm run test:e2e:defect
 ```
 
-프로젝트 `playwright.config.ts`가 `npm run dev`로 서버를 띄우고 Chromium으로 돈다.
+Node **24.18.0** / npm **11.16.0**이 필요하다. `.npmrc`에 `engine-strict=true`라 버전이
+다르면 `npm`이 거부한다. 브라우저 버전은 `@playwright/test`(1.62.0)와 짝이라 위 명령으로
+같이 받는다.
 
-**이 WSL에서는 그 경로를 쓸 수 없다** — Linux node가 없어 `npm run dev`가 실패한다
-([결함-필터-UI-드롭다운_작업내용.md](결함-필터-UI-드롭다운_작업내용.md) §4.3). 그래서 검증은
-컨테이너로 dev 서버를 띄우고, 같은 `baseURL`을 보는 임시 config로 했다(커밋하지 않음).
-서버를 누가 띄우는지만 다르고 스펙·브라우저는 같다. **정식 경로(`npm run test:e2e:defect`)는
-Linux node가 있는 환경에서 한 번 확인이 필요하다**(§6).
+### 5.1 이 WSL에서는 정식 경로를 쓸 수 없다
+
+Linux node가 없고 `npm`은 Windows 쪽이 잡히는데, cmd.exe가 UNC 경로
+(`\\wsl.localhost\...`)를 작업 디렉터리로 못 쓴다
+([결함-필터-UI-드롭다운_작업내용.md](결함-필터-UI-드롭다운_작업내용.md) §4.3).
+
+그래서 이번 검증은 **컨테이너로 dev 서버를 띄우고 같은 `baseURL`을 보는 임시 config**로
+했다(커밋하지 않음). 서버를 누가 띄우는지만 다르고 스펙·브라우저는 같다.
+
+정식 경로로 돌리려면 둘 중 하나가 필요하다.
+
+| 방법 | 명령 |
+| --- | --- |
+| ① WSL에 Node 설치(권장 — `npm run dev`·`lint`도 함께 풀린다) | `nvm install 24.18.0 && npm i -g npm@11.16.0` |
+| ② Playwright 공식 이미지로 돌리기(호스트에 설치 없음, 이미지 1.5~2GB) | `docker run --rm -v <repo>/web/frontend/gilbom:/app -w /app mcr.microsoft.com/playwright:v1.62.0-jammy npm run test:e2e:defect` |
+
+②의 이미지 태그는 `@playwright/test` 버전과 맞춰야 브라우저가 어긋나지 않는다.
+**정식 경로 확인은 아직 남아 있다**(§6).
 
 ---
 
@@ -155,7 +177,8 @@ Linux node가 있는 환경에서 한 번 확인이 필요하다**(§6).
 ### 내 몫
 
 - **정식 스크립트로 한 번 돌려보기.** 이 환경에서는 `npm run dev`가 안 돼 컨테이너 서버로만
-  확인했다. 다른 사람 기계나 CI에서 `npm run test:e2e:defect`가 그대로 도는지 봐야 한다.
+  확인했다. §5.1의 ① 또는 ②로 `npm run test:e2e:defect`가 그대로 도는지 봐야 한다.
+  스펙 자체는 17개 모두 반복 실행에서 안정적이었다.
 - 상세 카드(상태 드롭다운 다섯 항목, 완료 선택 시 처리 결과 필수)는 지도 스크립트가 필요해
   빠졌다. `mission-map.spec.ts`의 `naver.maps` 가짜를 공용 support로 빼내면 넣을 수 있다.
 - 이 스펙들은 CI에 걸려 있지 않다. Jenkins에 붙이려면 브라우저 설치가 필요하다
