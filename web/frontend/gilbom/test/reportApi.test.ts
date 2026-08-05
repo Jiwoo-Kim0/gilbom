@@ -4,6 +4,7 @@ import {
   approveReport,
   createReport,
   deleteReport,
+  listReports,
   rejectReport,
   ReportCreateAttempt,
   submitReport,
@@ -114,6 +115,33 @@ test('생성 실패 후 재호출은 동일한 Idempotency-Key를 전송한다',
 
   assert.deepEqual(sentKeys, [FIRST_UUID, FIRST_UUID])
   assert.deepEqual(sentCsrfTokens, ['csrf-token', 'csrf-token'])
+})
+
+test('목록 조회에 보고서 기간 필터를 전달한다', async (context) => {
+  const originalFetch = globalThis.fetch
+  let requestedUrl = ''
+
+  context.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  globalThis.fetch = async (input) => {
+    requestedUrl = String(input)
+    return jsonResponse({})
+  }
+
+  await listReports({
+    page: 2,
+    size: 25,
+    periodFrom: '2026-08-01T00:00:00.000Z',
+    periodTo: '2026-08-05T23:59:59.999Z',
+  })
+
+  const query = new URL(requestedUrl, 'http://localhost').searchParams
+  assert.equal(query.get('page'), '2')
+  assert.equal(query.get('size'), '25')
+  assert.equal(query.get('periodFrom'), '2026-08-01T00:00:00.000Z')
+  assert.equal(query.get('periodTo'), '2026-08-05T23:59:59.999Z')
 })
 
 test('모든 보고서 변경 요청에 CSRF와 expectedVersionNo를 전달한다', async (context) => {

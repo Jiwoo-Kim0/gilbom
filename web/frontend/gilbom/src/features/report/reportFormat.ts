@@ -21,6 +21,45 @@ export function formatReportPeriod(from: string, to: string): string {
   return `${formatter.format(new Date(from))} – ${formatter.format(new Date(to))}`
 }
 
+function toReportPeriodBoundary(
+  value: string,
+  endOfDay: boolean,
+): string | undefined {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (match === null) {
+    return undefined
+  }
+
+  const year = Number(match[1])
+  const monthIndex = Number(match[2]) - 1
+  const day = Number(match[3])
+  const date = new Date(
+    year,
+    monthIndex,
+    day,
+    endOfDay ? 23 : 0,
+    endOfDay ? 59 : 0,
+    endOfDay ? 59 : 0,
+    endOfDay ? 999 : 0,
+  )
+  if (
+    date.getFullYear() !== year
+    || date.getMonth() !== monthIndex
+    || date.getDate() !== day
+  ) {
+    return undefined
+  }
+  return date.toISOString()
+}
+
+export function toReportPeriodStartInstant(value: string): string | undefined {
+  return toReportPeriodBoundary(value, false)
+}
+
+export function toReportPeriodEndInstant(value: string): string | undefined {
+  return toReportPeriodBoundary(value, true)
+}
+
 const INCIDENT_CODE_PATTERN = /\bINC-[A-Z0-9]+(?:-[A-Z0-9]+)+\b/
 
 /**

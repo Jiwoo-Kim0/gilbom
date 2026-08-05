@@ -197,6 +197,8 @@ export type ReportListFilters = {
   size?: number
   search?: string
   statuses?: ReportStatus[]
+  periodFrom?: string
+  periodTo?: string
   reportType?: ReportType
   generationMethod?: ReportGenerationMethod
   sort?: ReportSort
