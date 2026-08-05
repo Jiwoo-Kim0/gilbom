@@ -37,6 +37,14 @@ export function DefectPhotoViewer({
 }: DefectPhotoViewerProps) {
   const [zoom, setZoom] = useState<PhotoZoom>(MIN_PHOTO_ZOOM)
   const [dragging, setDragging] = useState(false)
+  /**
+   * 사진의 원본 비율. 사진을 상자에 `contain`으로 담으므로 bbox 오버레이도 같은 비율로
+   * 여백을 둬야 겹친다. 서버 응답의 imageWidth·imageHeight는 null일 수 있어 실제로
+   * 그려진 이미지에서 읽는다.
+   */
+  const [aspect, setAspect] = useState<{ width: number; height: number } | null>(
+    null,
+  )
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const closeRef = useRef<HTMLButtonElement | null>(null)
   /** 끌기 시작점. 화면 좌표와 그때의 스크롤 위치를 함께 잡아둔다. */
@@ -140,7 +148,14 @@ export function DefectPhotoViewer({
         onClick={(event) => event.stopPropagation()}
       >
         <header className="defect-photo-header">
-          <p className="defect-photo-code">{incidentCode}</p>
+          <div className="defect-photo-title">
+            <p className="defect-photo-code">{incidentCode}</p>
+            {/* 안내를 따로 한 줄로 두면 그만큼 사진이 작아진다. 머리줄에 붙인다. */}
+            <p className="defect-photo-hint">
+              휠·<kbd>+</kbd><kbd>-</kbd> 확대, 끌어서 이동, <kbd>0</kbd> 전체,
+              {' '}<kbd>Esc</kbd> 닫기
+            </p>
+          </div>
           <div className="defect-photo-controls">
             <button
               type="button"
@@ -196,15 +211,17 @@ export function DefectPhotoViewer({
               src={imageUrl}
               alt={`${incidentCode} 증거 사진`}
               draggable={false}
+              onLoad={(event) => {
+                const { naturalWidth, naturalHeight } = event.currentTarget
+                if (naturalWidth > 0 && naturalHeight > 0) {
+                  setAspect({ width: naturalWidth, height: naturalHeight })
+                }
+              }}
             />
-            <BoundingBoxOverlay bboxNorm={bboxNorm} />
+            <BoundingBoxOverlay bboxNorm={bboxNorm} aspect={aspect} />
           </div>
         </div>
 
-        <p className="defect-photo-hint">
-          휠 또는 <kbd>+</kbd> <kbd>-</kbd>로 확대·축소, 확대한 뒤 끌어서 이동,
-          <kbd>0</kbd>으로 전체 보기, <kbd>Esc</kbd>로 닫기
-        </p>
       </div>
     </div>
   )

@@ -776,7 +776,8 @@
   z-index: 200;
   inset: 0;
   display: grid;
-  padding: clamp(12px, 3vw, 32px);
+  /* 여백을 줄인 만큼 사진이 커진다. */
+  padding: clamp(8px, 1.5vw, 18px);
   /*
    * 창을 화면 높이에 맞춰 늘린다(가운데 정렬로 두면 안 된다). 높이가 내용에 따라
    * 늘어나면 사진 상자가 1400px까지 자라 화면 밖으로 나가고, 상자 안에서 스크롤되지
@@ -797,10 +798,10 @@
   /* 가운데 줄만 남는 높이를 갖고, 그 줄 안에서 스크롤한다. */
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 12px;
-  width: min(1100px, 100%);
+  width: min(1500px, 100%);
   height: 100%;
   min-height: 0;
-  padding: 16px;
+  padding: 12px;
   border-radius: 16px;
   background: var(--surface);
   box-shadow: var(--shadow);
@@ -863,7 +864,11 @@
 .defect-photo-scroll {
   overflow: auto;
   border-radius: 12px;
-  background: var(--surface-muted);
+  /*
+   * 사진 비율과 상자 비율이 달라 남는 자리(letterbox)가 생긴다. 밝은 배경이면 "카드가
+   * 비어 있다"로 읽혀 사진이 작아 보이므로, 사진 뷰어답게 어둡게 깐다.
+   */
+  background: rgb(23 26 24);
   /* 확대 전에는 끌 것이 없다. 커서로 그것을 알린다. */
   cursor: default;
   overscroll-behavior: contain;
@@ -875,82 +880,83 @@
 
 .defect-photo-frame {
   position: relative;
-  /* 사진을 감싸는 크기여야 bbox 오버레이가 정확히 겹친다. */
-  width: fit-content;
-  margin: 0 auto;
-  line-height: 0;
   /* 끌어서 이동할 때 사진 대신 글자·이미지가 선택되지 않게 한다. */
   user-select: none;
 }
 
+/*
+ * 사진은 상자 안에 비율을 지키며 담는다(`contain`). 상자를 꽉 채우게 두면 기준 배율에서
+ * 화면을 최대한 쓸 수 있고, 배율 계산에 사진 크기를 몰라도 된다.
+ *
+ * <p>bbox 오버레이도 같은 비율로 여백을 둬야 겹친다. `DefectBoundingBox`가 `aspect`를
+ * 받으면 `meet`으로 맞춘다.
+ */
 .defect-photo-frame img {
   display: block;
   width: 100%;
-  height: auto;
-}
-
-/*
- * 기준 배율은 "사진 전체가 보이는 크기"다. 폭만 맞추면 세로로 긴 사진이 열자마자
- * 아래가 잘려, 전체를 보고 부위를 고르려고 창을 연 목적이 무너진다.
- *
- * 높이 상한은 창의 머리·안내 줄과 여백을 뺀 어림값이다. 부모가 auto 높이라 `100%`가
- * 해석되지 않아 뷰포트 기준으로 잡았다. 어림이 틀려 남는 만큼은 상자 안에서
- * 스크롤되므로 잘리지는 않는다.
- */
-.defect-photo-zoom-100 {
-  /* 확대 단계에서는 상한을 풀어야 한다. 공통 규칙에 두면 확대가 먹지 않는다. */
-  max-width: 100%;
-  max-height: 100%;
-}
-
-.defect-photo-zoom-100 img {
-  width: auto;
-  max-width: 100%;
-  max-height: calc(100dvh - 200px);
+  height: 100%;
+  object-fit: contain;
 }
 
 /*
  * 배율 단계. `defectPhotoZoom.ts`의 `PHOTO_ZOOM_STEPS`와 짝이며, 한쪽만 늘리면
  * 그 단계는 기준 배율로 보인다(단위 시험이 이 짝을 확인한다).
+ *
+ * <p>기준 배율(100)은 상자와 같은 크기 = 사진 전체가 보이는 가장 큰 크기다.
  */
+.defect-photo-zoom-100 {
+  width: 100%;
+  height: 100%;
+}
+
 .defect-photo-zoom-120 {
   width: 120%;
+  height: 120%;
 }
 
 .defect-photo-zoom-140 {
   width: 140%;
+  height: 140%;
 }
 
 .defect-photo-zoom-160 {
   width: 160%;
+  height: 160%;
 }
 
 .defect-photo-zoom-180 {
   width: 180%;
+  height: 180%;
 }
 
 .defect-photo-zoom-200 {
   width: 200%;
+  height: 200%;
 }
 
 .defect-photo-zoom-240 {
   width: 240%;
+  height: 240%;
 }
 
 .defect-photo-zoom-280 {
   width: 280%;
+  height: 280%;
 }
 
 .defect-photo-zoom-320 {
   width: 320%;
+  height: 320%;
 }
 
 .defect-photo-zoom-360 {
   width: 360%;
+  height: 360%;
 }
 
 .defect-photo-zoom-400 {
   width: 400%;
+  height: 400%;
 }
 
 /* 확대된 상태에서만 끌어서 이동할 수 있다. */
@@ -958,8 +964,18 @@
   cursor: grab;
 }
 
+.defect-photo-title {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
 .defect-photo-hint {
+  display: flex;
+  gap: 4px;
   margin: 0;
+  align-items: center;
+  flex-wrap: wrap;
   color: var(--text-muted);
   font-size: 12px;
 }
