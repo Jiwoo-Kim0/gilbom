@@ -17,8 +17,21 @@ interface DefectFilterProps {
 }
 
 /**
+ * `filters.from`은 서버로 나갈 때 시각까지 쓰는 datetime-local 문자열인데, 화면에서는
+ * 날짜만 받는다. 그래서 앞 10자만 잘라 보여주고, 고른 날짜는 그 날 0시로 되돌린다.
+ * 상한(`to`)은 받지 않는다. 결함은 미래에 생기지 않으니 늘 "지금"이다.
+ */
+function toDateInputValue(from: string): string {
+  return from.slice(0, 10)
+}
+
+function fromDateInputValue(date: string): string {
+  return date === '' ? '' : `${date}T00:00`
+}
+
+/**
  * 지도 오른쪽에 세로로 붙는 조건 패널이다. 검색은 화면 맨 위 {@link DefectSearchBar}로
- * 따로 나가 있고, 기간 조건은 쓰지 않는다(전체 기간을 본다).
+ * 따로 나가 있다.
  */
 export function DefectFilter({
   filters,
@@ -35,6 +48,32 @@ export function DefectFilter({
       aria-label="결함 필터"
       onSubmit={(event) => event.preventDefault()}
     >
+      <fieldset className="defect-filter-group" disabled={disabled}>
+        <legend>
+          시작 날짜
+          {filters.from.length > 0 && (
+            <button
+              type="button"
+              className="defect-filter-clear-date"
+              onClick={() => update({ from: '' })}
+            >
+              전체 기간
+            </button>
+          )}
+        </legend>
+        <input
+          type="date"
+          className="defect-filter-date-input"
+          value={toDateInputValue(filters.from)}
+          aria-describedby="defect-filter-from-hint"
+          onChange={(event) =>
+            update({ from: fromDateInputValue(event.target.value) })
+          }
+        />
+        {/* 서버는 이 조건을 last_seen_at에 건다. "최초 발견"으로 읽으면 오해한다. */}
+        <small id="defect-filter-from-hint">이 날짜 이후 관측된 결함</small>
+      </fieldset>
+
       {/*
         조건 셋은 접어둔다. 펼쳐 두면 체크박스 14개가 패널을 다 먹어서
         신뢰도·초기화가 화면 밖으로 밀렸다.

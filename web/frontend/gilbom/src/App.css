@@ -441,10 +441,42 @@
 }
 
 .defect-filter-group legend {
+  display: flex;
+  gap: 8px;
   padding: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  width: 100%;
   color: var(--text-muted);
   font-size: 13px;
   font-weight: 700;
+}
+
+.defect-filter-group small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.defect-filter-date-input {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  background: var(--surface);
+  font-size: 14px;
+}
+
+/* 날짜를 지우는 길이 date 입력만으로는 없다. 전체 기간으로 되돌리는 통로다. */
+.defect-filter-clear-date {
+  padding: 0;
+  border: none;
+  color: var(--brand-strong);
+  background: none;
+  font-size: 12px;
+  font-weight: 750;
+  text-decoration: underline;
 }
 
 .defect-filter-dropdown {
@@ -565,6 +597,32 @@
 .defect-status-dot-done,
 .defect-legend-item-done .defect-status-dot {
   background: var(--brand-strong);
+}
+
+/*
+ * 필터 드롭다운의 점은 상태 코드(`NEW`·`IN_PROGRESS`…)로 클래스를 만든다. 위의
+ * received/progress/done은 지도 범례용 이름이라 하나도 걸리지 않아 전부 회색이었다.
+ * 목록 배지와 같은 색으로 맞춘다.
+ */
+.defect-status-dot-new {
+  background: #dfa93a;
+}
+
+.defect-status-dot-accepted {
+  background: #4b8db3;
+}
+
+.defect-status-dot-in_progress {
+  background: var(--nb-gold);
+}
+
+.defect-status-dot-resolved {
+  background: #2f9163;
+}
+
+.defect-status-dot-false_positive,
+.defect-status-dot-rejected {
+  background: #9ca3af;
 }
 
 .defect-filter-reset {
@@ -949,11 +1007,33 @@
   overflow: hidden;
 }
 
+/*
+ * 8열(코드·유형·심각도·위치·최근 관측·반복·신뢰도·상태)이다. 예전에는 fr 6개만 적어
+ * 유형·심각도가 1.4fr씩 가져가고 신뢰도·상태는 암묵 열로 밀려났다. 값 폭이 정해진 열은
+ * px로 못박고 **남는 폭은 위치가 받는다.** 위치가 가장 길고 잘리면 곤란한 값이다.
+ *
+ * 각 폭은 "가장 긴 값 + 여유"다. 딱 맞게 잡으면 글꼴이 조금만 달라져도 옆 열 글자에
+ * 달라붙어 두 열이 한 덩어리로 읽힌다.
+ */
 .defect-table-row {
   display: grid;
-  grid-template-columns: 90px 1.4fr 1.4fr 1.1fr 0.8fr 0.6fr;
-  gap: 12px;
-  padding: 12px 16px;
+  grid-template-columns:
+    146px 72px 58px minmax(0, 1fr) 96px 44px 46px 106px;
+  gap: 18px;
+  padding: 12px 18px;
+}
+
+.defect-table-row > span {
+  /* 기본값 auto면 긴 위치 값이 열을 밀어낸다. 0이어야 ellipsis가 걸린다. */
+  min-width: 0;
+  /*
+   * 넘치는 값은 반드시 자기 칸 안에서 잘려야 한다. nowrap만 주고 이걸 빼면 넘친
+   * 글자가 옆 칸 위에 그대로 그려져 두 열이 겹쳐 보인다.
+   */
+  overflow: hidden;
+  align-self: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .defect-table-head {
@@ -961,6 +1041,164 @@
   background: var(--surface-muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+/* 위치가 두 줄까지 늘어나므로 한 줄짜리 행도 같은 높이로 맞춰 둔다.
+   두 줄 높이(1.35 × 14px × 2 + 위아래 padding 24px ≈ 62px)보다 조금 크게 잡아
+   반올림 차이로 행마다 1px씩 흔들리지 않게 한다. */
+.defect-table-body-row {
+  min-height: 64px;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.defect-table-body-row:hover {
+  background: var(--surface-muted);
+}
+
+.defect-table-body-row:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* 선택된 행은 상세 카드에 열려 있는 행이다. 배경만으로는 스크롤 중에 놓친다. */
+.defect-table-body-row.is-selected {
+  box-shadow: inset 3px 0 0 var(--nb-gold);
+  background: var(--brand-soft);
+}
+
+/* `INC-20260805-000123` 19자가 들어가야 한다. 본문보다 한 단 작게, 자리수를 고정해
+   폭을 140px에 맞춘다. */
+.defect-cell-code {
+  font-size: 13px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+/*
+ * 남는 폭을 받는 열이지만 1280px 화면에서는 120px 남짓이라 한 줄로는 8자밖에 못 넣는다.
+ * 두 줄까지 허용해 이름을 끝까지 보여준다. `keep-all`은 한국어 단어 중간에서 줄이
+ * 끊기지 않게 한다.
+ */
+/* `.defect-table-row > span`의 nowrap을 이겨야 하므로 자식 선택자까지 붙인다. */
+.defect-table-row > .defect-cell-location {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--text-muted);
+  line-height: 1.35;
+  white-space: normal;
+  word-break: keep-all;
+}
+
+/* 좌표·시각·비율은 자리수가 흔들리면 세로로 훑을 수 없다. */
+.defect-cell-number {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.defect-cell-status {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/*
+ * 심각도·상태는 `<em>`이라 스타일이 없으면 기울어진 맨 텍스트로 나온다. 색이 있는
+ * 배지로 만들어 훑을 때 눈에 걸리게 한다. 색 배합은 report.css의 상태 배지와 맞췄다.
+ */
+.defect-risk,
+.defect-status,
+.defect-review-flag {
+  display: inline-flex;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 800;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.defect-risk-low {
+  color: #4b5563;
+  border-color: #d1d5db;
+  background: #f3f4f6;
+}
+
+.defect-risk-medium {
+  color: #87570d;
+  border-color: #f4c56a;
+  background: #fff6df;
+}
+
+.defect-risk-high {
+  color: #9a4f16;
+  border-color: #f0b483;
+  background: #fff1e6;
+}
+
+.defect-risk-critical {
+  color: #a23636;
+  border-color: #efb0b0;
+  background: #fff0f0;
+}
+
+.defect-status-new {
+  color: #87570d;
+  border-color: #f4c56a;
+  background: #fff6df;
+}
+
+.defect-status-accepted {
+  color: #1f5673;
+  border-color: #a9cfe0;
+  background: #eaf5fb;
+}
+
+.defect-status-in_progress {
+  color: var(--brand-strong);
+  border-color: #f0d68a;
+  background: var(--brand-soft);
+}
+
+.defect-status-resolved {
+  color: #17643d;
+  border-color: #9ad4b4;
+  background: #e8f7ef;
+}
+
+.defect-status-false_positive,
+.defect-status-rejected {
+  color: #4b5563;
+  border-color: #d1d5db;
+  background: #f3f4f6;
+}
+
+/* 검토 필요는 상태와 함께 붙으므로 채우지 않고 테두리만 준다. */
+.defect-review-flag {
+  color: #a23636;
+  border-color: #efb0b0;
+  background: none;
+}
+
+.defect-table-empty {
+  display: grid;
+  gap: 12px;
+  padding: 48px 24px;
+  justify-items: center;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.defect-table-empty p {
+  max-width: 460px;
+  margin: 0;
 }
 
 .table-heading {
@@ -2523,7 +2761,8 @@ button:disabled {
 
 /* 병합 다중 선택 — 체크박스 열은 권한이 있을 때만 붙으므로 modifier로 분리한다. */
 .defect-table.is-selectable .defect-table-row {
-  grid-template-columns: 32px 90px 1.4fr 1.4fr 1.1fr 0.8fr 0.6fr;
+  grid-template-columns:
+    32px 146px 72px 58px minmax(0, 1fr) 96px 44px 46px 106px;
 }
 
 .defect-merge-bar {
