@@ -71,6 +71,12 @@ export function defectAt(index: number) {
   }
 }
 
+/**
+ * 기본 권한. `DEFECT_MERGE`는 넣지 않는다 — 있으면 목록에 병합 선택 체크박스 열이
+ * 생겨 열 폭 스펙이 세는 열 개수가 달라진다. 병합 줄을 시험할 때만 따로 넘긴다.
+ */
+const DEFAULT_PERMISSIONS = ['DEFECT_STATUS_VIEW', 'DEFECT_STATUS_UPDATE']
+
 interface StubOptions {
   /** 목록에 실을 결함 수. */
   count?: number
@@ -78,6 +84,8 @@ interface StubOptions {
    * 목록 조회가 들어올 때마다 query string을 담는다. 조회 횟수를 세는 스펙이 쓴다.
    */
   listQueries?: string[]
+  /** 로그인 사용자 권한. 기본은 {@link DEFAULT_PERMISSIONS}. */
+  permissions?: string[]
 }
 
 /**
@@ -110,7 +118,11 @@ export async function stubDefectPage(
   page: Page,
   options: StubOptions = {},
 ): Promise<ReturnType<typeof defectAt>[]> {
-  const { count = 8, listQueries } = options
+  const {
+    count = 8,
+    listQueries,
+    permissions = DEFAULT_PERMISSIONS,
+  } = options
   const defects = Array.from({ length: count }, (_, index) => defectAt(index))
 
   await silenceRealtime(page)
@@ -130,7 +142,7 @@ export async function stubDefectPage(
         userId: USER_ID,
         displayName: '결함 화면 e2e 관리자',
         roles: [{ roleCode: 'OPERATOR', roleName: '운영자' }],
-        permissions: ['DEFECT_STATUS_VIEW', 'DEFECT_STATUS_UPDATE'],
+        permissions,
       })
       return
     }

@@ -138,6 +138,68 @@ test.describe('결함 목록 표', () => {
     expect(gap, '범례와 지도 사이 간격').toBeGreaterThanOrEqual(8)
   })
 
+  test('병합 선택 줄이 생겨도 목록이 밀리지 않는다', async ({ page }) => {
+    await stubDefectPage(page, {
+      permissions: ['DEFECT_STATUS_VIEW', 'DEFECT_STATUS_UPDATE', 'DEFECT_MERGE'],
+    })
+    await openDefectPage(page, '?allStatus=1')
+
+    const bar = page.locator('.defect-merge-bar')
+    /*
+     * 숨은 동안에는 role 기반 locator로 못 잡는다 — `visibility: hidden`이면 접근성
+     * 트리에서 빠지기 때문이다(그게 바로 원하는 상태다). 버튼은 CSS로 집는다.
+     */
+    const clear = bar.locator('button.secondary-button')
+    const merge = bar.locator('button.primary-button')
+    /*
+     * 문서 좌표로 잰다. 화면 기준으로 재면 체크박스를 누를 때 일어나는 스크롤까지
+     * 섞여 들어와, 자리가 밀린 것과 구분되지 않는다.
+     */
+    const listTop = () =>
+      page.evaluate(() =>
+        Math.round(
+          document.querySelector('.defect-list-card')!
+            .getBoundingClientRect().top + window.scrollY,
+        ),
+      )
+
+    /*
+     * 선택이 없을 때도 줄은 자리에 있어야 한다. 조건부로 렌더하면 체크할 때마다 목록이
+     * 위아래로 움직여, 방금 누른 행이 손가락 밑에서 달아난다.
+     */
+    await expect(bar).toHaveClass(/is-hidden/)
+    await expect(bar).toBeHidden()
+    await expect(clear).toBeDisabled()
+    await expect(merge).toBeDisabled()
+    const before = await listTop()
+
+    // 한 건 선택 — 줄이 보이고 목록은 그대로다.
+    await page.locator('.defect-table-body-row input[type="checkbox"]')
+      .first()
+      .check()
+    await expect(bar).toBeVisible()
+    await expect(bar).toContainText('1건 선택됨')
+    // 보일 때는 접근성 트리에도 들어온다.
+    await expect(bar.getByRole('button', { name: '선택 해제' })).toBeVisible()
+    await expect(clear).toBeEnabled()
+    // 한 건만으로는 합칠 상대가 없다.
+    await expect(merge).toBeDisabled()
+    expect(await listTop(), '목록 위치가 그대로여야 한다').toBe(before)
+
+    // 두 건 선택 — 병합이 열린다.
+    await page.locator('.defect-table-body-row input[type="checkbox"]')
+      .nth(1)
+      .check()
+    await expect(bar).toContainText('2건 선택됨')
+    await expect(merge).toBeEnabled()
+    expect(await listTop()).toBe(before)
+
+    // 해제하면 다시 숨지만 자리는 남는다.
+    await clear.click()
+    await expect(bar).toHaveClass(/is-hidden/)
+    expect(await listTop()).toBe(before)
+  })
+
   test('행을 고르면 지도까지 화면이 올라간다', async ({ page }) => {
     await stubDefectPage(page, { count: 20 })
     await openDefectPage(page, '?allStatus=1', 20)

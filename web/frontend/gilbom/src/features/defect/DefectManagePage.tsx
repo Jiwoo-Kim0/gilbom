@@ -279,13 +279,26 @@ export function DefectManagePage() {
           onReset={() => setSearchResetToken((token) => token + 1)}
         />
       </div>
-      {canMerge && checkedVisible.length > 0 && (
-        <div className="defect-merge-bar" role="status">
+      {/*
+        선택이 없어도 자리는 남겨둔다. 조건부로 렌더하면 체크할 때마다 이 줄이 생겼다
+        사라지며 아래 목록이 위아래로 움직여, 방금 누른 행이 손가락 밑에서 달아난다.
+        보이지 않을 때는 `visibility: hidden`이라 포커스·스크린리더에서도 빠지지만,
+        버튼도 함께 `disabled`로 잠근다.
+      */}
+      {canMerge && (
+        <div
+          className={`defect-merge-bar${
+            checkedVisible.length === 0 ? ' is-hidden' : ''
+          }`}
+          role="status"
+          aria-hidden={checkedVisible.length === 0}
+        >
           <span>{checkedVisible.length}건 선택됨</span>
           <div className="defect-merge-bar-actions">
             <button
               type="button"
               className="secondary-button"
+              disabled={checkedVisible.length === 0}
               onClick={() => setCheckedIds([])}
             >
               선택 해제
@@ -293,7 +306,7 @@ export function DefectManagePage() {
             <button
               type="button"
               className="primary-button"
-              // 한 건만 고르면 합칠 상대가 없다.
+              // 한 건만 고르면 합칠 상대가 없다. 0건도 여기서 함께 막힌다.
               disabled={checkedVisible.length < 2}
               onClick={() => setMerging(true)}
             >
