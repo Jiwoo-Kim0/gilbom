@@ -48,23 +48,26 @@ export function DefectFilter({
       aria-label="결함 필터"
       onSubmit={(event) => event.preventDefault()}
     >
-      <fieldset className="defect-filter-group" disabled={disabled}>
-        <legend>
-          시작 날짜
+      <div className="defect-filter-group">
+        <div className="defect-filter-group-heading">
+          <label htmlFor="defect-filter-from">시작 날짜</label>
           {filters.from.length > 0 && (
             <button
               type="button"
               className="defect-filter-clear-date"
+              disabled={disabled}
               onClick={() => update({ from: '' })}
             >
               전체 기간
             </button>
           )}
-        </legend>
+        </div>
         <input
+          id="defect-filter-from"
           type="date"
           className="defect-filter-date-input"
           value={toDateInputValue(filters.from)}
+          disabled={disabled}
           aria-describedby="defect-filter-from-hint"
           onChange={(event) =>
             update({ from: fromDateInputValue(event.target.value) })
@@ -72,7 +75,7 @@ export function DefectFilter({
         />
         {/* 서버는 이 조건을 last_seen_at에 건다. "최초 발견"으로 읽으면 오해한다. */}
         <small id="defect-filter-from-hint">이 날짜 이후 관측된 결함</small>
-      </fieldset>
+      </div>
 
       {/*
         조건 셋은 접어둔다. 펼쳐 두면 체크박스 14개가 패널을 다 먹어서
@@ -111,17 +114,22 @@ export function DefectFilter({
         onChange={(severities) => update({ severities })}
       />
 
-      <fieldset className="defect-filter-group" disabled={disabled}>
-        <legend>
+      <div className="defect-filter-group">
+        <label
+          className="defect-filter-group-heading"
+          htmlFor="defect-filter-min-confidence"
+        >
           최소 AI 신뢰도
           {filters.minConfidence !== null
             && ` ${Math.round(filters.minConfidence * 100)}%`}
-        </legend>
+        </label>
         <input
+          id="defect-filter-min-confidence"
           type="range"
           min={0}
           max={100}
           step={5}
+          disabled={disabled}
           value={
             filters.minConfidence === null
               ? 0
@@ -133,7 +141,7 @@ export function DefectFilter({
             update({ minConfidence: percent === 0 ? null : percent / 100 })
           }}
         />
-      </fieldset>
+      </div>
 
       {/* 검색어까지 함께 지운다. 검색창이 위에 보이므로 지워진 것도 바로 보인다. */}
       <button

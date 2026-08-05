@@ -389,18 +389,20 @@
 .defect-filter-group {
   display: grid;
   gap: 10px;
-  margin: 0;
-  padding: 0;
-  border: none;
 }
 
-.defect-filter-group legend {
+/*
+ * 라벨 줄. 드롭다운의 `.defect-filter-dropdown-label`과 같은 모양이어야 조건 네 칸의
+ * 간격이 같아 보인다.
+ *
+ * `<fieldset>`/`<legend>`로 짰다가 이 규칙으로 옮겼다. legend는 grid 항목이 아니라
+ * 부모의 `gap`이 걸리지 않아, 시작 날짜만 라벨과 입력이 붙어 보였다.
+ */
+.defect-filter-group-heading {
   display: flex;
   gap: 8px;
-  padding: 0;
   align-items: baseline;
   justify-content: space-between;
-  width: 100%;
   color: var(--text-muted);
   font-size: 13px;
   font-weight: 700;
@@ -409,6 +411,12 @@
 .defect-filter-group small {
   color: var(--text-muted);
   font-size: 12px;
+}
+
+/* range 입력은 UA가 위아래 2px 여백을 붙인다. 그만큼 간격이 벌어져 조건 네 칸이
+   1~2px씩 어긋나 보인다. */
+.defect-filter-group input[type="range"] {
+  margin: 0;
 }
 
 .defect-filter-date-input {
