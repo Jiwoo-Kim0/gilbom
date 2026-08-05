@@ -1,7 +1,6 @@
 import {
   ChevronLeft,
   ChevronRight,
-  RefreshCw,
   Search,
 } from 'lucide-react'
 import {
@@ -137,17 +136,6 @@ export function ReportListPage() {
           <p className="eyebrow">REPORTS</p>
           <h2 id="reports-page-title">운영 보고서</h2>
           <p>승인 가능한 불변 버전으로 운영 현황과 결함 조치를 관리합니다.</p>
-        </div>
-        <div className="report-heading-actions">
-          <button
-            className="secondary-button button-with-icon"
-            type="button"
-            onClick={() => void load(page, appliedFilters)}
-            disabled={loading}
-          >
-            <RefreshCw size={17} aria-hidden="true" />
-            새로고침
-          </button>
         </div>
       </div>
 

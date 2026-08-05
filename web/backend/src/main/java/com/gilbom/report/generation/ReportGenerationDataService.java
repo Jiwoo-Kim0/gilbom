@@ -79,7 +79,7 @@ public class ReportGenerationDataService {
                 evidenceSnapshot(snapshot.evidenceMetadata());
         // 단건 보고서는 결함 코드를 제목에 넣어야 목록에서 구분된다.
         String incidentCode = snapshot.evidence().getFirst().incidentCode();
-        String title = "%s 결함 보고서".formatted(incidentCode);
+        String title = "%s 보고서".formatted(incidentCode);
         String summary =
                 "결함 %s 한 건에 대한 보고서입니다.".formatted(incidentCode);
         return new PreparedCreation(
