@@ -69,7 +69,11 @@ do
   echo
   echo "아래 블록을 이 사람에게 보내고, 자기 PC에서 다음을 실행하게 한다."
   echo
-  echo "  gpg --decrypt <<'EOF'"
+  echo "  # 암호문을 파일로 먼저 저장한다. gpg --decrypt <<EOF 형태로 바로 넘기면"
+  echo "  # 표준입력이 암호문으로 차서 암호를 물어볼 통로가 없어 실패한다."
+  echo "  # (Inappropriate ioctl for device)"
+  echo "  export GPG_TTY=\$(tty)"
+  echo "  cat > /tmp/challenge.asc <<'EOF'"
   gpg --batch --quiet --no-options --homedir "$home" \
     --trust-model always \
     --recipient "$fingerprint" \
@@ -77,6 +81,7 @@ do
 $challenge
 CHALLENGE
   echo "EOF"
+  echo "  gpg --decrypt /tmp/challenge.asc && rm -f /tmp/challenge.asc"
   echo
   echo "돌려받은 값이 이것과 같아야 한다: $challenge"
   echo
