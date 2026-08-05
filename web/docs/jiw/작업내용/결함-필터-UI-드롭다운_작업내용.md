@@ -1,11 +1,12 @@
 # 결함 필터 UI — 드롭다운 전환과 화면 배치 재구성 작업내용
 
 기간: 2026-08-05
-범위: 결함 관리 화면 필터 UI·배치와 목록 표 가독성. 조회 계약·서버는 그대로다.
-네 차례로 나눠 진행했다. §1~6이 1차(드롭다운 전환, 종료 날짜 제거),
+범위: 결함 관리 화면 필터 UI·배치, 목록 표 가독성, 목록→지도 스크롤. 조회 계약·서버는 그대로다.
+다섯 차례로 나눠 진행했다. §1~6이 1차(드롭다운 전환, 종료 날짜 제거),
 §7이 2차(검색 분리, 필터를 지도 오른쪽으로, 기간 조건 제거),
 §9가 3차(시작 날짜 되살리기, 목록 표 열 폭·배지),
-§11이 4차(열끼리 겹쳐 보이는 문제와 열 간 여유)다.
+§11이 4차(열끼리 겹쳐 보이는 문제와 열 간 여유),
+§13이 5차(목록에서 고르면 지도까지 스크롤)다.
 
 관련 문서: [결함-목록-지도-상세화면_작업내용.md](결함-목록-지도-상세화면_작업내용.md),
 [결함-API와-SSE_작업내용.md](결함-API와-SSE_작업내용.md)
@@ -468,7 +469,84 @@ word-break: keep-all;   /* 한국어 단어 중간에서 끊지 않는다 */
 
 ---
 
-## 12. 남은 것
+## 12. 4차 뒤 남았던 것
+
+- 목록 행을 눌러도 상세 카드가 화면 밖일 수 있었다 → §13에서 해결했다.
+- 검색 디바운스는 여전히 남아 있다(§14).
+
+---
+
+## 13. 5차 — 목록에서 고르면 지도까지 화면을 올린다
+
+상세 카드는 지도 위에 뜨는데(`DefectMap` 안 `.defect-map-canvas-wrap`) 목록은 지도
+아래에 있다. 목록 20행을 스크롤해 내려간 뒤 행을 누르면 **카드는 화면 위쪽 1300px
+밖에서 열렸다.** 눌러도 아무 일도 안 일어난 것처럼 보인다.
+
+### 13.1 스크롤은 목록에서 고를 때만 한다
+
+지도 마커로 고를 때는 이미 지도를 보고 있으니 화면이 움직일 이유가 없다. 그래서
+`DefectMap`의 `onSelect`는 그대로 `setSelectedDefectId`를 쓰고, `DefectList`에만
+스크롤까지 하는 핸들러를 따로 넘겼다.
+
+```tsx
+const selectFromList = useCallback((defectId: string) => {
+  setSelectedDefectId(defectId)
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  mapCardRef.current?.scrollIntoView({
+    behavior: reduceMotion ? 'auto' : 'smooth',
+    block: 'start',
+  })
+}, [])
+```
+
+`prefers-reduced-motion`을 켠 사용자에게 1300px을 부드럽게 흐르는 애니메이션은 멀미를
+준다. 그때는 즉시 이동한다.
+
+### 13.2 지도 카드에 ref를 뚫었다
+
+`DefectMap`에 `cardRef?: RefObject<HTMLElement | null>` prop을 추가해 `<article
+className="content-card defect-map-card">`에 걸었다. 페이지가 DOM을
+`querySelector`로 뒤지지 않게 하려는 것이다.
+
+화면 맨 위에 딱 붙지 않도록 여백은 CSS로 줬다. JS에 오프셋 숫자를 넣으면 헤더 높이가
+바뀔 때마다 같이 고쳐야 한다.
+
+```css
+.defect-map-card { scroll-margin-top: 24px; }
+```
+
+### 13.3 확인한 것
+
+목록 20행을 만들어 맨 끝까지 스크롤한 뒤 3번째 행을 눌렀다(임시 스펙, 커밋하지 않음).
+
+| | 클릭 전 | 클릭 후 |
+| --- | --- | --- |
+| `window.scrollY` | 1695 | 342 |
+| 지도 카드 top | **-1329px**(화면 밖) | +23.6px(= `scroll-margin-top`) |
+| 상세 카드 위치 | — | y=114px, 388px 높이로 화면 안 |
+
+선택된 행의 강조(`.is-selected`)도 그대로 남는다.
+
+### 13.4 겪은 함정 — 스텁이 부실하면 화면이 통째로 사라진다
+
+행을 누르자 `.defect-map-card`가 아예 없어져서 처음에는 내 변경이 언마운트를 일으킨
+줄 알았다. 실제로는 상세 카드의 `BoundingBoxOverlay`가 터져 **라우터 에러 화면으로
+넘어간 것**이었다.
+
+```
+TypeError: Cannot read properties of undefined (reading 'length')
+The above error occurred in the <BoundingBoxOverlay> component.
+```
+
+`bboxNorm === null || bboxNorm.length !== 4`로 막고 있는데, 내 스텁이 `image-url`
+응답에 그 필드를 아예 넣지 않아 `undefined`가 됐다. 서버 DTO는 항상 그 필드를 채우니
+실제로는 나지 않는 오류다. **`page.on('pageerror')`를 붙이지 않았으면 원인을 한참
+헤맸다.** 결함 화면 e2e를 쓸 때 상세 카드를 여는 시나리오라면 `image-url`까지
+제대로 스텁하거나 404로 두어야 한다(404는 "이미지 없음"으로 정상 처리된다).
+
+---
+
+## 14. 남은 것
 
 ### 내 몫
 
@@ -479,7 +557,8 @@ word-break: keep-all;   /* 한국어 단어 중간에서 끊지 않는다 */
   덮어뒀다. 더 필요하면 **반복·신뢰도를 한 열로 합치는** 것이 다음 후보다.
 - 좁은 화면(≤820px)에서는 표가 한 열로 접히는데 **레이블이 없어** 어떤 값인지 알 수 없다.
   1차 이전부터 그랬고 이번에도 손대지 않았다.
-- 결함 화면 e2e 스펙이 아직 없다. 만들 때 §4.5(`check()` 함정)를 참고한다.
+- 결함 화면 e2e 스펙이 아직 없다. 만들 때 §4.5(`check()` 함정)와 §13.4(상세 카드 스텁)를
+  참고한다.
 
 ### 다른 팀원 몫
 

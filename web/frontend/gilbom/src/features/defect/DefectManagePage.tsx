@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { DefectFilter } from './DefectFilter'
@@ -98,6 +98,7 @@ export function DefectManagePage() {
   const [checkedIds, setCheckedIds] = useState<string[]>([])
   const [merging, setMerging] = useState(false)
   const [mergeNotice, setMergeNotice] = useState<string | null>(null)
+  const mapCardRef = useRef<HTMLElement | null>(null)
 
   const { user } = useAuthentication()
   const canMerge = hasPermission(user?.permissions ?? [], DEFECT_MERGE)
@@ -157,6 +158,25 @@ export function DefectManagePage() {
 
   const refresh = useCallback(() => {
     setReloadToken((token) => token + 1)
+  }, [])
+
+  /**
+   * 목록에서 고른 결함의 상세 카드는 **지도 위에** 뜬다. 목록은 지도 아래에 있어
+   * 행을 눌러도 카드가 화면 밖일 수 있으니 지도까지 올려준다.
+   *
+   * 지도 마커로 고를 때는 이 함수를 쓰지 않는다. 이미 지도를 보고 있으므로 화면이
+   * 움직일 이유가 없다.
+   */
+  const selectFromList = useCallback((defectId: string) => {
+    setSelectedDefectId(defectId)
+    // 접근성 설정을 켠 사용자에게 긴 스크롤 애니메이션은 멀미를 준다.
+    const reduceMotion = window.matchMedia(
+      '(prefers-reduced-motion: reduce)',
+    ).matches
+    mapCardRef.current?.scrollIntoView({
+      behavior: reduceMotion ? 'auto' : 'smooth',
+      block: 'start',
+    })
   }, [])
 
   const toggleCheck = useCallback((defectId: string) => {
@@ -237,6 +257,7 @@ export function DefectManagePage() {
           selectedDefectId={selectedDefectId}
           onSelect={setSelectedDefectId}
           onChanged={refresh}
+          cardRef={mapCardRef}
         />
         <DefectFilter
           filters={filters}
@@ -284,7 +305,7 @@ export function DefectManagePage() {
         checkedIds={checkedVisible}
         onSortChange={changeSort}
         onPageChange={changePage}
-        onSelect={setSelectedDefectId}
+        onSelect={selectFromList}
         onToggleCheck={toggleCheck}
         onRetry={() => setReloadToken((token) => token + 1)}
       />

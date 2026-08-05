@@ -633,6 +633,8 @@
   display: grid;
   gap: 16px;
   padding: 20px;
+  /* 목록에서 결함을 고르면 이 카드로 스크롤한다. 화면 맨 위에 딱 붙지 않게 띄운다. */
+  scroll-margin-top: 24px;
 }
 
 .defect-map-legend {
