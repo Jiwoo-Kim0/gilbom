@@ -24,6 +24,7 @@ export type DefectWorkflowStatus =
 
 export type DefectType =
   | 'DAMAGED'
+  | 'MISSING'
   | 'INSTALLATION_INVALID'
   | 'UNKNOWN_ANOMALY'
 

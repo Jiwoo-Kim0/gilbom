@@ -61,6 +61,15 @@ loopback port가 전부 닫혔다.
 `verify-day10-observability.sh`가 "port를 발행하는 service는 비-internal network를 가진다"를
 검사하므로 같은 실수가 다시 나면 정적 검사에서 걸린다.
 
+### textfile은 파일이 달라도 metric 이름이 같으면 HELP·TYPE이 일치해야 한다
+
+두 파일이 같은 metric 이름을 선언하는데 `# HELP`·`# TYPE` 문구가 다르면(한쪽이 아예
+없는 경우 포함) **collector가 한쪽 시계열을 통째로 버린다.** 더 나쁜 것은
+`node_textfile_scrape_error`가 **0으로 남는다**는 점이다. 오류 표시 없이 값만 사라진다.
+
+`backup-common.sh`가 두 backup 종류의 metric을 같은 함수로 찍는 것은 이 때문이다.
+새 textfile을 손으로 추가할 때는 기존 파일의 HELP·TYPE 문구를 그대로 복사한다.
+
 ### PostgreSQL·Mosquitto Exporter를 쓰지 않는다
 
 connection pool은 Micrometer의 HikariCP metric으로 이미 보인다. MQTT는
@@ -86,6 +95,81 @@ tree가 아니라 checkout tree를 검사해 거짓 `PASS`가 날 수 있다.
 
 ```sh
 release_sha="$(sudo cat /var/lib/gilbom/releases/current.sha)"
+sudo ls "/opt/gilbom/artifacts/$release_sha"
+```
+
+목록에 `gilbom-web-<sha>.tar.zst`가 **있는지 없는지로 경로가 갈린다.**
+
+**(가) 소스 archive가 있는 경우** — 수동으로 승격한 release다. 그대로 푼다.
+
+```sh
+sudo sh -c '
+  sha="$(cat /var/lib/gilbom/releases/current.sha)"
+  cd "/opt/gilbom/artifacts/$sha"
+  sha256sum -c SHA256SUMS
+  zstd -dc "gilbom-web-$sha.tar.zst" \
+    | tar --extract --file - --directory /opt/gilbom/deploy --no-same-owner
+'
+```
+
+**(나) 없는 경우** — Jenkins 배포다. `promote-ci-release-artifacts.sh`의 허용 목록에
+소스 archive가 없어서 host에 존재하지 않는다. 배포된 SHA로 로컬에서 같은 archive를 만들어
+SFTP로 옮긴다. `build-release-artifacts.sh`와 같은 방식이라 내용은 공식 archive와 같다.
+
+```sh
+# 로컬 (저장소 root)
+sha=<current.sha 값>
+git archive --format=tar "$sha:web" | gzip -9 > "/tmp/gilbom-web-$sha.tar.gz"
+
+# 운영 상태 파일이 섞이지 않았는지 — Day 8과 같은 검사
+tar -tzf "/tmp/gilbom-web-$sha.tar.gz" \
+  | grep -E '(^|/)(runtime\.env|image\.env)$|(^|/)secrets/[^/]+$' \
+  | grep -Ev '(^|/)secrets/\.gitignore$' \
+  && echo "운영 상태가 섞여 있다. 전송하지 않는다." || echo "안전"
+
+sha256sum "/tmp/gilbom-web-$sha.tar.gz"
+```
+
+SFTP로 `/home/ubuntu`에 올린 뒤 EC2에서 checksum을 대조하고 푼다.
+
+```sh
+sha256sum "gilbom-web-$sha.tar.gz"          # 로컬 값과 일치해야 한다
+sudo tar --extract --gzip --file "gilbom-web-$sha.tar.gz" \
+  --directory /opt/gilbom/deploy --no-same-owner
+rm -f "gilbom-web-$sha.tar.gz"
+```
+
+> **(나)는 우회다.** 감사 흔적이 남는 정공법은 CI 승격 목록에 소스 archive를 포함시키는
+> 것이고, 그건 배포 파이프라인 소유자의 몫이다.
+
+어느 쪽이든 > **archive를 다시 풀었으면 monitoring stack을 반드시 재생성한다.**
+> `tar`가 디렉터리를 새 inode로 바꾸는데, container의 bind mount는 기동 시점 inode에
+> 고정돼 있다. 그래서 그 뒤로 container는 **떨어져 나간 옛 디렉터리를 계속 본다.**
+>
+> 증상이 고약하다 — Prometheus는 정상 기동하고 로그에도 오류가 없는데 alert rule이
+> **0개**가 된다. host에서 `ls`하면 파일이 다 있고 `promtool check rules`도 통과한다.
+> container 안에서만 비어 있다. Grafana 대시보드도 같은 방식으로 사라진다.
+>
+> ```sh
+> sudo sh -c 'cd /opt/gilbom/deploy && docker compose \
+>   --project-name gilbom-monitoring \
+>   --env-file /opt/gilbom/monitoring/monitoring.env \
+>   -f compose.monitoring.yaml up --detach --force-recreate --wait'
+> ```
+>
+> 확인은 container 안에서 한다. host에서 보는 것은 의미가 없다.
+>
+> ```sh
+> sudo docker exec gilbom-monitoring-prometheus-1 ls /etc/prometheus/rules/
+> curl -s http://127.0.0.1:9090/api/v1/rules | jq '[.data.groups[].rules[]] | length'
+> ```
+
+archive에는 Git이 추적하는 파일만 들어 있어 `runtime.env`, `image.env`,
+`/opt/gilbom/secrets`, named volume은 보존된다. 푼 뒤 확인한다.
+
+```sh
+cd /opt/gilbom/deploy
+test -f infra/scripts/install-day10-host.sh \
 sudo test "$(sudo cat /opt/gilbom/deploy/.release-source.sha)" = "$release_sha"
 sudo test -f \
   "/opt/gilbom/artifacts/$release_sha/gilbom-web-$release_sha.tar.zst"
@@ -158,6 +242,15 @@ Mattermost webhook을 Secret 파일로 넣는다. 값은 저장소에 남기지 
 이미 다른 운영자가 연동한 비어 있지 않은 파일은 덮어쓰지 않고 그대로 사용한다.
 
 ```sh
+<<<<<<< HEAD
+sudo install -d -m 0700 /opt/gilbom/secrets
+sudo sh -c 'umask 077; printf "%s\n" "<Mattermost incoming webhook URL>" \
+  > /opt/gilbom/secrets/alertmanager_mattermost_webhook'
+
+# Alertmanager container는 nobody(65534)로 돈다. root 소유 0400이면 읽지 못하고,
+# 그 상태에서도 Alertmanager는 정상으로 보인다. 알람만 조용히 사라진다.
+sudo chown 65534:65534 /opt/gilbom/secrets/alertmanager_mattermost_webhook
+=======
 sudo install -d -o root -g root -m 0700 /opt/gilbom/secrets
 if sudo test -s /opt/gilbom/secrets/alertmanager_mattermost_webhook; then
   echo "기존 Mattermost webhook을 보존한다."
@@ -169,8 +262,17 @@ else
   unset webhook_url
 fi
 sudo chown root:root /opt/gilbom/secrets/alertmanager_mattermost_webhook
+>>>>>>> 252a717efd57afc1cfaaa6df398ffe0d9ee01080
 sudo chmod 0400 /opt/gilbom/secrets/alertmanager_mattermost_webhook
+sudo stat -c '%a %U:%G' /opt/gilbom/secrets/alertmanager_mattermost_webhook
 ```
+
+`400 nobody:nogroup`이 나와야 한다. 명령 이력에 URL을 남기지 않으려면 첫 줄 앞에
+공백을 하나 넣는다.
+
+> **0444로 여는 방식은 쓰지 않는다.** Grafana 비밀번호 파일이 그렇게 돼 있지만,
+> 그러면 host의 모든 사용자가 webhook URL을 읽을 수 있다. 소유자를 container 사용자로
+> 바꾸고 0400을 유지하는 쪽이 더 좁다.
 
 ---
 

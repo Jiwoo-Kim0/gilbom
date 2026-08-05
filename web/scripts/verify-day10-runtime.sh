@@ -101,6 +101,23 @@ else
   check "Mattermost receiver" FAIL "receiver 목록에 없다"
 fi
 
+# receiver가 설정에 있는 것과 실제로 전달되는 것은 다르다. secret 파일 권한 때문에
+# 한 번도 전달되지 않은 채 설정만 정상으로 보인 적이 있어서 실패 누계도 함께 본다.
+notification_failures="$(scalar 'sum(increase(alertmanager_notifications_failed_total[30m]))')"
+case "$notification_failures" in
+  none)
+    check "알람 전달 실패 없음" PASS "최근 통지 시도 없음"
+    ;;
+  *)
+    if [ "${notification_failures%%.*}" -eq 0 ] 2>/dev/null; then
+      check "알람 전달 실패 없음" PASS
+    else
+      check "알람 전달 실패 없음" FAIL \
+        "최근 30분 ${notification_failures%%.*}건 — docker logs에서 Notify for alerts failed를 확인한다"
+    fi
+    ;;
+esac
+
 echo
 echo "4. Loki"
 if curl --silent --fail --max-time 10 "$LOKI_URL/ready" >/dev/null 2>&1; then

@@ -5924,6 +5924,7 @@ components:
       description: 결함 유형. 통계 응답의 items는 아래 enum 순서를 유지합니다.
       enum:
         - DAMAGED
+        - MISSING
         - INSTALLATION_INVALID
         - UNKNOWN_ANOMALY
 

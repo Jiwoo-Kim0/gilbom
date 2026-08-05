@@ -91,7 +91,6 @@
         "command_type": {
           "enum": [
             "PAUSE_MISSION",
-            "CANCEL_MISSION",
             "EMERGENCY_STOP",
             "CLEAR_EMERGENCY_STOP"
           ]
@@ -103,6 +102,29 @@
             "reason"
           ],
           "properties": {
+            "reason": {
+              "$ref": "common.schema.json#/definitions/nonBlankString"
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "command_type": {
+          "const": "CANCEL_MISSION"
+        },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mission_id",
+            "reason"
+          ],
+          "properties": {
+            "mission_id": {
+              "$ref": "common.schema.json#/definitions/nonBlankString"
+            },
             "reason": {
               "$ref": "common.schema.json#/definitions/nonBlankString"
             }

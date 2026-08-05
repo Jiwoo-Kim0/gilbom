@@ -421,6 +421,45 @@ class RobotCommandLifecycleIntegrationTest {
     }
 
     @Test
+    void publishesCancelWithTheResolvedMissionCode() {
+        UUID missionId = createPausedMission();
+        String missionCode = "MIS-" + missionId;
+
+        RobotCommandResponse command = create(
+                new RobotCommandCreateRequest(
+                        CommandRequestPayload.CommandType.CANCEL_MISSION,
+                        new RobotCommandCreateRequest.Parameters(
+                                null,
+                                null,
+                                "operator cancellation")),
+                UUID.randomUUID(),
+                UUID.randomUUID());
+
+        Map<String, Object> stored = jdbcTemplate.queryForMap("""
+                SELECT
+                    mission_id,
+                    parameters ->> 'mission_id' AS wire_mission_id,
+                    parameters ->> 'reason' AS reason
+                FROM robot.robot_command
+                WHERE command_id = ?
+                """,
+                command.commandId());
+        assertThat(stored.get("mission_id")).isEqualTo(missionId);
+        assertThat(stored.get("wire_mission_id")).isEqualTo(missionCode);
+        assertThat(stored.get("reason")).isEqualTo("operator cancellation");
+        assertThat(command.parameters().missionId()).isEqualTo(missionCode);
+        verify(mqttPublisher).publishCommand(
+                eq(mqttId),
+                argThat(payload ->
+                        payload.commandType()
+                                == CommandRequestPayload.CommandType.CANCEL_MISSION
+                                && missionCode.equals(
+                                        payload.parameters().missionId())
+                                && "operator cancellation".equals(
+                                        payload.parameters().reason())));
+    }
+
+    @Test
     void rejectsCompleteCommandForPausedMission() {
         createPausedMission();
 
