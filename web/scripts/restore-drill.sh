@@ -109,6 +109,13 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 umask 077
 
+# 개인키에는 암호가 걸려 있는 것이 정상이다. gpg가 암호를 물어보려면 터미널이
+# 필요한데, GPG_TTY가 없으면 "Inappropriate ioctl for device"로 조용히 실패한다.
+if [ -t 0 ] && command -v tty >/dev/null 2>&1; then
+  GPG_TTY="$(tty)"
+  export GPG_TTY
+fi
+
 [ -n "$BUNDLE" ] || fail "usage: $0 [--keep] BUNDLE_DIRECTORY"
 [ -d "$BUNDLE" ] || fail "bundle directory does not exist: $BUNDLE"
 command -v docker >/dev/null 2>&1 || fail "Docker CLI is required"
@@ -158,7 +165,12 @@ dump_encrypted="$(find "$BUNDLE" -maxdepth 1 -name '*.dump.gpg' | head -n 1)"
 [ -n "$dump_encrypted" ] || fail "encrypted PostgreSQL dump is missing in the bundle"
 gpg --batch --quiet --yes --decrypt \
   --output "$WORK_DIR/gilbom.dump" "$dump_encrypted" \
-  || fail "PostgreSQL dump could not be decrypted (개인키가 있는 곳에서 실행했는가?)"
+  || fail "PostgreSQL dump를 복호화하지 못했다.
+  - 개인키가 있는 곳에서 실행했는가? (gpg --list-secret-keys)
+  - 암호 입력창이 뜨지 않았다면 터미널에서 직접 실행한다. 스크립트를 파이프나
+    자동화 도구로 돌리면 gpg가 암호를 물어볼 통로가 없다.
+  - 먼저 아무 파일이나 한 번 복호화해 gpg-agent에 암호를 캐시해 두면 그다음부터는
+    묻지 않는다."
 check "PostgreSQL dump 복호화" PASS "$(basename "$dump_encrypted")"
 
 for archive in "$BUNDLE"/*.tar.gz.gpg; do
