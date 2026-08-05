@@ -1,7 +1,6 @@
 import {
   FileClock,
   Filter,
-  RefreshCw,
   RotateCcw,
 } from 'lucide-react'
 import {
@@ -133,12 +132,6 @@ export function AuditLogPage() {
     setPage(targetPage)
   }
 
-  function refresh() {
-    setLoading(true)
-    setError(null)
-    void load(page, appliedFilters)
-  }
-
   return (
     <section className="page-stack" aria-labelledby="audit-page-title">
       <div className="page-heading">
@@ -147,15 +140,6 @@ export function AuditLogPage() {
           <h2 id="audit-page-title">감사 로그</h2>
           <p>주요 보안 이벤트와 관리자 변경 이력을 append-only 원본에서 조회합니다.</p>
         </div>
-        <button
-          className="secondary-button button-with-icon"
-          type="button"
-          onClick={refresh}
-          disabled={loading}
-        >
-          <RefreshCw size={17} />
-          새로고침
-        </button>
       </div>
 
       <form className="content-card audit-filter-grid" onSubmit={handleFilter}>

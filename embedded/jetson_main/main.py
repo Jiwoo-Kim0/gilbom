@@ -426,9 +426,12 @@ def main() -> None:
     if args.comms_config:
         # 통신 의존성은 옵션을 준 실기 경로에서만 import한다.
         # dry-run·단위 테스트가 paho/credential 없이도 계속 돌아간다.
+        # GPS 리더는 위에서 연 것을 **공유**한다 — 같은 시리얼 장치를 통신 쪽이
+        # 또 열면 NMEA 문장을 두 리더가 나눠 읽어 양쪽 좌표가 다 깨진다.
+        # (mock 인지라 gps가 None이면 runtime이 스스로 만들어 소유한다)
         from communication import CommunicationRuntime
         comms_runtime = CommunicationRuntime.build(
-            args.comms_config, config, live=args.live)
+            args.comms_config, config, live=args.live, gps_reader=gps)
         comms_runtime.start()
         logger.info("MQTT 원격 미션 모드 — START_MISSION 전까지 정지 대기")
     else:

@@ -152,3 +152,42 @@ class TestPartialPromotion:
         assert verdict.is_defect
         assert verdict.defect_band_count == 1
         assert verdict.partial_count == 1
+
+
+class TestDefectEvidence:
+    """불량 판정에는 근거 검출(신뢰도·픽셀 상자)이 함께 실려야 한다.
+
+    계약 §8.3이 DAMAGED 결함에 confidence·bbox_norm을 필수로 요구한다 — 이 두 값이
+    verdict에 없으면 runtime.report_inspection이 결함 event를 만들지 못한다
+    (실제로 필드가 빠져 있어 결함 보고가 전부 AttributeError로 죽었던 회귀 방어).
+    """
+
+    def test_defective_band_carries_winner_evidence(self, params):
+        verdict = decide_band_argmax(
+            [det(0.7, CLASS_DEFECT_FULL, at=0.0),
+             det(0.9, CLASS_DEFECT_FULL, at=1000.0)], params, T)
+        assert verdict.is_defect
+        assert verdict.defect_confidence == 0.9      # 불량 띠 승자 중 최고 신뢰도
+        assert verdict.defect_box == box(x=1000.0)   # 그 승자의 픽셀 상자
+
+    def test_partial_promotion_carries_best_partial_evidence(self, params):
+        above = params.defect_conf + 0.01
+        best = params.defect_conf + 0.2
+        verdict = decide_band_argmax(
+            [det(0.9, CLASS_NORMAL),
+             det(above, CLASS_DEFECT_PARTIAL, at=200.0),
+             det(best, CLASS_DEFECT_PARTIAL, at=400.0)], params, T)
+        assert verdict.is_defect
+        assert verdict.defect_confidence == pytest.approx(best)
+        assert verdict.defect_box == box(x=400.0)
+
+    def test_normal_verdict_has_no_evidence(self, params):
+        verdict = decide_band_argmax([det(0.9, CLASS_NORMAL)], params, T)
+        assert not verdict.is_defect
+        assert verdict.defect_confidence is None
+        assert verdict.defect_box is None
+
+    def test_no_detection_verdict_has_no_evidence(self, params):
+        verdict = decide_band_argmax([], params, T)
+        assert verdict.defect_confidence is None
+        assert verdict.defect_box is None

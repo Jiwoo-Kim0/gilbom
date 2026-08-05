@@ -224,13 +224,13 @@ storage key와 SHA-256만 저장하며 presigned URL은 저장하지 않는다.
 | `GILBOM_LLM_DAILY_REQUEST_LIMIT` |  | 양수인 환경별 요청 상한 |
 | `GILBOM_LLM_DAILY_BUDGET` |  | 양수인 일별 크레딧 승인 예산 |
 | `GILBOM_LLM_MAX_CONCURRENT_REQUESTS` |  | 기본 `5`, 인스턴스별 `1..20` 동시 외부 호출 상한 |
-| `GILBOM_LLM_PROMPT_VERSION` |  | 현재 `report-v1`만 허용 |
+| `GILBOM_LLM_PROMPT_VERSION` |  | 운영 `report-v2`; 롤백용 `report-v1`도 허용 |
 | `GILBOM_LLM_POLICY_APPROVED` |  | 전체 LLM 운영 정책 승인 여부 |
 | `GILBOM_LLM_TRAINING_EXCLUSION_APPROVED` |  | 입력·출력 학습 제외 확인 여부 |
 | `GILBOM_LLM_DATA_RETENTION_APPROVED` |  | 보존 기간·삭제 정책 승인 여부 |
 | `GILBOM_LLM_OUTBOUND_ALLOWLIST_APPLIED` |  | `gms.ssafy.io:443` egress 적용 확인 여부 |
-| `GILBOM_LLM_IMAGE_INPUT_ENABLED` |  | 기본 `false`; 대표 결함 JPEG 전송 기능 flag |
-| `GILBOM_LLM_IMAGE_DEIDENTIFICATION_APPROVED` |  | 얼굴·차량번호·EXIF 등 이미지 비식별화 검증 승인 |
+| `GILBOM_LLM_IMAGE_INPUT_ENABLED` |  | 운영 `true`; 대표 결함 JPEG 전송 기능 flag |
+| `GILBOM_LLM_IMAGE_DEIDENTIFICATION_APPROVED` |  | 운영 `true`; 얼굴·차량번호·EXIF 등 이미지 비식별화 검증 승인 |
 
 `GILBOM_LLM_ENABLED=true`는 외부 호출을 강제하는 값이 아니다. API Key, provider, 정확한 base URL, 모델, timeout, 출력·동시성 상한, 일별 요청 한도·예산, Prompt 버전, 학습 제외·보존·outbound·전체 정책 승인을 모두 통과해야 `GmsLlmClient`를 만든다. 하나라도 빠지면 서버 기동과 일반 보고서 API는 유지하고 `DisabledLlmClient`와 템플릿 생성만 사용한다. 일별 요청 한도는 사용자별 실제 외부 호출 수에 적용되고, 일별 budget은 환경 전체 호출에 적용된다.
 
@@ -292,4 +292,3 @@ Backend는 port를 publish하지 않으므로 internal `app` network 밖에서�
 - 운영 LLM 활성화 전에 데이터 보존·학습 제외·비용 상한이 승인됨
 
 이 기준을 만족해야 환경 설정 작업을 완료로 본다.
-

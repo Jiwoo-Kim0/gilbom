@@ -217,6 +217,7 @@ public class ReportLlmGenerationPipeline {
                 ReportContent content = resultRenderer.render(
                         result,
                         prepared,
+                        request.templateTitle(),
                         request.evidenceSnapshot());
                 return new ReportGenerationOutcome(
                         content,

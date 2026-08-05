@@ -39,6 +39,7 @@ class ReportLlmResultValidatorTest {
                         .render(
                                 result,
                                 prepared,
+                                "INC-20260715-000001 보고서",
                                 Map.of(
                                         "defectIds",
                                         java.util.List.of(
@@ -55,9 +56,18 @@ class ReportLlmResultValidatorTest {
                 .isEqualTo("gpt-5.4-mini");
         assertThat(content.promptVersion())
                 .isEqualTo("report-v1");
+        assertThat(content.title())
+                .isEqualTo("INC-20260715-000001 보고서");
         assertThat(content.body())
+                .startsWith("# INC-20260715-000001 보고서")
+                .contains("## 통계")
+                .contains("임무: 전체 3건, 완료 2건, 취소 1건, 실패 0건")
+                .contains("완료율: 66.67%")
+                .contains("상태별 결함: NEW 1건")
+                .contains("유형별 결함: DAMAGED 1건")
                 .contains("## 주요 결함")
                 .contains("## 조치 권고")
+                .doesNotContain("검증된 통계 snapshot")
                 .doesNotContain("<script");
     }
 
