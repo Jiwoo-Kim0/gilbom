@@ -526,6 +526,7 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
     name: '순찰 구역 등록',
   })
   await expect(registrationDialog).toBeVisible()
+  await expect(page.locator('body')).toHaveClass(/\bmodal-open\b/)
   await expect(
     registrationDialog.getByText('중심 좌표 직접 입력'),
   ).toHaveCount(0)
@@ -709,6 +710,7 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
   await createAreaButton.click()
 
   await expect(registrationDialog).toBeHidden()
+  await expect(page.locator('body')).not.toHaveClass(/\bmodal-open\b/)
 
   await expect(
     page.getByRole('status').filter({

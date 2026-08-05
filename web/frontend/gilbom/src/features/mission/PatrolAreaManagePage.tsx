@@ -20,6 +20,7 @@ import {
   ApiError,
   getApiErrorMessage,
 } from '../../shared/api/apiClient'
+import { lockBodyScroll } from '../../shared/dom/bodyScrollLock'
 import { useAuthentication } from '../auth/authenticationContext'
 import { MISSION_MANAGE } from '../auth/permissions'
 import {
@@ -107,8 +108,7 @@ export function PatrolAreaManagePage() {
       return undefined
     }
 
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
+    const releaseBodyScroll = lockBodyScroll()
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !submitting) {
         setRegistrationOpen(false)
@@ -117,7 +117,7 @@ export function PatrolAreaManagePage() {
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => {
-      document.body.style.overflow = previousOverflow
+      releaseBodyScroll()
       document.removeEventListener('keydown', handleKeyDown)
     }
   }, [registrationOpen, submitting])
@@ -478,10 +478,6 @@ export function PatrolAreaManagePage() {
                 />
               </div>
             ) : null}
-            <div className="mission-area-create-summary" role="note">
-              <strong>ACTIVE로 즉시 등록</strong>
-              <span>AUTONOMOUS_DEFAULT 경로가 자동 생성됩니다.</span>
-            </div>
           </form>
           </section>
         </div>
