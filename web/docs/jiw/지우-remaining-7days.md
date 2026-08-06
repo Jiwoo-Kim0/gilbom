@@ -380,7 +380,7 @@ LLM 호출은 서버 안에서 일어난다(A 스펙의 `GILBOM_LLM_API_KEY`, ou
 - 문서 마감
   - `defect-schema.md`에 이미지·위험도 절 추가
   - `openapi-v1.yaml` 최종
-  - 결함 운영 가이드 1장 (상태 전이 규칙 — 시연 진행자·평가자용)
+  - ~~결함 운영 가이드 1장~~ — **완료(8/7)** [defect-operations-guide.md](../defect-operations-guide.md)
 
 ---
 

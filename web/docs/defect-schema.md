@@ -1,5 +1,9 @@
 # 결함(defect) 스키마
 
+> 운영 규칙(상태 전이·자동 병합·심각도 산정·유형 교정)은
+> [defect-operations-guide.md](defect-operations-guide.md)에 있다. 이 문서는 테이블과
+> 제약만 다룬다.
+
 ## 1. 범위와 원칙
 
 이 문서는 `docs/길봄_DB.pdf`(길봄 DB Specification v1.0) 7장에 정의된 `defect` 스키마 중
