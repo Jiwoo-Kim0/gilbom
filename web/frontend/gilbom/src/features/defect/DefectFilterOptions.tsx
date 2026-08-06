@@ -1,24 +1,22 @@
 import type { ReactNode } from 'react'
 
 interface DefectFilterOptionsProps<T extends string> {
-  /** 스크린리더가 이 묶음을 뭐라고 읽을지. 알약 라벨과 같은 말을 쓴다. */
+  /** 스크린리더가 이 묶음을 뭐라고 읽을지. 위에 붙는 제목과 같은 말을 쓴다. */
   label: string
   options: readonly T[]
   optionLabels: Record<T, string>
   selected: T[]
   onChange: (next: T[]) => void
-  /** 상태 점처럼 라벨 앞에 붙일 표식이 있으면 여기서 그린다. */
+  /** 유형 색 점처럼 라벨 앞에 붙일 표식이 있으면 여기서 그린다. */
   renderMark?: (value: T) => ReactNode
-  /**
-   * `list`는 알약 패널 안에서 세로로 쌓고, `grid`는 상세 필터 모달에서 가로로 흘린다.
-   * 고르는 방식(체크박스)은 같고 모양만 다르다 — 모달에서도 키보드·스크린리더가
-   * 그대로 동작해야 해서 버튼으로 바꾸지 않았다.
-   */
-  variant?: 'list' | 'grid'
 }
 
 /**
- * 다중 선택 조건 하나의 선택지 목록이다. 알약 패널과 상세 필터 모달이 같은 것을 쓴다.
+ * 다중 선택 조건 하나의 선택지 목록이다. 가로로 흘러 누르는 칸이 넓다.
+ *
+ * <p>보기에는 토글 버튼이지만 요소는 `<input type="checkbox">` 그대로다. 버튼으로
+ * 바꾸면 "여러 개 고를 수 있다"와 눌린 상태를 `aria-pressed`로 다시 만들어야 한다.
+ * 체크박스는 그것을 공짜로 준다 — 숨긴 것은 네모 표식뿐이고 포커스는 살아 있다.
  *
  * <p>빈 배열은 "조건 없음", 즉 전체 조회다. 그래서 "선택 해제"가 곧 전체 보기다.
  */
@@ -29,7 +27,6 @@ export function DefectFilterOptions<T extends string>({
   selected,
   onChange,
   renderMark,
-  variant = 'list',
 }: DefectFilterOptionsProps<T>) {
   const toggle = (value: T) => {
     onChange(
@@ -41,7 +38,7 @@ export function DefectFilterOptions<T extends string>({
 
   return (
     <div
-      className={`defect-filter-options is-${variant}`}
+      className="defect-filter-options"
       role="group"
       aria-label={label}
     >

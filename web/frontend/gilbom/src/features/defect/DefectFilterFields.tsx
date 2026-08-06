@@ -1,12 +1,12 @@
 import { useId } from 'react'
-import { fromDateInputValue, toDateInputValue } from './defectFilterSummary'
+import { fromDateInputValue, toDateInputValue } from './defectDateInput'
 
 /**
- * 알약 패널과 상세 필터 모달이 함께 쓰는 단일 조건 입력 둘이다. 두 곳에 같은 markup을
- * 두 벌 두면 한쪽만 고쳐지므로 여기로 모았다.
+ * 필터 모달의 단일 값 조건 둘 — 시작 날짜와 최소 AI 신뢰도다. 여러 값을 고르는 조건은
+ * {@link DefectFilterOptions}가 그린다.
  *
- * <p>`id`는 {@link useId}로 뽑는다. 같은 조건이 알약과 모달에 동시에 떠 있을 수 있어
- * 고정 id를 쓰면 `<label for>`가 어느 입력을 가리키는지 문서 안에서 갈린다.
+ * <p>`id`는 {@link useId}로 뽑는다. 고정 id를 쓰면 창을 닫았다 열거나 같은 조건이 두 번
+ * 그려질 때 `<label for>`가 어느 입력을 가리키는지 문서 안에서 갈린다.
  */
 export function DefectDateField({
   from,

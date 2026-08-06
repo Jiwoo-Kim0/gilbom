@@ -7,6 +7,8 @@ import {
   defectTypeTone,
 } from '../src/features/defect/defectMapState.ts'
 import {
+  countActiveFilterGroups,
+  DEFAULT_DEFECT_FILTERS,
   DEFECT_SORT_OPTIONS,
   EMPTY_DEFECT_FILTERS,
 } from '../src/features/defect/defectTypes.ts'
@@ -171,6 +173,62 @@ test('배율이나 화면 크기를 재지 못하면 한 단계만 확대한다'
   assert.equal(
     clusterZoomPlan(members, ONE_METER_PER_PIXEL, { widthPx: 0, heightPx: 0 })
       .step,
+    1,
+  )
+})
+
+/*
+ * "필터" 버튼 배지. 조건이 전부 모달 안으로 들어가면서, 화면에 무엇이 걸렸는지 알리는
+ * 것이 이 숫자 하나뿐이다. 고른 항목 수가 아니라 **손댄 조건 묶음 수**를 센다.
+ */
+test('기본 조건에서는 배지에 셀 것이 없다', () => {
+  assert.equal(countActiveFilterGroups(DEFAULT_DEFECT_FILTERS), 0)
+  // 검색어는 검색창에 그대로 보이므로 세지 않는다.
+  assert.equal(
+    countActiveFilterGroups({ ...DEFAULT_DEFECT_FILTERS, q: 'INC' }),
+    0,
+  )
+})
+
+test('한 묶음에서 여럿을 골라도 조건 하나로 센다', () => {
+  assert.equal(
+    countActiveFilterGroups({
+      ...DEFAULT_DEFECT_FILTERS,
+      severities: ['LOW', 'HIGH', 'CRITICAL'],
+    }),
+    1,
+  )
+  assert.equal(
+    countActiveFilterGroups({
+      ...DEFAULT_DEFECT_FILTERS,
+      severities: ['CRITICAL'],
+      defectTypes: ['DAMAGED'],
+      from: '2026-08-03T00:00',
+      minConfidence: 0.6,
+    }),
+    4,
+  )
+})
+
+test('처리 상태는 기본 셋과 다를 때만 센다', () => {
+  // 순서만 다른 것은 같은 조건이다.
+  assert.equal(
+    countActiveFilterGroups({
+      ...DEFAULT_DEFECT_FILTERS,
+      workflowStatuses: ['IN_PROGRESS', 'NEW', 'ACCEPTED'],
+    }),
+    0,
+  )
+  assert.equal(
+    countActiveFilterGroups({
+      ...DEFAULT_DEFECT_FILTERS,
+      workflowStatuses: ['NEW', 'ACCEPTED', 'IN_PROGRESS', 'RESOLVED'],
+    }),
+    1,
+  )
+  // 전부 푼 것("전체 보기")도 기본과 다르다.
+  assert.equal(
+    countActiveFilterGroups({ ...DEFAULT_DEFECT_FILTERS, workflowStatuses: [] }),
     1,
   )
 })

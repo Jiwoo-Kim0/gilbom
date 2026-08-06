@@ -21,12 +21,11 @@ interface DefectFilterModalProps {
 }
 
 /**
- * 조건을 한 화면에 펼쳐놓는 상세 필터다. 알약은 조건 하나씩 빠르게 손보는 길이고,
- * 여기는 여러 조건을 한꺼번에 짜맞추는 길이다.
+ * 조건을 한 화면에 펼쳐놓는 필터다. 검색어를 뺀 `/defects`의 조건은 전부 여기에 있다.
  *
- * <p>**알약과 달리 즉시 반영하지 않는다.** 여기서 고른 것은 초안으로만 들고 있다가
- * "적용하기"에서 한 번에 나간다. 조건 다섯 개를 손보는 동안 매번 조회가 나가면
- * 뒤 화면이 계속 다시 그려져 무엇을 고르는 중인지 알 수 없다. "닫기"는 초안을 버린다.
+ * <p>**즉시 반영하지 않는다.** 여기서 고른 것은 초안으로만 들고 있다가 "적용하기"에서
+ * 한 번에 나간다. 조건 다섯 개를 손보는 동안 매번 조회가 나가면 뒤 화면이 계속 다시
+ * 그려져 무엇을 고르는 중인지 알 수 없다. "닫기"는 초안을 버린다.
  */
 export function DefectFilterModal({
   filters,
@@ -35,7 +34,7 @@ export function DefectFilterModal({
 }: DefectFilterModalProps) {
   const [draft, setDraft] = useState(filters)
   const dialogRef = useRef<HTMLDivElement>(null)
-  /** 닫을 때 포커스를 돌려줄 곳. 열기 직전에 눌린 "상세 필터" 버튼이다. */
+  /** 닫을 때 포커스를 돌려줄 곳. 열기 직전에 눌린 "필터" 버튼이다. */
   const openerRef = useRef<Element | null>(null)
 
   const update = (partial: Partial<DefectFilters>) => {
@@ -44,7 +43,7 @@ export function DefectFilterModal({
 
   useEffect(() => {
     openerRef.current = document.activeElement
-    // 열자마자 포커스를 카드로 옮긴다. 그러지 않으면 Tab이 뒤 화면의 알약들을
+    // 열자마자 포커스를 카드로 옮긴다. 그러지 않으면 Tab이 뒤 화면의 목록·지도를
     // 훑고 다녀 키보드 사용자는 모달이 열린 줄도 모른다.
     dialogRef.current?.focus()
 
@@ -86,7 +85,7 @@ export function DefectFilterModal({
           <button
             type="button"
             className="defect-card-close"
-            aria-label="필터 창 닫기"
+            aria-label="창 닫기"
             onClick={onClose}
           >
             <X size={18} aria-hidden="true" />
@@ -98,7 +97,12 @@ export function DefectFilterModal({
           aria-label="상세 결함 필터"
           onSubmit={(event) => {
             event.preventDefault()
-            onApply(draft)
+            /*
+             * 검색어만은 초안이 아니라 **지금 값**을 쓴다. 열 때 찍어둔 `draft.q`를
+             * 그대로 내보내면, 창이 떠 있는 사이 확정된 검색어(디바운스 300ms가
+             * 뒤늦게 끝난 경우)를 적용하기가 조용히 지워버린다.
+             */
+            onApply({ ...draft, q: filters.q })
           }}
         >
           <DefectDateField
@@ -110,7 +114,6 @@ export function DefectFilterModal({
             <h4 className="defect-filter-group-heading">처리 상태</h4>
             <DefectFilterOptions
               label="처리 상태"
-              variant="grid"
               options={WORKFLOW_STATUSES}
               optionLabels={WORKFLOW_STATUS_LABELS}
               selected={draft.workflowStatuses}
@@ -126,7 +129,6 @@ export function DefectFilterModal({
             <h4 className="defect-filter-group-heading">결함 유형</h4>
             <DefectFilterOptions
               label="결함 유형"
-              variant="grid"
               options={DEFECT_TYPES}
               optionLabels={DEFECT_TYPE_LABELS}
               selected={draft.defectTypes}
@@ -144,7 +146,6 @@ export function DefectFilterModal({
             <h4 className="defect-filter-group-heading">심각도</h4>
             <DefectFilterOptions
               label="심각도"
-              variant="grid"
               options={RISK_LEVELS}
               optionLabels={RISK_LEVEL_LABELS}
               selected={draft.severities}

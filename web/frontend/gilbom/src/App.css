@@ -478,38 +478,56 @@
   border-color: var(--focus);
 }
 
-/* 1440px에서 알약 다섯과 초기화가 한 줄에 들어가야 한다. gap을 6px 아래로 더 줄이면
-   알약끼리 붙어 보인다 — 그보다 좁아지면 두 줄로 접히게 둔다. */
+/* 검색창은 왼쪽, 이 둘은 오른쪽 끝. 사이는 비워둔다. */
 .defect-filter-bar {
   display: flex;
   flex: 1;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   align-items: center;
+  justify-content: flex-end;
 }
 
-/* 조건을 한 화면에 펼치는 상세 필터. 알약과 같은 높이의 정사각형이다. */
-.defect-filter-detail-button {
-  display: grid;
-  width: 38px;
-  height: 38px;
+.defect-filter-open-button {
+  display: flex;
+  gap: 7px;
+  height: 40px;
+  padding: 0 16px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  place-items: center;
+  align-items: center;
   color: var(--text);
   background: var(--surface);
+  font-size: 14px;
+  font-weight: 700;
 }
 
-.defect-filter-detail-button:hover:not(:disabled),
-.defect-filter-detail-button.is-open {
+.defect-filter-open-button:hover:not(:disabled),
+.defect-filter-open-button.is-open {
   border-color: var(--nb-gold);
+}
+
+/* 조건이 걸려 있다는 표시. 조건이 전부 모달 안에 있어 이것 말고는 단서가 없다. */
+.defect-filter-open-button.is-active {
+  border-color: var(--nb-gold);
+  color: var(--brand-strong);
   background: var(--brand-soft);
 }
 
-.defect-filter-detail-button:disabled {
+.defect-filter-open-button:disabled {
   color: var(--text-muted);
   background: var(--surface-muted);
+}
+
+.defect-filter-open-count {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--nb-ink);
+  background: var(--nb-gold-soft);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .defect-filter-group {
@@ -567,154 +585,56 @@
   text-decoration: underline;
 }
 
-.defect-filter-chip {
-  position: relative;
-}
-
-/* 라벨이 버튼 안에 있다. 사이드바이던 시절에는 위에 얹혀 있었는데, 가로 한 줄에
-   다섯 개가 들어가야 해 안으로 넣었다. */
-.defect-filter-chip-trigger {
-  display: flex;
-  gap: 5px;
-  height: 38px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  align-items: center;
-  color: var(--text);
-  background: var(--surface);
-  font-size: 13px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.defect-filter-chip-value {
-  max-width: 12ch;
-  overflow: hidden;
-  color: var(--text-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
-}
-
-/* 기본값이 아닌 조건이 걸린 알약. 한눈에 "몇 개가 걸려 있나"가 보여야 한다. */
-.defect-filter-chip-trigger.is-active {
-  border-color: var(--nb-gold);
-  color: var(--brand-strong);
-  background: var(--brand-soft);
-}
-
-.defect-filter-chip-trigger.is-active .defect-filter-chip-value {
-  color: inherit;
-}
-
-.defect-filter-chip-trigger.is-open {
-  border-color: var(--nb-gold);
-}
-
-.defect-filter-chip-trigger:disabled {
-  color: var(--text-muted);
-  background: var(--surface-muted);
-}
-
-.defect-filter-chip-count {
-  min-width: 20px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  color: var(--nb-ink);
-  background: var(--nb-gold-soft);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-/* 열린 패널은 툴바를 밀지 않고 그 아래에 얹힌다. 지도 카드보다 위여야 한다. */
-.defect-filter-chip-panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  z-index: 30;
-  display: grid;
-  gap: 10px;
-  min-width: 220px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
-}
-
-.defect-filter-options {
-  display: grid;
-  gap: 10px;
-}
-
-.defect-filter-options-clear {
-  margin-top: 2px;
-  padding: 6px 0;
-  border: none;
-  border-top: 1px solid var(--line);
-  color: var(--text-muted);
-  background: none;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.defect-filter-checkbox {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.defect-filter-checkbox input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--brand);
-}
-
 /*
- * 상세 필터 모달용. 같은 체크박스를 가로로 흘려 누르는 칸을 넓힌다. 체크박스 자체는
- * 숨기되 포커스는 살려둔다(`opacity: 0`, 크기 0) — 눌린 상태는 칸 색으로 보인다.
+ * 선택지를 가로로 흘려 누르는 칸을 넓힌다. 체크박스 네모는 숨기되 포커스는 살려둔다
+ * (`opacity: 0`, 크기 0) — 눌린 상태는 칸 색으로 보인다.
  */
-.defect-filter-options.is-grid {
+.defect-filter-options {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.defect-filter-options.is-grid .defect-filter-checkbox {
+.defect-filter-checkbox {
+  display: flex;
   gap: 7px;
   padding: 9px 14px;
   border: 1px solid var(--line);
   border-radius: 12px;
+  align-items: center;
+  color: var(--text);
   font-size: 13px;
+  font-weight: 600;
 }
 
-.defect-filter-options.is-grid .defect-filter-checkbox input {
+.defect-filter-checkbox input {
   position: absolute;
   width: 0;
   height: 0;
   opacity: 0;
+  accent-color: var(--brand);
 }
 
-.defect-filter-options.is-grid .defect-filter-checkbox:has(input:checked) {
+.defect-filter-checkbox:has(input:checked) {
   border-color: var(--nb-gold);
   color: var(--brand-strong);
   background: var(--brand-soft);
 }
 
-.defect-filter-options.is-grid .defect-filter-checkbox:focus-within {
+.defect-filter-checkbox:focus-within {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 
 /* 선택지 사이에 끼면 그것도 고르는 칸으로 보인다. 줄 끝으로 밀어 성격을 갈라둔다. */
-.defect-filter-options.is-grid .defect-filter-options-clear {
-  margin: 0 0 0 auto;
+.defect-filter-options-clear {
+  margin-left: auto;
   padding: 9px 4px;
   border: none;
+  color: var(--text-muted);
+  background: none;
+  font-size: 13px;
+  font-weight: 700;
   text-decoration: underline;
 }
 
@@ -751,13 +671,12 @@
   background: var(--defect-unknown-anomaly);
 }
 
-/* 조건 줄 맨 오른쪽. `margin-left: auto`로 알약들과 떼어놓아 실수로 눌리지 않게 한다. */
+/* 툴바 맨 오른쪽. 되돌리는 버튼이라 "필터"보다 눈에 덜 띄어야 한다 — 테두리 없이 글자만. */
 .defect-filter-reset {
   display: inline-flex;
   gap: 6px;
-  height: 38px;
-  margin-left: auto;
-  padding: 0 10px;
+  height: 40px;
+  padding: 0 12px;
   border: none;
   border-radius: 999px;
   align-items: center;

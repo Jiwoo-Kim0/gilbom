@@ -311,6 +311,48 @@ export const EMPTY_DEFECT_FILTERS: DefectFilters = {
   bbox: '',
 }
 
+/**
+ * "초기화"가 되돌아가는 자리. **첫 진입과 같은 화면**이어야 한다 — 조건을 다 풀어
+ * 종결까지 쏟아지는 목록은 아무도 원하지 않는다.
+ *
+ * <p>`EMPTY_DEFECT_FILTERS`와 다른 점은 처리 상태뿐이다. 그쪽은 "조건 없음"(전체 조회)을
+ * 뜻하는 값이라 URL에 `allStatus` 표식으로 실린다. 초기화에 그것을 쓰면 안 된다.
+ */
+export const DEFAULT_DEFECT_FILTERS: DefectFilters = {
+  ...EMPTY_DEFECT_FILTERS,
+  workflowStatuses: [...DEFAULT_WORKFLOW_STATUSES],
+}
+
+function sameSelection(left: string[], right: string[]): boolean {
+  return (
+    left.length === right.length
+    && [...left].sort().join() === [...right].sort().join()
+  )
+}
+
+/**
+ * 기본값과 달라진 조건 묶음의 수. "필터" 버튼 배지에 찍힌다.
+ *
+ * <p>조건이 전부 모달 안으로 들어가면서 화면에 무엇이 걸렸는지 보여줄 것이 이 숫자
+ * 하나뿐이다. 그래서 **고른 항목 수가 아니라 손댄 조건 수**를 센다 — 심각도 넷을 고른
+ * 것도 "조건 하나 걸림"이다. 검색어는 검색창에 그대로 보이므로 세지 않는다.
+ *
+ * <p>기준은 {@link DEFAULT_DEFECT_FILTERS}다. 첫 진입의 처리 상태 셋은 손댄 것이 아니다.
+ */
+export function countActiveFilterGroups(filters: DefectFilters): number {
+  const changed = [
+    filters.from !== DEFAULT_DEFECT_FILTERS.from,
+    !sameSelection(
+      filters.workflowStatuses,
+      DEFAULT_DEFECT_FILTERS.workflowStatuses,
+    ),
+    filters.defectTypes.length > 0,
+    filters.severities.length > 0,
+    filters.minConfidence !== null,
+  ]
+  return changed.filter(Boolean).length
+}
+
 /** 서버 `DefectFilter.SORTABLE_COLUMNS`가 허용하는 키만 노출한다. */
 export const DEFECT_SORT_OPTIONS = [
   { value: 'lastSeenAt,desc', label: '최근 관측순' },
