@@ -33,6 +33,7 @@ import com.gilbom.common.error.ErrorCode;
 import com.gilbom.defect.DefectAccessService;
 import com.gilbom.defect.DefectCommandService;
 import com.gilbom.defect.DefectDtos.DefectStatusUpdateRequest;
+import com.gilbom.defect.DefectDtos.DefectUpdateRequest;
 import com.gilbom.defect.DefectFilter;
 import com.gilbom.defect.DefectImageUrlIssuer;
 import com.gilbom.defect.DefectQueryService;
@@ -392,6 +393,68 @@ class DefectQueryScopeIntegrationTest {
                         null, null, null, null,
                         null, null, null, null, null));
         assertThat(mapWithinPeriod.features()).isNotEmpty();
+    }
+
+    @Test
+    void changesDefectTypeInAnyDirection() {
+        // 유형에는 전이 규칙이 없다. 로봇은 DAMAGED·MISSING만 올리고,
+        // INSTALLATION_INVALID·UNKNOWN_ANOMALY는 사람이 붙이는 값이다.
+        // 되돌리는 것도 되어야 AI 오분류를 교정할 수 있다.
+        String[] path = {
+            "MISSING", "INSTALLATION_INVALID", "UNKNOWN_ANOMALY", "DAMAGED",
+        };
+        String previous = "DAMAGED";
+        for (String next : path) {
+            var updated = commandService.updateDefect(
+                    ADMIN_USER_ID,
+                    VISIBLE_DEFECT_ID,
+                    new DefectUpdateRequest(
+                            next,
+                            null, null, null, null, null, null, null, null,
+                            "관리자 재분류"),
+                    AuditRequestContext.requestIdOnly(UUID.randomUUID()));
+            assertThat(updated.defect().defectType()).isEqualTo(next);
+
+            // 축마다 별도 이력이 남아야 무엇을 왜 바꿨는지 되짚을 수 있다.
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*)
+                    FROM defect.defect_status_history
+                    WHERE defect_id = ?
+                      AND change_type = 'TYPE_CHANGED'
+                      AND reason = '관리자 재분류'
+                    """,
+                    Integer.class,
+                    VISIBLE_DEFECT_ID)).isPositive();
+            previous = next;
+        }
+        assertThat(previous).isEqualTo("DAMAGED");
+    }
+
+    @Test
+    void rejectsUnknownDefectTypeAndNoopUpdate() {
+        assertThatThrownBy(() -> commandService.updateDefect(
+                ADMIN_USER_ID,
+                VISIBLE_DEFECT_ID,
+                new DefectUpdateRequest(
+                        "CONTAMINATED",
+                        null, null, null, null, null, null, null, null,
+                        "없는 유형"),
+                AuditRequestContext.requestIdOnly(UUID.randomUUID())))
+                .isInstanceOf(BusinessException.class);
+
+        // 같은 값으로 다시 보내면 바뀐 축이 없다. 빈 이력이 쌓이면 안 된다.
+        assertThatThrownBy(() -> commandService.updateDefect(
+                ADMIN_USER_ID,
+                VISIBLE_DEFECT_ID,
+                new DefectUpdateRequest(
+                        "DAMAGED",
+                        null, null, null, null, null, null, null, null,
+                        "그대로"),
+                AuditRequestContext.requestIdOnly(UUID.randomUUID())))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(ErrorCode.COMMON_INVALID_REQUEST));
     }
 
     // ------------------------------------------------------------ fixtures
