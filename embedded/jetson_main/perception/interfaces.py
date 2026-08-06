@@ -82,7 +82,13 @@ class SegmentationFrame:
         (막다른 길). cost_profile의 ∞와는 다른 사실이다: ∞는 차도·횡단보도처럼
         '가면 안 되는' 방향이고, 이 필드는 벽·담장·공사벽처럼 '갈 수 없는' 방향이다.
         후자는 어느 클래스도 ∞가 아니어서(미분류 0.9 등) 비용만으로는 관측되지 않는다.
-        AVOID 재확인이 이 필드로 회차(DEAD_END 180° K턴) 승격을 판단한다.
+        AVOID 재확인이 이 필드로 재정향(DEAD_END — 선회 호 ↔ 되짚기 후진, 안 풀리면
+        U턴) 승격을 판단한다.
+    perception_blank: 이 프레임에서 세그가 **어느 클래스도 잡지 못했다**(빈 프레임).
+        주행 계층은 읽지 않는다 — 계측·진단용이다. 인지 계층이 이 사실을 막힘 판정에
+        어떻게 반영하는지는 segmentation.BlankFrameGate 에 있다: 짧은 빈 프레임은
+        '못 봤다'이지 '앞이 막혔다'가 아니므로 장애물·막다른길 판정에서 빼고,
+        빈 상태가 확정 시간 이상 이어지면 그때는 그대로 통과시킨다.
     """
 
     timestamp: float
@@ -98,6 +104,7 @@ class SegmentationFrame:
     braille_missing_at_crosswalk: bool = False
     cost_profile: Optional[Tuple[float, ...]] = None
     all_directions_blocked: bool = False
+    perception_blank: bool = False
 
     def has_blocking_obstacle(self) -> bool:
         """진행을 막는 장애물이 하나라도 있는가."""

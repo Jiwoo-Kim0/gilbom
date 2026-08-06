@@ -215,18 +215,110 @@ class TestYaw:
         assert reading.pitch_deg == pytest.approx(30.0, abs=0.01)
 
 
-class TestStartupReference:
-    def test_startup_tilt_becomes_zero_reference(self, config):
-        # 출발 자세(기수 30° 들림 = 장착 기울기+바닥)가 영점이 된다.
-        # 이후 진짜 평지로 내려오면 상대값 -30°로 보고돼야 한다.
+class TestPitchIsAbsolute:
+    """pitch 는 **중력 기준 절대값**이다 — 출발 자세를 0점으로 잡지 않는다.
+
+    잡으면 출발선 경사가 매번 0점에 박혀, 평지에 나왔을 때 반대 부호의 경사로 읽힌다:
+    5° 오르막에서 출발 → 평지에서 -5° → SLOPE 내리막 진입, 12° 오르막에서 출발 →
+    평지에서 -12° → 하강 안전 정지(수동 개입 전까지 안 움직임).
+    driving.slope 의 임계가 전부 중력 기준 물리량이므로 기준도 중력이어야 한다.
+    (docs/IMU-ZERO-REFERENCE.md §1·§5)
+    """
+
+    def test_startup_tilt_is_not_zeroed(self, config):
+        # 경사에서 켜도 그 경사가 그대로 읽힌다 (0점으로 삼키지 않는다)
+        samples = config["hardware"]["imu"]["gyro_bias_samples"]
+        fake_bus = FakeSmbus([frame(acceleration_g=_NOSE_UP_30_G)] * (samples + 2))
+        imu = build_imu(config, fake_bus, FakeClock())
+        assert imu.read().pitch_deg == pytest.approx(30.0, abs=0.01)
+
+    def test_flat_ground_reads_zero_after_a_slope_start(self, config):
+        # 경사에서 출발해 평지로 내려오면 0° — 종전에는 -30° 로 읽혔다
         samples = config["hardware"]["imu"]["gyro_bias_samples"]
         fake_bus = FakeSmbus(
             [frame(acceleration_g=_NOSE_UP_30_G)] * (samples + 1) + [frame()])
         clock = FakeClock()
         imu = build_imu(config, fake_bus, clock)
-        assert imu.read().pitch_deg == pytest.approx(0.0, abs=0.01)
+        imu.read()
         clock.now += 1.0
-        assert imu.read().pitch_deg == pytest.approx(-30.0, abs=0.01)
+        assert imu.read().pitch_deg == pytest.approx(0.0, abs=0.01)
+
+    def test_mount_offset_is_a_constant_that_is_subtracted(self, config):
+        """장착 기울기는 config 상수로 받아 빼기만 한다 (재지 않는다)."""
+        samples = config["hardware"]["imu"]["gyro_bias_samples"]
+        imu_config = config["hardware"]["imu"]
+        fake_bus = FakeSmbus([frame(acceleration_g=_NOSE_UP_30_G)] * (samples + 2))
+        imu = JetsonImu(
+            bus=imu_config["bus"], address=imu_config["address"],
+            forward_axis=imu_config["forward_axis"], up_axis=imu_config["up_axis"],
+            gyro_bias_samples=samples,
+            complementary_alpha=imu_config["complementary_alpha"], yaw_sign=1,
+            mount_pitch_offset_deg=30.0,      # 차체가 30° 삐뚤게 장착됐다면
+            bus_factory=lambda _bus: fake_bus, clock=FakeClock())
+        # 같은 30° 자세는 '평지'로 읽혀야 한다
+        assert imu.read().pitch_deg == pytest.approx(0.0, abs=0.01)
+
+
+class TestStartupZeroing:
+    """출발 직전 터치 영점 — **매 시작 다시 재는 것은 자이로 바이어스뿐**이다.
+
+    바이어스는 기준점이 아니라 센서 오차라, 정지 중 참값이 0인 것이 물리적으로
+    확실하다 → 어느 경사에 서 있든 유효하다. 온도로 변하므로 자주 잴수록 좋다.
+    """
+
+    def still_imu(self, config, rate_dps, clock=None):
+        samples = config["hardware"]["imu"]["gyro_bias_samples"]
+        bus = FakeSmbus([frame()] * (samples + 1)
+                        + [frame(angular_rate_dps=rate_dps)])
+        return build_imu(config, bus, clock or FakeClock()), bus
+
+    def test_it_measures_the_bias_while_stationary(self, config):
+        # 기동 영점 뒤 센서가 데워져 바이어스가 +3dps 로 흘렀다고 하자
+        imu, _ = self.still_imu(config, (0.0, 0.0, 3.0))
+        clock = FakeClock()
+        imu = build_imu(config, FakeSmbus(
+            [frame()] * (config["hardware"]["imu"]["gyro_bias_samples"] + 1)
+            + [frame(angular_rate_dps=(0.0, 0.0, 3.0))]), clock)
+        imu.read()
+        assert imu.begin_zeroing() is True
+        for _ in range(20):
+            clock.now += 0.05
+            imu.read()
+        assert imu.finish_zeroing() is True
+
+        # 이제 같은 3dps 는 '정지'로 읽혀 yaw 가 흐르지 않는다
+        before = imu.read().yaw_deg
+        clock.now += 1.0
+        assert imu.read().yaw_deg == pytest.approx(before, abs=0.05)
+
+    def test_it_refuses_when_the_robot_moved(self, config):
+        """흔들린 표본으로 바이어스를 박으면 영점을 안 잡느니만 못하다."""
+        clock = FakeClock()
+        samples = config["hardware"]["imu"]["gyro_bias_samples"]
+        # 영점 구간에서 각속도가 크게 변한다(= 움직였다)
+        moving = [frame(angular_rate_dps=(0.0, 0.0, rate))
+                  for rate in (0.0, 30.0, -30.0, 10.0)] * 6
+        bus = FakeSmbus([frame()] * (samples + 1) + moving)
+        imu = build_imu(config, bus, clock)
+        imu.read()
+        imu.begin_zeroing()
+        for _ in range(20):
+            clock.now += 0.05
+            imu.read()
+        assert imu.finish_zeroing() is False       # 버린다 = 출발도 하지 않는다
+
+    def test_no_sensor_never_blocks_the_start(self, config):
+        """센서가 없으면 영점을 시작조차 못 한다 — 호출부가 건너뛸 수 있어야 한다."""
+        imu_config = config["hardware"]["imu"]
+        imu = JetsonImu(
+            bus=imu_config["bus"], address=imu_config["address"],
+            forward_axis=imu_config["forward_axis"], up_axis=imu_config["up_axis"],
+            gyro_bias_samples=imu_config["gyro_bias_samples"],
+            complementary_alpha=imu_config["complementary_alpha"], yaw_sign=1,
+            bus_factory=lambda _bus: (_ for _ in ()).throw(OSError(2, "없음")),
+            clock=FakeClock())
+        assert imu.begin_zeroing() is False
+        assert imu.finish_zeroing() is False
 
     def test_yaw_sign_flip_corrects_inverted_clone_gyro(self, config):
         # 클론 칩 실측: 좌회전(반시계) 때 자이로 z가 -로 나온다 → yaw_sign=-1이면

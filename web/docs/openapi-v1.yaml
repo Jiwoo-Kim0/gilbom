@@ -2991,6 +2991,35 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /api/v1/missions/{missionId}/defects:
+    get:
+      tags: [Missions]
+      operationId: getMissionDefects
+      summary: Mission에서 발생한 결함 지도 마커 조회
+      description: |
+        Defect 정본을 변경하지 않고 Mission의 robot_event와 연결된 관측만
+        조회합니다. 병합된 결함은 대표 결함으로 치환해 한 번만 반환합니다.
+        결함 SSE 수신 후 이 API를 다시 조회하면 다른 Mission의 결함이 섞이지
+        않은 최신 지도 마커를 얻을 수 있습니다.
+      x-required-permissions: [MISSION_VIEW, DEFECT_STATUS_VIEW]
+      security:
+        - serverSession: []
+      parameters:
+        - $ref: "#/components/parameters/MissionId"
+      responses:
+        "200":
+          description: Mission에 연결된 결함 지도 마커
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MissionDefectMapResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /api/v1/missions/{missionId}/history:
     get:
       tags: [Missions]
@@ -5858,6 +5887,60 @@ components:
           allOf:
             - $ref: "#/components/schemas/MissionMapCurrentPosition"
           nullable: true
+
+    MissionDefectMapItem:
+      type: object
+      required:
+        - defectId
+        - incidentCode
+        - defectType
+        - riskLevel
+        - workflowStatus
+        - longitude
+        - latitude
+        - latestConfidence
+      additionalProperties: false
+      properties:
+        defectId:
+          type: string
+          format: uuid
+        incidentCode:
+          type: string
+        defectType:
+          $ref: "#/components/schemas/DefectType"
+        riskLevel:
+          $ref: "#/components/schemas/DefectRiskLevel"
+        workflowStatus:
+          $ref: "#/components/schemas/DefectWorkflowStatus"
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+        latestConfidence:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          nullable: true
+
+    MissionDefectMapResponse:
+      type: object
+      required: [missionId, defects]
+      additionalProperties: false
+      properties:
+        missionId:
+          type: string
+          format: uuid
+        defects:
+          type: array
+          items:
+            $ref: "#/components/schemas/MissionDefectMapItem"
 
     MissionStatusHistoryItem:
       type: object

@@ -99,14 +99,20 @@ export function SafeReportDocument({
         if (current === null) {
           break
         }
+        const itemContent = reportListItem(
+          current[1]?.trim() ?? '',
+          currentSection,
+          lineIndex,
+        )
         items.push(createElement(
           'li',
-          { key: `item-${lineIndex}` },
-          reportListItem(
-            current[1]?.trim() ?? '',
-            currentSection,
-            lineIndex,
-          ),
+          {
+            className: typeof itemContent === 'string'
+              ? undefined
+              : 'safe-report-structured-list-item',
+            key: `item-${lineIndex}`,
+          },
+          itemContent,
         ))
         lineIndex += 1
       }

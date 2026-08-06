@@ -66,6 +66,7 @@ def arguments(auto_complete_sec: int = 0) -> SimpleNamespace:
         battery_step_percent=0.0,
         position_step_m=0.0,
         position_update_interval=0.0,
+        normal_detection_step=1,
         speed_mps=0.8,
         jetson_temp_c=41.5,
         jetson_temp_step_c=0.0,
@@ -399,7 +400,7 @@ class MockRobotMissionTest(unittest.TestCase):
     def test_periodic_event_payloads_cover_all_event_families(self) -> None:
         safety_events = [self.robot.safety_event_payload() for _ in range(4)]
         battery_events = [self.robot.battery_event_payload() for _ in range(5)]
-        incident = self.robot.incident_event_payload()
+        incidents = [self.robot.incident_event_payload() for _ in range(2)]
 
         self.assertEqual(
             [event["event_type"] for event in safety_events],
@@ -421,19 +422,56 @@ class MockRobotMissionTest(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            incident["event_type"],
+            incidents[0]["event_type"],
             "BRAILLE_BLOCK_INCIDENT_DETECTED",
         )
-        self.assertEqual(incident["source_component"], "ai")
-        self.assertIsNone(incident["mission_id"])
-        self.assertTrue(incident["location"]["valid"])
+        self.assertEqual(incidents[0]["source_component"], "ai")
+        self.assertIsNone(incidents[0]["mission_id"])
+        self.assertTrue(incidents[0]["location"]["valid"])
+        self.assertEqual(
+            [event["incident"]["defect_type"] for event in incidents],
+            ["DAMAGED", "MISSING"],
+        )
+        self.assertEqual(incidents[0]["incident"]["block_type"], "LINEAR")
+        self.assertEqual(incidents[1]["incident"]["block_type"], "UNKNOWN")
+        self.assertEqual(incidents[1]["incident"]["attributes"], {})
         self.assertEqual(
             len({
                 event["event_id"]
-                for event in [*safety_events, *battery_events, incident]
+                for event in [*safety_events, *battery_events, *incidents]
             }),
-            10,
+            11,
         )
+
+    def test_successful_incidents_and_installed_blocks_are_counted_per_mission(
+        self,
+    ) -> None:
+        mission_id = "MIS-MOCK-DETECTION-COUNTS"
+        self.robot.args.position_step_m = 3.0
+        self.robot.handle_command(command(
+            "START_MISSION",
+            {"mission_id": mission_id, "zone_id": "A-01"},
+        ))
+
+        first = self.robot.incident_event_payload()
+        second = self.robot.incident_event_payload()
+        self.robot.record_published_incident(first)
+        self.robot.record_published_incident(second)
+        self.robot.advance_telemetry_values()
+
+        telemetry = self.robot.telemetry_payload()
+        self.assertEqual(telemetry["mission"]["incident_count"], 2)
+        self.robot.handle_command(command("COMPLETE_MISSION", {}))
+        result = self.published_json("/events/mission")[-1]["result"]
+        self.assertEqual(result["incident_count"], 2)
+        self.assertEqual(result["normal_detection_count"], 1)
+
+        self.robot.handle_command(command(
+            "START_MISSION",
+            {"mission_id": "MIS-MOCK-NEXT", "zone_id": "A-01"},
+        ))
+        self.assertEqual(self.robot.mission_incident_count, 0)
+        self.assertEqual(self.robot.normal_detection_count, 0)
 
     def test_telemetry_values_change_while_mission_is_running(self) -> None:
         self.robot.args.jetson_temp_step_c = 0.2

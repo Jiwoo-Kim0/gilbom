@@ -369,3 +369,125 @@ class TestFrameIntegration:
         assert frame.cost_profile is not None
         assert len(frame.cost_profile) == SLOTS          # 잘리지 않았다
         assert len(frame.obstacles) == 1                 # 장애물 보고는 그대로 산다
+
+    # ---- '갈 수 없다'(막다른 길) 판정은 근거리 확증을 함께 요구한다 ----
+    #
+    # 자유거리가 짧아지는 이유는 물체만이 아니다: 오르막·크레스트·코너에서는 지면이
+    # 시야에서 먼저 끝난다. 그 장면은 전 슬롯이 **균등하게** 짧아지므로 상대 노치로는
+    # 안 잡히지만, 절대 기준을 전 슬롯에 적용하는 all_directions_blocked 에는 그대로
+    # 걸린다 — 그리고 그 판정의 결과는 정지 → 재확인 → **후진 + 재정향**이다.
+    # 인도 한복판에서 후진하는 그 기동이 '경사면에서 쓸데없이 멈춘다'의 최종 형태다.
+
+    def blocked_everywhere(self, **overrides):
+        return self.base(free_reach_ratios=tuple(open_reaches(0.0)), **overrides)
+
+    def test_crest_alone_is_not_a_dead_end(self, post, costmap, fs):
+        """전 슬롯이 균등하게 짧아도 바로 앞 노면이 멀쩡하면 막다른 길이 아니다."""
+        reaches = open_reaches(fs.blocking_reach_ratio - 0.05)
+        frame = build_frame(self.base(free_reach_ratios=tuple(reaches)),
+                            post, T, costmap=costmap, free_space=fs)
+        assert not frame.all_directions_blocked
+        assert not frame.has_blocking_obstacle()     # 균등하면 노치도 없다
+
+    def test_wall_with_near_evidence_is_a_dead_end(self, post, costmap, fs):
+        """벽·담장은 다가서면 근거리 밴드를 채운다 — 그때는 그대로 막다른 길이다."""
+        summary = self.blocked_everywhere(
+            obstacle_corridor_fraction=post.obstacle_min_fraction + 0.05,
+            obstacle_proximity=post.obstacle_blocking_proximity + 0.1)
+        frame = build_frame(summary, post, T, costmap=costmap, free_space=fs)
+        assert frame.all_directions_blocked
+        assert frame.has_blocking_obstacle()
+
+    def test_far_wall_waits_for_the_near_band(self, post, costmap, fs):
+        """아직 근거리 밴드에 안 들어온 벽은 '막힘'으로 단정하지 않는다.
+
+        놓치는 것이 아니라 미루는 것이다: 다가가면 밴드에 들어오고(위 테스트),
+        그 사이에도 자유거리 노치가 코스트맵 비용으로 조향을 비껴 준다.
+        """
+        frame = build_frame(self.blocked_everywhere(), post, T,
+                            costmap=costmap, free_space=fs)
+        assert not frame.all_directions_blocked
+        assert frame.has_blocking_obstacle()   # 회피 기동은 그대로 걸린다
+
+
+class TestBlockedByWhatExactly:
+    """같은 '짧은 자유거리'라도 **원인**이 다르면 대응이 달라야 한다.
+
+    자유거리는 주행가능이 어디까지 이어지는지만 잰다. 그것이 짧아지는 이유는 둘이고
+    (뭔가가 막았다 / 인도가 거기서 끝났다) 종전에는 구분이 없었다 — 그래서 횡단보도
+    연석이 정면을 가로막은 물체와 똑같이 회피 기동을 유발했다.
+    실측 2026-08-05(실사 38장): blocking 22건 중 6건이 crosswalk·roadway 에서 끊긴
+    것이었고, 전부 횡단보도 접근 프레임이다 — 미설치 판정을 하러 가야 하는 자리다.
+    """
+
+    def objects(self, slot=None, ratio=1.0, width=1):
+        out = [0.0] * SLOTS
+        if slot is not None:
+            for i in range(slot, min(SLOTS, slot + width)):
+                out[i] = ratio
+        return out
+
+    def test_object_terminator_blocks(self, fs):
+        far = free_space_obstacle(with_person(open_reaches(), 7, 0.1), fs,
+                                  object_ratios=self.objects(7))
+        assert far is not None and far.blocking
+
+    def test_curb_terminator_does_not_block(self, fs):
+        """인도가 끝난 것은 막힌 것이 아니다 — 차도 방어는 코리도 비율이 따로 한다."""
+        far = free_space_obstacle(with_person(open_reaches(), 7, 0.1), fs,
+                                  object_ratios=self.objects())
+        assert far is not None            # 보고는 남는다(비용·치우침은 유효하다)
+        assert not far.blocking           # 회피 기동만 걸지 않는다
+
+    def test_object_standing_on_the_curb_still_blocks(self, fs):
+        """연석에 사람이 서 있으면 이웃이 전부 연석이어도 그 사람은 피해야 한다.
+
+        구간 평균을 쓰면 바로 이 경우가 지워진다 — 그래서 최댓값으로 본다.
+        """
+        reaches = with_person(open_reaches(), 6, 0.1, width=3)
+        objects = self.objects(7)         # 가운데 한 슬롯만 물체
+        far = free_space_obstacle(reaches, fs, object_ratios=objects)
+        assert far is not None and far.blocking
+
+    def test_threshold_is_inclusive(self, fs):
+        far = free_space_obstacle(
+            with_person(open_reaches(), 7, 0.1), fs,
+            object_ratios=self.objects(7, ratio=fs.blocking_object_min_ratio))
+        assert far is not None and far.blocking
+
+    def test_absent_profile_keeps_the_old_behaviour(self, fs):
+        """원인을 재지 않는 경로(mock 인지)는 종전 그대로 — 조용히 바뀌지 않는다."""
+        far = free_space_obstacle(with_person(open_reaches(), 7, 0.1), fs)
+        assert far is not None and far.blocking
+
+
+class TestTerminatorInFrame:
+    """build_frame 결합 — 종결자 프로파일이 실제로 기동 판정까지 닿는가."""
+
+    def base(self, **overrides) -> MaskSummary:
+        values = dict(
+            drivable_fraction=0.5, drivable_center_offset_ratio=0.0,
+            roadway_corridor_fraction=0.0, obstacle_corridor_fraction=0.0,
+            obstacle_lateral_bias=0.0, obstacle_proximity=0.0,
+            obstacle_height_ratio=1.0, braille_fraction=0.0,
+            braille_center_offset_ratio=0.0, braille_proximity=0.0,
+            slot_class_fractions=tuple({"sidewalk": 1.0, UNKNOWN_CLASS: 0.0}
+                                       for _ in range(SLOTS)),
+            free_reach_ratios=tuple(with_person(open_reaches(), 7, 0.1)),
+        )
+        values.update(overrides)
+        return MaskSummary(**values)
+
+    def test_crosswalk_edge_does_not_trigger_evasion(self, post, costmap, fs):
+        frame = build_frame(self.base(free_block_object_ratios=(0.0,) * SLOTS),
+                            post, T, costmap=costmap, free_space=fs)
+        assert not frame.has_blocking_obstacle()
+        # 비용은 그대로 얹힌다 — 연석 쪽으로 파고들지는 않는다
+        assert frame.cost_profile[7] > frame.cost_profile[0]
+
+    def test_real_object_still_triggers_evasion(self, post, costmap, fs):
+        objects = [0.0] * SLOTS
+        objects[7] = 1.0
+        frame = build_frame(self.base(free_block_object_ratios=tuple(objects)),
+                            post, T, costmap=costmap, free_space=fs)
+        assert frame.has_blocking_obstacle()

@@ -42,7 +42,6 @@ import type {
   GeoJsonPolygon,
   PatrolArea,
   PatrolAreaCodeAvailability,
-  PatrolAreaBoundary,
 } from './missionTypes'
 import './mission.css'
 
@@ -51,15 +50,6 @@ function formatDateTime(value: string): string {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(value))
-}
-
-function boundaryPointCount(boundary: PatrolAreaBoundary): number {
-  if (boundary.type === 'Polygon') {
-    return Math.max(boundary.coordinates[0]?.length - 1, 0)
-  }
-  return boundary.coordinates.reduce((count, polygon) => (
-    count + Math.max(polygon[0]?.length - 1, 0)
-  ), 0)
 }
 
 export function PatrolAreaManagePage() {
@@ -537,7 +527,6 @@ export function PatrolAreaManagePage() {
                 <tr>
                   <th scope="col">구역</th>
                   <th scope="col">상태</th>
-                  <th scope="col">경계점</th>
                   <th scope="col">미션 사용</th>
                   <th scope="col">최근 수정</th>
                   {canManage ? <th scope="col">관리</th> : null}
@@ -559,7 +548,6 @@ export function PatrolAreaManagePage() {
                         {lifecycleStatusText(area)}
                       </span>
                     </td>
-                    <td>{boundaryPointCount(area.boundary)}개</td>
                     <td>
                       {area.lifecycleStatus === 'ACTIVE' ? (
                         <span className="patrol-area-mission-eligible">

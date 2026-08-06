@@ -469,17 +469,31 @@
   gap: 5px;
 }
 
+.safe-report-document li.safe-report-structured-list-item {
+  padding-left: 0;
+  list-style: none;
+}
+
 .safe-report-structured-field,
 .safe-report-structured-body {
   display: block;
 }
 
 .safe-report-structured-field {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 7px;
   font-weight: 400;
+}
+
+.safe-report-structured-field::before {
+  color: var(--brand-strong);
+  content: '•';
 }
 
 .safe-report-structured-body {
   margin-top: 3px;
+  padding-left: 17px;
   line-height: 1.75;
 }
 

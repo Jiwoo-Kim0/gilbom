@@ -5,6 +5,7 @@ const ROBOT_ID = '82000000-0000-4000-8000-000000000002'
 const AREA_ID = '82000000-0000-4000-8000-000000000003'
 const ROUTE_ID = '82000000-0000-4000-8000-000000000004'
 const MISSION_ID = '82000000-0000-4000-8000-000000000005'
+const DEFECT_ID = '82000000-0000-4000-8000-000000000006'
 
 const mission = {
   missionId: MISSION_ID,
@@ -81,6 +82,7 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
   page,
 }) => {
   let snapshotVersion = 1
+  let missionDefectAvailable = false
 
   await page.addInitScript(() => {
     type EventListener = (event: MessageEvent<string>) => void
@@ -373,7 +375,7 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
         userId: USER_ID,
         displayName: 'Mission Map E2E 관리자',
         roles: [{ roleCode: 'OPERATOR', roleName: '운영자' }],
-        permissions: ['MISSION_VIEW'],
+        permissions: ['MISSION_VIEW', 'DEFECT_STATUS_VIEW'],
       })
       return
     }
@@ -466,6 +468,67 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
       })
       return
     }
+    if (pathname === `/api/v1/missions/${MISSION_ID}/defects`) {
+      await fulfillJson(route, {
+        missionId: MISSION_ID,
+        defects: missionDefectAvailable
+          ? [{
+            defectId: DEFECT_ID,
+            incidentCode: 'INC-20260806-000001',
+            defectType: 'DAMAGED',
+            riskLevel: 'HIGH',
+            workflowStatus: 'NEW',
+            longitude: 127.0065,
+            latitude: 37.0065,
+            latestConfidence: 0.91,
+          }]
+          : [],
+      })
+      return
+    }
+    if (pathname === `/api/v1/defects/${DEFECT_ID}`) {
+      await fulfillJson(route, {
+        defect: {
+          defectId: DEFECT_ID,
+          incidentCode: 'INC-20260806-000001',
+          assetType: 'BRAILLE_BLOCK',
+          blockType: 'LINEAR',
+          defectType: 'DAMAGED',
+          riskLevel: 'HIGH',
+          riskScore: 72,
+          workflowStatus: 'NEW',
+          resolution: null,
+          location: { longitude: 127.0065, latitude: 37.0065 },
+          locationAccuracyM: 1.2,
+          zoneId: 'A-01',
+          patrolAreaId: AREA_ID,
+          patrolRouteId: ROUTE_ID,
+          locationLabel: '지도 검증 지점',
+          representativeImageUrl: null,
+          firstSeenAt: '2026-08-06T01:00:00Z',
+          lastSeenAt: '2026-08-06T01:00:00Z',
+          observationCount: 1,
+          latestConfidence: 0.91,
+          reviewRequired: false,
+        },
+        resolutionNote: null,
+        riskScore: 72,
+        riskRuleVersion: 'DAMAGE_RATIO_V1',
+        riskCalculatedAt: '2026-08-06T01:00:00Z',
+        mergedIntoDefectId: null,
+        mergedDefectIds: [],
+        createdAt: '2026-08-06T01:00:00Z',
+        updatedAt: '2026-08-06T01:00:00Z',
+      })
+      return
+    }
+    if (pathname === `/api/v1/defects/${DEFECT_ID}/image-url`) {
+      await fulfillJson(route, {
+        code: 'DEFECT_IMAGE_NOT_FOUND',
+        message: '이미지가 없습니다.',
+      }, 404)
+      return
+    }
 
     await route.fulfill({ status: 404, body: pathname })
   })
@@ -478,6 +541,9 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
   await expect(page.getByRole('dialog', {
     name: 'MIS-MAP-E2E',
   })).toBeVisible()
+  await expect(page.getByRole('link', {
+    name: '로봇 상세 페이지로 이동: 지도 검증 로봇',
+  })).toHaveAttribute('href', `/robots/${ROBOT_ID}`)
 
   await expect(page.getByRole('heading', {
     name: '임무 위치 지도',
@@ -624,4 +690,29 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
   await expect(page.getByText('실제 궤적 (4)')).toBeVisible()
   await expect(page.getByText('현재 위치가 지정된 순찰 구역 밖입니다.'))
     .toBeVisible()
+
+  missionDefectAvailable = true
+  await page.evaluate(({ defectId, areaId }) => {
+    const emit = (
+      window as Window & {
+        __emitMissionRobotEvent?: (type: string, payload: unknown) => void
+      }
+    ).__emitMissionRobotEvent
+    emit?.('defect.created', {
+      eventType: 'defect.created',
+      defectId,
+      patrolAreaId: areaId,
+    })
+  }, { defectId: DEFECT_ID, areaId: AREA_ID })
+
+  await expect(page.getByText('결함 (1)')).toBeVisible()
+  await expect(page.getByRole('complementary', { name: '결함 상세' }))
+    .toBeVisible()
+  await expect(page.getByText('INC-20260806-000001')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '파손' })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => (
+    window as Window & {
+      __missionMapOverlayState?: { nativeMarkers: number }
+    }
+  ).__missionMapOverlayState?.nativeMarkers ?? 0)).toBeGreaterThan(0)
 })

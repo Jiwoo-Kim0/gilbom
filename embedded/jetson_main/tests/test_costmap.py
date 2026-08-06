@@ -96,7 +96,10 @@ class TestClassPriorityTable:
         """
         costs = dict(classes.costs)
         undrivable = set(costs) - set(classes.drivable) - set(classes.roadway)
-        assert undrivable == {"bike_lane", "caution_zone", "alley"}
+        # bike_lane·caution_zone 은 언제나 이쪽이다. alley 는 실내 테스트에서
+        # drivable 로 넘어가므로(config 의 alley 주석) 집합을 리터럴로 못 박지
+        # 않는다 — 지켜야 하는 것은 '주행불가면 유한 비용'이라는 아래 불변식이다.
+        assert {"bike_lane", "caution_zone"} <= undrivable
         for name in undrivable:
             assert 0.0 < costs[name] < float("inf"), (
                 f"{name}: 지나갈 수는 있으나 피해야 하는 클래스여야 한다")
@@ -334,11 +337,16 @@ class TestCruiseCostmap:
     def test_costmap_choice_obeys_asymmetric_left_limit(self, params):
         # 코스트맵 선택도 비례 조향과 같은 좌우 비대칭 상한을 지난다.
         # 왼쪽 끝 슬롯만 통행 가능 → 이득을 곱하면 상한을 넘고, 좌측 상한에서 잘린다
+        # 슬롯 수는 실사용값(15)을 쓴다 — 5슬롯이면 최외곽 중심이 ±0.8 이라
+        # 이득 30을 곱해도 24°이고, 좌측 상한이 25로 올라간 뒤로는 전제가 깨진다
+        # (0806: 조향 사각지대 18° 위로 상한을 올렸다 — config cruise 주석)
         inf = float("inf")
+        slots = 15
         machine = self.started(params)
-        extreme = slot_center_ratio(0, 5) * params.cruise_steer_gain_deg
+        extreme = slot_center_ratio(0, slots) * params.cruise_steer_gain_deg
         assert abs(extreme) > params.cruise_steer_left_max_deg  # 전제: 상한을 넘는 입력
-        command = machine.step(self.frame(1.0, (0.0, inf, inf, inf, inf)), None, 1.0)
+        profile = (0.0,) + (inf,) * (slots - 1)
+        command = machine.step(self.frame(1.0, profile), None, 1.0)
         assert command.steering_offset_deg == pytest.approx(
             -params.cruise_steer_left_max_deg)
 

@@ -1,4 +1,5 @@
 import { Info } from 'lucide-react'
+import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router'
 import { NavigationBar } from '../features/navigationbar'
 import { useAuthentication } from '../features/auth/authenticationContext'
@@ -87,6 +88,7 @@ function pageHeaderFor(pathname: string): PageHeader {
 export function AppLayout() {
   const location = useLocation()
   const { user } = useAuthentication()
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const pageHeader = pageHeaderFor(location.pathname)
   const displayName = user?.displayName ?? '관리자'
   const tooltipId = `topbar-help-${pageHeader.id}`
@@ -96,8 +98,12 @@ export function AppLayout() {
       <a className="skip-link" href="#main-content">
         본문으로 바로가기
       </a>
-      <div className="app-shell">
-        <NavigationBar permissions={user?.permissions ?? []} />
+      <div className={`app-shell${sidebarCollapsed ? ' is-sidebar-collapsed' : ''}`}>
+        <NavigationBar
+          collapsed={sidebarCollapsed}
+          permissions={user?.permissions ?? []}
+          onToggle={() => setSidebarCollapsed((collapsed) => !collapsed)}
+        />
 
         <div className="app-frame">
           <header className="topbar">

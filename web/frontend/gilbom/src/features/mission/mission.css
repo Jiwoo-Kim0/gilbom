@@ -236,7 +236,7 @@
 }
 
 .patrol-area-table {
-  min-width: 820px;
+  min-width: 720px;
 }
 
 .patrol-area-edit-button {
@@ -465,6 +465,19 @@
 
 .mission-detail-modal-heading h3 {
   margin: 0.2rem 0 0;
+}
+
+.mission-detail-modal-heading-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--mission-detail-control-gap);
+  align-items: center;
+}
+
+.mission-detail-robot-link {
+  min-height: 36px;
+  padding-inline: 0.75rem;
+  white-space: nowrap;
 }
 
 .mission-detail-map-primary {
