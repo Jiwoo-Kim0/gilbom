@@ -434,10 +434,16 @@ async function openCluster(
  */
 async function waitForCardSettled(page: Page): Promise<void> {
   await expect(page.locator('.defect-card')).toBeVisible()
+  /*
+   * **멈출 때까지** 기다린다. "상단 바 아래로 내려왔나"만 보면 아직 미끄러지는 중에
+   * 통과해, 그 뒤에 재는 좌표가 어긋난다(끌기 시험이 그것 때문에 이따금 실패했다).
+   * 두 번 연달아 같은 값이면 멈춘 것으로 본다.
+   */
+  let previous = Number.NaN
   await expect
     .poll(
-      () =>
-        page.evaluate(() => {
+      async () => {
+        const now = await page.evaluate(() => {
           const header = document
             .querySelector('.defect-card-header')!
             .getBoundingClientRect()
@@ -445,10 +451,14 @@ async function waitForCardSettled(page: Page): Promise<void> {
             .querySelector('.topbar')!
             .getBoundingClientRect()
           return Math.round(header.top - topbar.bottom)
-        }),
-      { timeout: 5000 },
+        })
+        const settled = now > 0 && now === previous
+        previous = now
+        return settled
+      },
+      { timeout: 5000, intervals: [100, 100, 150, 200, 300, 500] },
     )
-    .toBeGreaterThan(0)
+    .toBe(true)
 }
 
 /**
@@ -546,12 +556,110 @@ test.describe('묶음 결함 목록', () => {
     await expect(list).toBeVisible()
   })
 
+  test('목록과 상세 카드는 지도 모서리에 붙는다', async ({ page }) => {
+    await openCluster(page, 3)
+    const list = page.getByRole('region', { name: '묶인 결함 목록' })
+    await list.getByRole('listitem').first().getByRole('button').click()
+    await expect(page.locator('.defect-card')).toBeVisible()
+
+    /*
+     * 16px씩 띄워두면 지도의 둥근 모서리와 상자의 둥근 모서리가 나란히 보여 두 겹으로
+     * 겹친 것처럼 읽힌다. 붙이면 반지름이 같아 두 곡선이 포개진다.
+     */
+    const gaps = await page.evaluate(() => {
+      const wrap = document
+        .querySelector('.defect-map-canvas-wrap')!
+        .getBoundingClientRect()
+      const panel = document
+        .querySelector('.defect-cluster-list')!
+        .getBoundingClientRect()
+      const card = document
+        .querySelector('.defect-card')!
+        .getBoundingClientRect()
+      const radius = Number.parseFloat(
+        getComputedStyle(document.querySelector('.defect-card')!)
+          .borderTopRightRadius,
+      )
+      const mapRadius = Number.parseFloat(
+        getComputedStyle(document.querySelector('.defect-map-canvas-wrap')!)
+          .borderTopRightRadius,
+      )
+      return {
+        panelTop: Math.round(panel.top - wrap.top),
+        panelLeft: Math.round(panel.left - wrap.left),
+        cardTop: Math.round(card.top - wrap.top),
+        cardRight: Math.round(wrap.right - card.right),
+        radius,
+        mapRadius,
+      }
+    })
+
+    expect(gaps.panelTop, '목록이 지도 위변에 붙는다').toBe(0)
+    expect(gaps.panelLeft).toBe(0)
+    expect(gaps.cardTop, '카드가 지도 위변에 붙는다').toBe(0)
+    expect(gaps.cardRight).toBe(0)
+    // 반지름이 같아야 두 곡선이 포개져 한 겹으로 보인다.
+    expect(gaps.radius).toBe(gaps.mapRadius)
+  })
+
   test('닫으면 목록만 사라지고 지도는 그대로다', async ({ page }) => {
     await openCluster(page, 3)
 
     await page.getByRole('button', { name: '묶인 결함 목록 닫기' }).click()
     await expect(page.locator('.defect-cluster-list')).toHaveCount(0)
     await expect(page.locator('.defect-map-canvas-wrap')).toBeVisible()
+  })
+
+  test('상세 카드가 목록보다 앞에 온다', async ({ page }) => {
+    await openCluster(page, 3)
+    const list = page.getByRole('region', { name: '묶인 결함 목록' })
+    await list.getByRole('listitem').first().getByRole('button').click()
+    const card = page.locator('.defect-card')
+    await expect(card).toBeVisible()
+
+    /*
+     * 카드를 목록 위로 끌어다 놓는다. 기본 자리(오른쪽)에서는 둘이 겹치지 않아 순서를
+     * 볼 수 없다.
+     */
+    const header = page.locator('.defect-card-header')
+    const listBox = (await list.boundingBox())!
+    const headerBox = (await header.boundingBox())!
+    await page.mouse.move(
+      headerBox.x + headerBox.width / 2,
+      headerBox.y + headerBox.height / 2,
+    )
+    await page.mouse.down()
+    await page.mouse.move(
+      listBox.x + listBox.width / 2,
+      headerBox.y + headerBox.height / 2,
+      { steps: 8 },
+    )
+    await page.mouse.up()
+
+    const layers = await page.evaluate(() => {
+      const card = document.querySelector('.defect-card')!
+      const panel = document.querySelector('.defect-cluster-list')!
+      const cardBox = card.getBoundingClientRect()
+      const panelBox = panel.getBoundingClientRect()
+      // 두 상자가 겹치는 자리를 잡아 그 지점에서 무엇이 위인지 본다.
+      const x = (Math.max(cardBox.left, panelBox.left)
+        + Math.min(cardBox.right, panelBox.right)) / 2
+      const y = (Math.max(cardBox.top, panelBox.top)
+        + Math.min(cardBox.bottom, panelBox.bottom)) / 2
+      const top = document.elementFromPoint(x, y)
+      return {
+        overlaps:
+          cardBox.left < panelBox.right && panelBox.left < cardBox.right,
+        cardOnTop: top !== null && card.contains(top),
+        cardZ: Number(getComputedStyle(card).zIndex),
+        panelZ: Number(getComputedStyle(panel).zIndex),
+      }
+    })
+
+    expect(layers.overlaps, '겹쳐야 순서를 볼 수 있다').toBe(true)
+    expect(layers.cardOnTop, '겹친 자리에서 카드가 위여야 한다').toBe(true)
+    // 층 번호로도 못박는다. 카드에 z-index가 없던 시절에는 목록(6)이 이겼다.
+    expect(layers.cardZ).toBeGreaterThan(layers.panelZ)
   })
 })
 

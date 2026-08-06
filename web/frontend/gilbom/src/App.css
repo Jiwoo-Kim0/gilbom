@@ -927,11 +927,29 @@
 }
 
 /* 마커를 클릭하면 지도 위에 뜨는 결함 카드 */
+/*
+ * 지도 위 상세 카드.
+ *
+ * <p>**지도 안에서 가장 위 층이다.** z-index를 주지 않았을 때는 묶음 목록(6)이 이겨서,
+ * 목록에서 결함을 고르면 방금 연 카드가 그 목록 **뒤로** 깔렸다. 카드는 고른 결과이자
+ * 지금 보려는 것이므로 항상 앞에 있어야 한다.
+ *
+ * <p>지도 안 층 순서: 축척 5 → 묶음 목록 6 → 이 카드 8.
+ * (`.defect-map-canvas-wrap`이 `isolation: isolate`라 바깥 층과 섞이지 않는다.)
+ */
 .defect-card {
   position: absolute;
-  top: 16px;
-  right: 16px;
+  /*
+   * 지도 **오른쪽 위 모서리에 붙인다.** 16px씩 띄워두면 지도의 둥근 모서리와 카드의 둥근
+   * 모서리가 나란히 보여 상자가 두 겹으로 겹친 것처럼 읽혔다. 붙이면 반지름이 둘 다
+   * 14px이라 두 곡선이 정확히 포개져 한 겹이 된다.
+   *
+   * <p>아래는 그대로 띄운다 — 카드가 지도 아래 끝까지 닿으면 축척 바를 가린다.
+   */
+  top: 0;
+  right: 0;
   bottom: 16px;
+  z-index: 8;
   display: flex;
   width: min(340px, calc(100% - 32px));
   flex-direction: column;
@@ -4006,12 +4024,13 @@ button:disabled {
  */
 .defect-cluster-list {
   position: absolute;
-  top: 16px;
-  left: 16px;
+  /* 상세 카드와 같은 이유로 지도 **왼쪽 위 모서리에 붙인다**(`.defect-card` 주석 참고). */
+  top: 0;
+  left: 0;
   z-index: 6;
   display: flex;
   /* 건수만큼만 차지한다. 세 건인데 지도 높이를 다 쓰면 빈 카드가 지도를 가린다. */
-  max-height: calc(100% - 32px);
+  max-height: calc(100% - 16px);
   width: min(300px, calc(100% - 32px));
   flex-direction: column;
   gap: 10px;
