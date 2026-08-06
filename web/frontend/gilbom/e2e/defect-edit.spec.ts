@@ -217,6 +217,55 @@ test.describe('결함 수정 창', () => {
     ])
   })
 
+  test('고정된 상단 바보다 앞에 나오고 상단 바까지 덮는다', async ({ page }) => {
+    await stubEditPage(page)
+    await openEditModal(page)
+
+    const layers = await page.evaluate(() => {
+      const overlay = document.querySelector('.defect-modal-backdrop')!
+      const topbar = document.querySelector('.topbar')!
+      const sidebar = document.querySelector('.nb-sidebar')!
+      /** 그 자리에서 가장 위에 있는 것이 이 창(막 또는 카드)인가. */
+      const overlayOnTopOf = (element: Element) => {
+        const rect = element.getBoundingClientRect()
+        const top = document.elementFromPoint(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2,
+        )
+        return top !== null && overlay.contains(top)
+      }
+      const box = overlay.getBoundingClientRect()
+      return {
+        overOnTopbar: overlayOnTopOf(topbar),
+        overOnSidebar: overlayOnTopOf(sidebar),
+        coversViewport:
+          Math.round(box.top) === 0
+          && Math.round(box.height) === window.innerHeight,
+        overlayZ: Number(getComputedStyle(overlay).zIndex),
+        topbarZ: Number(getComputedStyle(topbar).zIndex),
+        sidebarZ: Number(getComputedStyle(sidebar).zIndex),
+        dialogTop: Math.round(
+          document.querySelector('.defect-edit-modal')!
+            .getBoundingClientRect().top,
+        ),
+      }
+    })
+
+    /*
+     * 예전에는 이 막이 z-index 40이라 상단 바(50) **뒤로** 깔렸다. 창이 제목에 잘리고
+     * 어두운 막이 상단 바만 비껴가 그 줄만 환하게 남았다.
+     */
+    expect(layers.overOnTopbar, '상단 바 자리에서 이 창이 가장 위여야 한다')
+      .toBe(true)
+    expect(layers.overOnSidebar, '왼쪽 바도 함께 덮는다').toBe(true)
+    expect(layers.coversViewport, '막이 화면 전체를 덮는다').toBe(true)
+    // 층 순서 자체를 못박는다. 숫자가 뒤집히면 어두운 막이 그 바만 비껴간다.
+    expect(layers.overlayZ).toBeGreaterThan(layers.topbarZ)
+    expect(layers.overlayZ).toBeGreaterThan(layers.sidebarZ)
+    // 창 자체도 상단 바에 잘리지 않는다.
+    expect(layers.dialogTop).toBeGreaterThanOrEqual(0)
+  })
+
   test('Esc로 닫힌다', async ({ page }) => {
     await stubEditPage(page)
     await openEditModal(page)
