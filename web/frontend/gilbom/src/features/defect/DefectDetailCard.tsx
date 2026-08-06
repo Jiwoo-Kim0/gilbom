@@ -18,6 +18,7 @@ import type {
 } from './defectCardDrag'
 import { DefectEditModal } from './DefectEditModal'
 import { DefectPhotoViewer } from './DefectPhotoViewer'
+import { DefectSelectMenu } from './DefectSelectMenu'
 import {
   createReport,
   ReportCreateAttempt,
@@ -289,6 +290,24 @@ export function DefectDetailCard({
   const allowed: WorkflowStatus[] = defect
     ? allowedTransitions(defect.workflowStatus)
     : []
+  /*
+   * 고르개에 넘길 목록. 맨 앞의 빈 값은 예전 `<option value="">선택하세요</option>`
+   * 자리다 — 골랐다가 무르는 길을 없애지 않는다.
+   */
+  const statusOptions = [
+    { value: '', label: '선택하세요' },
+    ...allowed.map((status) => ({
+      value: status,
+      label: WORKFLOW_STATUS_LABELS[status],
+    })),
+  ]
+  const resolutionOptions = [
+    { value: '', label: '선택하세요' },
+    ...RESOLUTIONS.map((value) => ({
+      value,
+      label: RESOLUTION_LABELS[value],
+    })),
+  ]
   // 수정을 막는 사유. null이면 수정할 수 있다. 서버 requireChangeable와 같은 규칙이라
   // 여기서 걸러내면 저장 눌러서 409를 받는 일이 없다.
   const mergedInto = detail?.mergedIntoDefectId ?? null
@@ -733,43 +752,42 @@ export function DefectDetailCard({
           <div className="defect-card-actions">
             {canUpdate && (
               <>
-                <label className="defect-card-field">
+                {/*
+                  카드는 스스로 스크롤하고 이 줄은 카드 바닥 쪽이라, 목록이 아래로
+                  펼쳐지면 잘린다. `DefectSelectMenu`가 자리를 재서 위로 뒤집는다.
+                */}
+                <div className="defect-card-field">
                   <span>처리 상태 변경</span>
-                  <select
+                  <DefectSelectMenu
+                    label="처리 상태 변경"
+                    variant="block"
+                    placeholder="선택하세요"
+                    options={statusOptions}
                     value={nextStatus}
                     disabled={!canUpdate || submitting}
-                    onChange={(event) => {
-                      setNextStatus(event.target.value as WorkflowStatus | '')
+                    onChange={(value) => {
+                      setNextStatus(value as WorkflowStatus | '')
+                      // 상태가 바뀌면 앞서 고른 처리 결과는 짝이 맞지 않는다.
                       setResolution('')
                     }}
-                  >
-                    <option value="">선택하세요</option>
-                    {allowed.map((status) => (
-                      <option key={status} value={status}>
-                        {WORKFLOW_STATUS_LABELS[status]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                  />
+                </div>
 
                 {resolutionRequired && (
-                  <label className="defect-card-field">
+                  <div className="defect-card-field">
                     <span>처리 결과</span>
-                    <select
+                    <DefectSelectMenu
+                      label="처리 결과"
+                      variant="block"
+                      placeholder="선택하세요"
+                      options={resolutionOptions}
                       value={resolution}
                       disabled={submitting}
-                      onChange={(event) =>
-                        setResolution(event.target.value as Resolution | '')
+                      onChange={(value) =>
+                        setResolution(value as Resolution | '')
                       }
-                    >
-                      <option value="">선택하세요</option>
-                      {RESOLUTIONS.map((value) => (
-                        <option key={value} value={value}>
-                          {RESOLUTION_LABELS[value]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                    />
+                  </div>
                 )}
 
                 {nextStatus !== '' && (
@@ -862,7 +880,7 @@ export function DefectDetailCard({
                       })
                   }}
                 >
-                  {generating ? '보고서 생성 중…' : '리포트 생성'}
+                  {generating ? '보고서 생성 중…' : '보고서 생성'}
                 </button>
                 {generating && (
                   <p className="defect-card-coord">

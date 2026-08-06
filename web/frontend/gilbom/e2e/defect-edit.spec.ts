@@ -313,3 +313,65 @@ test.describe('결함 수정 창', () => {
     await expect(page.locator('.defect-card')).toBeVisible()
   })
 })
+
+/**
+ * 상세 카드의 처리 상태·처리 결과도 정렬과 같은 고르개를 쓴다. 이 카드는 스스로
+ * 스크롤하고 두 고르개가 카드 바닥 쪽이라, 목록이 아래로 펼쳐지면 잘린다.
+ */
+test.describe('처리 상태 고르개', () => {
+  test('네이티브 select가 아니라 목록이고, 고르면 사유 칸이 열린다', async ({ page }) => {
+    await stubEditPage(page)
+    await page.goto('/defects?allStatus=1')
+    await expect(page.locator('.defect-table-body-row')).toHaveCount(1)
+    await page.locator('.defect-table-body-row').first().click()
+    const card = page.locator('.defect-card')
+    await expect(card).toBeVisible()
+
+    await expect(card.locator('select')).toHaveCount(0)
+    const trigger = card.getByRole('button', { name: /처리 상태 변경/ })
+    // 아직 고르지 않았다는 것이 값처럼 보이면 안 된다.
+    await expect(trigger).toContainText('선택하세요')
+    // 사유 칸은 상태를 고른 뒤에 열린다.
+    await expect(card.getByPlaceholder('변경 이력에 남습니다')).toHaveCount(0)
+
+    await trigger.click()
+    const list = page.getByRole('listbox', { name: '처리 상태 변경' })
+    await expect(list).toBeVisible()
+    // 첫 항목은 무르는 길("선택하세요")이고 나머지가 갈 수 있는 상태다.
+    await expect(list.getByRole('option').first()).toContainText('선택하세요')
+
+    await list.getByRole('option', { name: '처리 중' }).click()
+    await expect(trigger).toContainText('처리 중')
+    await expect(card.getByPlaceholder('변경 이력에 남습니다')).toBeVisible()
+  })
+
+  test('카드 아래쪽에서는 목록이 위로 펼쳐진다', async ({ page }) => {
+    // 카드가 짧아 아래 자리가 모자란 상황을 만든다.
+    await page.setViewportSize({ width: 1280, height: 640 })
+    await stubEditPage(page)
+    await page.goto('/defects?allStatus=1')
+    await expect(page.locator('.defect-table-body-row')).toHaveCount(1)
+    await page.locator('.defect-table-body-row').first().click()
+    const card = page.locator('.defect-card')
+    await expect(card).toBeVisible()
+
+    await card.getByRole('button', { name: /처리 상태 변경/ }).click()
+    const geometry = await page.evaluate(() => {
+      const panel = document.querySelector('.defect-select-panel')!
+      const trigger = document.querySelector('.defect-select-trigger.is-open')!
+      const scroller = document.querySelector('.defect-card')!
+      const panelBox = panel.getBoundingClientRect()
+      return {
+        above: panel.classList.contains('is-above'),
+        panelBottom: Math.round(panelBox.bottom),
+        triggerTop: Math.round(trigger.getBoundingClientRect().top),
+        cardBottom: Math.round(scroller.getBoundingClientRect().bottom),
+      }
+    })
+
+    expect(geometry.above, '아래가 모자라면 위로 뒤집는다').toBe(true)
+    // 뒤집었으니 목록이 버튼 위에 있고, 카드 밖으로 잘려나가지 않는다.
+    expect(geometry.panelBottom).toBeLessThanOrEqual(geometry.triggerTop)
+    expect(geometry.panelBottom).toBeLessThanOrEqual(geometry.cardBottom)
+  })
+})
