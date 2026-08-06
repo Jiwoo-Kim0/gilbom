@@ -211,6 +211,56 @@ test.describe('결함 목록 표', () => {
     expect(await listTop()).toBe(before)
   })
 
+  test('지도 내용이 고정된 상단 바를 침범하지 않는다', async ({ page }) => {
+    await stubDefectPage(page, { count: 20 })
+    await openDefectPage(page, '?allStatus=1', 20)
+
+    /*
+     * Naver SDK는 컨트롤·저작권 표시에 큰 z-index를 쓴다. 지도 컨테이너가 stacking
+     * context를 만들지 않으면 그 값이 상단 바(z-index 50)와 같은 층에서 경쟁해, 스크롤로
+     * 상자가 바와 겹치는 구간에서 `© NAVER Corp.`가 바 위에 그려졌다.
+     * `overflow: hidden`은 이걸 막아주지 못한다.
+     */
+    await page.evaluate(() => {
+      const wrap = document.querySelector('.defect-map-canvas-wrap')
+        ?? document.querySelector('.defect-map-placeholder')!
+      const mark = document.createElement('div')
+      mark.id = 'attribution-like'
+      mark.textContent = '© NAVER Corp.'
+      mark.setAttribute(
+        'style',
+        'position:absolute;left:16px;bottom:8px;z-index:1000;'
+        + 'background:#fff;color:#111;font:700 14px sans-serif;padding:3px 6px',
+      )
+      wrap.appendChild(mark)
+    })
+    // 그 표시가 상단 바 뒤를 지나는 지점까지 스크롤한다.
+    await page.evaluate(() => {
+      const mark = document.querySelector('#attribution-like')!
+      const bar = document.querySelector('.topbar')!.getBoundingClientRect()
+      window.scrollBy(0, mark.getBoundingClientRect().top - bar.height / 2)
+    })
+
+    const probe = await page.evaluate(() => {
+      const topbar = document.querySelector('.topbar')!
+      const bar = topbar.getBoundingClientRect()
+      const mark = document.querySelector('#attribution-like')!
+        .getBoundingClientRect()
+      const hit = document.elementFromPoint(mark.left + 40, mark.top + 8)
+      return {
+        overlapping: mark.top < bar.bottom,
+        topbarOnTop: hit?.closest('.topbar') !== null,
+        background: getComputedStyle(topbar).backgroundColor,
+      }
+    })
+
+    expect(probe.overlapping, '겹치는 상황을 만들었는지').toBe(true)
+    // 겹치는 지점에서 잡히는 것은 상단 바여야 한다.
+    expect(probe.topbarOnTop).toBe(true)
+    // 반투명이면 뒤 내용이 비쳐 글자와 겹쳐 읽힌다.
+    expect(probe.background).not.toContain('rgba')
+  })
+
   test('행을 고르면 지도까지 화면이 올라간다', async ({ page }) => {
     await stubDefectPage(page, { count: 20 })
     await openDefectPage(page, '?allStatus=1', 20)
@@ -238,11 +288,18 @@ test.describe('결함 목록 표', () => {
       )
       .toBeGreaterThanOrEqual(0)
 
-    const after = await page.evaluate(() =>
-      document.querySelector('.defect-map-card')!.getBoundingClientRect().top,
-    )
-    // scroll-margin-top(24px)만큼 띄우고 화면 안에 들어온다.
-    expect(after).toBeLessThan(60)
+    const { after, topbarHeight } = await page.evaluate(() => ({
+      after: document.querySelector('.defect-map-card')!
+        .getBoundingClientRect().top,
+      topbarHeight: document.querySelector('.topbar')!
+        .getBoundingClientRect().height,
+    }))
+    /*
+     * 상단 바가 고정(sticky)이라 그 높이 아래에 놓여야 카드가 가려지지 않는다.
+     * `scroll-margin-top`이 바 높이를 따라가는지 함께 지킨다.
+     */
+    expect(after).toBeGreaterThanOrEqual(topbarHeight - 1)
+    expect(after).toBeLessThan(topbarHeight + 40)
     await expect(page.locator('.defect-table-body-row.is-selected'))
       .toHaveCount(1)
   })

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { updateDefect } from './defectApi'
@@ -110,7 +111,12 @@ export function DefectEditModal({
     }
   }
 
-  return (
+  /*
+   * 지도 컨테이너가 `isolation: isolate`로 stacking context를 만들기 때문에, 그 안에
+   * 남겨두면 화면 전체를 덮어야 하는 이 창이 고정된 상단 바 밑에 깔린다.
+   * 모달은 문서 최상단에 그린다.
+   */
+  return createPortal(
     <div
       className="defect-modal-backdrop"
       role="presentation"
@@ -255,6 +261,7 @@ export function DefectEditModal({
           <p className="defect-card-terminal">변경된 항목이 없습니다.</p>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

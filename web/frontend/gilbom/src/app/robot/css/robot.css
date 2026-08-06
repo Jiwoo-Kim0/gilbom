@@ -232,8 +232,10 @@
   border-radius: 14px;
 }
 
+/* 결함 지도와 같은 이유로 stacking context를 만든다(App.css의 같은 규칙 주석 참고). */
 .robot-map-canvas-wrap {
   position: relative;
+  isolation: isolate;
   min-height: 420px;
   border-radius: 14px;
   overflow: hidden;
