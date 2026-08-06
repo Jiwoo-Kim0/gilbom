@@ -3,6 +3,8 @@ import {
   Bot,
   CircleDot,
   ClipboardList,
+  ChevronsLeft,
+  ChevronsRight,
   FileClock,
   MapPinned,
   ShieldCheck,
@@ -21,6 +23,8 @@ import {
 } from './auth/permissions'
 
 interface NavigationBarProps {
+  collapsed: boolean
+  onToggle: () => void
   permissions: readonly string[]
 }
 
@@ -82,14 +86,18 @@ const navigationItems: readonly NavigationItem[] = [
   },
 ] as const
 
-export function NavigationBar({ permissions }: NavigationBarProps) {
+export function NavigationBar({
+  collapsed,
+  onToggle,
+  permissions,
+}: NavigationBarProps) {
   const visibleNavigationItems = navigationItems.filter((item) => (
     item.requiredPermission === null
     || hasPermission(permissions, item.requiredPermission)
   ))
 
   return (
-    <aside className="nb-sidebar">
+    <aside className={`nb-sidebar${collapsed ? ' is-collapsed' : ''}`}>
       <NavLink className="nb-brand" to="/defects" aria-label="길봄 홈">
         <span className="nb-brand-badge" aria-hidden="true">
           <img className="nb-brand-logo" src={gilbomLogo} alt="" />
@@ -100,20 +108,38 @@ export function NavigationBar({ permissions }: NavigationBarProps) {
         </span>
       </NavLink>
 
-      <nav className="nb-nav" aria-label="주요 메뉴">
+      <nav className="nb-nav" id="primary-navigation" aria-label="주요 메뉴">
         {visibleNavigationItems.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
+            aria-label={label}
+            title={collapsed ? label : undefined}
             className={({ isActive }) => `nb-nav-item${isActive ? ' nb-nav-item-active' : ''}`}
           >
             <span className="nb-nav-icon" aria-hidden="true">
               <Icon size={16} />
             </span>
-            <span>{label}</span>
+            <span className="nb-nav-label">{label}</span>
           </NavLink>
         ))}
       </nav>
+
+      <button
+        className="nb-sidebar-toggle"
+        type="button"
+        aria-controls="primary-navigation"
+        aria-expanded={!collapsed}
+        aria-label={collapsed ? '네비게이션 펼치기' : '네비게이션 접기'}
+        title={collapsed ? '네비게이션 펼치기' : '네비게이션 접기'}
+        onClick={onToggle}
+      >
+        {collapsed ? (
+          <ChevronsRight size={18} aria-hidden="true" />
+        ) : (
+          <ChevronsLeft size={18} aria-hidden="true" />
+        )}
+      </button>
     </aside>
   )
 }
