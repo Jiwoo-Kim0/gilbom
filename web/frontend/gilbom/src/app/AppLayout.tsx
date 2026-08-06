@@ -111,7 +111,7 @@ export function AppLayout() {
                   aria-label={`${pageHeader.title} 안내`}
                   aria-describedby={tooltipId}
                 >
-                  <Info size={13} strokeWidth={2.4} aria-hidden="true" />
+                  <Info size={17} strokeWidth={2.2} aria-hidden="true" />
                   <span
                     id={tooltipId}
                     className="topbar-tooltip"

@@ -55,8 +55,6 @@
   position: relative;
   width: 17px;
   height: 17px;
-  border: 1px solid var(--text-muted);
-  border-radius: 50%;
   align-self: flex-start;
   place-items: center;
   color: var(--text-muted);
