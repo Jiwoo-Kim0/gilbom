@@ -1,16 +1,25 @@
 import type { RobotTelemetrySeriesInterval } from './robotTypes'
-import { instantToSeoulInput } from '../../shared/time/seoulTime.ts'
 
 const DAY_MILLISECONDS = 24 * 60 * 60 * 1000
 const MAXIMUM_PERIOD_MILLISECONDS = 31 * DAY_MILLISECONDS
 const WEEK_MILLISECONDS = 7 * DAY_MILLISECONDS
 
-/**
- * `<input type="datetime-local">`에 넣을 값. 로컬 getter로 만들면 보는 사람 기계 설정에
- * 따라 다른 시각이 찍히므로 서울 기준으로 만든다.
- */
+function pad(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
 export function toDateTimeLocalInput(value: Date): string {
-  return instantToSeoulInput(value)
+  return [
+    value.getFullYear(),
+    '-',
+    pad(value.getMonth() + 1),
+    '-',
+    pad(value.getDate()),
+    'T',
+    pad(value.getHours()),
+    ':',
+    pad(value.getMinutes()),
+  ].join('')
 }
 
 export function createDefaultTelemetryStatisticsRange(

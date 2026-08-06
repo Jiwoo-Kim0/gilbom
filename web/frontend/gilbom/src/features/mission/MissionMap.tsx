@@ -25,7 +25,6 @@ import type {
   PatrolAreaBoundary,
 } from './missionTypes'
 import './mission-map.css'
-import { SEOUL_TIME_ZONE } from '../../shared/time/seoulTime.ts'
 
 type Coordinate = [longitude: number, latitude: number]
 type MissionMapOverlay = naver.maps.OverlayView & {
@@ -204,7 +203,6 @@ function formatObservedAt(value: string | null): string {
     return '기준 시각 미수신'
   }
   return new Intl.DateTimeFormat('ko-KR', {
-    timeZone: SEOUL_TIME_ZONE,
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',

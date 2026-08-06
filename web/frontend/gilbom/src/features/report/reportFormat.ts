@@ -1,8 +1,3 @@
-import {
-  instantToSeoulInput,
-  SEOUL_TIME_ZONE,
-} from '../../shared/time/seoulTime.ts'
-
 export function formatReportDateTime(value: string | null): string {
   if (value === null) {
     return '—'
@@ -12,7 +7,6 @@ export function formatReportDateTime(value: string | null): string {
     return '—'
   }
   return new Intl.DateTimeFormat('ko-KR', {
-    timeZone: SEOUL_TIME_ZONE,
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(date)
@@ -20,7 +14,6 @@ export function formatReportDateTime(value: string | null): string {
 
 export function formatReportPeriod(from: string, to: string): string {
   const formatter = new Intl.DateTimeFormat('ko-KR', {
-    timeZone: SEOUL_TIME_ZONE,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -141,14 +134,11 @@ export function actorLabel(
   return actorId
 }
 
-/**
- * `<input type="datetime-local">`에 넣을 값. 로컬 오프셋으로 밀면 보는 사람 기계 설정에
- * 따라 다른 시각이 찍히므로 서울 기준으로 만든다.
- */
 export function toDateTimeLocal(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) {
     return ''
   }
-  return instantToSeoulInput(date)
+  const offset = date.getTimezoneOffset() * 60_000
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16)
 }

@@ -25,7 +25,6 @@ import type {
   RobotRealtimeEvent,
 } from './robotTypes'
 import { useRobotRealtime } from './useRobotRealtime'
-import { SEOUL_TIME_ZONE } from '../../shared/time/seoulTime.ts'
 
 function formatMetric(value: number | null, suffix: string): string {
   return value === null ? '—' : `${value.toFixed(1)}${suffix}`
@@ -40,7 +39,6 @@ function formatDateTime(value: string | null): string {
     return value
   }
   return new Intl.DateTimeFormat('ko-KR', {
-    timeZone: SEOUL_TIME_ZONE,
     dateStyle: 'medium',
     timeStyle: 'medium',
     hour12: false,

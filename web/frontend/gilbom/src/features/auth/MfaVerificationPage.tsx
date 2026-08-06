@@ -5,7 +5,6 @@ import { useAuthentication } from './authenticationContext'
 import { AuthCardHeader, ErrorNotice, FormField } from './AuthFormParts'
 import { validateTotp } from './authValidation'
 import { useNavigate } from 'react-router'
-import { SEOUL_TIME_ZONE } from '../../shared/time/seoulTime.ts'
 
 type VerificationMode = 'totp' | 'recovery'
 
@@ -85,7 +84,7 @@ export function MfaVerificationPage() {
 
       {challengeExpiresAt ? (
         <p className="challenge-expiry">
-          인증 요청은 {new Date(challengeExpiresAt).toLocaleTimeString('ko-KR', { timeZone: SEOUL_TIME_ZONE })}까지 유효합니다.
+          인증 요청은 {new Date(challengeExpiresAt).toLocaleTimeString('ko-KR')}까지 유효합니다.
         </p>
       ) : null}
       <ErrorNotice error={error} />

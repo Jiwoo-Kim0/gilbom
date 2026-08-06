@@ -1,6 +1,5 @@
 import { AlertTriangle, CheckCircle2, Info } from 'lucide-react'
 import type { RobotLogEntry, RobotLogLevel } from './robotTypes'
-import { SEOUL_TIME_ZONE } from '../../shared/time/seoulTime.ts'
 
 interface RobotSystemLogProps {
   logs?: RobotLogEntry[]
@@ -18,7 +17,6 @@ function formatTimestamp(value: string): string {
     return value
   }
   return new Intl.DateTimeFormat('ko-KR', {
-    timeZone: SEOUL_TIME_ZONE,
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',

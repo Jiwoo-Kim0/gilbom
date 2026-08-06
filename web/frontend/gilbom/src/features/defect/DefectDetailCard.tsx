@@ -40,11 +40,6 @@ import type {
   Resolution,
   WorkflowStatus,
 } from './defectTypes'
-import {
-  instantToSeoulDateInput,
-  SEOUL_TIME_ZONE,
-  seoulInputToInstant,
-} from '../../shared/time/seoulTime.ts'
 
 /**
  * 결함이 처음 발견된 **그날 하루**를 보고서 기간으로 쓴다.
@@ -53,23 +48,19 @@ import {
  * 같은데 서버가 `from < to`를 강제하기 때문이다. 1초짜리 구간으로 억지로 맞추면
  * 통계가 전부 0이 되어, 통계를 기간 전체로 두는 취지가 무너진다.
  *
- * <p>하루 경계는 **서울 기준**으로 자른다. "그날"이 달력상 하루여야 말이 되고, 보는 사람
- * 기계 설정에 따라 보고서 기간이 달라지면 안 된다.
+ * <p>하루 경계는 보는 사람의 시간대로 자른다. "그날"이 달력상 하루여야 말이 된다.
  */
 function reportPeriodFor(firstSeenAt: string): { from: string; to: string } {
-  const seenDate = instantToSeoulDateInput(firstSeenAt)
-  const from = seoulInputToInstant(seenDate)
-  if (from === null) {
-    // 날짜를 못 읽으면 관측 시각 그대로 둔다. 서버가 from < to를 검증한다.
-    return { from: firstSeenAt, to: firstSeenAt }
-  }
-  const to = new Date(new Date(from).getTime() + 24 * 60 * 60 * 1000)
-  return { from, to: to.toISOString() }
+  const seen = new Date(firstSeenAt)
+  const from = new Date(seen)
+  from.setHours(0, 0, 0, 0)
+  const to = new Date(from)
+  to.setDate(to.getDate() + 1)
+  return { from: from.toISOString(), to: to.toISOString() }
 }
 
 function formatDateTime(value: string): string {
   return new Date(value).toLocaleString('ko-KR', {
-    timeZone: SEOUL_TIME_ZONE,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -101,7 +92,6 @@ type HistoryState<T> =
 
 function formatShortDateTime(value: string): string {
   return new Date(value).toLocaleString('ko-KR', {
-    timeZone: SEOUL_TIME_ZONE,
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',

@@ -23,11 +23,9 @@ import type {
   AdminUser,
   PageResponse,
 } from './adminTypes'
-import { SEOUL_TIME_ZONE } from '../../shared/time/seoulTime.ts'
 
 function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat('ko-KR', {
-    timeZone: SEOUL_TIME_ZONE,
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(value))

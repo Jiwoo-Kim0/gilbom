@@ -7,7 +7,6 @@ import {
 } from 'lucide-react'
 import { Link } from 'react-router'
 import type { RobotFleetItem, RobotStatus } from './robotTypes'
-import { SEOUL_TIME_ZONE } from '../../shared/time/seoulTime.ts'
 
 interface RobotFleetGridProps {
   robots?: RobotFleetItem[]
@@ -34,7 +33,6 @@ function formatLastReceivedAt(value: string | null): string {
     return value
   }
   return new Intl.DateTimeFormat('ko-KR', {
-    timeZone: SEOUL_TIME_ZONE,
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',

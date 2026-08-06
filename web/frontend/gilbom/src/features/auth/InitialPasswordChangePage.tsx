@@ -4,7 +4,6 @@ import { changeInitialPassword } from './authApi'
 import { useAuthentication } from './authenticationContext'
 import { AuthCardHeader, ErrorNotice, FormField } from './AuthFormParts'
 import { validatePassword } from './authValidation'
-import { SEOUL_TIME_ZONE } from '../../shared/time/seoulTime.ts'
 
 export function InitialPasswordChangePage() {
   const navigate = useNavigate()
@@ -54,7 +53,7 @@ export function InitialPasswordChangePage() {
 
       {challengeExpiresAt ? (
         <p className="challenge-expiry">
-          이 단계는 {new Date(challengeExpiresAt).toLocaleTimeString('ko-KR', { timeZone: SEOUL_TIME_ZONE })}까지 유효합니다.
+          이 단계는 {new Date(challengeExpiresAt).toLocaleTimeString('ko-KR')}까지 유효합니다.
         </p>
       ) : null}
       <ErrorNotice error={error} />
