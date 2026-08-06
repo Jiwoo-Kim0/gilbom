@@ -6,6 +6,7 @@ import { DefectDetailCard } from './DefectDetailCard'
 import { getDefectMap } from './defectApi'
 import {
   bboxForDefectMapFilter,
+  clusterZoomPlan,
   defectMapFilterKey,
   defectTypeTone,
 } from './defectMapState'
@@ -117,6 +118,9 @@ function createClusterIcon(
   }
 }
 
+/** Naver 지도가 허용하는 최대 확대 단계. */
+const MAX_MAP_ZOOM = 21
+
 /** App.css의 `.defect-marker-box` 크기와 같아야 앵커가 중심에 맞는다. */
 const MARKER_BOX_SIZE = 34
 
@@ -169,6 +173,23 @@ function computeScale(
     label: step >= 1000 ? `${step / 1000}km` : `${step}m`,
     widthPx: Math.round(step / metersPerPixel),
   }
+}
+
+/**
+ * 지금 배율에서 1px이 몇 m인가. `computeScale`과 같은 식이고, 지도가 실제로 보여주는
+ * 범위에서 재므로 projection 단위·해상도 배율에 기대지 않는다.
+ */
+function metersPerPixelOf(map: naver.maps.Map, widthPx: number): number {
+  if (widthPx <= 0) {
+    return 0
+  }
+  const bounds = map.getBounds()
+  const southWest = bounds.getSW()
+  const northEast = bounds.getNE()
+  const centerLatitude = (southWest.lat() + northEast.lat()) / 2
+  const spanMeters = Math.abs(northEast.lng() - southWest.lng())
+    * 111_320 * Math.cos((centerLatitude * Math.PI) / 180)
+  return spanMeters / widthPx
 }
 
 /** 지도를 끌 때마다 조회하지 않도록 idle 이후 잠깐 기다린다. */
@@ -492,9 +513,26 @@ export function DefectMap({
           onSelect(defectId)
           return
         }
-        // 묶음을 클릭하면 그 자리로 확대한다. 두 단계면 대개 나뉜다.
-        map.setCenter(new maps.LatLng(cluster.lat, cluster.lng))
-        map.setZoom(Math.min(map.getZoom() + 2, 21))
+        /*
+         * 묶음을 클릭하면 **구성원 전체가 담기는 가장 큰 배율**로 확대한다. 고정 두 단계로
+         * 두면 촘촘한 묶음은 같은 숫자가 다시 나오고, 가장 가까운 쌍까지 갈라내려 하면
+         * 지나치게 확대돼 나머지 구성원이 화면 밖으로 나간다.
+         */
+        const element = mapElementRef.current
+        const plan = clusterZoomPlan(
+          cluster.features.map((member) => {
+            const [longitude, latitude] = member.geometry.coordinates
+            return { latitude, longitude }
+          }),
+          // 1px이 몇 m인지는 지도에서 직접 잰다(축척 바와 같은 방법).
+          metersPerPixelOf(map, element?.clientWidth ?? 0),
+          {
+            widthPx: element?.clientWidth ?? 0,
+            heightPx: element?.clientHeight ?? 0,
+          },
+        )
+        map.setCenter(new maps.LatLng(plan.center.latitude, plan.center.longitude))
+        map.setZoom(Math.min(map.getZoom() + plan.step, MAX_MAP_ZOOM))
       })
       return marker
     })

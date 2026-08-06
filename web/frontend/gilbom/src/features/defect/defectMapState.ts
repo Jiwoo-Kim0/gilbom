@@ -27,6 +27,100 @@ export function defectTypeTone(defectType: DefectType): DefectTypeTone {
   }
 }
 
+/** 묶음을 클릭했을 때 어디를 얼마나 확대할지. */
+export interface ClusterZoomPlan {
+  /** 지금 배율에서 몇 단계 더 확대할지. 최소 1이다. */
+  step: number
+  /** 확대 뒤 지도 중심. 구성원을 감싸는 사각형의 중심이다. */
+  center: { latitude: number; longitude: number }
+}
+
+/**
+ * 화면에서 묶음이 실제로 차지하는 비율. 나머지는 여백으로 남긴다.
+ *
+ * <p>가장자리에 딱 붙이면 마커 아이콘(44px)이 반쯤 잘리고, 아래쪽은 상세 카드가 덮는다.
+ */
+const CLUSTER_FIT_RATIO = 0.7
+
+/**
+ * 묶인 마커를 클릭했을 때 확대할 단계와 중심.
+ *
+ * <p>기준은 **"구성원 전체가 화면에 담기는 가장 큰 배율"**이다. 그러면 두 가지가 함께
+ * 지켜진다.
+ *
+ * <ul>
+ *   <li>클릭한 묶음의 결함이 **하나도 화면 밖으로 밀려나지 않는다** — 10건을 눌렀으면
+ *       확대된 화면에 (묶음이든 낱개든) 10건이 들어 있다.
+ *   <li>담기는 한 최대한 확대하므로 **묶음은 갈라진다.** 구성원을 감싼 사각형이 화면의
+ *       {@link CLUSTER_FIT_RATIO}만큼을 채우니, 가장 먼 쌍은 격자 한 칸(44px)보다 훨씬
+ *       멀어진다.
+ * </ul>
+ *
+ * <p>처음에는 **가장 가까운 쌍**이 갈릴 배율을 구했다. 그건 "완전히 갈리기"를 노린 것인데,
+ * 촘촘한 쌍이 하나만 있어도 최대 배율까지 뛰어 **나머지 구성원이 화면 밖으로 나갔다.**
+ * 완전히 갈리는 것보다 **눌러서 본 것을 잃지 않는 것**이 먼저다 — 남은 묶음은 다시 누르면
+ * 된다.
+ *
+ * <p>배율은 미터로 계산한다. 지도 SDK의 `fromCoordToOffset`이 무슨 단위를 주는지에 기대지
+ * 않기 위해서다. `metersPerPixel`은 지도에서 직접 재서 넘긴다 — 축척 바와 같은 값이다.
+ *
+ * @param members 묶음에 든 좌표들
+ * @param metersPerPixel 지금 배율에서 1px이 몇 m인가
+ * @param viewport 지도 화면 크기(px)
+ * @param maxStep 좌표가 똑같아 계산이 서지 않을 때의 상한. 지도 최대 배율은 부르는 쪽이
+ *   따로 자른다.
+ */
+export function clusterZoomPlan(
+  members: { latitude: number; longitude: number }[],
+  metersPerPixel: number,
+  viewport: { widthPx: number; heightPx: number },
+  maxStep = 21,
+): ClusterZoomPlan {
+  const latitudes = members.map((member) => member.latitude)
+  const longitudes = members.map((member) => member.longitude)
+  const south = Math.min(...latitudes)
+  const north = Math.max(...latitudes)
+  const west = Math.min(...longitudes)
+  const east = Math.max(...longitudes)
+  const center = {
+    latitude: (south + north) / 2,
+    longitude: (west + east) / 2,
+  }
+
+  const usableWidth = viewport.widthPx * CLUSTER_FIT_RATIO
+  const usableHeight = viewport.heightPx * CLUSTER_FIT_RATIO
+  if (!(metersPerPixel > 0) || usableWidth <= 0 || usableHeight <= 0) {
+    // 배율이나 화면 크기를 재지 못했다. 한 단계만 확대해 최소한 반응은 남긴다.
+    return { step: 1, center }
+  }
+
+  const northSouthMeters = (north - south) * 111_320
+  const eastWestMeters = (east - west) * 111_320
+    * Math.cos((center.latitude * Math.PI) / 180)
+  /*
+   * 두 축이 각각 요구하는 배율 중 **더 느슨한 쪽**을 따른다. 가로가 담기는 배율로 확대해도
+   * 세로가 넘치면 구성원이 위아래로 밀려난다.
+   */
+  const requiredMetersPerPixel = Math.max(
+    eastWestMeters / usableWidth,
+    northSouthMeters / usableHeight,
+  )
+  // 구성원 좌표가 모두 같으면 사각형이 한 점이라 계산이 서지 않는다. 상한까지 확대한다.
+  if (requiredMetersPerPixel <= 0) {
+    return { step: maxStep, center }
+  }
+
+  /*
+   * 확대 한 단계가 1px이 덮는 거리를 절반으로 만든다. 요구 배율보다 더 잘게 내려가면
+   * 화면을 벗어나므로 `floor`다(1e-9는 딱 떨어질 때의 부동소수 오차 보정).
+   */
+  const fits = Math.floor(
+    Math.log2(metersPerPixel / requiredMetersPerPixel) + 1e-9,
+  )
+  // 이미 화면을 가득 채우고 있어도 클릭했으면 한 단계는 들어가야 반응으로 읽힌다.
+  return { step: Math.min(Math.max(fits, 1), maxStep), center }
+}
+
 export function defectMapFilterKey(filters: DefectFilters): string {
   return JSON.stringify({ ...filters, bbox: '' })
 }
