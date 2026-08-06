@@ -266,10 +266,7 @@ export function ReportListPage() {
 
       <div className="content-card report-list-card">
         <div className="table-heading">
-          <div>
-            <h3>보고서 목록</h3>
-            <p>소프트 삭제된 보고서는 서버 목록 계약에서 제외됩니다.</p>
-          </div>
+          <h3>보고서 목록</h3>
           <strong>{reports?.totalElements ?? 0}건</strong>
         </div>
 

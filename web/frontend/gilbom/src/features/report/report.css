@@ -79,29 +79,42 @@
 }
 
 .report-table-wrap {
-  margin: 20px -10px 0;
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
   overflow-x: auto;
 }
 
 .report-table {
   width: 100%;
   min-width: 880px;
-  border-collapse: collapse;
+  border-spacing: 0;
+  border-collapse: separate;
 }
 
 .report-table th,
 .report-table td {
-  padding: 15px 12px;
-  border-bottom: 1px solid var(--line);
+  padding: 12px 18px;
   text-align: left;
   vertical-align: middle;
 }
 
 .report-table th {
+  border-bottom: 1px solid var(--line);
   color: var(--text-muted);
   background: var(--surface-muted);
   font-size: 12px;
+  font-weight: 700;
   letter-spacing: 0.02em;
+}
+
+.report-table td {
+  height: 64px;
+  font-size: 14px;
+}
+
+.report-table tbody tr + tr td {
+  border-top: 1px solid var(--line);
 }
 
 .report-table tbody tr {
@@ -116,6 +129,7 @@
   display: grid;
   gap: 4px;
   color: var(--text);
+  font-size: 14px;
   text-decoration: none;
 }
 
@@ -125,6 +139,7 @@
 
 .report-title-link small {
   color: var(--text-muted);
+  font-size: 13px;
   font-weight: 500;
 }
 
@@ -379,6 +394,25 @@
   color: var(--brand-strong);
 }
 
+.safe-report-structured-item {
+  display: grid;
+  gap: 5px;
+}
+
+.safe-report-structured-field,
+.safe-report-structured-body {
+  display: block;
+}
+
+.safe-report-structured-field {
+  font-weight: 650;
+}
+
+.safe-report-structured-body {
+  margin-top: 3px;
+  line-height: 1.75;
+}
+
 .report-evidence-section {
   margin: 28px 0 1.85em;
   padding-top: 24px;
@@ -427,29 +461,6 @@
 
 .report-evidence-gallery + .report-evidence-note {
   margin-top: 10px;
-}
-
-.report-metric-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.report-metric-grid > div {
-  display: grid;
-  gap: 7px;
-  padding: 15px;
-  border-radius: 12px;
-  background: var(--surface-muted);
-}
-
-.report-metric-grid span {
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.report-metric-grid strong {
-  font-size: 21px;
 }
 
 .report-current-state {
@@ -764,8 +775,7 @@
   .report-filter-grid,
   .report-form-grid,
   .report-method-options,
-  .report-metadata-grid,
-  .report-metric-grid {
+  .report-metadata-grid {
     grid-template-columns: 1fr;
   }
 
