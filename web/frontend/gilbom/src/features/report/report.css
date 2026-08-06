@@ -29,7 +29,7 @@
 
 .report-period-filter {
   display: flex;
-  grid-column: 1 / span 2;
+  grid-column: 1 / span 3;
   gap: 8px;
   min-width: 0;
   margin: 0;
@@ -39,11 +39,15 @@
 }
 
 .report-period-filter legend {
+  display: flex;
   width: 100%;
+  gap: 10px;
   margin-bottom: 7px;
+  align-items: center;
   color: var(--text);
   font-size: 13px;
   font-weight: 750;
+  white-space: nowrap;
 }
 
 .report-period-filter input {
@@ -56,12 +60,12 @@
 }
 
 .report-contract-note {
-  grid-column: 3;
-  align-self: center;
   margin: 0;
   color: var(--text-muted);
   font-size: 12px;
+  font-weight: 500;
   line-height: 1.5;
+  white-space: nowrap;
 }
 
 .report-filter-actions {
@@ -749,9 +753,8 @@
   }
 
   .report-period-filter,
-  .report-contract-note,
   .report-filter-actions {
-    grid-column: auto;
+    grid-column: 1 / -1;
   }
 
   .report-detail-grid,
