@@ -115,13 +115,14 @@ function createdEvent(defectId: string, incidentCode: string) {
 async function openMapWithNewDefect(
   page: Page,
   metersAway: number,
+  startZoom = START_ZOOM,
 ): Promise<{
   newDefect: ReturnType<typeof featureAt>
   detect: () => void
 }> {
   const newDefect = featureAt(NEW_DEFECT_INDEX, pointNorthOf(metersAway))
   await installFakeMap(page, {
-    startZoom: START_ZOOM,
+    startZoom,
     baseLat: BASE_LAT,
     baseLng: BASE_LNG,
   })
@@ -133,6 +134,9 @@ async function openMapWithNewDefect(
     .toBeGreaterThan(0)
   return { newDefect, detect: reveal }
 }
+
+/** `revealZoom`이 맞추는 배율. 소스와 같은 값을 시험에서도 쓴다. */
+const REVEAL_ZOOM = 17
 
 test.describe('새 결함이 들어왔을 때 지도 이동', () => {
   test('화면 밖에 생긴 결함이면 그 위치로 옮긴다', async ({ page }) => {
@@ -162,8 +166,38 @@ test.describe('새 결함이 들어왔을 때 지도 이동', () => {
       + ` ${longitude.toFixed(5)})`)
     expect(moved.lat).toBeCloseTo(latitude, 5)
     expect(moved.lng).toBeCloseTo(longitude, 5)
-    // 옮기기만 한다. 배율은 사용자가 보던 그대로 둔다.
-    expect(after.zoom).toEqual(before.zoom)
+    /*
+     * 옮기는 것만으로는 어디에 생겼는지 알 수 없어서, 알아볼 배율(17)까지 확대한다.
+     * 확대는 옮긴 **뒤에** 일어나야 한다 — 먼저 확대하면 엉뚱한 자리를 파고든다.
+     */
+    expect(after.zoom).toEqual([REVEAL_ZOOM])
+  })
+
+  test('이미 더 깊이 보고 있었다면 배율을 줄이지 않는다', async ({ page }) => {
+    /*
+     * zoom 19에서 보고 있다가 화면 밖(500m)에 결함이 생긴 경우. 옮기기는 하지만
+     * 사용자가 확대해 둔 것을 17로 되돌리면 안 된다.
+     */
+    const { newDefect, detect } = await openMapWithNewDefect(page, 500, 19)
+    const before = await readMapCalls(page)
+    detect()
+
+    await pushSseEvent(
+      page,
+      'defect.created',
+      createdEvent(
+        newDefect.properties.defectId,
+        newDefect.properties.incidentCode,
+      ),
+    )
+
+    await expect
+      .poll(async () => (await readMapCalls(page)).center.length)
+      .toBeGreaterThan(before.center.length)
+
+    const after = await readMapCalls(page)
+    console.log(`깊이 보던 중: 배율 호출 ${JSON.stringify(after.zoom)}`)
+    expect(after.zoom, '19에서 17로 물러나면 안 된다').toEqual(before.zoom)
   })
 
   test('이미 보이는 자리에 생긴 결함이면 움직이지 않는다', async ({ page }) => {
@@ -195,5 +229,6 @@ test.describe('새 결함이 들어왔을 때 지도 이동', () => {
     console.log(`안에 생긴 결함: 지도 중심 이동 ${after.center.length}회`)
     expect(after.center.length, '보이는 자리면 지도가 움직이지 않는다')
       .toBe(before.center.length)
+    expect(after.zoom, '보이는 자리면 배율도 그대로다').toEqual(before.zoom)
   })
 })

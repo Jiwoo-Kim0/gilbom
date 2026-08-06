@@ -9,6 +9,8 @@ import { getDefectMap } from './defectApi'
 import {
   bboxForDefectMapFilter,
   isPointOutsideMapView,
+  REVEAL_ZOOM,
+  revealZoom,
   clusterZoomPlan,
   defectMapFilterKey,
   defectTypeTone,
@@ -442,6 +444,15 @@ export function DefectMap({
         // 이미 보이는 자리면 움직이지 않는다. 보던 위치를 빼앗지 않는 것이 기본이다.
         if (!outside) return
         centerMapOn(latitude, longitude)
+        /*
+         * 옮기는 것만으로는 부족하다. 넓게 보고 있었다면 마커가 화면에 들어와도 어느
+         * 길인지 알 수 없어서, 알아볼 배율까지 확대한다. 이미 더 깊이 보고 있었다면
+         * 그대로 둔다(revealZoom).
+         */
+        const focused = revealZoom(map.getZoom(), REVEAL_ZOOM, MAX_MAP_ZOOM)
+        if (focused !== map.getZoom()) {
+          map.setZoom(focused)
+        }
       })
       // 못 찾거나 조회가 실패하면 지도를 움직이지 않는다. 알림 줄은 이미 떠 있다.
       .catch(() => {})
