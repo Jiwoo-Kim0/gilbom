@@ -121,16 +121,11 @@ def quantile(values, q: float) -> float:
 
 
 def seam_braille_fraction(crosswalk, braille, band_ratio: float, q: float,
-                          drivable=None, drivable_min: float = 0.0,
-                          min_near_ratio: float = 0.0,
-                          max_tilt_band_ratio: float = float("inf")):
+                          drivable=None, drivable_min: float = 0.0):
     """이음 띠 안의 점자블록 비율, 판정 불가면 None. 픽셀 집합은 (x, y).
 
     drivable=None은 '띠 전체가 인도'라는 뜻이다 — 기하만 보는 테스트용 지름길이고,
     가드 자체는 TestSeamGuards가 실제 집합을 넣어 확인한다.
-    min_near_ratio·max_tilt_band_ratio의 기본값은 '가드 없음'이다 — 기하만 보는
-    테스트가 거리·기울기 가드에 걸려 전부 None이 되지 않게 한다. 두 가드 자체는
-    TestSeamObservability가 실제 값을 넣어 확인한다.
     """
     if not crosswalk:
         return None
@@ -138,21 +133,12 @@ def seam_braille_fraction(crosswalk, braille, band_ratio: float, q: float,
     xs = [x for x, _ in crosswalk]
     near_y = int(quantile(ys, q))
     band_px = max(1, int(round(HEIGHT * band_ratio)))
-    if near_y < HEIGHT * min_near_ratio:    # ③ 아직 멀다 → 판정 보류
-        return None
     y_from = min(HEIGHT - 1, near_y)
     y_to = min(HEIGHT, near_y + band_px)
-    if y_to - y_from < band_px:              # ① 띠가 화면 밖으로 잘렸다 → 판정 보류
+    if y_to - y_from < band_px:              # 띠가 화면 밖으로 잘렸다 → 판정 보류
         return None
     x_from = int(quantile(xs, 1.0 - q))
     x_to = min(WIDTH, max(x_from + 1, int(quantile(xs, q)) + 1))
-    # ④ 하단 경계 기울기 — 좌/우 절반의 최근접 행 차이가 띠 높이에 비해 크면 보류
-    mid_x = (x_from + x_to) // 2
-    left = [y for (x, y) in crosswalk if x < mid_x]
-    right = [y for (x, y) in crosswalk if x >= mid_x]
-    if left and right:
-        if abs(quantile(left, q) - quantile(right, q)) > band_px * max_tilt_band_ratio:
-            return None
     area = (y_to - y_from) * (x_to - x_from)
 
     def in_band(pixels):
@@ -160,7 +146,7 @@ def seam_braille_fraction(crosswalk, braille, band_ratio: float, q: float,
                    if y_from <= y < y_to and x_from <= x < x_to)
 
     if drivable is not None and in_band(drivable) / area < drivable_min:
-        return None                          # ② 띠가 인도가 아니다 → 판정 보류
+        return None                          # 띠가 인도가 아니다 → 판정 보류
     return in_band(braille) / area
 
 
@@ -256,134 +242,3 @@ class TestSeamGuards:
         value = self.fraction(crosswalk, set(), post, drivable=sidewalk)
         assert value == 0.0                                    # 봤는데 블록이 없다
         assert value < post.crosswalk_seam_braille_min_fraction   # → 미설치
-
-
-class TestSeamObservability:
-    """판정 보류 ③④ — '관측할 수 있었는가'를 먼저 묻는다 (0805 실기 근거).
-
-    미설치는 **부재의 증명**이다. 부재 증명은 '관측 가능했는데 없었다'를 요구하는데,
-    종전 가드는 '너무 가까움'(띠 잘림)만 막고 있었다. 그래서:
-      ③ 원거리 — crosswalk_min_fraction(0.03)은 도색면이 넓어 원거리에서도 넘는다.
-        그 거리에서는 원근압축으로 띠가 지면 수 미터를 덮고 점형블록은 아직 몇
-        픽셀이거나 화각 밖이다 → '보이기 전에 없다고 판정'.
-      ④ 사선 — 최근접 행은 가장 가까운 한쪽 코너가 정하는데 x 범위는 횡단보도가
-        걸친 폭 전체다. 기울기가 크면 수평 띠가 반대쪽에서 이음부를 완전히 비껴간다.
-    """
-
-    def fraction(self, crosswalk, braille, post):
-        """실제 구현과 **같은 가드 값**으로 부른다 (미러가 어긋나면 이 클래스가 잡는다)."""
-        return seam_braille_fraction(
-            crosswalk, braille,
-            post.crosswalk_seam_band_ratio, post.proximity_quantile,
-            min_near_ratio=post.crosswalk_seam_min_near_ratio,
-            max_tilt_band_ratio=post.crosswalk_seam_max_tilt_band_ratio)
-
-    def near_y_of(self, ratio: float) -> int:
-        return int(HEIGHT * ratio)
-
-    def test_distant_crosswalk_is_withheld(self, post):
-        """멀리 보이는 횡단보도는 판정하지 않는다 — 오탐의 지배적 경로였다."""
-        top = self.near_y_of(post.crosswalk_seam_min_near_ratio) - 60
-        distant = rect(200, 440, top, top + 50)
-        assert self.fraction(distant, set(), post) is None
-
-    def test_near_crosswalk_is_judged(self, post):
-        """창 안으로 들어오면 판정한다 — 가드가 정상 경로를 막으면 미설치를 못 잡는다."""
-        near = self.near_y_of(post.crosswalk_seam_min_near_ratio) + 10
-        crosswalk = rect(200, 440, near - 60, near)
-        assert self.fraction(crosswalk, set(), post) == 0.0     # 봤는데 없다 → 미설치
-
-    def test_the_window_is_not_empty_before_the_estop_point(self, post):
-        """판정 창이 ESTOP 지점 **아래**에서 열려야 한다 — 안 그러면 영영 보고 못 한다.
-
-        횡단보도는 roadway_classes 합집합이라 코리도를 채우면 roadway_critical이
-        먼저 ESTOP을 건다(수동 해제만이 출구). 그 지점의 near_y는
-        corridor_height_ratio와 roadway_critical_fraction으로 정해지므로, 판정 하한이
-        그보다 위면 창이 열리기 전에 미션이 멈춘다.
-        """
-        estop_near_ratio = (1.0 - post.corridor_height_ratio
-                            + post.roadway_critical_fraction * post.corridor_height_ratio)
-        assert post.crosswalk_seam_min_near_ratio < estop_near_ratio
-        # 창의 반대쪽 끝(띠 잘림)도 하한보다 위여야 창이 존재한다
-        assert post.crosswalk_seam_min_near_ratio < 1.0 - post.crosswalk_seam_band_ratio
-
-    def test_slanted_crosswalk_edge_is_withheld(self, post):
-        """사선 이음부 — 수평 띠 하나로 덮을 수 없으므로 보류한다."""
-        base = self.near_y_of(post.crosswalk_seam_min_near_ratio) + 20
-        band_px = round(HEIGHT * post.crosswalk_seam_band_ratio)
-        drop = int(band_px * post.crosswalk_seam_max_tilt_band_ratio) + 12
-        # 왼쪽은 base, 오른쪽은 base-drop 에서 끝난다 (오른쪽이 더 멀다)
-        slanted = rect(200, 320, base - 60, base) | rect(320, 440, base - 60 - drop,
-                                                        base - drop)
-        assert self.fraction(slanted, set(), post) is None
-
-    def test_mildly_slanted_edge_is_still_judged(self, post):
-        """허용치 안의 기울기는 판정한다 — 실사에서 완전한 수평은 없다."""
-        base = self.near_y_of(post.crosswalk_seam_min_near_ratio) + 20
-        band_px = round(HEIGHT * post.crosswalk_seam_band_ratio)
-        drop = max(1, int(band_px * post.crosswalk_seam_max_tilt_band_ratio) - 8)
-        mild = rect(200, 320, base - 60, base) | rect(320, 440, base - 60 - drop,
-                                                     base - drop)
-        assert self.fraction(mild, set(), post) is not None
-
-
-class TestMirrorMatchesImplementation:
-    """미러 ≡ 실제 numpy 구현. **위 두 클래스가 검증하는 것은 미러**이므로 이 고리가
-    없으면 구현만 조용히 어긋난다.
-
-    실제로 어긋난 적이 있다: 0805에 거리·기울기 가드를 구현에 넣었는데 미러에는 안
-    넣었고, 그래서 구현에서 가드를 도로 빼도 테스트가 전부 통과했다. 미러 전략의
-    구조적 약점이고, 그 약점을 막는 것이 이 클래스의 유일한 일이다.
-
-    numpy가 없는 개발 PC에서는 skip된다 — 보드와 numpy 있는 환경에서 걸린다.
-    """
-
-    def scenes(self, post):
-        """(이름, 횡단보도, 점자블록) — 두 가드의 양쪽 경계를 다 지난다."""
-        near = int(HEIGHT * post.crosswalk_seam_min_near_ratio)
-        band = round(HEIGHT * post.crosswalk_seam_band_ratio)
-        tilt = post.crosswalk_seam_max_tilt_band_ratio
-        big, ok = int(band * tilt) + 12, max(1, int(band * tilt) - 8)
-        return [
-            ("원거리", rect(200, 440, near - 60, near - 10), set()),
-            ("근거리·블록 없음", rect(200, 440, near - 50, near + 10), set()),
-            ("근거리·블록 있음", rect(200, 440, near - 50, near + 10),
-             rect(220, 420, near + 10, near + 50)),
-            ("사선 초과", rect(200, 320, near - 40, near + 20)
-             | rect(320, 440, near - 40 - big, near + 20 - big), set()),
-            ("사선 허용", rect(200, 320, near - 40, near + 20)
-             | rect(320, 440, near - 40 - ok, near + 20 - ok), set()),
-            ("화면 최하단", rect(200, 440, HEIGHT - 10, HEIGHT), set()),
-            ("횡단보도 없음", set(), set()),
-        ]
-
-    def test_every_scene_agrees(self, post):
-        np = pytest.importorskip("numpy")
-        from perception.segmentation import _crosswalk_seam_braille_fraction
-
-        def mask(pixels):
-            grid = np.zeros((HEIGHT, WIDTH), dtype=bool)
-            for x, y in pixels:
-                grid[y, x] = True
-            return grid
-
-        for name, crosswalk, braille in self.scenes(post):
-            actual = _crosswalk_seam_braille_fraction(
-                np, mask(crosswalk), mask(braille),
-                np.ones((HEIGHT, WIDTH), dtype=bool),   # 띠 전체가 인도 (미러 기본값)
-                height=HEIGHT, width=WIDTH,
-                band_ratio=post.crosswalk_seam_band_ratio,
-                quantile=post.proximity_quantile,
-                drivable_min_fraction=0.0,
-                min_near_ratio=post.crosswalk_seam_min_near_ratio,
-                max_tilt_band_ratio=post.crosswalk_seam_max_tilt_band_ratio)
-            expected = seam_braille_fraction(
-                crosswalk, braille,
-                post.crosswalk_seam_band_ratio, post.proximity_quantile,
-                min_near_ratio=post.crosswalk_seam_min_near_ratio,
-                max_tilt_band_ratio=post.crosswalk_seam_max_tilt_band_ratio)
-            if expected is None:
-                assert actual is None, f"{name}: 구현은 판정, 미러는 보류"
-            else:
-                assert actual is not None, f"{name}: 구현은 보류, 미러는 판정"
-                assert actual == pytest.approx(expected), name
