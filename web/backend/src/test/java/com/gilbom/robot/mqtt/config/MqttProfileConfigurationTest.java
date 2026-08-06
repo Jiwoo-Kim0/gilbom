@@ -31,6 +31,8 @@ class MqttProfileConfigurationTest {
                     assertThat(properties.getClientId()).isEqualTo("gilbom-local");
                     assertThat(properties.getReconnectMaxDelay())
                             .isEqualTo(Duration.ofSeconds(5));
+                    assertThat(properties.getSessionExpiry())
+                            .isEqualTo(Duration.ofHours(1));
                     assertThat(properties.getConnectCompletionTimeout())
                             .isEqualTo(Duration.ofSeconds(10));
                     assertThat(properties.getDisconnectCompletionTimeout())
@@ -58,6 +60,19 @@ class MqttProfileConfigurationTest {
                         context.getBean(MqttProperties.class)
                                 .getReconnectMaxDelay())
                         .isEqualTo(Duration.ofSeconds(3)));
+    }
+
+    @Test
+    void sessionExpiryCanBeOverridden() {
+        contextRunner
+                .withPropertyValues(
+                        "spring.profiles.active=local",
+                        "MQTT_SESSION_EXPIRY=30m"
+                )
+                .run(context -> assertThat(
+                        context.getBean(MqttProperties.class)
+                                .getSessionExpiry())
+                        .isEqualTo(Duration.ofMinutes(30)));
     }
 
     @Test

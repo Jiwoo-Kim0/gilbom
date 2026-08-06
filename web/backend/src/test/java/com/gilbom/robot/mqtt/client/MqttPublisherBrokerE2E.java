@@ -225,7 +225,6 @@ class MqttPublisherBrokerE2E {
         properties.setUsername(username);
         properties.setPassword(password);
         properties.setSubscribeTopic("tbs/v2/robots/+/telemetry");
-        properties.setPublishTopic("tbs/v2/robots/+/commands/request");
         properties.setQos(1);
         properties.getSecurity().setTrustCertificate(caCertificate);
         return properties;

@@ -584,8 +584,6 @@ class MqttInboundBrokerE2E {
         properties.setUsername(username);
         properties.setPassword(password);
         properties.setSubscribeTopic("tbs/v2/robots/+/events/#");
-        properties.setPublishTopic(
-                "tbs/v2/robots/robot-test/commands/request");
         properties.setQos(1);
         properties.getSecurity().setTrustCertificate(caCertificate);
 
