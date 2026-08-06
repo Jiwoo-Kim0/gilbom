@@ -21,6 +21,8 @@ import com.gilbom.common.error.ErrorCode;
 import com.gilbom.robot.application.RobotScopeService;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionListScope;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionListResponse;
+import com.gilbom.robot.data.api.response.MissionDtos.MissionDefectMapItem;
+import com.gilbom.robot.data.api.response.MissionDtos.MissionDefectMapResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionMapCurrentPosition;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionMapResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionResponse;
@@ -332,6 +334,62 @@ public class MissionQueryService {
                 context.patrolAreaBoundary(),
                 trajectory.points(),
                 context.currentPosition());
+    }
+
+    /**
+     * Defect 정본을 변경하지 않고, 해당 Mission의 robot_event에 연결된 관측만
+     * 지도용으로 읽는다. 병합된 결함은 결함관리 지도와 동일하게 대표 결함으로
+     * 치환해 한 번만 반환한다.
+     */
+    @Transactional(readOnly = true)
+    public MissionDefectMapResponse findDefects(
+            UUID userId,
+            UUID missionId
+    ) {
+        // Mission 객체 범위를 먼저 확인한다. 이 Mission에서 발생한 관측은 같은
+        // Robot의 event만 가리키므로 별도의 더 넓은 Defect 범위를 만들지 않는다.
+        findMission(userId, missionId);
+        List<MissionDefectMapItem> defects = jdbcTemplate.query("""
+                SELECT
+                    d.defect_id,
+                    d.incident_code,
+                    d.defect_type,
+                    d.risk_level,
+                    d.workflow_status,
+                    ST_X(d.location) AS longitude,
+                    ST_Y(d.location) AS latitude,
+                    d.latest_confidence
+                FROM defect.defect d
+                WHERE d.merged_into_defect_id IS NULL
+                  AND EXISTS (
+                    SELECT 1
+                    FROM defect.defect_observation observation
+                    JOIN telemetry.robot_event event
+                      ON event.event_id = observation.event_id
+                     AND event.robot_id = observation.robot_id
+                    WHERE event.mission_id = :missionId
+                      AND (
+                        observation.defect_id = d.defect_id
+                        OR observation.defect_id IN (
+                            SELECT merged.defect_id
+                            FROM defect.defect merged
+                            WHERE merged.merged_into_defect_id = d.defect_id
+                        )
+                      )
+                  )
+                ORDER BY d.last_seen_at DESC, d.defect_id ASC
+                """,
+                new MapSqlParameterSource("missionId", missionId),
+                (resultSet, rowNumber) -> new MissionDefectMapItem(
+                        resultSet.getObject("defect_id", UUID.class),
+                        resultSet.getString("incident_code"),
+                        resultSet.getString("defect_type"),
+                        resultSet.getString("risk_level"),
+                        resultSet.getString("workflow_status"),
+                        resultSet.getDouble("longitude"),
+                        resultSet.getDouble("latitude"),
+                        resultSet.getBigDecimal("latest_confidence")));
+        return new MissionDefectMapResponse(missionId, defects);
     }
 
     @Transactional(readOnly = true)

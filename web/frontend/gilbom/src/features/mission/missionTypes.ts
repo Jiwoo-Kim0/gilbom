@@ -1,3 +1,9 @@
+import type {
+  DefectType,
+  RiskLevel,
+  WorkflowStatus,
+} from '../defect/defectTypes'
+
 export type MissionStatus =
   | 'CREATED'
   | 'READY'
@@ -140,6 +146,22 @@ export type MissionMapResponse = {
   patrolAreaBoundary: PatrolAreaBoundary
   trajectory: MissionTrajectoryPoint[]
   currentPosition: MissionMapCurrentPosition | null
+}
+
+export type MissionDefectMapItem = {
+  defectId: string
+  incidentCode: string
+  defectType: DefectType
+  riskLevel: RiskLevel
+  workflowStatus: WorkflowStatus
+  longitude: number
+  latitude: number
+  latestConfidence: number | null
+}
+
+export type MissionDefectMapResponse = {
+  missionId: string
+  defects: MissionDefectMapItem[]
 }
 
 export type PatrolArea = {

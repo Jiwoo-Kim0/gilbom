@@ -44,6 +44,8 @@ import com.gilbom.common.web.RequestBodySizeLimitFilter;
 import com.gilbom.common.web.RequestIdFilter;
 import com.gilbom.robot.api.MissionController;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionCreateRequest;
+import com.gilbom.robot.data.api.response.MissionDtos.MissionDefectMapItem;
+import com.gilbom.robot.data.api.response.MissionDtos.MissionDefectMapResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionListScope;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionListResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionMapCurrentPosition;
@@ -80,10 +82,14 @@ class MissionControllerTest {
             UUID.fromString("25000000-0000-4000-8000-000000000004");
     private static final UUID ROUTE_ID =
             UUID.fromString("25000000-0000-4000-8000-000000000005");
+    private static final UUID DEFECT_ID =
+            UUID.fromString("25000000-0000-4000-8000-000000000006");
     private static final SimpleGrantedAuthority MISSION_VIEW =
             new SimpleGrantedAuthority("MISSION_VIEW");
     private static final SimpleGrantedAuthority MISSION_MANAGE =
             new SimpleGrantedAuthority("MISSION_MANAGE");
+    private static final SimpleGrantedAuthority DEFECT_STATUS_VIEW =
+            new SimpleGrantedAuthority("DEFECT_STATUS_VIEW");
 
     @Autowired
     private MockMvc mockMvc;
@@ -337,6 +343,52 @@ class MissionControllerTest {
                 .andExpect(jsonPath(
                         "$.currentPosition.connectivityStatus",
                         is("ONLINE")));
+    }
+
+    @Test
+    void returnsOnlyDefectsLinkedToMissionWithBothViewPermissions()
+            throws Exception {
+        when(queryService.findDefects(USER_ID, MISSION_ID))
+                .thenReturn(new MissionDefectMapResponse(
+                        MISSION_ID,
+                        List.of(new MissionDefectMapItem(
+                                DEFECT_ID,
+                                "INC-20260806-000001",
+                                "DAMAGED",
+                                "HIGH",
+                                "NEW",
+                                127.0276,
+                                37.4979,
+                                new BigDecimal("0.910")))));
+
+        mockMvc.perform(get(
+                        "/api/v1/missions/{missionId}/defects",
+                        MISSION_ID)
+                        .with(user(USER_ID.toString()).authorities(
+                                MISSION_VIEW,
+                                DEFECT_STATUS_VIEW)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.missionId", is(
+                        MISSION_ID.toString())))
+                .andExpect(jsonPath("$.defects[0].defectId", is(
+                        DEFECT_ID.toString())))
+                .andExpect(jsonPath("$.defects[0].incidentCode", is(
+                        "INC-20260806-000001")))
+                .andExpect(jsonPath("$.defects[0].longitude", is(127.0276)))
+                .andExpect(jsonPath("$.defects[0].latitude", is(37.4979)));
+    }
+
+    @Test
+    void requiresDefectViewPermissionForMissionDefects() throws Exception {
+        mockMvc.perform(get(
+                        "/api/v1/missions/{missionId}/defects",
+                        MISSION_ID)
+                        .with(user(USER_ID.toString())
+                                .authorities(MISSION_VIEW)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")));
+
+        verifyNoInteractions(queryService);
     }
 
     private MissionResponse response(MissionStatus status) {
