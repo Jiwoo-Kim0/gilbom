@@ -862,7 +862,7 @@ export function DefectDetailCard({
                       })
                   }}
                 >
-                  {generating ? '보고서 생성 중…' : '리포트 생성'}
+                  {generating ? '보고서 생성 중…' : '보고서 생성'}
                 </button>
                 {generating && (
                   <p className="defect-card-coord">
