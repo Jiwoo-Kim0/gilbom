@@ -274,19 +274,25 @@ test.describe('결함 목록 표', () => {
 
     await page.locator('.defect-table-body-row').nth(2).click()
 
-    // 부드러운 스크롤이 끝나기를 기다린다.
+    /*
+     * 부드러운 스크롤이 끝나기를 기다린다. **도착 지점까지** 기다려야 한다 — `>= 0`만
+     * 보면 아직 미끄러지는 중인 값(예: 41px)을 읽고 아래 단정이 실패한다.
+     */
     await expect
       .poll(
         () =>
-          page.evaluate(() =>
-            Math.round(
-              document.querySelector('.defect-map-card')!
-                .getBoundingClientRect().top,
-            ),
-          ),
+          page.evaluate(() => {
+            const card = document
+              .querySelector('.defect-map-card')!
+              .getBoundingClientRect().top
+            const topbar = document
+              .querySelector('.topbar')!
+              .getBoundingClientRect().height
+            return Math.round(card - topbar)
+          }),
         { timeout: 5000 },
       )
-      .toBeGreaterThanOrEqual(0)
+      .toBeGreaterThanOrEqual(-1)
 
     const { after, topbarHeight } = await page.evaluate(() => ({
       after: document.querySelector('.defect-map-card')!

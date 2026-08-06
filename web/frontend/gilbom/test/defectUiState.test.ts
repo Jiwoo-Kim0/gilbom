@@ -16,6 +16,10 @@ import {
   cardPositionFromKey,
 } from '../src/features/defect/defectCardDrag.ts'
 import {
+  buildDefectUpdateRequest,
+  defectEditBlockingHint,
+} from '../src/features/defect/defectEditForm.ts'
+import {
   countActiveFilterGroups,
   DEFAULT_DEFECT_FILTERS,
   DEFECT_SORT_OPTIONS,
@@ -399,4 +403,98 @@ test('좌표가 완전히 같은 이웃이면 갈 수 있는 데까지 확대한
   const target = { latitude: 37.5, longitude: 127 }
   assert.equal(unclusterZoomStep(target, [{ ...target }], 1, 44), 21)
   assert.equal(unclusterZoomStep(target, [{ ...target }], 1, 44, 5), 5)
+})
+
+/*
+ * 결함 수정 창. PATCH는 **바뀐 축만** 담아야 한다 — 서버가 null을 "변경 없음"으로 읽고,
+ * 바뀐 것이 없으면 COMMON_INVALID_REQUEST를 돌려준다.
+ */
+const EDITABLE = {
+  defectId: '83000000-0000-4000-8000-000000000001',
+  incidentCode: 'INC-20260805-000001',
+  assetType: 'BRAILLE_BLOCK',
+  blockType: 'LINEAR' as const,
+  defectType: 'DAMAGED' as const,
+  riskLevel: 'LOW' as const,
+  riskScore: 40,
+  workflowStatus: 'NEW' as const,
+  resolution: null,
+  location: { longitude: 127.04321, latitude: 37.50123 },
+  locationAccuracyM: 1.5,
+  zoneId: null,
+  patrolAreaId: null,
+  patrolRouteId: null,
+  locationLabel: '역삼역 3번 출구',
+  representativeImageUrl: null,
+  firstSeenAt: '2026-08-01T02:00:00Z',
+  lastSeenAt: '2026-08-02T02:00:00Z',
+  observationCount: 2,
+  latestConfidence: 0.9,
+  reviewRequired: false,
+}
+
+function editFormOf(overrides = {}) {
+  return {
+    defectType: EDITABLE.defectType,
+    riskLevel: EDITABLE.riskLevel,
+    zoneId: EDITABLE.zoneId ?? '',
+    locationLabel: EDITABLE.locationLabel ?? '',
+    reviewRequired: EDITABLE.reviewRequired,
+    reason: '현장 확인',
+    ...overrides,
+  }
+}
+
+test('바꾼 축만 PATCH 본문에 담는다', () => {
+  const request = buildDefectUpdateRequest(
+    EDITABLE,
+    editFormOf({ riskLevel: 'CRITICAL', reviewRequired: true }),
+  )
+  assert.deepEqual(request, {
+    reason: '현장 확인',
+    riskLevel: 'CRITICAL',
+    reviewRequired: true,
+  })
+  // 손대지 않은 축은 키 자체가 없어야 한다.
+  assert.ok(request !== null && !('defectType' in request))
+  assert.ok(request !== null && !('locationLabel' in request))
+})
+
+test('바뀐 것이 없으면 아예 보내지 않는다', () => {
+  assert.equal(buildDefectUpdateRequest(EDITABLE, editFormOf()), null)
+  // 사유만 적은 것도 "변경"이 아니다.
+  assert.equal(
+    buildDefectUpdateRequest(EDITABLE, editFormOf({ reason: '그냥' })),
+    null,
+  )
+})
+
+test('빈 입력은 지우기가 아니라 건드리지 않기다', () => {
+  /*
+   * 서버에 null 지우기 계약이 없다. 지운 것처럼 보이게 하면 거짓말이 되므로 빈 값은
+   * 본문에서 빠진다.
+   */
+  const request = buildDefectUpdateRequest(
+    EDITABLE,
+    editFormOf({ locationLabel: '  ', riskLevel: 'HIGH' }),
+  )
+  assert.ok(request !== null && !('locationLabel' in request))
+})
+
+test('저장을 막는 이유를 말로 돌려준다', () => {
+  const unchanged = buildDefectUpdateRequest(EDITABLE, editFormOf())
+  assert.equal(
+    defectEditBlockingHint(unchanged, '현장 확인'),
+    '아직 바꾼 항목이 없습니다.',
+  )
+
+  const changed = buildDefectUpdateRequest(
+    EDITABLE,
+    editFormOf({ riskLevel: 'HIGH', reason: '' }),
+  )
+  assert.equal(
+    defectEditBlockingHint(changed, '   '),
+    '수정 사유를 적어야 저장할 수 있습니다.',
+  )
+  assert.equal(defectEditBlockingHint(changed, '현장 확인'), null)
 })
