@@ -158,6 +158,28 @@ export function isPointOutsideMapView(
     || point.longitude > view.east - longitudeMargin
 }
 
+/**
+ * 새 결함으로 옮겨갈 때 맞출 배율.
+ *
+ * <p>17이면 1px이 약 1.2m라 블록 하나가 구분된다 — "어디에 생겼는지"를 알아볼 수 있는
+ * 가장 얕은 배율이다. 더 깊이 넣으면 주변 맥락(어느 길인지)이 사라진다.
+ */
+export const REVEAL_ZOOM = 17
+
+/**
+ * 새 결함으로 옮겨갈 때 쓸 배율. **줄이지는 않는다.**
+ *
+ * <p>이미 더 깊이 보고 있었다면 그대로 둔다. 사용자가 확대해 둔 것을 되돌리는 것은
+ * 화면을 빼앗는 것과 같다.
+ */
+export function revealZoom(
+  currentZoom: number,
+  focusZoom = REVEAL_ZOOM,
+  maxZoom = 21,
+): number {
+  return Math.max(currentZoom, Math.min(focusZoom, maxZoom))
+}
+
 export function defectMapFilterKey(filters: DefectFilters): string {
   return JSON.stringify({ ...filters, bbox: '' })
 }

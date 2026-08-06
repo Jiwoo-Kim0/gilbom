@@ -4,6 +4,8 @@ import {
   bboxForDefectMapFilter,
   clusterZoomPlan,
   isPointOutsideMapView,
+  REVEAL_ZOOM,
+  revealZoom,
   defectMapFilterKey,
   defectTypeTone,
 } from '../src/features/defect/defectMapState.ts'
@@ -341,4 +343,20 @@ test('가장자리에 걸친 좌표는 밖으로 친다', () => {
     isPointOutsideMapView({ latitude: 37.5040, longitude: 127.045 }, VIEW),
     false,
   )
+})
+
+test('새 결함으로 옮겨갈 때는 알아볼 배율까지 확대한다', () => {
+  // 넓게 보고 있었으면 REVEAL_ZOOM까지 들어간다.
+  assert.equal(revealZoom(12), REVEAL_ZOOM)
+  assert.equal(revealZoom(14), REVEAL_ZOOM)
+})
+
+test('이미 더 깊이 보고 있었다면 배율을 줄이지 않는다', () => {
+  // 사용자가 확대해 둔 것을 되돌리는 것은 화면을 빼앗는 것과 같다.
+  assert.equal(revealZoom(19), 19)
+  assert.equal(revealZoom(21), 21)
+})
+
+test('확대 배율은 지도 최대 배율을 넘지 않는다', () => {
+  assert.equal(revealZoom(12, 30, 21), 21)
 })
