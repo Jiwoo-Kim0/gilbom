@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.Optional;
+import java.time.Instant;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -349,6 +350,48 @@ class DefectQueryScopeIntegrationTest {
         assertThat(hiddenRobotOnly.content())
                 .extracting(item -> item.defectId())
                 .containsExactly(HIDDEN_DEFECT_ID);
+    }
+
+    @Test
+    void filtersByObservationPeriod() {
+        // from·to는 Instant로 들어오는데 그대로 바인딩하면 드라이버가 SQL 타입을
+        // 정하지 못해 조회 전체가 500으로 죽는다. 화면의 날짜 필터가 이 경로를 탄다.
+        var withinPeriod = queryService.findDefects(
+                ADMIN_USER_ID,
+                0,
+                100,
+                null,
+                DefectFilter.of(
+                        null,
+                        Instant.parse("2000-01-01T00:00:00Z"),
+                        Instant.parse("2100-01-01T00:00:00Z"),
+                        null, null, null, null,
+                        null, null, null, null, null));
+        assertThat(withinPeriod.content()).isNotEmpty();
+
+        var startOnly = queryService.findDefects(
+                ADMIN_USER_ID,
+                0,
+                100,
+                null,
+                DefectFilter.of(
+                        null,
+                        Instant.parse("2100-01-01T00:00:00Z"),
+                        null,
+                        null, null, null, null,
+                        null, null, null, null, null));
+        assertThat(startOnly.content()).isEmpty();
+
+        // 지도 GeoJSON도 같은 필터를 쓴다. 목록만 고치면 지도가 계속 죽는다.
+        var mapWithinPeriod = queryService.findMapDefects(
+                ADMIN_USER_ID,
+                DefectFilter.of(
+                        null,
+                        Instant.parse("2000-01-01T00:00:00Z"),
+                        null,
+                        null, null, null, null,
+                        null, null, null, null, null));
+        assertThat(mapWithinPeriod.features()).isNotEmpty();
     }
 
     // ------------------------------------------------------------ fixtures

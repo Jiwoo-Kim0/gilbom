@@ -2,6 +2,8 @@ package com.gilbom.defect;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -224,11 +226,17 @@ public record DefectFilter(
         if (q != null) {
             parameters.addValue("q", q);
         }
+        // Instant를 그대로 넘기면 드라이버가 SQL 타입을 정하지 못해 조회가 통째로
+        // 실패한다. 저장소의 다른 시각 파라미터와 같이 OffsetDateTime으로 맞춘다.
         if (from != null) {
-            parameters.addValue("from", from);
+            parameters.addValue(
+                    "from",
+                    OffsetDateTime.ofInstant(from, ZoneOffset.UTC));
         }
         if (to != null) {
-            parameters.addValue("to", to);
+            parameters.addValue(
+                    "to",
+                    OffsetDateTime.ofInstant(to, ZoneOffset.UTC));
         }
         if (!workflowStatuses.isEmpty()) {
             parameters.addValue("workflowStatuses", workflowStatuses);
