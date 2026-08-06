@@ -945,6 +945,62 @@
 }
 
 /*
+ * 둥근 상자 안의 스크롤바.
+ *
+ * <p>트랙이 위아래 끝까지 닿으면 **네모난 스크롤바가 모서리의 둥근 부분을 덮어** 상자가
+ * 각져 보인다. 트랙을 모서리 반지름만큼 띄워 둥근 자리를 비운다. 상자마다 반지름이
+ * 달라서 값을 변수로 받는다.
+ *
+ * <p>`::-webkit-scrollbar-*`만 쓴다. 같은 요소에 `scrollbar-width`·`scrollbar-color`를
+ * 함께 주면 Chrome이 표준 쪽을 택해 이 규칙을 통째로 무시하고, 표준 속성에는 트랙을
+ * 띄우는 방법이 없다. Firefox는 기본 스크롤바를 그대로 쓴다(거기서는 모서리가 조금 덮인다).
+ */
+.defect-card {
+  --defect-scrollbar-inset: 14px;
+}
+
+.defect-modal {
+  --defect-scrollbar-inset: 12px;
+}
+
+.defect-edit-modal,
+.defect-filter-modal {
+  --defect-scrollbar-inset: 20px;
+}
+
+.defect-card::-webkit-scrollbar,
+.defect-modal::-webkit-scrollbar,
+.defect-filter-modal::-webkit-scrollbar {
+  width: 12px;
+}
+
+.defect-card::-webkit-scrollbar-track,
+.defect-modal::-webkit-scrollbar-track,
+.defect-filter-modal::-webkit-scrollbar-track {
+  margin: var(--defect-scrollbar-inset) 0;
+  background: transparent;
+}
+
+/*
+ * 손잡이는 투명 테두리 + `background-clip: content-box`로 얇게 만든다. `width`를 줄이면
+ * 손잡이만 얇아지는 것이 아니라 누를 수 있는 자리까지 좁아진다.
+ */
+.defect-card::-webkit-scrollbar-thumb,
+.defect-modal::-webkit-scrollbar-thumb,
+.defect-filter-modal::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-color: var(--line);
+  background-clip: content-box;
+}
+
+.defect-card::-webkit-scrollbar-thumb:hover,
+.defect-modal::-webkit-scrollbar-thumb:hover,
+.defect-filter-modal::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-muted);
+}
+
+/*
  * 끌어 옮긴 카드. 위치를 **클래스로** 정하는 이유는 CSP다 — `style-src 'self'`가 inline
  * style을 막아 계산된 px을 넣을 수 없다(`defectCardDrag.ts` 주석 참고).
  *

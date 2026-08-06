@@ -266,6 +266,43 @@ test.describe('결함 수정 창', () => {
     expect(layers.dialogTop).toBeGreaterThanOrEqual(0)
   })
 
+  /*
+   * 둥근 상자에서 스크롤 트랙이 위아래 끝까지 닿으면 네모난 스크롤바가 모서리의 둥근
+   * 부분을 덮어 상자가 각져 보인다. 트랙을 모서리 반지름만큼 띄운다.
+   *
+   * <p>스크롤바 **기하**는 DOM으로 잴 수 없고(그리고 이 브라우저는 폭 0인 overlay
+   * 스크롤바를 쓴다), 대신 계산된 값으로 규칙을 못박는다. 반지름을 바꾸고 여백을 안
+   * 바꾸면 이 시험이 잡는다.
+   */
+  test('둥근 상자의 스크롤 트랙은 모서리 반지름만큼 띄운다', async ({ page }) => {
+    await stubEditPage(page)
+    await openEditModal(page)
+
+    const boxes = await page.evaluate(() => {
+      const read = (selector: string) => {
+        const element = document.querySelector(selector)!
+        const own = getComputedStyle(element)
+        const track = getComputedStyle(element, '::-webkit-scrollbar-track')
+        return {
+          radius: Number.parseFloat(own.borderTopRightRadius),
+          overflowY: own.overflowY,
+          top: Number.parseFloat(track.marginTop),
+          bottom: Number.parseFloat(track.marginBottom),
+        }
+      }
+      return { card: read('.defect-card'), modal: read('.defect-edit-modal') }
+    })
+
+    for (const [name, box] of Object.entries(boxes)) {
+      expect(box.overflowY, `${name}은 스스로 스크롤한다`).toBe('auto')
+      expect(box.radius, `${name}에 둥근 모서리가 있다`).toBeGreaterThan(0)
+      expect(box.top, `${name} 트랙 위 여백이 모서리만큼 있어야 한다`)
+        .toBeGreaterThanOrEqual(box.radius)
+      expect(box.bottom, `${name} 트랙 아래 여백`)
+        .toBeGreaterThanOrEqual(box.radius)
+    }
+  })
+
   test('Esc로 닫힌다', async ({ page }) => {
     await stubEditPage(page)
     await openEditModal(page)
