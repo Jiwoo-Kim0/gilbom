@@ -97,10 +97,10 @@ test.describe('결함 검색 디바운스', () => {
     // 타이머가 도는 중에 초기화를 누른다. 페이지 안에서 눌러 300ms를 넘기지 않는다.
     await typeInSearch(page, 'INC', 10)
     await page.evaluate(() => {
-      const reset = [...document.querySelectorAll('button')].find(
-        (button) => button.textContent?.includes('필터 초기화'),
-      )
-      ;(reset as HTMLButtonElement).click()
+      // 보이는 글자는 "초기화"뿐이다. 무엇을 되돌리는지는 aria-label에 있다.
+      document
+        .querySelector<HTMLButtonElement>('button[aria-label="필터 초기화"]')!
+        .click()
     })
     await page.waitForTimeout(600)
 
@@ -117,7 +117,7 @@ test.describe('결함 검색 디바운스', () => {
     listQueries.length = 0
 
     await typeInSearch(page, 'INC', 10)
-    const filter = page.getByRole('form', { name: '결함 필터' })
+    const filter = page.getByRole('group', { name: '결함 필터' })
     await filter.getByRole('button', { name: /심각도/ }).click()
     await filter.getByRole('group', { name: '심각도' }).getByText('심각').click()
 
