@@ -6,7 +6,7 @@ import { DefectDetailCard } from './DefectDetailCard'
 import { getDefectMap } from './defectApi'
 import {
   bboxForDefectMapFilter,
-  clusterSplitZoomStep,
+  clusterZoomPlan,
   defectMapFilterKey,
   defectTypeTone,
 } from './defectMapState'
@@ -514,20 +514,25 @@ export function DefectMap({
           return
         }
         /*
-         * 묶음을 클릭하면 **한 번에 나뉘는 만큼** 확대한다. 고정 두 단계로 두면 촘촘한
-         * 묶음은 확대해도 같은 숫자가 다시 나와서, 사용자가 여러 번 눌러야 했다.
+         * 묶음을 클릭하면 **구성원 전체가 담기는 가장 큰 배율**로 확대한다. 고정 두 단계로
+         * 두면 촘촘한 묶음은 같은 숫자가 다시 나오고, 가장 가까운 쌍까지 갈라내려 하면
+         * 지나치게 확대돼 나머지 구성원이 화면 밖으로 나간다.
          */
-        const step = clusterSplitZoomStep(
+        const element = mapElementRef.current
+        const plan = clusterZoomPlan(
           cluster.features.map((member) => {
             const [longitude, latitude] = member.geometry.coordinates
             return { latitude, longitude }
           }),
           // 1px이 몇 m인지는 지도에서 직접 잰다(축척 바와 같은 방법).
-          metersPerPixelOf(map, mapElementRef.current?.clientWidth ?? 0),
-          CLUSTER_CELL_PX,
+          metersPerPixelOf(map, element?.clientWidth ?? 0),
+          {
+            widthPx: element?.clientWidth ?? 0,
+            heightPx: element?.clientHeight ?? 0,
+          },
         )
-        map.setCenter(new maps.LatLng(cluster.lat, cluster.lng))
-        map.setZoom(Math.min(map.getZoom() + step, MAX_MAP_ZOOM))
+        map.setCenter(new maps.LatLng(plan.center.latitude, plan.center.longitude))
+        map.setZoom(Math.min(map.getZoom() + plan.step, MAX_MAP_ZOOM))
       })
       return marker
     })

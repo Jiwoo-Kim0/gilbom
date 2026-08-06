@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   bboxForDefectMapFilter,
-  clusterSplitZoomStep,
+  clusterZoomPlan,
   defectMapFilterKey,
   defectTypeTone,
 } from '../src/features/defect/defectMapState.ts'
@@ -51,103 +51,126 @@ test('최초 발견순은 오래된 최초 발견부터 정렬한다', () => {
  * 되어야 갈린다. 확대 한 단계가 화면 거리를 두 배로 만든다.
  */
 /*
- * 확대 단계 계산. 1px = 1m인 배율을 넘겨 미터 값이 그대로 화면 픽셀 거리가 되게 했다 —
- * 기대값을 손으로 읽을 수 있다. 격자 한 칸은 실제와 같은 44px이다.
+ * 묶음 클릭 확대. 1px = 1m인 배율(`metersPerPixel = 1`)을 넘겨 미터 값이 그대로 화면
+ * 픽셀이 되게 했다 — 기대값을 손으로 읽을 수 있다.
  */
 const ONE_METER_PER_PIXEL = 1
-/** 서울 위도에서 동서로 `meters`만큼 떨어진 경도 차이. */
-function eastWestDegrees(meters: number): number {
-  return meters / (111_320 * Math.cos((37.5 * Math.PI) / 180))
+const VIEWPORT = { widthPx: 800, heightPx: 500 }
+const BASE = { latitude: 37.5, longitude: 127 }
+
+/** 기준점에서 북쪽 `north`m, 동쪽 `east`m 떨어진 좌표. */
+function offsetBy(north: number, east: number) {
+  return {
+    latitude: BASE.latitude + north / 111_320,
+    longitude: BASE.longitude
+      + east / (111_320 * Math.cos((BASE.latitude * Math.PI) / 180)),
+  }
 }
-/** 남북으로 `meters`만큼 떨어진 위도 차이. */
-function northSouthDegrees(meters: number): number {
-  return meters / 111_320
-}
 
-test('한 번의 클릭으로 묶음이 갈릴 만큼 확대 단계를 계산한다', () => {
-  const pairApartBy = (meters: number) => [
-    { latitude: 37.5, longitude: 127 },
-    { latitude: 37.5, longitude: 127 + eastWestDegrees(meters) },
-  ]
-  // 22px이면 한 단계(×2 = 44px)로 갈린다.
-  assert.equal(clusterSplitZoomStep(pairApartBy(22), ONE_METER_PER_PIXEL, 44), 1)
-  // 11px이면 두 단계(×4 = 44px)가 필요하다.
-  assert.equal(clusterSplitZoomStep(pairApartBy(11), ONE_METER_PER_PIXEL, 44), 2)
-  // 3px이면 네 단계(×16 = 48px)다 — 예전 고정값(+2)으로는 다시 같은 숫자가 나왔다.
-  assert.equal(clusterSplitZoomStep(pairApartBy(3), ONE_METER_PER_PIXEL, 44), 4)
-})
-
-test('가장 가까운 쌍이 기준이다', () => {
-  // 멀리 있는 점이 섞여 있어도 촘촘한 쌍을 갈라야 묶음이 풀린다.
-  const members = [
-    { latitude: 37.5, longitude: 127 },
-    { latitude: 37.5 + northSouthDegrees(200), longitude: 127 },
-    { latitude: 37.5 + northSouthDegrees(5), longitude: 127 },
-  ]
-  assert.equal(clusterSplitZoomStep(members, ONE_METER_PER_PIXEL, 44), 4)
-})
-
-test('세로가 가까워도 가로가 멀면 이미 다른 칸이다', () => {
+test('구성원 전체가 화면에 담기는 만큼만 확대한다', () => {
   /*
-   * 격자가 정사각형이라 같은 칸에 들어가려면 가로·세로가 **둘 다** 가까워야 한다.
-   * 그래서 축 방향 최대값(Chebyshev)으로 본다. 가로로 500px 떨어져 있으면 세로가
-   * 붙어 있어도 애초에 묶이지 않는다.
+   * 동서로 300m 퍼진 묶음. 쓸 수 있는 폭은 800px × 0.7 = 560px이므로 1px이 최소
+   * 0.536m는 덮어야 한다. 지금 1px = 1m이니 한 단계(0.5m)까지만 들어갈 수 있다.
    */
-  const far = [
-    { latitude: 37.5, longitude: 127 },
-    { latitude: 37.5 + northSouthDegrees(11), longitude: 127 + eastWestDegrees(500) },
-  ]
-  assert.equal(clusterSplitZoomStep(far, ONE_METER_PER_PIXEL, 44), 1)
-  // 둘 다 가까울 때만 확대가 필요하다.
-  const near = [
-    { latitude: 37.5, longitude: 127 },
-    { latitude: 37.5 + northSouthDegrees(11), longitude: 127 + eastWestDegrees(5) },
-  ]
-  assert.equal(clusterSplitZoomStep(near, ONE_METER_PER_PIXEL, 44), 2)
+  const { step } = clusterZoomPlan(
+    [offsetBy(0, 0), offsetBy(0, 150), offsetBy(0, 300)],
+    ONE_METER_PER_PIXEL,
+    VIEWPORT,
+  )
+  assert.equal(step, 1)
+
+  // 같은 묶음을 1px = 8m인 배율에서 누르면 세 단계까지 들어간다(8 → 1m).
+  const zoomedOut = clusterZoomPlan(
+    [offsetBy(0, 0), offsetBy(0, 150), offsetBy(0, 300)],
+    8,
+    VIEWPORT,
+  )
+  assert.equal(zoomedOut.step, 3)   // 네 단계면 0.5m로 내려가 300m가 넘친다
 })
 
-test('같은 좌표라도 지금 배율에 따라 필요한 단계가 다르다', () => {
+test('확대 뒤에도 구성원이 화면 안에 남는다', () => {
   /*
-   * 예전 구현은 지도 projection이 준 값을 화면 픽셀이라고 **가정**했다. 그 가정이 틀리면
-   * (예: 값이 훨씬 큰 단위로 오면) 이미 멀다고 보고 한 단계만 확대해, 여러 번 눌러야
-   * 갈리는 증상이 남는다. 지금은 지도에서 잰 배율(m/px)로 화면 거리를 만든다.
+   * 이 시험이 진짜 요구사항이다. 10건이 300m에 퍼져 있고 그 안에 2m 붙은 쌍이 있다 —
+   * 가장 가까운 쌍을 갈라내려던 예전 방식은 최대 배율까지 뛰어 **나머지가 화면 밖으로
+   * 나갔다.**
    */
   const members = [
-    { latitude: 37.5, longitude: 127 },
-    { latitude: 37.5 + northSouthDegrees(22), longitude: 127 },
+    ...Array.from({ length: 8 }, (_, index) => offsetBy(0, index * 40)),
+    offsetBy(0, 100),
+    offsetBy(2, 100),
   ]
-  // 1px이 8m면 22m는 화면에서 2.75px뿐이다 → 네 단계(×16 = 44px).
-  assert.equal(clusterSplitZoomStep(members, 8, 44), 4)
-  assert.equal(clusterSplitZoomStep(members, ONE_METER_PER_PIXEL, 44), 1)
+  const metersPerPixel = 8
+  const { step } = clusterZoomPlan(members, metersPerPixel, VIEWPORT)
+
+  const nextMetersPerPixel = metersPerPixel / 2 ** step
+  const widthPx = (280 / nextMetersPerPixel)
+  assert.ok(
+    widthPx <= VIEWPORT.widthPx,
+    `구성원 폭 ${Math.round(widthPx)}px이 화면 ${VIEWPORT.widthPx}px을 넘었다`,
+  )
+  // 담기는 한 최대한 확대하므로, 한 단계만 더 가면 넘친다.
+  assert.ok((280 / (nextMetersPerPixel / 2)) > VIEWPORT.widthPx)
 })
 
-test('이미 떨어져 있어도 한 단계는 확대한다', () => {
-  // 클릭했는데 아무 일도 없으면 눌리지 않은 것으로 읽힌다.
+test('세로로 긴 묶음은 화면 높이에 맞춘다', () => {
+  /*
+   * 가로는 여유가 있어도 세로가 넘치면 구성원이 위아래로 밀려난다. 남북 300m는 높이
+   * 500px × 0.7 = 350px에 담겨야 하므로 1px이 0.857m 이상이어야 한다.
+   */
+  const members = [offsetBy(0, 0), offsetBy(300, 10)]
+  const { step } = clusterZoomPlan(members, 8, VIEWPORT)
+  assert.equal(step, 3)   // 8 → 1m (0.857m보다 크다). 네 단계면 0.5m로 넘친다.
+})
+
+test('중심은 구성원을 감싸는 사각형의 중심이다', () => {
+  /*
+   * 평균으로 잡으면 한쪽에 몰린 구성원 쪽으로 중심이 치우쳐 반대쪽 끝이 화면 밖으로
+   * 나간다. 사각형 중심이어야 양쪽 끝이 대칭으로 담긴다.
+   */
   const members = [
-    { latitude: 37.5, longitude: 127 },
-    { latitude: 37.5 + northSouthDegrees(300), longitude: 127 },
+    offsetBy(0, 0),
+    offsetBy(0, 10),
+    offsetBy(0, 20),
+    offsetBy(0, 300),
   ]
-  assert.equal(clusterSplitZoomStep(members, ONE_METER_PER_PIXEL, 44), 1)
+  const { center } = clusterZoomPlan(members, 8, VIEWPORT)
+  const expected = offsetBy(0, 150)
+  assert.ok(Math.abs(center.longitude - expected.longitude) < 1e-9)
+  assert.ok(Math.abs(center.latitude - BASE.latitude) < 1e-9)
 })
 
 test('좌표가 완전히 같으면 상한까지 확대한다', () => {
   /*
-   * 아무리 확대해도 갈리지 않는다. 계산이 서지 않으니 상한으로 멈춘다. 상한은 넉넉히
-   * 두고 실제 자르기는 부르는 쪽(지도 최대 확대 단계)이 한다 — 작게 잡으면 촘촘한
-   * 묶음에서 쓸 수 있는 확대폭을 스스로 버린다.
+   * 감쌀 사각형이 한 점이라 계산이 서지 않는다. 그때는 상한으로 멈추고, 실제 자르기는
+   * 부르는 쪽(지도 최대 배율)이 한다.
    */
-  const same = { latitude: 37.5, longitude: 127 }
-  assert.equal(clusterSplitZoomStep([same, { ...same }], ONE_METER_PER_PIXEL, 44), 21)
-  assert.equal(clusterSplitZoomStep([same], ONE_METER_PER_PIXEL, 44), 21)
-  // 상한은 넘겨서 조절할 수 있다.
-  assert.equal(clusterSplitZoomStep([same], ONE_METER_PER_PIXEL, 44, 3), 3)
+  const same = { ...BASE }
+  assert.equal(
+    clusterZoomPlan([same, { ...same }], ONE_METER_PER_PIXEL, VIEWPORT).step,
+    21,
+  )
+  assert.equal(
+    clusterZoomPlan([same], ONE_METER_PER_PIXEL, VIEWPORT, 3).step,
+    3,
+  )
 })
 
-test('배율을 재지 못하면 한 단계만 확대한다', () => {
-  // 지도 폭이 0으로 잡히는 순간(레이아웃 전)에 0으로 나누지 않는다.
-  const members = [
-    { latitude: 37.5, longitude: 127 },
-    { latitude: 37.5 + northSouthDegrees(1), longitude: 127 },
-  ]
-  assert.equal(clusterSplitZoomStep(members, 0, 44), 1)
+test('이미 화면을 채우고 있어도 한 단계는 확대한다', () => {
+  // 클릭했는데 아무 일도 없으면 눌리지 않은 것으로 읽힌다.
+  const members = [offsetBy(0, 0), offsetBy(0, 5_000)]
+  assert.equal(
+    clusterZoomPlan(members, ONE_METER_PER_PIXEL, VIEWPORT).step,
+    1,
+  )
+})
+
+test('배율이나 화면 크기를 재지 못하면 한 단계만 확대한다', () => {
+  // 레이아웃 전에는 폭이 0으로 잡힌다. 0으로 나누지 않는다.
+  const members = [offsetBy(0, 0), offsetBy(0, 20)]
+  assert.equal(clusterZoomPlan(members, 0, VIEWPORT).step, 1)
+  assert.equal(
+    clusterZoomPlan(members, ONE_METER_PER_PIXEL, { widthPx: 0, heightPx: 0 })
+      .step,
+    1,
+  )
 })
