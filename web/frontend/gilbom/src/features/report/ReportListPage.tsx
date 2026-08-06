@@ -220,7 +220,12 @@ export function ReportListPage() {
           className="report-period-filter"
           aria-describedby="report-period-help"
         >
-          <legend>기간 검색</legend>
+          <legend>
+            <span>기간 검색</span>
+            <span id="report-period-help" className="report-contract-note">
+              선택한 기간과 하루라도 겹치는 보고서를 조회합니다.
+            </span>
+          </legend>
           <input
             type="date"
             aria-label="조회 기간 시작"
@@ -243,9 +248,6 @@ export function ReportListPage() {
             }))}
           />
         </fieldset>
-        <p id="report-period-help" className="report-contract-note">
-          선택한 기간과 하루라도 겹치는 보고서를 조회합니다.
-        </p>
         <div className="report-filter-actions">
           <button className="secondary-button" type="button" onClick={resetFilters}>
             초기화
