@@ -22,6 +22,7 @@ import {
   useState,
   type FormEvent,
 } from 'react'
+import { Link } from 'react-router'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { lockBodyScroll } from '../../shared/dom/bodyScrollLock'
 import { useAuthentication } from '../auth/authenticationContext'
@@ -1187,15 +1188,27 @@ export function MissionManagePage() {
                 {selectedMission?.missionCode ?? '임무 상세'}
               </h3>
             </div>
-            <button
-              className="icon-button"
-              type="button"
-              aria-label="임무 상세 창 닫기"
-              onClick={closeDetailModal}
-              disabled={missionAction !== null}
-            >
-              <X size={18} aria-hidden="true" />
-            </button>
+            <div className="mission-detail-modal-heading-actions">
+              {selectedMission ? (
+                <Link
+                  className="secondary-button button-with-icon mission-detail-robot-link"
+                  to={`/robots/${encodeURIComponent(selectedMission.robotId)}`}
+                  aria-label={`로봇 상세 페이지로 이동: ${selectedMission.robotName}`}
+                >
+                  <Bot size={16} aria-hidden="true" />
+                  로봇 상세
+                </Link>
+              ) : null}
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="임무 상세 창 닫기"
+                onClick={closeDetailModal}
+                disabled={missionAction !== null}
+              >
+                <X size={18} aria-hidden="true" />
+              </button>
+            </div>
           </div>
           {detailLoading && selectedMission === null ? (
             <div className="admin-loading" role="status">

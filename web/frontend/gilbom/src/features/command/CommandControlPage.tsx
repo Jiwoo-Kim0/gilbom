@@ -25,6 +25,7 @@ import {
   ROBOT_COMMAND_EXECUTE,
 } from '../auth/permissions'
 import { getMissions } from '../mission/missionApi'
+import { MissionMap } from '../mission/MissionMap'
 import type { Mission } from '../mission/missionTypes'
 import type {
   RobotDetail,
@@ -307,6 +308,26 @@ export function CommandControlPage({
 
   return (
     <section className="command-section" aria-labelledby="command-section-title">
+      {canViewMissions && (missionLoading || currentMission !== null) ? (
+        <article
+          className="content-card command-mission-map-card"
+          data-testid="command-mission-map"
+        >
+          {currentMission === null ? (
+            <div className="admin-loading" role="status">
+              <span className="loading-spinner" aria-hidden="true" />
+              현재 임무 지도를 준비하는 중입니다.
+            </div>
+          ) : (
+            <MissionMap
+              key={currentMission.missionId}
+              missionId={currentMission.missionId}
+              missionCode={currentMission.missionCode}
+              patrolAreaName={currentMission.patrolAreaName}
+            />
+          )}
+        </article>
+      ) : null}
       <div className="command-section-heading">
         <div>
           <p className="eyebrow">CONTROL</p>

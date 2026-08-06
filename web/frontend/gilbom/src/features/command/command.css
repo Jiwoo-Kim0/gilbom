@@ -7,6 +7,17 @@
   gap: 16px;
 }
 
+.command-mission-map-card .mission-map {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.command-mission-map-card .mission-map-canvas,
+.command-mission-map-card .mission-map-fallback {
+  height: 572px;
+}
+
 .command-section-heading {
   display: flex;
   gap: 20px;
@@ -980,6 +991,11 @@
 }
 
 @media (max-width: 720px) {
+  .command-mission-map-card .mission-map-canvas,
+  .command-mission-map-card .mission-map-fallback {
+    height: 442px;
+  }
+
   .command-section-heading {
     align-items: flex-start;
     flex-direction: column;

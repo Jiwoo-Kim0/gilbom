@@ -478,6 +478,9 @@ test('Mission 구역·실제 궤적·현재 위치를 그리고 SSE 갱신을 �
   await expect(page.getByRole('dialog', {
     name: 'MIS-MAP-E2E',
   })).toBeVisible()
+  await expect(page.getByRole('link', {
+    name: '로봇 상세 페이지로 이동: 지도 검증 로봇',
+  })).toHaveAttribute('href', `/robots/${ROBOT_ID}`)
 
   await expect(page.getByRole('heading', {
     name: '임무 위치 지도',
