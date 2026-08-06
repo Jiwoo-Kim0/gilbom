@@ -1,56 +1,55 @@
 **Source visual truth**
 
 - Path: `/home/ssafy/common-proj/web/docs/img/main.png`
-- Pixel dimensions: 2878 × 1534
-- Reference state: desktop, navigation expanded, red annotation marking the sidebar-edge toggle location
+- Pixel dimensions: 2878 × 1536
+- State: desktop defect screen with expanded navigation and the original wide `≪` boundary control
 
 **Implementation evidence**
 
-- Expanded state: `/home/ssafy/common-proj/web/.artifacts/sidebar-expanded.png`
-- Collapsed state: `/home/ssafy/common-proj/web/.artifacts/sidebar-collapsed.png`
-- Pagination state: `/home/ssafy/common-proj/web/.artifacts/defect-pagination.png`
+- Screenshot: `/home/ssafy/common-proj/web/.artifacts/sidebar-bookmark-layer.png`
+- Pixel dimensions: 2878 × 1536
 - Browser viewport: 1439 × 768 CSS pixels at device scale factor 2
-- Implementation captures: 2878 × 1536 pixels
-- Density normalization: source and implementation were compared at the same 1439 CSS-pixel display width
+- State: expanded navigation with the corrected bookmark-layer control
 
 **Full-view comparison evidence**
 
-- Comparison image: `/home/ssafy/common-proj/web/.artifacts/sidebar-comparison.png`
-- The source and expanded implementation are shown side by side at the same normalized viewport.
-- The toggle sits on the navigation/content boundary at the annotated vertical region.
+- Comparison: `/home/ssafy/common-proj/web/.artifacts/sidebar-bookmark-layer-full-comparison.png`
+- Existing layout proportions, navigation width, top bar, search region, and map card remain unchanged.
+- The corrected control occupies less horizontal space over the main content.
 
 **Focused region comparison evidence**
 
-- Comparison image: `/home/ssafy/common-proj/web/.artifacts/sidebar-focused-comparison.png`
-- Target region: the left navigation boundary around 44% of viewport height.
-- The implementation control is centered on the boundary and uses left-facing chevrons while expanded.
+- Comparison: `/home/ssafy/common-proj/web/.artifacts/sidebar-bookmark-layer-comparison.png`
+- The exposed width decreased from 34px to 22px and the height increased from 44px to 52px.
+- The navigation surface visibly covers the control’s overlapping 10px, creating an actual behind-layer bookmark relationship.
 
 **Findings**
 
-- No P0, P1, or P2 fidelity issue remains in the requested sidebar control.
-- The reference uses a hand-drawn marker, so its width and shape are treated as positional guidance rather than button styling.
-- The browser QA container lacks the project’s Korean font packages; missing glyph boxes in the implementation capture are environment-only and do not alter layout measurements.
+- No remaining P0, P1, or P2 issue was found in the requested layer and proportion correction.
+- The QA container lacks the project Korean font package and uses mocked map data; neither affects the measured control geometry or stacking.
 
 **Required fidelity surfaces**
 
-- Fonts and typography: application styles remain unchanged; the QA container font limitation is documented above.
-- Spacing and layout rhythm: expanded width is 256px, collapsed width is 76px, and the toggle center is between 42% and 46% of sidebar height.
-- Colors and visual tokens: the existing neutral border, surface, shadow, and focus tokens are reused.
-- Image quality and asset fidelity: the existing logo and Lucide chevrons are used.
-- Copy and content: navigation labels are unchanged; accessible labels are `네비게이션 접기` and `네비게이션 펼치기`.
+- Fonts and typography: unchanged.
+- Spacing and layout rhythm: 22px exposed width, 52px height, and the existing 44% vertical anchor.
+- Colors and visual tokens: existing surface, border, hover, focus, and shadow tokens remain unchanged.
+- Image quality and asset fidelity: existing logo, map component, and Lucide chevrons remain unchanged.
+- Copy and content: unchanged.
 
 **Primary interactions and console**
 
-- Playwright clicked the collapse control and verified the reverse expand control appeared.
-- Expanded width, collapsed width, and hidden collapsed labels were asserted.
-- Defect pagination left and right gaps were both asserted at 23px or greater; the applied gap is 24px.
-- The Naver map authentication request was isolated from visual QA.
-- No failed responses or console errors remained in the final run.
+- Navigation and toggle are sibling layers inside `.nb-sidebar-layer`.
+- Navigation uses `z-index: 2`; toggle uses `z-index: 1`.
+- Playwright verified the overlapping point resolves to the navigation layer.
+- Playwright verified the exposed point resolves to the toggle and remains clickable.
+- Playwright clicked collapse and verified the expand control appeared.
 
 **Comparison history**
 
-- Initial implementation: added the sidebar boundary toggle and collapsed state.
-- Visual iteration: matched the reference marker’s vertical region and verified both navigation states.
-- Pagination iteration: widened and centered the previous/counter/next controls.
+- Earlier P1: changing only the toggle’s `z-index` could not establish a reliable behind-navigation relationship because the control was a child of the navigation surface.
+- Fix: introduced a shared layer wrapper and made navigation and toggle sibling stacking items.
+- Earlier P2: the 34px protrusion was too wide and risked covering content.
+- Fix: reduced protrusion to 22px and increased height to 52px for a slimmer vertical bookmark.
+- Post-fix evidence: Playwright geometry, hit-target, collapse interaction, and visual comparison all passed.
 
 final result: passed

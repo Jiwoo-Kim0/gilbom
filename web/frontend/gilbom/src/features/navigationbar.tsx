@@ -97,33 +97,35 @@ export function NavigationBar({
   ))
 
   return (
-    <aside className={`nb-sidebar${collapsed ? ' is-collapsed' : ''}`}>
-      <NavLink className="nb-brand" to="/defects" aria-label="길봄 홈">
-        <span className="nb-brand-badge" aria-hidden="true">
-          <img className="nb-brand-logo" src={gilbomLogo} alt="" />
-        </span>
-        <span className="nb-brand-text">
-          <strong>길봄</strong>
-          <small>점자 보도블록 모니터링</small>
-        </span>
-      </NavLink>
+    <div className="nb-sidebar-layer">
+      <aside className={`nb-sidebar${collapsed ? ' is-collapsed' : ''}`}>
+        <NavLink className="nb-brand" to="/defects" aria-label="길봄 홈">
+          <span className="nb-brand-badge" aria-hidden="true">
+            <img className="nb-brand-logo" src={gilbomLogo} alt="" />
+          </span>
+          <span className="nb-brand-text">
+            <strong>길봄</strong>
+            <small>점자 보도블록 모니터링</small>
+          </span>
+        </NavLink>
 
-      <nav className="nb-nav" id="primary-navigation" aria-label="주요 메뉴">
-        {visibleNavigationItems.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            aria-label={label}
-            title={collapsed ? label : undefined}
-            className={({ isActive }) => `nb-nav-item${isActive ? ' nb-nav-item-active' : ''}`}
-          >
-            <span className="nb-nav-icon" aria-hidden="true">
-              <Icon size={16} />
-            </span>
-            <span className="nb-nav-label">{label}</span>
-          </NavLink>
-        ))}
-      </nav>
+        <nav className="nb-nav" id="primary-navigation" aria-label="주요 메뉴">
+          {visibleNavigationItems.map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              aria-label={label}
+              title={collapsed ? label : undefined}
+              className={({ isActive }) => `nb-nav-item${isActive ? ' nb-nav-item-active' : ''}`}
+            >
+              <span className="nb-nav-icon" aria-hidden="true">
+                <Icon size={16} />
+              </span>
+              <span className="nb-nav-label">{label}</span>
+            </NavLink>
+          ))}
+        </nav>
+      </aside>
 
       <button
         className="nb-sidebar-toggle"
@@ -140,6 +142,6 @@ export function NavigationBar({
           <ChevronsLeft size={18} aria-hidden="true" />
         )}
       </button>
-    </aside>
+    </div>
   )
 }
