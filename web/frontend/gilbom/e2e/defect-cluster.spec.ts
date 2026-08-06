@@ -63,8 +63,10 @@ async function installFakeMap(page: Page): Promise<void> {
       const calls: {
         zoom: number[]
         center: { lat: number; lng: number }[]
+        /** `panTo`로 옮긴 자리만 따로 센다. 목록에서 골랐을 때의 가운데 정렬이다. */
+        panned: { lat: number; lng: number }[]
         clickHandlers: (() => void)[]
-      } = { zoom: [], center: [], clickHandlers: [] }
+      } = { zoom: [], center: [], panned: [], clickHandlers: [] }
       ;(window as unknown as { mapCalls: typeof calls }).mapCalls = calls
 
       class LatLng {
@@ -118,6 +120,10 @@ async function installFakeMap(page: Page): Promise<void> {
           center = { lat: next.lat(), lng: next.lng() }
           calls.center.push(center)
         },
+        panTo: (next: LatLng) => {
+          center = { lat: next.lat(), lng: next.lng() }
+          calls.panned.push(center)
+        },
         fitBounds: () => {},
       }
 
@@ -170,6 +176,8 @@ async function installFakeMap(page: Page): Promise<void> {
 async function stubMap(
   page: Page,
   features: ReturnType<typeof featuresAt>,
+  /** 지도 아래 목록 표에 실을 결함. 표를 쓰지 않는 시험은 비워둔다. */
+  listContent: ReturnType<typeof defectAt>[] = [],
 ): Promise<void> {
   await page.route('**/api/v1/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname
@@ -192,7 +200,11 @@ async function stubMap(
     }
     if (pathname === '/api/v1/defects') {
       return fulfillJson(route, {
-        content: [], page: 0, size: 20, totalElements: 0, totalPages: 0,
+        content: listContent,
+        page: 0,
+        size: 20,
+        totalElements: listContent.length,
+        totalPages: listContent.length === 0 ? 0 : 1,
       })
     }
     /*
@@ -383,34 +395,46 @@ test.describe('결함 지도 묶음 클릭', () => {
  * 셀 만한 묶음은 확대만 하지 않고 구성원 목록까지 편다. 확대만으로는 "이 동네에 몇 건"
  * 까지만 알 수 있고, 코드를 보려면 마커를 하나씩 눌러야 했다.
  */
+/** 8m 격자 — 시작 배율에서는 한 묶음이고, 확대하면 갈린다. */
+function tightPoints(count: number): [number, number][] {
+  return Array.from(
+    { length: count },
+    (_, index): [number, number] =>
+      pointAt(Math.floor(index / 4) * 8, (index % 4) * 8),
+  )
+}
+
+/** 한 묶음으로 모인 `count`건을 띄우고 그 묶음을 클릭한다. */
+async function openCluster(
+  page: Page,
+  count: number,
+  listContent: ReturnType<typeof defectAt>[] = [],
+): Promise<void> {
+  await installFakeMap(page)
+  await stubMap(page, featuresAt(tightPoints(count)), listContent)
+  await page.goto('/defects?allStatus=1')
+  await expect(page.locator('.defect-map-canvas-wrap')).toBeVisible()
+  await expect
+    .poll(() => page.evaluate(() =>
+      (window as unknown as { mapCalls: { clickHandlers: unknown[] } })
+        .mapCalls.clickHandlers.length))
+    .toBe(1)
+  await page.evaluate(() =>
+    (window as unknown as { mapCalls: { clickHandlers: (() => void)[] } })
+      .mapCalls.clickHandlers[0]?.())
+}
+
+/** `panTo`로 옮겨간 마지막 자리. */
+function pannedTo(page: Page): Promise<{ lat: number; lng: number } | null> {
+  return page.evaluate(() => {
+    const { panned } = (window as unknown as {
+      mapCalls: { panned: { lat: number; lng: number }[] }
+    }).mapCalls
+    return panned.at(-1) ?? null
+  })
+}
+
 test.describe('묶음 결함 목록', () => {
-  /** 8m 격자 — 시작 배율에서는 한 묶음이고, 확대하면 갈린다. */
-  function tightPoints(count: number): [number, number][] {
-    return Array.from(
-      { length: count },
-      (_, index): [number, number] =>
-        pointAt(Math.floor(index / 4) * 8, (index % 4) * 8),
-    )
-  }
-
-  async function openCluster(
-    page: Page,
-    count: number,
-  ): Promise<void> {
-    await installFakeMap(page)
-    await stubMap(page, featuresAt(tightPoints(count)))
-    await page.goto('/defects?allStatus=1')
-    await expect(page.locator('.defect-map-canvas-wrap')).toBeVisible()
-    await expect
-      .poll(() => page.evaluate(() =>
-        (window as unknown as { mapCalls: { clickHandlers: unknown[] } })
-          .mapCalls.clickHandlers.length))
-      .toBe(1)
-    await page.evaluate(() =>
-      (window as unknown as { mapCalls: { clickHandlers: (() => void)[] } })
-        .mapCalls.clickHandlers[0]?.())
-  }
-
   test('10건 이하를 누르면 코드·사진·위치가 담긴 목록이 열린다', async ({ page }) => {
     await openCluster(page, 3)
 
@@ -467,5 +491,67 @@ test.describe('묶음 결함 목록', () => {
     await page.getByRole('button', { name: '묶인 결함 목록 닫기' }).click()
     await expect(page.locator('.defect-cluster-list')).toHaveCount(0)
     await expect(page.locator('.defect-map-canvas-wrap')).toBeVisible()
+  })
+})
+
+/**
+ * 목록에서 결함을 고르면 그 마커가 지도 가운데로 온다. 카드만 떠도 마커가 화면 밖이면
+ * 어디 일인지 알 수 없다.
+ *
+ * <p>`reducedMotion`을 고정한다 — 움직임을 줄이는 설정에서는 `panTo`가 아니라
+ * `setCenter`로 떨어지도록 만들어 뒀기 때문이다.
+ */
+test.describe('고른 결함 가운데 정렬', () => {
+  test.use({ reducedMotion: 'no-preference' })
+
+  test('묶음 목록에서 고르면 그 마커가 가운데로 온다', async ({ page }) => {
+    const points = tightPoints(3)
+    await openCluster(page, 3)
+
+    const list = page.getByRole('region', { name: '묶인 결함 목록' })
+    await list.getByRole('listitem').nth(2).getByRole('button').click()
+
+    const [longitude, latitude] = points[2]
+    const panned = await pannedTo(page)
+    expect(panned).not.toBeNull()
+    expect(panned!.lat).toBeCloseTo(latitude, 6)
+    expect(panned!.lng).toBeCloseTo(longitude, 6)
+  })
+
+  test('아래 목록 표에서 골라도 그 마커가 가운데로 온다', async ({ page }) => {
+    const rows = [defectAt(0), defectAt(1), defectAt(2)]
+    await installFakeMap(page)
+    await stubMap(page, featuresAt(tightPoints(3)), rows)
+    await page.goto('/defects?allStatus=1')
+    await expect(page.locator('.defect-table-body-row')).toHaveCount(3)
+
+    await page.locator('.defect-table-body-row').nth(1).click()
+
+    // 표 행의 좌표로 옮긴다. 지도 GeoJSON과 같은 결함의 같은 값이다.
+    const panned = await pannedTo(page)
+    expect(panned).not.toBeNull()
+    expect(panned!.lat).toBeCloseTo(rows[1].location.latitude, 6)
+    expect(panned!.lng).toBeCloseTo(rows[1].location.longitude, 6)
+  })
+
+  test('같은 행을 다시 눌러도 가운데로 되돌아온다', async ({ page }) => {
+    const rows = [defectAt(0), defectAt(1)]
+    await installFakeMap(page)
+    await stubMap(page, featuresAt(tightPoints(2)), rows)
+    await page.goto('/defects?allStatus=1')
+    await expect(page.locator('.defect-table-body-row')).toHaveCount(2)
+
+    const row = page.locator('.defect-table-body-row').nth(0)
+    await row.click()
+    await row.click()
+
+    /*
+     * 선택이 그대로라 좌표만 보고 있으면 두 번째 클릭은 아무 일도 하지 않는다.
+     * 요청마다 token을 올리는 이유가 이것이다.
+     */
+    const pannedCount = await page.evaluate(() =>
+      (window as unknown as { mapCalls: { panned: unknown[] } })
+        .mapCalls.panned.length)
+    expect(pannedCount).toBe(2)
   })
 })

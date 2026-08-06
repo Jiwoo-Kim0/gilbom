@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import { loadNaverMapsScript } from '../../lib/naverMaps'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
@@ -219,6 +219,19 @@ function createMarkerIcon(
   }
 }
 
+/**
+ * "이 좌표를 지도 가운데로" 요청. 목록 표에서 결함을 고를 때 상위가 넘긴다.
+ *
+ * <p>`token`이 있는 이유는 **같은 결함을 다시 고르는 경우** 때문이다. 좌표만 보고
+ * 있으면 지도를 딴 곳으로 끌어놓고 같은 행을 다시 눌러도 값이 그대로라 아무 일도
+ * 일어나지 않는다. 요청마다 token을 올려 "또 요청했다"를 구분한다.
+ */
+export type DefectMapCenterRequest = {
+  latitude: number
+  longitude: number
+  token: number
+}
+
 interface DefectMapProps {
   filters: DefectFilters
   selectedDefectId: string | null
@@ -227,6 +240,8 @@ interface DefectMapProps {
   onChanged: () => void
   /** 목록에서 결함을 고르면 페이지가 이 카드로 스크롤한다. */
   cardRef?: RefObject<HTMLElement | null>
+  /** 목록에서 고른 결함을 지도 가운데로 옮긴다. {@link DefectMapCenterRequest} 참고. */
+  centerRequest?: DefectMapCenterRequest | null
 }
 
 export function DefectMap({
@@ -235,6 +250,7 @@ export function DefectMap({
   onSelect,
   onChanged,
   cardRef,
+  centerRequest = null,
 }: DefectMapProps) {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<naver.maps.Map | null>(null)
@@ -297,6 +313,39 @@ export function DefectMap({
   const visibleClusterList = clusterList?.filterKey === filterKey
     ? clusterList.features
     : null
+
+  /**
+   * 좌표를 지도 가운데로 옮긴다. 배율은 건드리지 않는다 — 고른 결함을 보려는 것이지
+   * 더 들여다보려는 것이 아니고, 확대까지 바뀌면 주변 결함이 화면에서 사라진다.
+   */
+  const centerMapOn = useCallback((latitude: number, longitude: number) => {
+    const map = mapRef.current
+    if (map === null || !window.naver) return
+
+    const position = new window.naver.maps.LatLng(latitude, longitude)
+    // 움직임을 줄여달라고 설정한 사용자에게 미끄러지는 지도는 멀미를 준다.
+    // SDK 버전에 panTo가 없을 수도 있어 그때도 setCenter로 떨어진다.
+    const reduceMotion = window.matchMedia(
+      '(prefers-reduced-motion: reduce)',
+    ).matches
+    if (reduceMotion || typeof map.panTo !== 'function') {
+      map.setCenter(position)
+      return
+    }
+    map.panTo(position)
+  }, [])
+
+  /*
+   * 목록 표에서 고른 결함을 가운데로 옮긴다.
+   *
+   * 지도 마커를 눌렀을 때는 옮기지 않는다 — 이미 그 자리를 보고 있고, 손가락 밑에서
+   * 지도가 미끄러지면 방금 무엇을 눌렀는지 놓친다. 그래서 선택(`selectedDefectId`)이
+   * 아니라 **상위가 보낸 요청**에 반응한다.
+   */
+  useEffect(() => {
+    if (centerRequest === null || mapStatus !== 'ready') return
+    centerMapOn(centerRequest.latitude, centerRequest.longitude)
+  }, [centerRequest, centerMapOn, mapStatus])
   // 확대·이동이 끝나면 화면 좌표가 달라져 마커 묶음을 다시 계산해야 한다.
   const [idleToken, setIdleToken] = useState(0)
   /**
@@ -666,7 +715,11 @@ export function DefectMap({
                 .join(',')}
               features={visibleClusterList}
               selectedDefectId={selectedDefectId}
-              onSelect={onSelect}
+              // 이 목록도 목록이다. 고른 결함의 마커가 가운데로 온다.
+              onSelect={(defectId, latitude, longitude) => {
+                onSelect(defectId)
+                centerMapOn(latitude, longitude)
+              }}
               onClose={() => setClusterList(null)}
             />
           )}

@@ -4,6 +4,7 @@ import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { DefectFilterBar } from './DefectFilterBar'
 import { DefectList } from './DefectList'
 import { DefectMap } from './DefectMap'
+import type { DefectMapCenterRequest } from './DefectMap'
 import { DefectMergeModal } from './DefectMergeModal'
 import { DefectSearchBar } from './DefectSearchBar'
 import { getDefects } from './defectApi'
@@ -98,6 +99,9 @@ export function DefectManagePage() {
     : requestedSort
 
   const [selectedDefectId, setSelectedDefectId] = useState<string | null>(null)
+  /** 지도에 "이 좌표를 가운데로" 보내는 요청. 목록 표에서 고를 때만 만든다. */
+  const [centerRequest, setCenterRequest] =
+    useState<DefectMapCenterRequest | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
   const [checkedIds, setCheckedIds] = useState<string[]>([])
   const [merging, setMerging] = useState(false)
@@ -168,13 +172,25 @@ export function DefectManagePage() {
 
   /**
    * 목록에서 고른 결함의 상세 카드는 **지도 위에** 뜬다. 목록은 지도 아래에 있어
-   * 행을 눌러도 카드가 화면 밖일 수 있으니 지도까지 올려준다.
+   * 행을 눌러도 카드가 화면 밖일 수 있으니 지도까지 올려주고, 그 결함의 마커를
+   * 지도 가운데로 옮긴다 — 카드만 떠도 마커가 화면 밖이면 어디 일인지 알 수 없다.
    *
    * 지도 마커로 고를 때는 이 함수를 쓰지 않는다. 이미 지도를 보고 있으므로 화면이
    * 움직일 이유가 없다.
    */
   const selectFromList = useCallback((defectId: string) => {
     setSelectedDefectId(defectId)
+    const location = snapshot?.result?.content.find(
+      (defect) => defect.defectId === defectId,
+    )?.location
+    if (location != null) {
+      // token을 올려 같은 행을 다시 눌렀을 때도 가운데로 되돌아오게 한다.
+      setCenterRequest((previous) => ({
+        latitude: location.latitude,
+        longitude: location.longitude,
+        token: (previous?.token ?? 0) + 1,
+      }))
+    }
     // 접근성 설정을 켠 사용자에게 긴 스크롤 애니메이션은 멀미를 준다.
     const reduceMotion = window.matchMedia(
       '(prefers-reduced-motion: reduce)',
@@ -183,7 +199,7 @@ export function DefectManagePage() {
       behavior: reduceMotion ? 'auto' : 'smooth',
       block: 'start',
     })
-  }, [])
+  }, [snapshot])
 
   const toggleCheck = useCallback((defectId: string) => {
     setCheckedIds((previous) =>
@@ -261,6 +277,7 @@ export function DefectManagePage() {
         onSelect={setSelectedDefectId}
         onChanged={refresh}
         cardRef={mapCardRef}
+        centerRequest={centerRequest}
       />
       {/*
         선택이 없어도 자리는 남겨둔다. 조건부로 렌더하면 체크할 때마다 이 줄이 생겼다

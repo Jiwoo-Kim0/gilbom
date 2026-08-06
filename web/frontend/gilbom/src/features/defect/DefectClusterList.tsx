@@ -22,7 +22,8 @@ type ClusterEntry = {
 interface DefectClusterListProps {
   features: DefectMapFeature[]
   selectedDefectId: string | null
-  onSelect: (defectId: string) => void
+  /** 좌표를 함께 넘긴다. 상위가 그 마커를 지도 가운데로 옮긴다. */
+  onSelect: (defectId: string, latitude: number, longitude: number) => void
   onClose: () => void
 }
 
@@ -112,6 +113,7 @@ export function DefectClusterList({
       <ul className="defect-cluster-list-items">
         {features.map((feature) => {
           const { defectId, incidentCode } = feature.properties
+          const [longitude, latitude] = feature.geometry.coordinates
           const entry = entries[defectId] ?? {}
           const location = entry.location ?? formatCoordinates(feature)
           return (
@@ -122,7 +124,7 @@ export function DefectClusterList({
                   defectId === selectedDefectId ? ' is-selected' : ''
                 }`}
                 aria-current={defectId === selectedDefectId}
-                onClick={() => onSelect(defectId)}
+                onClick={() => onSelect(defectId, latitude, longitude)}
               >
                 <span className="defect-cluster-list-photo">
                   {entry.imageUrl === undefined && (
