@@ -25,6 +25,8 @@ export interface MapCalls {
   zoom: number[]
   center: { lat: number; lng: number }[]
   clickHandlers: number
+  /** 지금 지도에 붙어 있는 마커 좌표. */
+  markers: { lat: number; lng: number }[]
 }
 
 export async function installFakeMap(
@@ -38,8 +40,18 @@ export async function installFakeMap(
         zoom: number[]
         center: { lat: number; lng: number }[]
         clickHandlers: (() => void)[]
+        /** 지금 지도에 붙어 있는 마커 좌표. `setMap(null)`이면 빠진다. */
+        markers: { lat: number; lng: number; live: boolean }[]
+        mapListeners: Map<string, (() => void)[]>
         sseListeners: Map<string, ((event: MessageEvent<string>) => void)[]>
-      } = { zoom: [], center: [], clickHandlers: [], sseListeners: new Map() }
+      } = {
+        zoom: [],
+        center: [],
+        clickHandlers: [],
+        markers: [],
+        mapListeners: new Map(),
+        sseListeners: new Map(),
+      }
       ;(window as unknown as { mapCalls: typeof calls }).mapCalls = calls
 
       /**
@@ -94,6 +106,9 @@ export async function installFakeMap(
 
       let zoom = startZoom
       let center = { lat: baseLat, lng: baseLng }
+      /** `panTo` 애니메이션이 끝나는 데 걸리는 시간. 실제 SDK도 이 정도다. */
+      const PAN_DURATION_MS = 300
+      let panTimer: number | undefined
       const metersPerDegreeLng = 111_320 * Math.cos((baseLat * Math.PI) / 180)
       /** 실제 지도와 같은 성질: 한 단계 확대하면 1px이 덮는 거리가 절반이 된다. */
       const metersPerPixelAt = (z: number) =>
@@ -124,15 +139,59 @@ export async function installFakeMap(
         }),
         getZoom: () => zoom,
         setZoom: (next: number) => {
+          /*
+           * 실제 SDK와 같이, 진행 중인 이동 애니메이션은 확대에 끊긴다. 이동과 확대를
+           * 따로 부르면 옮겨가지 못한 자리에서 확대되는 것을 이 가짜가 재현한다.
+           */
+          if (panTimer !== undefined) {
+            window.clearTimeout(panTimer)
+            panTimer = undefined
+          }
           calls.zoom.push(next)
           zoom = next
+          settle()
+        },
+        /** 애니메이션으로 옮긴다. 실제 SDK처럼 곧바로 끝나지 않는다. */
+        panTo: (next: LatLng) => {
+          panTimer = window.setTimeout(() => {
+            panTimer = undefined
+            center = { lat: next.lat(), lng: next.lng() }
+            calls.center.push(center)
+            settle()
+          }, PAN_DURATION_MS)
         },
         setCenter: (next: LatLng) => {
           center = { lat: next.lat(), lng: next.lng() }
           calls.center.push(center)
+          settle()
+        },
+        /** 이동과 확대를 한 번에. 실제 SDK의 `morph`와 같은 자리다. */
+        morph: (next: LatLng, nextZoom?: number) => {
+          center = { lat: next.lat(), lng: next.lng() }
+          calls.center.push(center)
+          if (nextZoom !== undefined) {
+            calls.zoom.push(nextZoom)
+            zoom = nextZoom
+          }
+          settle()
         },
         // panTo가 없으면 centerMapOn이 setCenter로 떨어진다. 그쪽만 기록하면 된다.
         fitBounds: () => {},
+      }
+
+      /**
+       * 시야가 바뀌면 실제 지도처럼 `bounds_changed` → `idle`을 쏜다.
+       *
+       * <p>이게 없으면 앱이 **뷰포트 bbox로 다시 조회하지 않는다.** 옮겨간 자리에 마커가
+       * 실제로 올라오는지를 시험하려면 이 신호가 있어야 한다.
+       */
+      function settle(): void {
+        for (const handler of calls.mapListeners.get('bounds_changed') ?? []) {
+          handler()
+        }
+        for (const handler of calls.mapListeners.get('idle') ?? []) {
+          handler()
+        }
       }
 
       Object.defineProperty(window, 'naver', {
@@ -141,10 +200,26 @@ export async function installFakeMap(
           maps: {
             Map: class { constructor() { return fakeMap } },
             Marker: class {
-              setMap() {}
+              private readonly slot: number
+              constructor(options?: { position?: LatLng }) {
+                const position = options?.position
+                calls.markers.push({
+                  lat: position?.lat() ?? baseLat,
+                  lng: position?.lng() ?? baseLng,
+                  live: true,
+                })
+                this.slot = calls.markers.length - 1
+              }
+              setMap(map: unknown) {
+                // 마커를 다시 만들 때 옛것을 떼는 호출이다. 살아 있는 것만 세려고 본다.
+                calls.markers[this.slot].live = map !== null
+              }
               setIcon() {}
               setZIndex() {}
-              getPosition() { return new LatLng(baseLat, baseLng) }
+              getPosition() {
+                const marker = calls.markers[this.slot]
+                return new LatLng(marker.lat, marker.lng)
+              }
             },
             LatLng,
             LatLngBounds,
@@ -158,8 +233,14 @@ export async function installFakeMap(
                 type: string,
                 handler: () => void,
               ) => {
-                // 마커 클릭 핸들러만 모은다(지도 이벤트는 map 객체가 target이다).
-                if (type === 'click' && target !== fakeMap) {
+                // 마커 클릭 핸들러와 지도 이벤트를 갈라 담는다.
+                if (target === fakeMap) {
+                  const handlers = calls.mapListeners.get(type) ?? []
+                  handlers.push(handler)
+                  calls.mapListeners.set(type, handlers)
+                  return {}
+                }
+                if (type === 'click') {
                   calls.clickHandlers.push(handler)
                 }
                 return {}
@@ -189,12 +270,50 @@ export function readMapCalls(page: Page): Promise<MapCalls> {
         zoom: number[]
         center: { lat: number; lng: number }[]
         clickHandlers: unknown[]
+        markers: { lat: number; lng: number; live: boolean }[]
       }
     }).mapCalls
     return {
       zoom: calls.zoom,
       center: calls.center,
       clickHandlers: calls.clickHandlers.length,
+      markers: calls.markers
+        .filter((marker) => marker.live)
+        .map(({ lat, lng }) => ({ lat, lng })),
+    }
+  })
+}
+
+/** 가짜 지도가 지금 보고 있는 범위와 배율. */
+export interface MapView {
+  south: number
+  west: number
+  north: number
+  east: number
+  zoom: number
+}
+
+/** 지금 화면에 무엇이 보이는지 확인할 때 쓴다. */
+export function readMapView(page: Page): Promise<MapView> {
+  return page.evaluate(() => {
+    const map = (window as unknown as {
+      naver: { maps: { Map: new () => {
+        getBounds: () => {
+          getSW: () => { lat: () => number; lng: () => number }
+          getNE: () => { lat: () => number; lng: () => number }
+        }
+        getZoom: () => number
+      } } }
+    }).naver.maps.Map
+    // 가짜는 언제나 같은 지도 하나를 돌려준다.
+    const instance = new map()
+    const bounds = instance.getBounds()
+    return {
+      south: bounds.getSW().lat(),
+      west: bounds.getSW().lng(),
+      north: bounds.getNE().lat(),
+      east: bounds.getNE().lng(),
+      zoom: instance.getZoom(),
     }
   })
 }

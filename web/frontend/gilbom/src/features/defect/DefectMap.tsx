@@ -395,6 +395,35 @@ export function DefectMap({
     filterKeyRef.current = filterKey
   }, [filterKey])
 
+  /**
+   * 좌표로 옮기면서 배율까지 맞춘다.
+   *
+   * <p>**한 번에 해야 한다.** `panTo`(애니메이션) 뒤에 곧바로 `setZoom`을 부르면 이동이
+   * 중간에 끊겨 엉뚱한 자리에서 확대된다 — 옮겨간 화면에 정작 그 결함이 없게 된다.
+   * SDK의 `morph`가 이 일을 한 번에 하고, 없거나 움직임을 줄여달라고 한 사용자에게는
+   * 애니메이션 없이 `setCenter` + `setZoom`으로 떨어진다(이 조합은 끊길 것이 없다).
+   */
+  const focusMapOn = useCallback(
+    (latitude: number, longitude: number, zoom: number) => {
+      const map = mapRef.current
+      if (map === null || !window.naver) return
+
+      const position = new window.naver.maps.LatLng(latitude, longitude)
+      const reduceMotion = window.matchMedia(
+        '(prefers-reduced-motion: reduce)',
+      ).matches
+      if (!reduceMotion && typeof map.morph === 'function') {
+        map.morph(position, zoom)
+        return
+      }
+      map.setCenter(position)
+      if (map.getZoom() !== zoom) {
+        map.setZoom(zoom)
+      }
+    },
+    [],
+  )
+
   /*
    * 아래 "새 결함이 화면 밖이면 옮기기"가 최신 필터를 읽되, 필터가 바뀔 때마다 다시
    * 실행되지는 않게 하려고 ref로 들고 있는다. 그 효과는 **새 이벤트에만** 반응해야 한다.
@@ -443,16 +472,16 @@ export function DefectMap({
         })
         // 이미 보이는 자리면 움직이지 않는다. 보던 위치를 빼앗지 않는 것이 기본이다.
         if (!outside) return
-        centerMapOn(latitude, longitude)
         /*
          * 옮기는 것만으로는 부족하다. 넓게 보고 있었다면 마커가 화면에 들어와도 어느
          * 길인지 알 수 없어서, 알아볼 배율까지 확대한다. 이미 더 깊이 보고 있었다면
          * 그대로 둔다(revealZoom).
          */
-        const focused = revealZoom(map.getZoom(), REVEAL_ZOOM, MAX_MAP_ZOOM)
-        if (focused !== map.getZoom()) {
-          map.setZoom(focused)
-        }
+        focusMapOn(
+          latitude,
+          longitude,
+          revealZoom(map.getZoom(), REVEAL_ZOOM, MAX_MAP_ZOOM),
+        )
       })
       // 못 찾거나 조회가 실패하면 지도를 움직이지 않는다. 알림 줄은 이미 떠 있다.
       .catch(() => {})
@@ -460,7 +489,7 @@ export function DefectMap({
     return () => {
       cancelled = true
     }
-  }, [revealRequest, mapStatus, centerMapOn])
+  }, [revealRequest, mapStatus, focusMapOn])
 
   useEffect(() => {
     if (!naverMapClientId) return

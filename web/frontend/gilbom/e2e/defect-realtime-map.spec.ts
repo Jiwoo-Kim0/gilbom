@@ -1,6 +1,11 @@
 import { expect, test, type Page } from '@playwright/test'
 import { defectAt, fulfillJson, USER_ID } from './support/defectPage'
-import { installFakeMap, readMapCalls, pushSseEvent } from './support/fakeNaverMap'
+import {
+  installFakeMap,
+  readMapCalls,
+  readMapView,
+  pushSseEvent,
+} from './support/fakeNaverMap'
 
 /**
  * 새로 탐지된 결함으로 지도가 옮겨가는 규칙.
@@ -42,6 +47,17 @@ function featureAt(index: number, coordinates: [number, number]) {
 const EXISTING = featureAt(0, pointNorthOf(0))
 const NEW_DEFECT_INDEX = 1
 
+/** 서버 계약 순서는 `minLon,minLat,maxLon,maxLat`다. */
+function inBbox(
+  feature: ReturnType<typeof featureAt>,
+  bbox: string,
+): boolean {
+  const [minLon, minLat, maxLon, maxLat] = bbox.split(',').map(Number)
+  const [longitude, latitude] = feature.geometry.coordinates
+  return longitude >= minLon && longitude <= maxLon
+    && latitude >= minLat && latitude <= maxLat
+}
+
 /**
  * 지도·목록 조회를 막는다.
  *
@@ -76,11 +92,11 @@ async function stubDefectMap(
     if (pathname === '/api/v1/defects/map') {
       const bbox = url.searchParams.get('bbox') ?? ''
       mapQueries.push(bbox)
+      const all = detected ? [EXISTING, newDefect] : [EXISTING]
       return fulfillJson(route, {
         type: 'FeatureCollection',
-        features: detected && bbox === ''
-          ? [EXISTING, newDefect]
-          : [EXISTING],
+        // 실제 서버처럼 bbox로 걸러 준다. 지도가 엉뚱한 자리에 멈추면 마커가 없다.
+        features: bbox === '' ? all : all.filter((feature) => inBbox(feature, bbox)),
       })
     }
     if (pathname === '/api/v1/defects') {
@@ -158,9 +174,30 @@ test.describe('새 결함이 들어왔을 때 지도 이동', () => {
       .poll(async () => (await readMapCalls(page)).center.length)
       .toBeGreaterThan(before.center.length)
 
+    const [longitude, latitude] = newDefect.geometry.coordinates
+    /*
+     * 여기까지가 진짜 요구사항이다. 옮기고 확대하는 것으로는 부족하고, **그 화면에 그
+     * 결함 마커가 실제로 올라와야** 한다. 뷰포트 bbox 재조회가 새 자리에서 돌아야
+     * 마커가 생기므로, 이동이 중간에 끊기면 여기서 잡힌다.
+     */
+    await expect
+      .poll(async () => {
+        const { markers } = await readMapCalls(page)
+        return markers.some((marker) =>
+          Math.abs(marker.lat - latitude) < 1e-6
+          && Math.abs(marker.lng - longitude) < 1e-6)
+      }, { timeout: 5_000 })
+      .toBe(true)
+
+    const view = await readMapView(page)
+    expect(latitude, '결함이 보이는 범위 안에 있어야 한다')
+      .toBeGreaterThan(view.south)
+    expect(latitude).toBeLessThan(view.north)
+    expect(longitude).toBeGreaterThan(view.west)
+    expect(longitude).toBeLessThan(view.east)
+
     const after = await readMapCalls(page)
     const moved = after.center[after.center.length - 1]
-    const [longitude, latitude] = newDefect.geometry.coordinates
     console.log(`밖에 생긴 결함: 지도 중심 → ${moved.lat.toFixed(5)},`
       + ` ${moved.lng.toFixed(5)} (결함 ${latitude.toFixed(5)},`
       + ` ${longitude.toFixed(5)})`)
@@ -170,7 +207,7 @@ test.describe('새 결함이 들어왔을 때 지도 이동', () => {
      * 옮기는 것만으로는 어디에 생겼는지 알 수 없어서, 알아볼 배율(17)까지 확대한다.
      * 확대는 옮긴 **뒤에** 일어나야 한다 — 먼저 확대하면 엉뚱한 자리를 파고든다.
      */
-    expect(after.zoom).toEqual([REVEAL_ZOOM])
+    expect((await readMapView(page)).zoom).toBe(REVEAL_ZOOM)
   })
 
   test('이미 더 깊이 보고 있었다면 배율을 줄이지 않는다', async ({ page }) => {
@@ -195,9 +232,24 @@ test.describe('새 결함이 들어왔을 때 지도 이동', () => {
       .poll(async () => (await readMapCalls(page)).center.length)
       .toBeGreaterThan(before.center.length)
 
-    const after = await readMapCalls(page)
-    console.log(`깊이 보던 중: 배율 호출 ${JSON.stringify(after.zoom)}`)
-    expect(after.zoom, '19에서 17로 물러나면 안 된다').toEqual(before.zoom)
+    /*
+     * 배율은 **결과**로 본다. 이동과 확대를 한 번에 하는 SDK 호출(`morph`)은 같은 값이라도
+     * 배율 인수를 함께 넘기므로, "호출이 없었는가"로 보면 구현에 묶인 시험이 된다.
+     */
+    const view = await readMapView(page)
+    console.log(`깊이 보던 중: 배율 ${view.zoom}`)
+    expect(view.zoom, '19에서 17로 물러나면 안 된다').toBe(19)
+
+    // 옮긴 자리에 마커도 올라와야 한다.
+    const [longitude, latitude] = newDefect.geometry.coordinates
+    await expect
+      .poll(async () => {
+        const { markers } = await readMapCalls(page)
+        return markers.some((marker) =>
+          Math.abs(marker.lat - latitude) < 1e-6
+          && Math.abs(marker.lng - longitude) < 1e-6)
+      }, { timeout: 5_000 })
+      .toBe(true)
   })
 
   test('이미 보이는 자리에 생긴 결함이면 움직이지 않는다', async ({ page }) => {
@@ -229,6 +281,7 @@ test.describe('새 결함이 들어왔을 때 지도 이동', () => {
     console.log(`안에 생긴 결함: 지도 중심 이동 ${after.center.length}회`)
     expect(after.center.length, '보이는 자리면 지도가 움직이지 않는다')
       .toBe(before.center.length)
-    expect(after.zoom, '보이는 자리면 배율도 그대로다').toEqual(before.zoom)
+    expect((await readMapView(page)).zoom, '보이는 자리면 배율도 그대로다')
+      .toBe(START_ZOOM)
   })
 })
