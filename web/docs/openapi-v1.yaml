@@ -2518,11 +2518,11 @@ paths:
     patch:
       tags: [Missions]
       operationId: updatePatrolArea
-      summary: 순찰 구역 이름·경계 변경
+      summary: 순찰 구역 코드·이름·경계 변경
       description: |
-        areaCode는 변경하지 않는다. ARCHIVED 구역과 CREATED·READY·RUNNING·PAUSED
-        Mission이 사용하는 구역은 변경할 수 없다. 경계를 변경할 때는 기존 ACTIVE·DRAFT
-        Route가 모두 새 경계 안에 있어야 한다.
+        ARCHIVED 구역과 CREATED·READY·RUNNING·PAUSED Mission이 사용하는 구역은
+        변경할 수 없다. areaCode는 전체 구역에서 고유해야 한다. 경계를 변경할 때는
+        기존 ACTIVE·DRAFT Route가 모두 새 경계 안에 있어야 한다.
       x-required-permission: MISSION_MANAGE
       security:
         - serverSession: []
@@ -2560,8 +2560,9 @@ paths:
       operationId: changePatrolAreaStatus
       summary: 순찰 구역 상태 변경
       description: |
-        JSON Body로 목표 상태를 받으며 ACTIVE → INACTIVE → ARCHIVED 단방향 전이만
-        허용한다. 현재 상태와 같은 요청은 변경 없이 현재 값을 반환한다.
+        JSON Body로 목표 상태를 받는다. ACTIVE와 INACTIVE는 양방향으로 전환할 수
+        있고 INACTIVE에서 ARCHIVED로 폐기할 수 있다. ARCHIVED는 최종 상태로 다른
+        상태로 전환할 수 없다. 현재 상태와 같은 요청은 변경 없이 현재 값을 반환한다.
         CREATED·READY·RUNNING·PAUSED Mission이 사용하는 구역은 상태를 변경할 수 없다.
         이전·이후 상태는 PATROL_AREA_UPDATED 감사 로그의 beforeValue와 afterValue에
         기록한다.
@@ -5348,6 +5349,11 @@ components:
       minProperties: 1
       additionalProperties: false
       properties:
+        areaCode:
+          type: string
+          minLength: 1
+          maxLength: 50
+          example: AREA-SEOUL-01-UPDATED
         areaName:
           type: string
           minLength: 1

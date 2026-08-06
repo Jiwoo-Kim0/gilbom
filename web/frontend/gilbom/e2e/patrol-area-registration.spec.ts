@@ -79,7 +79,10 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
   let areaCreated = false
   let missionCreated = false
   let routeRequested = false
+  let currentArea: Record<string, unknown> = { ...createdArea }
   let createPayload: Record<string, unknown> | null = null
+  let areaUpdatePayload: Record<string, unknown> | null = null
+  let areaStatusPayload: Record<string, unknown> | null = null
   let missionCreatePayload: Record<string, unknown> | null = null
   const areaCodeAvailabilityRequests: string[] = []
 
@@ -441,9 +444,37 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
       await fulfillJson(route, createdArea, 201)
       return
     }
+    if (
+      pathname === `/api/v1/patrol-areas/${AREA_ID}`
+      && request.method() === 'PATCH'
+    ) {
+      areaUpdatePayload = request.postDataJSON() as Record<string, unknown>
+      expect(request.headers()['x-csrf-token']).toBe('patrol-area-e2e-csrf')
+      currentArea = {
+        ...currentArea,
+        ...areaUpdatePayload,
+        updatedAt: '2026-07-30T10:00:00Z',
+      }
+      await fulfillJson(route, currentArea)
+      return
+    }
+    if (
+      pathname === `/api/v1/patrol-areas/${AREA_ID}/status`
+      && request.method() === 'PATCH'
+    ) {
+      areaStatusPayload = request.postDataJSON() as Record<string, unknown>
+      expect(request.headers()['x-csrf-token']).toBe('patrol-area-e2e-csrf')
+      currentArea = {
+        ...currentArea,
+        ...areaStatusPayload,
+        updatedAt: '2026-07-30T10:01:00Z',
+      }
+      await fulfillJson(route, currentArea)
+      return
+    }
     if (pathname === '/api/v1/patrol-areas') {
       await fulfillJson(route, {
-        areas: areaCreated ? [createdArea] : [],
+        areas: areaCreated ? [currentArea] : [],
       })
       return
     }
@@ -633,8 +664,8 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
   await map.click({ position: { x: 240, y: 230 } })
   await expect(
     editor.getByText('교차 없이 자동 정렬된 Polygon입니다.'),
-  ).toBeVisible()
-  await expect(editor.getByText('4/100개 점')).toBeVisible()
+  ).toHaveCount(0)
+  await expect(editor.getByText('4/100 개의 점')).toBeVisible()
   await expect(projectedOverlay.locator('polygon')).toHaveAttribute(
     'points',
     '140,230 240,230 240,130 140,130',
@@ -714,7 +745,7 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
 
   await expect(
     page.getByRole('status').filter({
-      hasText: '시연 순찰 구역 (DEMO-ZONE-01) 구역을 ACTIVE로 등록했습니다.',
+      hasText: '시연 순찰 구역 (DEMO-ZONE-01) 구역을 활성화 상태로 등록했습니다.',
     }),
   ).toBeVisible()
   expect(createPayload).toEqual({
@@ -860,4 +891,84 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
     plannedDurationSec: 3600,
     scheduledStartAt: null,
   })
+
+  await page.getByRole('link', { name: '순찰 구역 관리' }).click()
+  const areaRowBeforeEdit = page.getByRole('row').filter({
+    hasText: '시연 순찰 구역',
+  })
+  await expect(areaRowBeforeEdit).toContainText('활성화')
+  await areaRowBeforeEdit.getByRole('button', {
+    name: '시연 순찰 구역 수정',
+  }).click()
+
+  const editDialog = page.getByRole('dialog', { name: '순찰 구역 수정' })
+  await expect(editDialog).toBeVisible()
+  await expect(editDialog.locator('#patrol-area-edit-code')).toHaveValue(
+    'DEMO-ZONE-01',
+  )
+  await expect(editDialog.locator('#patrol-area-edit-name')).toHaveValue(
+    '시연 순찰 구역',
+  )
+  await expect(editDialog.locator('#patrol-area-edit-status')).toHaveValue(
+    'ACTIVE',
+  )
+  await expect(editDialog.getByText('4/100 개의 점')).toBeVisible()
+
+  await editDialog.getByRole('button', { name: '경계점 4 삭제' }).click()
+  await expect(editDialog.getByText('3/100 개의 점')).toBeVisible()
+  await editDialog.getByRole('button', { name: '경계점 3 삭제' }).click()
+  await expect(editDialog.getByText('2/100 개의 점')).toBeVisible()
+  await expect(
+    editDialog.getByRole('button', { name: '변경사항 저장' }),
+  ).toBeDisabled()
+  expect(areaUpdatePayload).toBeNull()
+  expect(areaStatusPayload).toBeNull()
+  await editDialog.getByRole('button', { name: '경계 변경 취소' }).click()
+  await expect(editDialog.getByText('4/100 개의 점')).toBeVisible()
+  await editDialog.getByRole('button', { name: '경계점 4 삭제' }).click()
+  await expect(editDialog.getByText('3/100 개의 점')).toBeVisible()
+  await editDialog.locator('#patrol-area-edit-code').fill('DEMO-ZONE-EDITED')
+  await editDialog.locator('#patrol-area-edit-name').fill('수정된 순찰 구역')
+  await editDialog.getByRole('button', { name: '중복 확인' }).click()
+  await expect(editDialog.getByText('사용 가능한 구역 코드입니다.')).toBeVisible()
+  await editDialog.locator('#patrol-area-edit-status').selectOption('INACTIVE')
+  await editDialog.getByRole('button', { name: '변경사항 저장' }).click()
+
+  await expect(editDialog).toBeHidden()
+  expect(areaUpdatePayload).toMatchObject({
+    areaCode: 'DEMO-ZONE-EDITED',
+    areaName: '수정된 순찰 구역',
+    boundary: { type: 'Polygon' },
+  })
+  expect(areaStatusPayload).toEqual({ lifecycleStatus: 'INACTIVE' })
+  const updatedAreaRow = page.getByRole('row').filter({
+    hasText: '수정된 순찰 구역',
+  })
+  await expect(updatedAreaRow).toContainText('DEMO-ZONE-EDITED')
+  await expect(updatedAreaRow.locator('.patrol-area-status')).toHaveText(
+    '비활성화',
+  )
+  await updatedAreaRow.getByRole('button', {
+    name: '수정된 순찰 구역 수정',
+  }).click()
+  await expect(
+    page.getByRole('dialog', { name: '순찰 구역 수정' })
+      .getByRole('button', { name: '구역 폐기' }),
+  ).toBeVisible()
+  const reactivationDialog = page.getByRole('dialog', {
+    name: '순찰 구역 수정',
+  })
+  await expect(
+    reactivationDialog.locator('#patrol-area-edit-status option'),
+  ).toHaveText(['활성화', '비활성화'])
+  await reactivationDialog.locator('#patrol-area-edit-status')
+    .selectOption('ACTIVE')
+  await reactivationDialog.getByRole('button', {
+    name: '변경사항 저장',
+  }).click()
+  await expect(reactivationDialog).toBeHidden()
+  expect(areaStatusPayload).toEqual({ lifecycleStatus: 'ACTIVE' })
+  await expect(updatedAreaRow.locator('.patrol-area-status')).toHaveText(
+    '활성화',
+  )
 })

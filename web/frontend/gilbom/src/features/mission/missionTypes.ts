@@ -22,6 +22,7 @@ export type GeoJsonMultiPolygon = {
 }
 
 export type PatrolAreaBoundary = GeoJsonPolygon | GeoJsonMultiPolygon
+export type PatrolAreaLifecycleStatus = 'ACTIVE' | 'INACTIVE' | 'ARCHIVED'
 
 export type MissionFilters = {
   robotId: string
@@ -146,7 +147,7 @@ export type PatrolArea = {
   areaCode: string
   areaName: string
   boundary: PatrolAreaBoundary
-  lifecycleStatus: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED'
+  lifecycleStatus: PatrolAreaLifecycleStatus
   createdAt: string
   updatedAt: string
 }
@@ -156,6 +157,12 @@ export type PatrolAreaCreateInput = {
   areaName: string
   boundary: PatrolAreaBoundary
   lifecycleStatus: 'ACTIVE' | 'INACTIVE'
+}
+
+export type PatrolAreaUpdateInput = {
+  areaCode?: string
+  areaName?: string
+  boundary?: PatrolAreaBoundary
 }
 
 export type PatrolAreaListResponse = {

@@ -163,6 +163,21 @@
   min-width: 0;
 }
 
+.mission-area-edit-fields {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.mission-area-edit-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 10px;
+  align-items: center;
+}
+
+.mission-area-edit-action-spacer {
+  flex: 1;
+}
+
 .mission-area-code-check .secondary-button {
   min-height: 43px;
 }
@@ -221,11 +236,30 @@
 }
 
 .patrol-area-table {
-  min-width: 720px;
+  min-width: 820px;
+}
+
+.patrol-area-edit-button {
+  display: inline-flex;
+  min-height: 34px;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  align-items: center;
+  justify-content: center;
+  color: var(--brand-strong);
+  background: var(--surface);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .patrol-area-status,
-.patrol-area-mission-eligible {
+.patrol-area-mission-eligible,
+.patrol-area-mission-unavailable {
   display: inline-flex;
   gap: 5px;
   padding: 5px 9px;
@@ -247,15 +281,14 @@
   background: #fef3c7;
 }
 
+.patrol-area-mission-unavailable {
+  color: #9a3412;
+  background: #ffedd5;
+}
+
 .patrol-area-status-archived {
   color: #475569;
   background: #f1f5f9;
-}
-
-.patrol-area-mission-unavailable {
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 700;
 }
 
 .mission-view-only {
@@ -859,6 +892,18 @@
 
   .mission-area-form-fields {
     grid-template-columns: 1fr;
+  }
+
+  .mission-area-edit-actions {
+    flex-wrap: wrap;
+  }
+
+  .mission-area-edit-actions .mission-area-edit-action-spacer {
+    display: none;
+  }
+
+  .mission-area-edit-actions button {
+    flex: 1;
   }
 
   .mission-create-selection-fields {

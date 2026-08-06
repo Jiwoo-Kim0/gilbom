@@ -360,74 +360,74 @@ export function PatrolAreaBoundaryEditor({
       data-testid="patrol-area-boundary-editor"
     >
       <div className="patrol-boundary-editor-heading">
-        <div>
-          <MapPin size={18} aria-hidden="true" />
-          <div>
+        <div className="patrol-boundary-editor-heading-primary">
+          <div className="patrol-boundary-editor-title-row">
+            <MapPin size={18} aria-hidden="true" />
             <strong id="patrol-boundary-editor-title">지도에서 구역 경계 지정</strong>
-            <p>
-              경계점을 3개 이상 아무 순서로 클릭하면 연결 순서를 자동 최적화합니다.
-            </p>
           </div>
+          <span className="patrol-boundary-point-count">
+            {points.length}/{MAX_BOUNDARY_POINTS} 개의 점
+          </span>
         </div>
         <div className="patrol-boundary-editor-heading-tools">
-          <span>{points.length}/{MAX_BOUNDARY_POINTS}개 점</span>
           {actions}
         </div>
       </div>
 
-      {status === 'fallback' ? (
-        <div className="patrol-boundary-fallback" role="alert">
-          <p>
-            지도 SDK를 사용할 수 없어 경계를 지정할 수 없습니다. 잠시 후 다시
-            시도하거나 지도 API 설정을 확인해주세요.
-          </p>
-        </div>
-      ) : (
-        <div className="patrol-boundary-map-wrap">
-          <div
-            className="patrol-boundary-map"
-            ref={mapElementRef}
-            aria-label="순찰 구역 경계 편집 지도"
-            data-testid="patrol-boundary-naver-map"
-          />
-          {status === 'loading' ? (
-            <div className="patrol-boundary-map-loading" role="status">
-              <span className="loading-spinner" aria-hidden="true" />
-              지도 불러오는 중…
-            </div>
+      <div className="patrol-boundary-editor-body">
+        {status === 'fallback' ? (
+          <div className="patrol-boundary-fallback" role="alert">
+            <p>
+              지도 SDK를 사용할 수 없어 경계를 지정할 수 없습니다. 잠시 후 다시
+              시도하거나 지도 API 설정을 확인해주세요.
+            </p>
+          </div>
+        ) : (
+          <div className="patrol-boundary-map-wrap">
+            <div
+              className="patrol-boundary-map"
+              ref={mapElementRef}
+              aria-label="순찰 구역 경계 편집 지도"
+              data-testid="patrol-boundary-naver-map"
+            />
+            {status === 'loading' ? (
+              <div className="patrol-boundary-map-loading" role="status">
+                <span className="loading-spinner" aria-hidden="true" />
+                지도 불러오는 중…
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        <aside className="patrol-boundary-point-panel" aria-label="경계점 목록">
+          {points.length < 3 ? (
+            <p className="patrol-boundary-editor-status" role="status">
+              경계점을 {3 - points.length}개 더 지정해주세요.
+            </p>
           ) : null}
-        </div>
-      )}
 
-      <p className="patrol-boundary-editor-status" role="status">
-        {points.length < 3
-          ? `경계점을 ${3 - points.length}개 더 지정해주세요.`
-          : '교차 없이 자동 정렬된 Polygon입니다.'}
-      </p>
-
-      {points.length > 0 ? (
-        <ol
-          className="patrol-boundary-point-list"
-          aria-label="자동 정렬된 경계점"
-        >
-          {orderedPoints.map(([longitude, latitude], index) => (
-            <li key={`${longitude}-${latitude}-${index}`}>
-              <span>{index + 1}</span>
-              <code>
-                위도 {latitude.toFixed(7)} · 경도 {longitude.toFixed(7)}
-              </code>
-              <button
-                type="button"
-                onClick={() => removePoint([longitude, latitude])}
-                disabled={disabled}
-                aria-label={`경계점 ${index + 1} 삭제`}
-              >
-                <X size={15} aria-hidden="true" />
-              </button>
-            </li>
-          ))}
-        </ol>
-      ) : null}
+          {points.length > 0 ? (
+            <ol
+              className="patrol-boundary-point-list"
+              aria-label="자동 정렬된 경계점"
+            >
+              {orderedPoints.map(([longitude, latitude], index) => (
+                <li key={`${longitude}-${latitude}-${index}`}>
+                  <button
+                    type="button"
+                    onClick={() => removePoint([longitude, latitude])}
+                    disabled={disabled}
+                    aria-label={`경계점 ${index + 1} 삭제`}
+                  >
+                    <span aria-hidden="true">{index + 1}</span>
+                    <X size={15} aria-hidden="true" />
+                  </button>
+                </li>
+              ))}
+            </ol>
+          ) : null}
+        </aside>
+      </div>
     </section>
   )
 }

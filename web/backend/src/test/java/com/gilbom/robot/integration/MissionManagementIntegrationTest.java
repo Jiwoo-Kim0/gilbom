@@ -863,6 +863,17 @@ class MissionManagementIntegrationTest {
                                 .isEqualTo(
                                         ErrorCode.PATROL_AREA_CODE_CONFLICT));
 
+        assertThatThrownBy(() -> patrolAreaManagementService.update(
+                areaId,
+                new PatrolAreaUpdateRequest(areaCode, null, null),
+                OWNER_ID,
+                AuditRequestContext.requestIdOnly(UUID.randomUUID())))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(
+                                        ErrorCode.PATROL_AREA_CODE_CONFLICT));
+
         PatrolAreaCreateRequest selfIntersecting =
                 new PatrolAreaCreateRequest(
                         "AREA-INVALID-"
@@ -938,9 +949,12 @@ class MissionManagementIntegrationTest {
     void updatesPatrolAreaGeometryAndWritesBeforeAfterAudit()
             throws Exception {
         UUID requestId = UUID.randomUUID();
+        String updatedAreaCode = "AREA-UPDATED-"
+                + areaId.toString().substring(0, 8);
         PatrolAreaResponse updated = patrolAreaManagementService.update(
                 areaId,
                 new PatrolAreaUpdateRequest(
+                        updatedAreaCode,
                         " 변경된 통합 테스트 구역 ",
                         objectMapper.readTree("""
                                 {
@@ -959,6 +973,7 @@ class MissionManagementIntegrationTest {
                 OWNER_ID,
                 AuditRequestContext.requestIdOnly(requestId));
 
+        assertThat(updated.areaCode()).isEqualTo(updatedAreaCode);
         assertThat(updated.areaName())
                 .isEqualTo("변경된 통합 테스트 구역");
         assertThat(updated.lifecycleStatus()).isEqualTo("ACTIVE");
@@ -987,17 +1002,19 @@ class MissionManagementIntegrationTest {
                   AND before_value ->> 'areaName' = 'Mission Area'
                   AND after_value ->> 'areaName' =
                       '변경된 통합 테스트 구역'
+                  AND after_value ->> 'areaCode' = ?
                   AND before_value ->> 'lifecycleStatus' = 'ACTIVE'
                   AND after_value ->> 'lifecycleStatus' = 'ACTIVE'
                   AND result = 'SUCCESS'
                 """,
                 Integer.class,
                 requestId,
-                areaId)).isOne();
+                areaId,
+                updatedAreaCode)).isOne();
     }
 
     @Test
-    void changesPatrolAreaStateOneWayAndRemembersPreviousState() {
+    void togglesPatrolAreaActivationAndKeepsArchiveFinal() {
         UUID inactiveRequestId = UUID.randomUUID();
         PatrolAreaResponse inactive =
                 patrolAreaManagementService.changeStatus(
@@ -1007,6 +1024,22 @@ class MissionManagementIntegrationTest {
                         OWNER_ID,
                         AuditRequestContext.requestIdOnly(
                                 inactiveRequestId));
+        PatrolAreaResponse reactivated =
+                patrolAreaManagementService.changeStatus(
+                        areaId,
+                        new PatrolAreaStatusChangeRequest(
+                                PatrolAreaLifecycleStatus.ACTIVE),
+                        OWNER_ID,
+                        AuditRequestContext.requestIdOnly(
+                                UUID.randomUUID()));
+        PatrolAreaResponse inactiveAgain =
+                patrolAreaManagementService.changeStatus(
+                        areaId,
+                        new PatrolAreaStatusChangeRequest(
+                                PatrolAreaLifecycleStatus.INACTIVE),
+                        OWNER_ID,
+                        AuditRequestContext.requestIdOnly(
+                                UUID.randomUUID()));
         PatrolAreaResponse archived =
                 patrolAreaManagementService.changeStatus(
                         areaId,
@@ -1017,6 +1050,8 @@ class MissionManagementIntegrationTest {
                                 UUID.randomUUID()));
 
         assertThat(inactive.lifecycleStatus()).isEqualTo("INACTIVE");
+        assertThat(reactivated.lifecycleStatus()).isEqualTo("ACTIVE");
+        assertThat(inactiveAgain.lifecycleStatus()).isEqualTo("INACTIVE");
         assertThat(archived.lifecycleStatus()).isEqualTo("ARCHIVED");
         assertThat(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*)
@@ -1059,6 +1094,7 @@ class MissionManagementIntegrationTest {
         assertThatThrownBy(() -> patrolAreaManagementService.update(
                 areaId,
                 new PatrolAreaUpdateRequest(
+                        null,
                         "사용 중 변경 금지",
                         null),
                 OWNER_ID,
@@ -1091,6 +1127,7 @@ class MissionManagementIntegrationTest {
             throws Exception {
         PatrolAreaUpdateRequest invalid =
                 new PatrolAreaUpdateRequest(
+                        null,
                         null,
                         objectMapper.readTree("""
                                 {
@@ -1125,6 +1162,7 @@ class MissionManagementIntegrationTest {
                 routeId);
         PatrolAreaUpdateRequest excludesRoute =
                 new PatrolAreaUpdateRequest(
+                        null,
                         null,
                         objectMapper.readTree("""
                                 {
@@ -1179,6 +1217,7 @@ class MissionManagementIntegrationTest {
             assertThatThrownBy(() -> patrolAreaManagementService.update(
                     areaId,
                     new PatrolAreaUpdateRequest(
+                            null,
                             "Rollback 대상 이름",
                             null),
                     OWNER_ID,

@@ -14,7 +14,9 @@ import type {
   PatrolArea,
   PatrolAreaCodeAvailability,
   PatrolAreaCreateInput,
+  PatrolAreaLifecycleStatus,
   PatrolAreaListResponse,
+  PatrolAreaUpdateInput,
   PatrolRouteListResponse,
   RobotListResponse,
 } from './missionTypes.ts'
@@ -123,6 +125,32 @@ export function createPatrolArea(
     method: 'POST',
     body: jsonBody(input),
   })
+}
+
+export function updatePatrolArea(
+  patrolAreaId: string,
+  input: PatrolAreaUpdateInput,
+): Promise<PatrolArea> {
+  return apiJson(
+    `/api/v1/patrol-areas/${encodeURIComponent(patrolAreaId)}`,
+    {
+      method: 'PATCH',
+      body: jsonBody(input),
+    },
+  )
+}
+
+export function changePatrolAreaStatus(
+  patrolAreaId: string,
+  lifecycleStatus: PatrolAreaLifecycleStatus,
+): Promise<PatrolArea> {
+  return apiJson(
+    `/api/v1/patrol-areas/${encodeURIComponent(patrolAreaId)}/status`,
+    {
+      method: 'PATCH',
+      body: jsonBody({ lifecycleStatus }),
+    },
+  )
 }
 
 export function getPatrolRoutes(
