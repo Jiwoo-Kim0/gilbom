@@ -8,6 +8,7 @@ import type {
   MissionCreateInput,
   MissionFilters,
   MissionListResponse,
+  MissionDefectMapResponse,
   MissionMapResponse,
   MissionUpdateInput,
   MissionStatusHistoryResponse,
@@ -76,6 +77,14 @@ export function getMissionMap(
 ): Promise<MissionMapResponse> {
   return apiJson(
     `${MISSION_BASE_PATH}/${encodeURIComponent(missionId)}/map?limit=5000`,
+  )
+}
+
+export function getMissionDefects(
+  missionId: string,
+): Promise<MissionDefectMapResponse> {
+  return apiJson(
+    `${MISSION_BASE_PATH}/${encodeURIComponent(missionId)}/defects`,
   )
 }
 

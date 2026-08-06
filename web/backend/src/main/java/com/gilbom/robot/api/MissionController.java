@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.gilbom.audit.AuditRequestContext;
 import com.gilbom.auth.AuthenticatedUserIdResolver;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionCreateRequest;
+import com.gilbom.robot.data.api.response.MissionDtos.MissionDefectMapResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionListScope;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionListResponse;
 import com.gilbom.robot.data.api.response.MissionDtos.MissionMapResponse;
@@ -179,6 +180,17 @@ public class MissionController {
                 userIdResolver.require(authentication),
                 missionId,
                 limit);
+    }
+
+    @GetMapping("/{missionId}/defects")
+    @PreAuthorize("hasAuthority('MISSION_VIEW') and hasAuthority('DEFECT_STATUS_VIEW')")
+    public MissionDefectMapResponse findDefects(
+            @PathVariable UUID missionId,
+            Authentication authentication
+    ) {
+        return queryService.findDefects(
+                userIdResolver.require(authentication),
+                missionId);
     }
 
     @GetMapping("/{missionId}/history")

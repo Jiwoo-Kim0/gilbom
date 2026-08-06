@@ -17,6 +17,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -38,6 +39,7 @@ import com.gilbom.robot.event.RobotEventIngestionResult;
 import com.gilbom.robot.event.RobotEventIngestionService;
 import com.gilbom.robot.mission.MissionEventIngestionService;
 import com.gilbom.robot.mission.MissionProgressService;
+import com.gilbom.robot.mission.MissionQueryService;
 import com.gilbom.robot.mqtt.replay.MqttReplayProtectionService;
 import com.gilbom.robot.telemetry.TelemetryIngestionService;
 
@@ -77,6 +79,7 @@ class RobotEventMissionDefectIntegrationTest {
     private static MissionEventIngestionService missionIngestionService;
     private static IncidentEventIngestionService incidentIngestionService;
     private static TelemetryIngestionService telemetryIngestionService;
+    private static MissionQueryService missionQueryService;
 
     @BeforeAll
     static void migrate() {
@@ -118,6 +121,9 @@ class RobotEventMissionDefectIntegrationTest {
                 noOpPublisher,
                 new MissionProgressService(jdbcTemplate),
                 replayProtectionService);
+        missionQueryService = new MissionQueryService(
+                new NamedParameterJdbcTemplate(jdbcTemplate),
+                objectMapper);
     }
 
     @BeforeEach
@@ -674,6 +680,48 @@ class RobotEventMissionDefectIntegrationTest {
                 """,
                 String.class,
                 first.defectId())).isEqualTo("DAMAGE_RATIO_V1");
+    }
+
+    @Test
+    void findsDefectThroughItsMissionEventWithoutChangingDefectState() {
+        jdbcTemplate.update("""
+                INSERT INTO auth.user_robot_assignment (
+                    user_robot_assignment_id,
+                    user_id,
+                    robot_id,
+                    assignment_type,
+                    reason,
+                    assigned_by
+                ) VALUES (?, ?, ?, 'VIEWER', 'mission defect query test', ?)
+                """,
+                UUID.fromString(
+                        "23000000-0000-4000-8000-000000000304"),
+                ADMIN_ID,
+                ROBOT_ID,
+                ADMIN_ID);
+        IncidentIngestionResult incident = incidentIngestionService.ingest(
+                incidentEvent(
+                        UUID.fromString(
+                                "23000000-0000-4000-8000-000000000303"),
+                        1,
+                        127.027600,
+                        37.497900,
+                        0.91),
+                "{\"event_type\":\"BRAILLE_BLOCK_INCIDENT_DETECTED\"}",
+                BASE_TIME.plusSeconds(2));
+
+        var result = missionQueryService.findDefects(ADMIN_ID, MISSION_ID);
+
+        assertThat(result.missionId()).isEqualTo(MISSION_ID);
+        assertThat(result.defects()).singleElement().satisfies(defect -> {
+            assertThat(defect.defectId()).isEqualTo(incident.defectId());
+            assertThat(defect.longitude()).isEqualTo(127.027600);
+            assertThat(defect.latitude()).isEqualTo(37.497900);
+            assertThat(defect.latestConfidence())
+                    .isEqualByComparingTo("0.910");
+        });
+        assertThat(count("defect.defect")).isOne();
+        assertThat(count("defect.defect_observation")).isOne();
     }
 
     @Test

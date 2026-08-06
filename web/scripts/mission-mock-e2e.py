@@ -301,7 +301,9 @@ def register_and_authenticate(
             TRUE,
             {sql_literal(user_id)}::uuid
         FROM auth.role
-        WHERE role_code = 'MANAGER'
+        -- MQTT Credential 발급은 ROBOT_REGISTER가 필요한 전역 관리 작업이다.
+        -- 전체 E2E 계정은 제품 권한 계약과 동일하게 ADMIN 역할로 실행한다.
+        WHERE role_code = 'ADMIN'
         ON CONFLICT (user_id, role_id) DO UPDATE
         SET is_primary = TRUE,
             is_active = TRUE,
@@ -505,6 +507,14 @@ def start_mock_robot(
             str(CA_CERTIFICATE),
             "--telemetry-interval",
             "0.5",
+            "--position-step-m",
+            "1.5",
+            "--position-update-interval",
+            "0.5",
+            "--normal-detection-step",
+            "1",
+            "--incident-event-interval",
+            "1.5",
             "--mission-auto-complete-sec",
             "12",
             "--latitude",
@@ -608,12 +618,14 @@ def verify_database(
                     {sql_literal(robot_id)}::uuid
                   AND robot_command.command_status = 'COMPLETED'
             )
+            || '|' || COALESCE(result_incident_count::TEXT, '')
+            || '|' || COALESCE(result_normal_detection_count::TEXT, '')
         FROM robot.mission mission
         WHERE mission_id = {sql_literal(mission_id)}::uuid;
         """,
     )
     parts = result.split("|")
-    ensure(len(parts) == 6, "database_evidence_shape")
+    ensure(len(parts) == 8, "database_evidence_shape")
     ensure(parts[:4] == [
         "COMPLETED",
         "100.00",
@@ -622,6 +634,30 @@ def verify_database(
     ], "mission_completion_evidence")
     ensure(int(parts[4]) > 0, "mission_trajectory_evidence")
     ensure(parts[5] == "3", "command_completion_evidence")
+    ensure(int(parts[6]) > 0, "mission_incident_count_evidence")
+    ensure(int(parts[7]) > 0, "mission_normal_detection_count_evidence")
+
+    defect_types = psql(
+        db_container,
+        database,
+        f"""
+        SELECT COALESCE(
+            STRING_AGG(DISTINCT defect.defect_type, ','),
+            ''
+        )
+        FROM defect.defect defect
+        JOIN defect.defect_observation observation
+          ON observation.defect_id = defect.defect_id
+        JOIN telemetry.robot_event event
+          ON event.event_id = observation.event_id
+         AND event.robot_id = observation.robot_id
+        WHERE event.mission_id = {sql_literal(mission_id)}::uuid;
+        """,
+    )
+    ensure(
+        set(defect_types.split(",")) == {"DAMAGED", "MISSING"},
+        "mission_defect_types_evidence",
+    )
 
 
 def main() -> int:
@@ -730,7 +766,8 @@ def main() -> int:
         print(
             "[mission-mock-e2e] PASS: CREATED -> RUNNING -> PAUSED -> "
             "RUNNING -> COMPLETED, progress 100, history 5, trajectory, "
-            "and three completed commands"
+            "DAMAGED/MISSING defects, detection counts, and three completed "
+            "commands"
         )
         return 0
     except (
