@@ -29,6 +29,7 @@ type CommandExecution = {
   expectedStatus: 'COMPLETED' | 'FAILED' | 'REJECTED' | 'EXPIRED'
   expectedStatusLabel: string
   reason?: string
+  immediate?: boolean
   verifyIdempotentReplay?: boolean
 }
 
@@ -41,24 +42,28 @@ async function executeCommand(
     exact: true,
   })
   await expect(commandButton).toBeEnabled({ timeout: 15_000 })
+  const responsePromise = page.waitForResponse((response) => (
+    response.request().method() === 'POST'
+    && response.url().endsWith(`/api/v1/robots/${robotId}/commands`)
+  ))
   await commandButton.click()
 
   const confirmDialog = page.getByRole('dialog', {
     name: `${execution.label} 확인`,
   })
-  await expect(confirmDialog).toBeVisible()
-  if (execution.reason !== undefined) {
-    await confirmDialog.getByLabel('명령 사유').fill(execution.reason)
+  if (execution.immediate === true) {
+    await expect(confirmDialog).toHaveCount(0)
+  } else {
+    await expect(confirmDialog).toBeVisible()
+    if (execution.reason !== undefined) {
+      await confirmDialog.getByLabel('명령 사유').fill(execution.reason)
+    }
+    await confirmDialog.getByRole('button', {
+      name: `${execution.label} 실행`,
+      exact: true,
+    }).click()
   }
 
-  const responsePromise = page.waitForResponse((response) => (
-    response.request().method() === 'POST'
-    && response.url().endsWith(`/api/v1/robots/${robotId}/commands`)
-  ))
-  await confirmDialog.getByRole('button', {
-    name: `${execution.label} 실행`,
-    exact: true,
-  }).click()
   const response = await responsePromise
   expect(response.status()).toBe(201)
   const command = await response.json() as {
@@ -94,13 +99,20 @@ async function executeCommand(
     expect(replay.publishAttemptCount).toBe(1)
   }
 
-  await expect(
-    confirmDialog.locator('.command-created-result'),
-  ).toContainText(command.commandId)
-  await confirmDialog.getByRole('button', {
-    name: '닫기',
-    exact: true,
-  }).click()
+  if (execution.immediate === true) {
+    await expect(page.getByText(
+      `${execution.label} 명령을 즉시 발행했습니다.`,
+      { exact: true },
+    )).toBeVisible()
+  } else {
+    await expect(
+      confirmDialog.locator('.command-created-result'),
+    ).toContainText(command.commandId)
+    await confirmDialog.getByRole('button', {
+      name: '닫기',
+      exact: true,
+    }).click()
+  }
 
   const terminalRow = page.locator(
     `[data-command-id="${command.commandId}"]`
@@ -196,7 +208,7 @@ test('실패·거절·만료·중복·늦은 Result를 구분한다', async ({
   const failedCommandId = await executeCommand(page, {
     commandType: 'PAUSE_MISSION',
     label: '일시정지',
-    reason: 'E2E 강제 실패',
+    immediate: true,
     expectedStatus: 'FAILED',
     expectedStatusLabel: '실행 실패',
     verifyIdempotentReplay: true,
@@ -204,7 +216,7 @@ test('실패·거절·만료·중복·늦은 Result를 구분한다', async ({
   const rejectedCommandId = await executeCommand(page, {
     commandType: 'EMERGENCY_STOP',
     label: '긴급정지',
-    reason: 'E2E 안전 조건 거절',
+    immediate: true,
     expectedStatus: 'REJECTED',
     expectedStatusLabel: '실행 거절',
   })

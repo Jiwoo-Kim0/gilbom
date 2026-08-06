@@ -651,6 +651,20 @@
   font-weight: 700;
 }
 
+.command-immediate-feedback {
+  margin: 0;
+}
+
+.command-immediate-feedback.success {
+  padding: 12px 14px;
+  border: 1px solid #b9dfc5;
+  border-radius: 10px;
+  color: #1f6b38;
+  background: #effaf2;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .command-button-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

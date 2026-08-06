@@ -56,6 +56,10 @@ import './command.css'
 
 const PAGE_SIZE = 20
 const MISSION_PAGE_SIZE = 100
+const IMMEDIATE_COMMAND_REASONS: Partial<Record<CommandType, string>> = {
+  PAUSE_MISSION: '운영자 즉시 일시정지',
+  EMERGENCY_STOP: '운영자 즉시 긴급정지',
+}
 
 const commandIcons = {
   START_MISSION: Play,
@@ -149,6 +153,12 @@ export function CommandControlPage({
   const [createdCommand, setCreatedCommand] = useState<CommandResponse | null>(
     null,
   )
+  const [immediateCommandError, setImmediateCommandError] = useState<
+    string | null
+  >(null)
+  const [immediateCommandNotice, setImmediateCommandNotice] = useState<
+    string | null
+  >(null)
   const submitInFlightRef = useRef(false)
   const attemptRef = useRef<CommandCreateAttempt | null>(null)
   const canExecute = user?.permissions.includes(ROBOT_COMMAND_EXECUTE) ?? false
@@ -254,6 +264,39 @@ export function CommandControlPage({
     setSelectedCommand(definition.commandType)
     setSubmitError(null)
     setCreatedCommand(null)
+    setImmediateCommandError(null)
+    setImmediateCommandNotice(null)
+  }
+
+  function issueImmediateCommand(definition: CommandDefinition) {
+    const reason = IMMEDIATE_COMMAND_REASONS[definition.commandType]
+    if (reason === undefined) {
+      openConfirmModal(definition)
+      return
+    }
+
+    const availability = getCommandAvailability(
+      definition.commandType,
+      {
+        connectivityStatus: robot.connectivityStatus,
+        operationalStatus: robot.operationalStatus,
+        robotMode: robot.robotMode,
+        missionStatus: effectiveMissionStatus,
+        hasMissionTarget: currentMission !== null,
+        pendingCommandTypes,
+      },
+    )
+    if (!availability.enabled || !canExecute) {
+      return
+    }
+
+    attemptRef.current?.reset()
+    setSelectedCommand(null)
+    setSubmitError(null)
+    setCreatedCommand(null)
+    setImmediateCommandError(null)
+    setImmediateCommandNotice(null)
+    void submitCommand(definition.commandType, reason, true)
   }
 
   const closeConfirmModal = useCallback(() => {
@@ -266,10 +309,13 @@ export function CommandControlPage({
     setCreatedCommand(null)
   }, [])
 
-  async function submitCommand(reason: string) {
+  async function submitCommand(
+    commandType: CommandType,
+    reason: string,
+    immediate = false,
+  ) {
     if (
-      selectedCommand === null
-      || submitInFlightRef.current
+      submitInFlightRef.current
       || attemptRef.current === null
     ) {
       return
@@ -278,28 +324,50 @@ export function CommandControlPage({
     let input
     try {
       input = buildCommandRequest(
-        selectedCommand,
+        commandType,
         currentMission,
         reason,
       )
     } catch (nextError) {
-      setSubmitError(getApiErrorMessage(nextError))
+      const message = getApiErrorMessage(nextError)
+      if (immediate) {
+        setImmediateCommandError(message)
+      } else {
+        setSubmitError(message)
+      }
       return
     }
 
     submitInFlightRef.current = true
     setSubmitting(true)
-    setSubmitError(null)
+    if (immediate) {
+      setImmediateCommandError(null)
+      setImmediateCommandNotice(null)
+    } else {
+      setSubmitError(null)
+    }
     try {
       const command = await createRobotCommand(
         robot.robotId,
         input,
         attemptRef.current,
       )
-      setCreatedCommand(command)
+      if (immediate) {
+        const label = COMMAND_DEFINITIONS.find((definition) => (
+          definition.commandType === commandType
+        ))?.label ?? commandType
+        setImmediateCommandNotice(`${label} 명령을 즉시 발행했습니다.`)
+      } else {
+        setCreatedCommand(command)
+      }
       setCommands((current) => upsertCreatedCommand(current, command))
     } catch (nextError) {
-      setSubmitError(commandLoadErrorMessage(nextError))
+      const message = commandLoadErrorMessage(nextError)
+      if (immediate) {
+        setImmediateCommandError(message)
+      } else {
+        setSubmitError(message)
+      }
     } finally {
       submitInFlightRef.current = false
       setSubmitting(false)
@@ -360,6 +428,19 @@ export function CommandControlPage({
           Mission 정보를 불러오지 못했습니다. {getApiErrorMessage(missionError)}
         </div>
       ) : null}
+      {immediateCommandError !== null ? (
+        <div className="page-alert command-immediate-feedback" role="alert">
+          {immediateCommandError}
+        </div>
+      ) : null}
+      {immediateCommandNotice !== null ? (
+        <div
+          className="command-immediate-feedback success"
+          role="status"
+        >
+          {immediateCommandNotice}
+        </div>
+      ) : null}
 
       <article className="content-card command-controls-card">
         <div className="command-controls-heading">
@@ -409,7 +490,7 @@ export function CommandControlPage({
                     type="button"
                     aria-describedby={helpId}
                     disabled={!availability.enabled || submitting}
-                    onClick={() => openConfirmModal(definition)}
+                    onClick={() => issueImmediateCommand(definition)}
                   >
                     <Icon size={18} aria-hidden="true" />
                     {definition.label}
@@ -476,7 +557,10 @@ export function CommandControlPage({
           submitError={submitError}
           createdCommand={createdCommand}
           onClose={closeConfirmModal}
-          onConfirm={(reason) => void submitCommand(reason)}
+          onConfirm={(reason) => void submitCommand(
+            selectedDefinition.commandType,
+            reason,
+          )}
         />
       ) : null}
     </section>

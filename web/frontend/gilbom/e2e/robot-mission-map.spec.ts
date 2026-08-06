@@ -12,10 +12,14 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
   })
 }
 
-test('로봇 상세의 현재 임무 지도를 명령 관리 위에 표시한다', async ({
+test('로봇 상세의 현재 임무 지도와 즉시 정지 제어를 표시한다', async ({
   page,
 }) => {
   let mapRequestCount = 0
+  const commandRequests: Array<{
+    commandType: string
+    parameters: Record<string, unknown>
+  }> = []
 
   await page.addInitScript(() => {
     class FakeEventSource {
@@ -64,6 +68,14 @@ test('로봇 상세의 현재 임무 지도를 명령 관리 위에 표시한다
       })
       return
     }
+    if (pathname === '/api/v1/auth/csrf-token') {
+      await fulfillJson(route, {
+        headerName: 'X-CSRF-TOKEN',
+        parameterName: '_csrf',
+        token: 'robot-command-e2e-csrf',
+      })
+      return
+    }
     if (pathname === `/api/v1/robots/${ROBOT_ID}`) {
       await fulfillJson(route, {
         robotId: ROBOT_ID,
@@ -102,6 +114,39 @@ test('로봇 상세의 현재 임무 지도를 명령 관리 위에 표시한다
       return
     }
     if (pathname === `/api/v1/robots/${ROBOT_ID}/commands`) {
+      if (route.request().method() === 'POST') {
+        const request = route.request().postDataJSON() as {
+          commandType: string
+          parameters: Record<string, unknown>
+        }
+        commandRequests.push(request)
+        const now = '2026-08-06T01:16:00Z'
+        await fulfillJson(route, {
+          commandId: `83000000-0000-4000-8000-00000000010${commandRequests.length}`,
+          robotId: ROBOT_ID,
+          mqttId: 'robot-map-control-e2e',
+          commandType: request.commandType,
+          commandStatus: 'CREATED',
+          parameters: {
+            missionId: null,
+            zoneId: null,
+            reason: request.parameters.reason,
+          },
+          requestedByType: 'ADMIN',
+          requestedByUserId: '83000000-0000-4000-8000-000000000004',
+          requestedByUserCode: 'robot-map-e2e-admin',
+          issuedAt: now,
+          expiresAt: '2026-08-06T01:17:00Z',
+          sentAt: null,
+          acceptedAt: null,
+          completedAt: null,
+          publishAttemptCount: 0,
+          lastErrorCode: null,
+          createdAt: now,
+          updatedAt: now,
+        }, 201)
+        return
+      }
       await fulfillJson(route, {
         content: [],
         page: 0,
@@ -251,4 +296,38 @@ test('로봇 상세의 현재 임무 지도를 명령 관리 위에 표시한다
       & Node.DOCUMENT_POSITION_FOLLOWING,
     )
   })).toBe(true)
+
+  for (const expected of [
+    {
+      commandType: 'PAUSE_MISSION',
+      label: '일시정지',
+      reason: '운영자 즉시 일시정지',
+    },
+    {
+      commandType: 'EMERGENCY_STOP',
+      label: '긴급정지',
+      reason: '운영자 즉시 긴급정지',
+    },
+  ]) {
+    const responsePromise = page.waitForResponse((response) => (
+      response.request().method() === 'POST'
+      && response.url().endsWith(`/api/v1/robots/${ROBOT_ID}/commands`)
+    ))
+    await page.getByRole('button', {
+      name: expected.label,
+      exact: true,
+    }).click()
+    expect((await responsePromise).status()).toBe(201)
+    await expect(page.getByRole('dialog', {
+      name: `${expected.label} 확인`,
+    })).toHaveCount(0)
+    await expect(page.getByText(
+      `${expected.label} 명령을 즉시 발행했습니다.`,
+      { exact: true },
+    )).toBeVisible()
+    expect(commandRequests.at(-1)).toEqual({
+      commandType: expected.commandType,
+      parameters: { reason: expected.reason },
+    })
+  }
 })
