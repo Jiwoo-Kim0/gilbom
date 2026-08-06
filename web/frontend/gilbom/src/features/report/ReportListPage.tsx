@@ -1,6 +1,7 @@
 import {
   ChevronLeft,
   ChevronRight,
+  Info,
   Search,
 } from 'lucide-react'
 import {
@@ -147,15 +148,7 @@ export function ReportListPage() {
   }
 
   return (
-    <section className="page-stack" aria-labelledby="reports-page-title">
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">REPORTS</p>
-          <h2 id="reports-page-title">운영 보고서</h2>
-          <p>승인 가능한 불변 버전으로 운영 현황과 결함 조치를 관리합니다.</p>
-        </div>
-      </div>
-
+    <section className="page-stack" aria-label="보고서 관리">
       <form className="content-card report-filter-grid" onSubmit={handleSearch}>
         <label className="admin-form-field report-search-field">
           제목·보고서 코드
@@ -216,14 +209,23 @@ export function ReportListPage() {
             ))}
           </select>
         </label>
-        <fieldset
-          className="report-period-filter"
-          aria-describedby="report-period-help"
-        >
+        <fieldset className="report-period-filter">
           <legend>
             <span>기간 검색</span>
-            <span id="report-period-help" className="report-contract-note">
-              선택한 기간과 하루라도 겹치는 보고서를 조회합니다.
+            <span
+              className="report-period-info"
+              tabIndex={0}
+              aria-label="기간 검색 안내"
+              aria-describedby="report-period-help"
+            >
+              <Info size={12} strokeWidth={2.4} aria-hidden="true" />
+              <span
+                id="report-period-help"
+                className="report-period-tooltip"
+                role="tooltip"
+              >
+                선택한 기간과 하루라도 겹치는 보고서를 조회합니다.
+              </span>
             </span>
           </legend>
           <input

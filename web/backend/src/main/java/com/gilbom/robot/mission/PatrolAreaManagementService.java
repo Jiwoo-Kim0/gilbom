@@ -195,6 +195,10 @@ public class PatrolAreaManagementService {
 
         List<String> assignments = new ArrayList<>();
         List<Object> parameters = new ArrayList<>();
+        if (request.areaCode() != null) {
+            assignments.add("area_code = ?");
+            parameters.add(request.areaCode());
+        }
         if (request.areaName() != null) {
             assignments.add("area_name = ?");
             parameters.add(request.areaName());
@@ -209,14 +213,20 @@ public class PatrolAreaManagementService {
         assignments.add("updated_at = NOW()");
         parameters.add(patrolAreaId);
 
-        jdbcTemplate.update("""
-                UPDATE robot.patrol_area
-                SET
-                """ + String.join(",\n", assignments) + """
+        try {
+            jdbcTemplate.update("""
+                    UPDATE robot.patrol_area
+                    SET
+                    """ + String.join(",\n", assignments) + """
 
-                WHERE patrol_area_id = ?
-                """,
-                parameters.toArray());
+                    WHERE patrol_area_id = ?
+                    """,
+                    parameters.toArray());
+        } catch (DuplicateKeyException exception) {
+            throw new BusinessException(
+                    ErrorCode.PATROL_AREA_CODE_CONFLICT,
+                    exception);
+        }
         if (request.boundary() != null) {
             updateAutonomousDefaultRouteGeometry(patrolAreaId);
         }
@@ -403,10 +413,11 @@ public class PatrolAreaManagementService {
             PatrolAreaLifecycleStatus current,
             PatrolAreaLifecycleStatus target
     ) {
-        return current == PatrolAreaLifecycleStatus.ACTIVE
-                && target == PatrolAreaLifecycleStatus.INACTIVE
-                || current == PatrolAreaLifecycleStatus.INACTIVE
-                && target == PatrolAreaLifecycleStatus.ARCHIVED;
+        return (current == PatrolAreaLifecycleStatus.ACTIVE
+                && target == PatrolAreaLifecycleStatus.INACTIVE)
+                || (current == PatrolAreaLifecycleStatus.INACTIVE
+                && (target == PatrolAreaLifecycleStatus.ACTIVE
+                || target == PatrolAreaLifecycleStatus.ARCHIVED));
     }
 
     private void appendUpdateAudit(

@@ -720,29 +720,7 @@ export function MissionManagePage() {
   }
 
   return (
-    <section className="page-stack" aria-labelledby="mission-page-title">
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">PATROL MISSION</p>
-          <h2 id="mission-page-title">순찰 임무 관리</h2>
-          <p>순찰할 로봇에게 임무를 부여합니다.</p>
-        </div>
-        <div className="mission-page-actions">
-
-          {canManage ? (
-            <button
-              ref={createTriggerRef}
-              className="primary-button button-with-icon"
-              type="button"
-              onClick={openCreateModal}
-            >
-              <Plus size={17} aria-hidden="true" />
-              새 임무
-            </button>
-          ) : null}
-        </div>
-      </div>
-
+    <section className="page-stack" aria-label="순찰 임무 관리">
       <div className="summary-grid" aria-label="현재 임무 현황">
         <article className="summary-card">
           <span>조회된 전체 임무</span>
@@ -1054,7 +1032,20 @@ export function MissionManagePage() {
               <h3>임무 목록</h3>
               <p>최근 생성된 임무부터 표시합니다.</p>
             </div>
-            <span className="status-badge">{missions?.totalElements ?? 0}건</span>
+            <div className="table-heading-actions">
+              <span className="status-badge">{missions?.totalElements ?? 0}건</span>
+              {canManage ? (
+                <button
+                  ref={createTriggerRef}
+                  className="primary-button button-with-icon"
+                  type="button"
+                  onClick={openCreateModal}
+                >
+                  <Plus size={17} aria-hidden="true" />
+                  새 임무
+                </button>
+              ) : null}
+            </div>
           </div>
 
           {listLoading && missions === null ? (

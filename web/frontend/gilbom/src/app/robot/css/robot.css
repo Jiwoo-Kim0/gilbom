@@ -182,6 +182,7 @@
      "점 라벨"이 한 덩어리로 읽힌다. */
   gap: 20px;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 /*
@@ -198,6 +199,10 @@
   white-space: nowrap;
 }
 
+.robot-legend-item-warning {
+  margin-left: auto;
+}
+
 .robot-status-dot {
   display: inline-block;
   width: 10px;
@@ -206,16 +211,16 @@
   background: var(--text-muted);
 }
 
+.robot-legend-item-total .robot-status-dot {
+  background: var(--robot-total);
+}
+
 .robot-legend-item-online .robot-status-dot {
   background: var(--robot-online);
 }
 
 .robot-legend-item-warning .robot-status-dot {
   background: var(--robot-warning);
-}
-
-.robot-legend-item-charging .robot-status-dot {
-  background: var(--robot-charging);
 }
 
 .robot-legend-item-offline .robot-status-dot {
@@ -240,53 +245,6 @@
   width: 100%;
   height: 100%;
   min-height: 420px;
-}
-
-.robot-map-overlay {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  z-index: 1;
-  display: grid;
-  min-width: 170px;
-  gap: 8px;
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(6px);
-  box-shadow: var(--shadow);
-}
-
-.robot-map-overlay-live {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.robot-map-overlay-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--nb-gold);
-}
-
-.robot-map-overlay-stat {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-  color: var(--text-muted);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.robot-map-overlay-stat strong {
-  color: var(--text);
-  font-size: 15px;
 }
 
 .robot-map-loading {
@@ -333,10 +291,6 @@
   background: var(--robot-warning);
 }
 
-.robot-map-marker-charging .robot-map-marker-status {
-  background: var(--robot-charging);
-}
-
 .robot-map-marker-offline .robot-map-marker-status {
   background: var(--text-muted);
 }
@@ -375,6 +329,12 @@
   gap: 12px;
   align-items: center;
   justify-content: space-between;
+}
+
+.robot-fleet-heading-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
 }
 
 .robot-fleet-refreshing {
@@ -453,6 +413,13 @@
   letter-spacing: 0.04em;
 }
 
+.robot-status-badges {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .robot-status-badge-online {
   color: var(--robot-online-strong);
   background: var(--robot-online-soft);
@@ -461,11 +428,6 @@
 .robot-status-badge-warning {
   color: var(--robot-warning-strong);
   background: var(--robot-warning-soft);
-}
-
-.robot-status-badge-charging {
-  color: var(--robot-charging-strong);
-  background: var(--robot-charging-soft);
 }
 
 .robot-status-badge-offline {
@@ -527,11 +489,6 @@
 .robot-battery-progress::-moz-progress-bar {
   border-radius: inherit;
   background: var(--brand-strong);
-}
-
-.robot-fleet-card-warning .robot-battery-progress::-webkit-progress-value,
-.robot-fleet-card-warning .robot-battery-progress::-moz-progress-bar {
-  background: #c0392b;
 }
 
 .robot-fleet-context {

@@ -3,6 +3,7 @@ import {
   CircleAlert,
   ClipboardCheck,
   MapPinned,
+  Pencil,
   Plus,
   RotateCcw,
   Undo2,
@@ -35,6 +36,7 @@ import {
   polygonHasArea,
 } from './patrolAreaBoundary'
 import { PatrolAreaBoundaryEditor } from './PatrolAreaBoundaryEditor'
+import { PatrolAreaEditDialog } from './PatrolAreaEditDialog'
 import type {
   GeoJsonCoordinate,
   GeoJsonPolygon,
@@ -66,6 +68,7 @@ export function PatrolAreaManagePage() {
   const [error, setError] = useState<unknown>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [registrationOpen, setRegistrationOpen] = useState(false)
+  const [editingArea, setEditingArea] = useState<PatrolArea | null>(null)
   const [areaCode, setAreaCode] = useState('')
   const [areaCodeAvailability, setAreaCodeAvailability] =
     useState<PatrolAreaCodeAvailability | null>(null)
@@ -141,6 +144,26 @@ export function PatrolAreaManagePage() {
     setAreaName('')
     setBoundaryPoints([])
     setFormError(null)
+  }
+
+  function handleAreaSaved(savedArea: PatrolArea) {
+    setAreas((currentAreas) => currentAreas.map((area) => (
+      area.patrolAreaId === savedArea.patrolAreaId ? savedArea : area
+    )))
+    setEditingArea(null)
+    setNotice(
+      `${savedArea.areaName} (${savedArea.areaCode}) 구역 정보를 변경했습니다.`,
+    )
+  }
+
+  function lifecycleStatusText(area: PatrolArea): string {
+    if (area.lifecycleStatus === 'ACTIVE') {
+      return '활성화'
+    }
+    if (area.lifecycleStatus === 'INACTIVE') {
+      return '비활성화'
+    }
+    return '구역 폐기'
   }
 
   async function handleAreaCodeAvailabilityCheck() {
@@ -241,7 +264,7 @@ export function PatrolAreaManagePage() {
       setRegistrationOpen(false)
       window.requestAnimationFrame(() => registrationTriggerRef.current?.focus())
       setNotice(
-        `${created.areaName} (${created.areaCode}) 구역을 ACTIVE로 등록했습니다. `
+        `${created.areaName} (${created.areaCode}) 구역을 활성화 상태로 등록했습니다. `
         + '이제 순찰 임무 관리에서 선택할 수 있습니다.',
       )
     } catch (nextError) {
@@ -269,30 +292,7 @@ export function PatrolAreaManagePage() {
   const areaCodeConflict = matchingAreaCodeAvailability?.available === false
 
   return (
-    <section className="page-stack" aria-labelledby="patrol-area-page-title">
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">PATROL AREA</p>
-          <h2 id="patrol-area-page-title">순찰 구역 관리</h2>
-          <p>
-            지도에서 관할 경계를 등록하고 임무에 사용할 활성 구역을 관리합니다.
-          </p>
-        </div>
-        <div className="mission-page-actions">
-          {canManage ? (
-            <button
-              ref={registrationTriggerRef}
-              className="primary-button button-with-icon"
-              type="button"
-              onClick={openRegistration}
-            >
-              <Plus size={17} aria-hidden="true" />
-              새 구역 등록
-            </button>
-          ) : null}
-        </div>
-      </div>
-
+    <section className="page-stack" aria-label="순찰 구역 관리">
       <div className="summary-grid" aria-label="순찰 구역 현황">
         <article className="summary-card">
           <span>등록된 전체 구역</span>
@@ -302,14 +302,14 @@ export function PatrolAreaManagePage() {
         <article className="summary-card">
           <span>미션 선택 가능</span>
           <strong>{loading && areas.length === 0 ? '—' : activeAreaCount}</strong>
-          <small>ACTIVE 구역</small>
+          <small>활성화 구역</small>
         </article>
         <article className="summary-card">
           <span>미션 선택 제외</span>
           <strong>
             {loading && areas.length === 0 ? '—' : areas.length - activeAreaCount}
           </strong>
-          <small>INACTIVE · ARCHIVED 구역</small>
+          <small>비활성화 · 구역 폐기</small>
         </article>
       </div>
 
@@ -381,7 +381,9 @@ export function PatrolAreaManagePage() {
                     setAreaCodeAvailability(null)
                   }}
                   aria-invalid={areaCodeConflict}
-                  aria-describedby="patrol-area-code-status"
+                  aria-describedby={matchingAreaCodeAvailability
+                    ? 'patrol-area-code-status'
+                    : undefined}
                   placeholder="A-01"
                   disabled={submitting}
                   required
@@ -414,11 +416,7 @@ export function PatrolAreaManagePage() {
                     ? '사용 가능한 구역 코드입니다.'
                     : '이미 등록된 구역 코드입니다.'}
                 </p>
-              ) : (
-                <small id="patrol-area-code-status">
-                  형식 제한은 없으며 Incident의 zone_id에 그대로 사용됩니다.
-                </small>
-              )}
+              ) : null}
               </div>
               <label className="admin-form-field" htmlFor="patrol-area-name">
                 구역 이름
@@ -489,13 +487,34 @@ export function PatrolAreaManagePage() {
         </div>
       )}
 
+      {editingArea ? (
+        <PatrolAreaEditDialog
+          area={editingArea}
+          onClose={() => setEditingArea(null)}
+          onSaved={handleAreaSaved}
+        />
+      ) : null}
+
       <div className="content-card patrol-area-list-card">
         <div className="table-heading">
           <div>
             <h3>등록 구역 목록</h3>
-            <p>ACTIVE 구역만 순찰 임무 생성 화면의 선택 목록에 표시됩니다.</p>
+            <p>활성화 구역만 순찰 임무 생성 화면의 선택 목록에 표시됩니다.</p>
           </div>
-          <span className="status-badge">{areas.length}건</span>
+          <div className="table-heading-actions">
+            <span className="status-badge">{areas.length}건</span>
+            {canManage ? (
+              <button
+                ref={registrationTriggerRef}
+                className="primary-button button-with-icon"
+                type="button"
+                onClick={openRegistration}
+              >
+                <Plus size={17} aria-hidden="true" />
+                새 구역 등록
+              </button>
+            ) : null}
+          </div>
         </div>
 
         {loading && areas.length === 0 ? (
@@ -521,6 +540,7 @@ export function PatrolAreaManagePage() {
                   <th scope="col">경계점</th>
                   <th scope="col">미션 사용</th>
                   <th scope="col">최근 수정</th>
+                  {canManage ? <th scope="col">관리</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -536,7 +556,7 @@ export function PatrolAreaManagePage() {
                           area.lifecycleStatus.toLowerCase()
                         }`}
                       >
-                        {area.lifecycleStatus}
+                        {lifecycleStatusText(area)}
                       </span>
                     </td>
                     <td>{boundaryPointCount(area.boundary)}개</td>
@@ -553,6 +573,22 @@ export function PatrolAreaManagePage() {
                       )}
                     </td>
                     <td>{formatDateTime(area.updatedAt)}</td>
+                    {canManage ? (
+                      <td>
+                        <button
+                          className="patrol-area-edit-button"
+                          type="button"
+                          aria-label={`${area.areaName} 수정`}
+                          onClick={() => {
+                            setNotice(null)
+                            setEditingArea(area)
+                          }}
+                        >
+                          <Pencil size={15} aria-hidden="true" />
+                          {area.lifecycleStatus === 'ARCHIVED' ? '보기' : '수정'}
+                        </button>
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>

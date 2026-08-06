@@ -203,7 +203,7 @@ export function DefectManagePage() {
   )
 
   // 실시간 알림은 "다시 읽어라"만 알려준다. 데이터는 목록·지도가 각자 다시 읽는다.
-  const { status: streamStatus, lastEvent } = useDefectRealtime(refresh)
+  const { lastEvent } = useDefectRealtime(refresh)
 
   const changeSort = useCallback(
     (next: string) => {
@@ -220,25 +220,13 @@ export function DefectManagePage() {
   )
 
   return (
-    <section className="page-stack" aria-labelledby="defect-page-title">
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">DEFECTS</p>
-          <h2 id="defect-page-title">실시간 결함 상태 모니터링</h2>
-          <p>시스템에서 감지된 최신 결함 목록 및 위치 현황입니다.</p>
-        </div>
-        {/*
-          연결이 끊긴 채 조용히 있으면 "결함이 없다"로 오해한다. 상태를 항상 보여준다.
-        */}
-        <p
-          className={`defect-stream-status defect-stream-${streamStatus}`}
-          role="status"
-        >
-          {streamStatus === 'connected' && '실시간 연결됨'}
-          {streamStatus === 'connecting' && '실시간 연결 중…'}
-          {streamStatus === 'reconnecting' && '연결이 끊겨 재연결 중…'}
-        </p>
-      </div>
+    <section className="page-stack" aria-label="실시간 결함 상태 모니터링">
+      <DefectSearchBar
+        key={searchResetToken}
+        value={filters.q}
+        onChange={(q) => applyFilters({ ...filters, q })}
+        disabled={loading && result === null}
+      />
 
       {lastEvent !== null && lastEvent.eventType === 'defect.created' && (
         <p className="defect-toast" role="status">
@@ -253,13 +241,6 @@ export function DefectManagePage() {
         그대로 ''라 컴포넌트가 변화를 알 수 없고, 디바운스 대기 중이던 입력이
         300ms 뒤에 되살아난다.
       */}
-      <DefectSearchBar
-        key={searchResetToken}
-        value={filters.q}
-        onChange={(q) => applyFilters({ ...filters, q })}
-        disabled={loading && result === null}
-      />
-
       {/* 지도가 왼쪽, 조건 패널이 오른쪽이다. DOM 순서도 그대로 두고 좁은 화면에서만
           CSS order로 패널을 위로 올린다. */}
       <div className="defect-layout">

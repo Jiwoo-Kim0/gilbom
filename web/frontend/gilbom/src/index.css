@@ -39,12 +39,10 @@
   --robot-online: #55b83a;
   --robot-online-strong: #2f7d20;
   --robot-online-soft: #e8f6e2;
+  --robot-total: #2563eb;
   --robot-warning: #e5322a;
   --robot-warning-strong: #ad211a;
   --robot-warning-soft: #fde8e6;
-  --robot-charging: #f2c200;
-  --robot-charging-strong: #8a6a00;
-  --robot-charging-soft: #fdf3cf;
 }
 
 * {

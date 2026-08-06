@@ -162,6 +162,79 @@
   letter-spacing: -0.04em;
 }
 
+.topbar-heading {
+  min-width: 0;
+}
+
+.topbar-title-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.topbar-info {
+  display: inline-grid;
+  position: relative;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--text-muted);
+  border-radius: 50%;
+  place-items: center;
+  color: var(--text-muted);
+  cursor: help;
+}
+
+.topbar-info:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.topbar-tooltip {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 10px);
+  left: -80px;
+  width: max-content;
+  max-width: min(430px, calc(100vw - 48px));
+  padding: 9px 12px;
+  border-radius: 9px;
+  color: #fff;
+  background: #252a28;
+  box-shadow: 0 8px 24px rgba(17, 37, 28, 0.2);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: normal;
+  line-height: 1.5;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    visibility 140ms ease;
+  visibility: hidden;
+  white-space: normal;
+}
+
+.topbar-tooltip::before {
+  position: absolute;
+  bottom: 100%;
+  left: 86px;
+  width: 8px;
+  height: 8px;
+  background: #252a28;
+  content: '';
+  transform: translate(-50%, 50%) rotate(45deg);
+}
+
+.topbar-info:hover .topbar-tooltip,
+.topbar-info:focus-visible .topbar-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+}
+
 .eyebrow {
   margin: 0;
   color: var(--brand-strong);
@@ -1035,26 +1108,6 @@
   font-size: 0.75rem;
 }
 
-.defect-stream-status {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 10px;
-  border-radius: 999px;
-  margin: 0;
-  background: var(--surface-muted, #f2f1ec);
-  color: var(--text-muted, #6f6a5e);
-  font-size: 0.78rem;
-  gap: 6px;
-}
-
-.defect-stream-connected {
-  color: #2f6b45;
-}
-
-.defect-stream-reconnecting {
-  color: #a3341f;
-}
-
 .defect-toast {
   padding: 10px 14px;
   border: 1px solid #d8c79a;
@@ -1446,6 +1499,12 @@
   gap: 16px;
   align-items: start;
   justify-content: space-between;
+}
+
+.table-heading-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
 
 .status-badge {
