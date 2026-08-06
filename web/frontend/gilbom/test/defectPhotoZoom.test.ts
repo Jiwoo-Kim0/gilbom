@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  anchoredScroll,
   canZoomIn,
   canZoomOut,
   MAX_PHOTO_ZOOM,
@@ -82,4 +83,21 @@ test('배율 표시는 기준 대비 배수로 적는다', () => {
       '×2.4', '×2.8', '×3.2', '×3.6', '×4',
     ],
   )
+})
+
+test('확대해도 기준점이 화면에서 같은 자리에 남는다', () => {
+  // 1000px 상자 가운데(500)를 기준으로 두 배 확대. 내용이 두 배가 되므로 기준점
+  // 왼쪽에 있던 500px도 1000px이 되고, 그만큼 스크롤해야 같은 자리에 남는다.
+  assert.equal(anchoredScroll(0, 500, 2), 500)
+  // 이미 스크롤한 상태에서도 같은 규칙이다.
+  assert.equal(anchoredScroll(500, 500, 2), 1500)
+  // 커서가 왼쪽 끝(0)이면 스크롤이 그대로다 — 그 자리가 고정점이다.
+  assert.equal(anchoredScroll(0, 0, 2), 0)
+})
+
+test('축소하면 스크롤이 줄고 0 아래로는 가지 않는다', () => {
+  assert.equal(anchoredScroll(500, 500, 0.5), 0)
+  assert.equal(anchoredScroll(1500, 500, 0.5), 500)
+  // 배율을 크게 줄이면 음수가 되는데, 브라우저가 자르기 전에 여기서 자른다.
+  assert.equal(anchoredScroll(0, 500, 0.5), 0)
 })

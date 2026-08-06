@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Minus, Plus, X } from 'lucide-react'
 import { lockBodyScroll } from '../../shared/dom/bodyScrollLock'
 import { BoundingBoxOverlay } from './DefectBoundingBox'
 import {
+  anchoredScroll,
   canZoomIn,
   canZoomOut,
   MIN_PHOTO_ZOOM,
@@ -49,6 +50,59 @@ export function DefectPhotoViewer({
   const closeRef = useRef<HTMLButtonElement | null>(null)
   /** 끌기 시작점. 화면 좌표와 그때의 스크롤 위치를 함께 잡아둔다. */
   const dragOriginRef = useRef({ x: 0, y: 0, left: 0, top: 0 })
+  /**
+   * 배율이 바뀐 뒤 옮겨놓을 스크롤 위치. 상자 크기가 실제로 바뀐 다음에 적용해야 하므로
+   * 눌린 시점의 값을 담아두고 `useLayoutEffect`에서 쓴다.
+   */
+  const pendingAnchorRef = useRef<
+    { x: number; y: number; left: number; top: number; ratio: number } | null
+  >(null)
+
+  /**
+   * 배율을 바꾸면서 기준점을 화면에 고정한다. 기준점이 없으면 스크롤이 0에 머물러
+   * 늘 왼쪽 위로만 확대된다.
+   */
+  const zoomTo = (next: PhotoZoom, anchor: { x: number; y: number }) => {
+    const scroll = scrollRef.current
+    if (next === zoom || scroll === null) {
+      return
+    }
+    pendingAnchorRef.current = {
+      x: anchor.x,
+      y: anchor.y,
+      left: scroll.scrollLeft,
+      top: scroll.scrollTop,
+      ratio: next / zoom,
+    }
+    setZoom(next)
+  }
+
+  /** 버튼·키보드로 확대할 때의 기준점. 지금 보이는 영역의 가운데다. */
+  const centerAnchor = () => {
+    const scroll = scrollRef.current
+    return scroll === null
+      ? { x: 0, y: 0 }
+      : { x: scroll.clientWidth / 2, y: scroll.clientHeight / 2 }
+  }
+
+  const zoomBy = (direction: 1 | -1, anchor = centerAnchor()) => {
+    zoomTo(nextPhotoZoom(zoom, direction), anchor)
+  }
+
+  /*
+   * 배율이 바뀐 직후, 그림이 그려지기 전에 스크롤을 옮긴다. effect(paint 후)로 하면
+   * 한 프레임 동안 왼쪽 위로 튀는 것이 보인다.
+   */
+  useLayoutEffect(() => {
+    const scroll = scrollRef.current
+    const pending = pendingAnchorRef.current
+    pendingAnchorRef.current = null
+    if (scroll === null || pending === null) {
+      return
+    }
+    scroll.scrollLeft = anchoredScroll(pending.left, pending.x, pending.ratio)
+    scroll.scrollTop = anchoredScroll(pending.top, pending.y, pending.ratio)
+  }, [zoom])
 
   useEffect(() => {
     const releaseBodyScroll = lockBodyScroll()
@@ -66,13 +120,13 @@ export function DefectPhotoViewer({
         return
       }
       if (event.key === '+' || event.key === '=') {
-        setZoom((current) => nextPhotoZoom(current, 1))
+        zoomBy(1)
       }
       if (event.key === '-' || event.key === '_') {
-        setZoom((current) => nextPhotoZoom(current, -1))
+        zoomBy(-1)
       }
       if (event.key === '0') {
-        setZoom(MIN_PHOTO_ZOOM)
+        zoomTo(MIN_PHOTO_ZOOM, centerAnchor())
       }
     }
 
@@ -81,7 +135,9 @@ export function DefectPhotoViewer({
       releaseBodyScroll()
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [onClose])
+    // zoom이 바뀌면 핸들러를 다시 걸어야 한다. 지금 배율을 기준으로 한 단계를 계산한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onClose, zoom])
 
   useEffect(() => {
     const scroll = scrollRef.current
@@ -92,14 +148,22 @@ export function DefectPhotoViewer({
      * React의 onWheel은 passive로 붙어 preventDefault가 통하지 않는다. 직접 걸어
      * 페이지가 함께 스크롤되는 것을 막는다.
      */
-    function handleWheel(event: WheelEvent) {
+    // 함수 선언(hoisting) 대신 const로 둔다. 선언은 위의 null 검사보다 앞서 올라가
+    // 좁혀진 타입이 풀린다.
+    const handleWheel = (event: WheelEvent) => {
       event.preventDefault()
-      setZoom((current) => nextPhotoZoom(current, event.deltaY < 0 ? 1 : -1))
+      // 커서가 가리키는 지점을 고정한다. 지도 확대와 같은 감각이다.
+      const rect = scroll.getBoundingClientRect()
+      zoomBy(event.deltaY < 0 ? 1 : -1, {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      })
     }
 
     scroll.addEventListener('wheel', handleWheel, { passive: false })
     return () => scroll.removeEventListener('wheel', handleWheel)
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoom])
 
   const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     const scroll = scrollRef.current
@@ -162,7 +226,7 @@ export function DefectPhotoViewer({
               className="defect-photo-control"
               aria-label="축소"
               disabled={!canZoomOut(zoom)}
-              onClick={() => setZoom(nextPhotoZoom(zoom, -1))}
+              onClick={() => zoomBy(-1)}
             >
               <Minus size={16} aria-hidden="true" />
             </button>
@@ -174,7 +238,7 @@ export function DefectPhotoViewer({
               className="defect-photo-control"
               aria-label="확대"
               disabled={!canZoomIn(zoom)}
-              onClick={() => setZoom(nextPhotoZoom(zoom, 1))}
+              onClick={() => zoomBy(1)}
             >
               <Plus size={16} aria-hidden="true" />
             </button>
@@ -182,7 +246,7 @@ export function DefectPhotoViewer({
               type="button"
               className="secondary-button defect-photo-reset"
               disabled={zoom === MIN_PHOTO_ZOOM}
-              onClick={() => setZoom(MIN_PHOTO_ZOOM)}
+              onClick={() => zoomTo(MIN_PHOTO_ZOOM, centerAnchor())}
             >
               전체 보기
             </button>

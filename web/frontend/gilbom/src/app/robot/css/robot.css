@@ -103,10 +103,18 @@
   background: #c0392b;
 }
 
-.robot-filter-bar {
+/*
+ * 한 줄짜리 검색 줄이라 카드 기본 여백(`clamp(22px, 3vw, 32px)`)이 과하다 — 위아래
+ * 32px씩 붙어 줄 높이가 108px이었다.
+ *
+ * `.robot-filter-bar` 하나로는 못 이긴다. `.content-card`와 특이도가 같고, robot.css는
+ * App.css가 `@import`로 먼저 들여오므로 나중에 오는 App.css 쪽이 적용된다. 클래스를
+ * 둘 붙여 특이도를 올린다.
+ */
+.content-card.robot-filter-bar {
   display: flex;
   gap: 18px;
-  padding: 18px 20px;
+  padding: 12px 20px;
   align-items: center;
   justify-content: space-between;
 }
@@ -170,21 +178,24 @@
 
 .robot-map-legend {
   display: flex;
-  gap: 10px;
+  /* 테두리가 없으니 항목 사이는 이 간격만으로 갈린다. 점·라벨 간격(8px)보다 넉넉해야
+     "점 라벨"이 한 덩어리로 읽힌다. */
+  gap: 20px;
   flex-wrap: wrap;
 }
 
+/*
+ * 테두리 없는 점 + 글자다. 알약 모양으로 두면 눌러서 거를 수 있는 필터 칩처럼 보여
+ * 범례로 읽히지 않는다(결함 지도 범례도 같은 이유로 걷어냈다).
+ */
 .robot-legend-item {
   display: flex;
   gap: 8px;
-  height: 38px;
-  padding: 0 14px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
   align-items: center;
-  color: var(--text);
+  color: var(--text-muted);
   font-size: 13px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .robot-status-dot {

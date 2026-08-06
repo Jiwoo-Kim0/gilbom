@@ -53,6 +53,25 @@ export function photoZoomLabel(zoom: PhotoZoom): string {
   return `×${zoom / 100}`
 }
 
+/**
+ * 확대·축소 뒤의 스크롤 위치.
+ *
+ * <p>기준점(`anchor`)이 화면에서 같은 자리에 남게 한다. 그냥 배율만 키우면 스크롤이 0에
+ * 머물러 늘 왼쪽 위로만 확대된다.
+ *
+ * @param scroll 바뀌기 전 스크롤 위치
+ * @param anchor 보이는 영역 안에서의 기준점(가운데 확대는 폭/2, 휠은 커서 위치)
+ * @param ratio 새 배율 ÷ 이전 배율
+ */
+export function anchoredScroll(
+  scroll: number,
+  anchor: number,
+  ratio: number,
+): number {
+  // 음수로 내려가면 브라우저가 어차피 0으로 자른다. 계산에서 미리 자른다.
+  return Math.max(0, (scroll + anchor) * ratio - anchor)
+}
+
 export function canZoomIn(zoom: PhotoZoom): boolean {
   return zoom !== MAX_PHOTO_ZOOM
 }
