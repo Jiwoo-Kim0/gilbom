@@ -5,6 +5,7 @@ import {
   clusterZoomPlan,
   isPointOutsideMapView,
   REVEAL_ZOOM,
+  unclusterZoomStep,
   revealZoom,
   defectMapFilterKey,
   defectTypeTone,
@@ -359,4 +360,43 @@ test('이미 더 깊이 보고 있었다면 배율을 줄이지 않는다', () =
 
 test('확대 배율은 지도 최대 배율을 넘지 않는다', () => {
   assert.equal(revealZoom(12, 30, 21), 21)
+})
+
+/*
+ * 고른 결함이 묶이지 않을 만큼의 확대 단계. 1px = 1m인 배율을 넘겨 미터가 그대로 화면
+ * 픽셀이 되게 했다. 격자 한 칸은 실제와 같은 44px이다.
+ */
+test('가장 가까운 이웃과 격자 한 칸만큼 벌어질 단계를 구한다', () => {
+  const target = { latitude: 37.5, longitude: 127 }
+  const northOf = (meters: number) => ({
+    latitude: 37.5 + meters / 111_320,
+    longitude: 127,
+  })
+  // 22m(=22px)이면 한 단계(×2 = 44px)로 갈린다.
+  assert.equal(unclusterZoomStep(target, [northOf(22)], 1, 44), 1)
+  // 11m이면 두 단계다.
+  assert.equal(unclusterZoomStep(target, [northOf(11)], 1, 44), 2)
+  // 이웃이 여럿이면 가장 가까운 것이 기준이다.
+  assert.equal(
+    unclusterZoomStep(target, [northOf(300), northOf(11), northOf(80)], 1, 44),
+    2,
+  )
+})
+
+test('이미 갈려 있거나 혼자면 확대하지 않는다', () => {
+  const target = { latitude: 37.5, longitude: 127 }
+  const far = { latitude: 37.5 + 300 / 111_320, longitude: 127 }
+  // 300px 떨어져 있으면 묶이지 않는다 — 고른 마커는 이미 낱개로 보인다.
+  assert.equal(unclusterZoomStep(target, [far], 1, 44), 0)
+  // 혼자면 어떤 배율에서도 묶이지 않는다.
+  assert.equal(unclusterZoomStep(target, [], 1, 44), 0)
+  // 배율을 재지 못했을 때도 화면을 건드리지 않는다.
+  assert.equal(unclusterZoomStep(target, [far], 0, 44), 0)
+})
+
+test('좌표가 완전히 같은 이웃이면 갈 수 있는 데까지 확대한다', () => {
+  // 아무리 확대해도 갈리지 않는다. 실제 자르기는 부르는 쪽이 지도 최대 배율로 한다.
+  const target = { latitude: 37.5, longitude: 127 }
+  assert.equal(unclusterZoomStep(target, [{ ...target }], 1, 44), 21)
+  assert.equal(unclusterZoomStep(target, [{ ...target }], 1, 44, 5), 5)
 })

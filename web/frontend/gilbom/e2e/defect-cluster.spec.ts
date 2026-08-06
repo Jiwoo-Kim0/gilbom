@@ -63,7 +63,10 @@ async function installFakeMap(page: Page): Promise<void> {
       const calls: {
         zoom: number[]
         center: { lat: number; lng: number }[]
-        /** `panTo`로 옮긴 자리만 따로 센다. 목록에서 골랐을 때의 가운데 정렬이다. */
+        /**
+         * `panTo`(애니메이션)로 옮긴 자리만 따로 센다. 확대까지 함께 하는 경로는
+         * 애니메이션을 쓸 수 없어 `setCenter`로 옮기므로, "옮겨졌나"는 `center`로 본다.
+         */
         panned: { lat: number; lng: number }[]
         clickHandlers: (() => void)[]
       } = { zoom: [], center: [], panned: [], clickHandlers: [] }
@@ -473,12 +476,22 @@ async function openDetailCard(page: Page): Promise<void> {
 }
 
 /** `panTo`로 옮겨간 마지막 자리. */
-function pannedTo(page: Page): Promise<{ lat: number; lng: number } | null> {
+/**
+ * 지도가 마지막으로 옮겨간 자리.
+ *
+ * <p>목록에서 고르면 그 마커가 묶이지 않을 배율까지 함께 확대한다. 이동과 확대는 한 번에
+ * 해야 해서(따로 부르면 이동 애니메이션이 확대에 끊긴다) `panTo`가 아니라 `setCenter`로
+ * 옮긴다. 그래서 `panned`가 아니라 `center`를 본다.
+ *
+ * <p>확대할 이웃 정보를 지도가 한 번 더 조회해서 얻으므로 클릭 직후에는 아직 옮겨지지
+ * 않았을 수 있다. 부르는 쪽에서 기다려야 한다.
+ */
+function movedTo(page: Page): Promise<{ lat: number; lng: number } | null> {
   return page.evaluate(() => {
-    const { panned } = (window as unknown as {
-      mapCalls: { panned: { lat: number; lng: number }[] }
+    const { center } = (window as unknown as {
+      mapCalls: { center: { lat: number; lng: number }[] }
     }).mapCalls
-    return panned.at(-1) ?? null
+    return center.at(-1) ?? null
   })
 }
 
@@ -560,10 +573,10 @@ test.describe('고른 결함 가운데 정렬', () => {
     await list.getByRole('listitem').nth(2).getByRole('button').click()
 
     const [longitude, latitude] = points[2]
-    const panned = await pannedTo(page)
-    expect(panned).not.toBeNull()
-    expect(panned!.lat).toBeCloseTo(latitude, 6)
-    expect(panned!.lng).toBeCloseTo(longitude, 6)
+    await expect.poll(() => movedTo(page)).not.toBeNull()
+    const moved = await movedTo(page)
+    expect(moved!.lat).toBeCloseTo(latitude, 6)
+    expect(moved!.lng).toBeCloseTo(longitude, 6)
   })
 
   test('아래 목록 표에서 골라도 그 마커가 가운데로 온다', async ({ page }) => {
@@ -576,10 +589,10 @@ test.describe('고른 결함 가운데 정렬', () => {
     await page.locator('.defect-table-body-row').nth(1).click()
 
     // 표 행의 좌표로 옮긴다. 지도 GeoJSON과 같은 결함의 같은 값이다.
-    const panned = await pannedTo(page)
-    expect(panned).not.toBeNull()
-    expect(panned!.lat).toBeCloseTo(rows[1].location.latitude, 6)
-    expect(panned!.lng).toBeCloseTo(rows[1].location.longitude, 6)
+    await expect.poll(() => movedTo(page)).not.toBeNull()
+    const moved = await movedTo(page)
+    expect(moved!.lat).toBeCloseTo(rows[1].location.latitude, 6)
+    expect(moved!.lng).toBeCloseTo(rows[1].location.longitude, 6)
   })
 
   test('같은 행을 다시 눌러도 가운데로 되돌아온다', async ({ page }) => {
@@ -597,10 +610,11 @@ test.describe('고른 결함 가운데 정렬', () => {
      * 선택이 그대로라 좌표만 보고 있으면 두 번째 클릭은 아무 일도 하지 않는다.
      * 요청마다 token을 올리는 이유가 이것이다.
      */
-    const pannedCount = await page.evaluate(() =>
-      (window as unknown as { mapCalls: { panned: unknown[] } })
-        .mapCalls.panned.length)
-    expect(pannedCount).toBe(2)
+    await expect
+      .poll(() => page.evaluate(() =>
+        (window as unknown as { mapCalls: { center: unknown[] } })
+          .mapCalls.center.length))
+      .toBe(2)
   })
 })
 

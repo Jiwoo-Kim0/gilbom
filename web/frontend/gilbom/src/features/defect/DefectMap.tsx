@@ -9,6 +9,7 @@ import { getDefectMap } from './defectApi'
 import {
   bboxForDefectMapFilter,
   isPointOutsideMapView,
+  unclusterZoomStep,
   REVEAL_ZOOM,
   revealZoom,
   clusterZoomPlan,
@@ -234,6 +235,11 @@ export type DefectMapCenterRequest = {
   latitude: number
   longitude: number
   token: number
+  /**
+   * 고른 결함. 이웃과의 거리를 잴 때 자기 자신을 빼기 위해 쓴다. 없으면 같은 좌표에
+   * 있는 것을 자기 자신으로 본다.
+   */
+  defectId?: string
 }
 
 /**
@@ -372,28 +378,13 @@ export function DefectMap({
   }, [])
 
   /*
-   * 목록 표에서 고른 결함을 가운데로 옮긴다.
-   *
-   * 지도 마커를 눌렀을 때는 옮기지 않는다 — 이미 그 자리를 보고 있고, 손가락 밑에서
-   * 지도가 미끄러지면 방금 무엇을 눌렀는지 놓친다. 그래서 선택(`selectedDefectId`)이
-   * 아니라 **상위가 보낸 요청**에 반응한다.
+   * 아래 "새 결함이 화면 밖이면 옮기기"가 최신 필터를 읽되, 필터가 바뀔 때마다 다시
+   * 실행되지는 않게 하려고 ref로 들고 있는다. 그 효과는 **새 이벤트에만** 반응해야 한다.
    */
+  const filtersRef = useRef(filters)
   useEffect(() => {
-    if (centerRequest === null || mapStatus !== 'ready') return
-    centerMapOn(centerRequest.latitude, centerRequest.longitude)
-  }, [centerRequest, centerMapOn, mapStatus])
-  // 확대·이동이 끝나면 화면 좌표가 달라져 마커 묶음을 다시 계산해야 한다.
-  const [idleToken, setIdleToken] = useState(0)
-  /**
-   * 결함 위치로 지도를 한 번 맞췄는지. 기본 뷰포트(구미)와 실제 결함 위치가
-   * 다를 수 있어, 처음에는 전체를 조회해 그 범위로 이동한다. 이 전에 뷰포트
-   * bbox를 적용하면 엉뚱한 범위로 걸러 0건이 되고 지도가 영영 비어 보인다.
-   */
-  const fittedFilterKeyRef = useRef<string | null>(null)
-
-  useEffect(() => {
-    filterKeyRef.current = filterKey
-  }, [filterKey])
+    filtersRef.current = filters
+  }, [filters])
 
   /**
    * 좌표로 옮기면서 배율까지 맞춘다.
@@ -424,14 +415,86 @@ export function DefectMap({
     [],
   )
 
-  /*
-   * 아래 "새 결함이 화면 밖이면 옮기기"가 최신 필터를 읽되, 필터가 바뀔 때마다 다시
-   * 실행되지는 않게 하려고 ref로 들고 있는다. 그 효과는 **새 이벤트에만** 반응해야 한다.
+  /**
+   * 목록에서 고른 결함의 마커로 화면을 옮기고, **그 마커가 묶이지 않을 만큼** 확대한다.
+   *
+   * <p>묶음 안에 있으면 옮겨가도 정작 그 마커가 보이지 않는다 — 숫자만 보인다. 그래서
+   * 가장 가까운 이웃과 격자 한 칸(44px)만큼 벌어지는 배율까지 들어간다.
+   *
+   * <p>이웃을 알려면 **뷰포트 bbox 없이** 지도 GeoJSON을 받아야 한다. 지금 그려진 것만
+   * 보면, 화면 밖에 있는 결함을 골랐을 때 그 주변을 아예 모른다(그 자리로 옮긴 뒤에야
+   * 이웃이 조회되고, 그때는 이미 묶여 보인다).
+   *
+   * <p>조회가 실패하면 확대 없이 가운데로만 옮긴다. 옮기기는 살려야 한다.
    */
-  const filtersRef = useRef(filters)
+  const focusDefectMarker = useCallback(
+    (defectId: string | null, latitude: number, longitude: number) => {
+      const map = mapRef.current
+      if (map === null) return
+
+      getDefectMap({ ...filtersRef.current, bbox: '' })
+        .then((response) => {
+          if (mapRef.current === null) return
+          const others = response.features
+            .filter((feature) => (
+              defectId === null
+                ? feature.geometry.coordinates[1] !== latitude
+                  || feature.geometry.coordinates[0] !== longitude
+                : feature.properties.defectId !== defectId
+            ))
+            .map((feature) => ({
+              latitude: feature.geometry.coordinates[1],
+              longitude: feature.geometry.coordinates[0],
+            }))
+          const step = unclusterZoomStep(
+            { latitude, longitude },
+            others,
+            // 배율과 확대 단계는 같은 시점에 읽어야 어긋나지 않는다.
+            metersPerPixelOf(
+              mapRef.current,
+              mapElementRef.current?.clientWidth ?? 0,
+            ),
+            CLUSTER_CELL_PX,
+          )
+          focusMapOn(
+            latitude,
+            longitude,
+            Math.min(mapRef.current.getZoom() + step, MAX_MAP_ZOOM),
+          )
+        })
+        .catch(() => centerMapOn(latitude, longitude))
+    },
+    [centerMapOn, focusMapOn],
+  )
+
+  /*
+   * 목록 표에서 고른 결함을 가운데로 옮긴다.
+   *
+   * 지도 마커를 눌렀을 때는 옮기지 않는다 — 이미 그 자리를 보고 있고, 손가락 밑에서
+   * 지도가 미끄러지면 방금 무엇을 눌렀는지 놓친다. 그래서 선택(`selectedDefectId`)이
+   * 아니라 **상위가 보낸 요청**에 반응한다.
+   */
   useEffect(() => {
-    filtersRef.current = filters
-  }, [filters])
+    if (centerRequest === null || mapStatus !== 'ready') return
+    focusDefectMarker(
+      centerRequest.defectId ?? null,
+      centerRequest.latitude,
+      centerRequest.longitude,
+    )
+  }, [centerRequest, focusDefectMarker, mapStatus])
+  // 확대·이동이 끝나면 화면 좌표가 달라져 마커 묶음을 다시 계산해야 한다.
+  const [idleToken, setIdleToken] = useState(0)
+  /**
+   * 결함 위치로 지도를 한 번 맞췄는지. 기본 뷰포트(구미)와 실제 결함 위치가
+   * 다를 수 있어, 처음에는 전체를 조회해 그 범위로 이동한다. 이 전에 뷰포트
+   * bbox를 적용하면 엉뚱한 범위로 걸러 0건이 되고 지도가 영영 비어 보인다.
+   */
+  const fittedFilterKeyRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    filterKeyRef.current = filterKey
+  }, [filterKey])
+
 
   /**
    * 새로 탐지된 결함이 **화면 밖일 때만** 그 위치로 지도를 옮긴다.
@@ -850,7 +913,8 @@ export function DefectMap({
               // 이 목록도 목록이다. 고른 결함의 마커가 가운데로 온다.
               onSelect={(defectId, latitude, longitude) => {
                 onSelect(defectId)
-                centerMapOn(latitude, longitude)
+                // 묶음 목록에서 고르는 것이라 특히 묶이지 않을 배율까지 들어가야 한다.
+                focusDefectMarker(defectId, latitude, longitude)
               }}
               onClose={() => setClusterList(null)}
             />
