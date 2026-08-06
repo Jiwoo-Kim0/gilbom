@@ -13,8 +13,15 @@
  * <p>1%p는 지도 폭 1000px에서 10px, 높이 600px에서 6px이다. 끌 때 눈에 걸리지 않는다.
  */
 
-/** 컨테이너 모서리에서 이만큼은 남긴다. 카드가 모서리에 붙으면 답답해 보인다. */
-export const CARD_DRAG_MARGIN_PX = 16
+/**
+ * 옮길 수 있는 폭이 이보다 좁으면 "자리가 없다"로 보고 {@link CARD_DRAG_MIN_VISIBLE_PX}
+ * 규칙으로 넘어간다(컨테이너에 대한 %).
+ *
+ * <p>예전에는 모서리마다 16px씩 남기고 그 값으로 자리 유무를 갈랐는데, 그러면 **카드를
+ * 지도 꼭대기까지 올릴 수 없었다.** 기본 자리가 모서리에 붙어 있는데 한 번 끌면 다시는
+ * 붙일 수 없는 셈이라, 여백을 없애고 판정만 따로 뒀다.
+ */
+const MIN_TRAVEL_PERCENT = 8
 
 /**
  * 카드가 컨테이너보다 클 때 최소한 이만큼은 안에 남긴다(≈헤더 한 줄).
@@ -54,26 +61,23 @@ function clampToPercent(
   if (containerSize <= 0) {
     return 0
   }
-  const minPercent = Math.ceil((CARD_DRAG_MARGIN_PX / containerSize) * 100)
   /*
    * 먼저 "카드가 전부 보이는 자리"까지만 허용한다. 그렇게 해서 움직일 여유가 안 나오면
    * (기본 카드는 지도 높이를 꽉 채운다) "손잡이는 남는 자리"까지 넓힌다. 이 두 번째
    * 단계가 없으면 위아래로 1px도 못 움직인다.
    */
-  const fitPercent = Math.floor(
-    ((containerSize - cardSize - CARD_DRAG_MARGIN_PX) / containerSize) * 100,
-  )
-  const maxPercent = fitPercent > minPercent
+  const fitPercent = Math.floor(((containerSize - cardSize) / containerSize) * 100)
+  const maxPercent = fitPercent >= MIN_TRAVEL_PERCENT
     ? fitPercent
     : Math.floor(
         ((containerSize - CARD_DRAG_MIN_VISIBLE_PX) / containerSize) * 100,
       )
-  // 아주 좁은 컨테이너에서는 둘이 뒤집힌다. 그때는 여백만 남기고 붙여둔다.
-  if (maxPercent <= minPercent) {
-    return Math.min(Math.max(minPercent, 0), 100)
+  // 아래는 0이 곧 모서리다. 카드가 컨테이너보다 크면 그 자리에 붙여둔다.
+  if (maxPercent <= 0) {
+    return 0
   }
   const percent = Math.round((positionPx / containerSize) * 100)
-  return Math.min(Math.max(percent, minPercent), maxPercent)
+  return Math.min(Math.max(percent, 0), maxPercent)
 }
 
 export function cardPositionFromDrag(
