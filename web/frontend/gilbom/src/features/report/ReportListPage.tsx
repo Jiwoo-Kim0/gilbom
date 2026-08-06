@@ -218,7 +218,7 @@ export function ReportListPage() {
               aria-label="기간 검색 안내"
               aria-describedby="report-period-help"
             >
-              <Info size={12} strokeWidth={2.4} aria-hidden="true" />
+              <Info size={16} strokeWidth={2.2} aria-hidden="true" />
               <span
                 id="report-period-help"
                 className="report-period-tooltip"
