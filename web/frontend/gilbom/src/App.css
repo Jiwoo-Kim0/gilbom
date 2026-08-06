@@ -2803,7 +2803,7 @@
   color: #fff;
   background:
     radial-gradient(circle at 85% 20%, rgba(240, 161, 40, 0.2), transparent 34%),
-    linear-gradient(155deg, #123c29 0%, #1b583b 54%, #143f2c 100%);
+    linear-gradient(155deg, #0b1f3a 0%, #17365d 54%, #102947 100%);
 }
 
 .auth-intro::after {
@@ -2885,21 +2885,6 @@
   letter-spacing: -0.055em;
 }
 
-.auth-intro-copy > p:last-child {
-  max-width: 440px;
-  margin: 0;
-  color: rgba(255, 255, 255, 0.72);
-  line-height: 1.75;
-}
-
-.auth-storage-note {
-  position: relative;
-  z-index: 1;
-  margin: 0;
-  color: rgba(255, 255, 255, 0.58);
-  font-size: 12px;
-}
-
 .auth-main {
   display: grid;
   min-width: 0;
@@ -2913,7 +2898,7 @@
   border: 1px solid var(--line);
   border-radius: 24px;
   background: var(--surface);
-  box-shadow: 0 24px 70px rgba(21, 80, 53, 0.1);
+  box-shadow: 0 24px 70px rgba(14, 36, 67, 0.12);
 }
 
 .auth-card-wide {
@@ -2945,6 +2930,16 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 15px;
+}
+
+.auth-form-columns .form-field {
+  grid-template-rows: auto 48px minmax(18px, auto);
+  align-content: start;
+}
+
+.auth-form-columns .form-field > input {
+  height: 48px;
+  min-height: 48px;
 }
 
 .form-field {
@@ -2979,6 +2974,14 @@
   border-color: var(--brand);
   outline: none;
   box-shadow: 0 0 0 3px rgba(31, 107, 69, 0.12);
+}
+
+.auth-shell .form-field input {
+  border-color: #cbd4e0;
+}
+
+.auth-shell .form-field input:focus {
+  box-shadow: 0 0 0 3px rgba(23, 54, 93, 0.16);
 }
 
 .field-hint,
@@ -3113,7 +3116,7 @@
 .auth-mode-tabs button.is-active {
   color: var(--brand-strong);
   background: #fff;
-  box-shadow: 0 4px 12px rgba(20, 63, 44, 0.08);
+  box-shadow: 0 4px 12px rgba(14, 36, 67, 0.1);
 }
 
 .totp-input,
@@ -3158,6 +3161,11 @@
   border-top-color: var(--brand);
   border-radius: 50%;
   animation: auth-spin 700ms linear infinite;
+}
+
+.auth-shell .loading-spinner {
+  border-color: #cbd4e0;
+  border-top-color: var(--brand);
 }
 
 @keyframes auth-spin {
@@ -3432,10 +3440,6 @@ button:disabled {
     font-size: 36px;
   }
 
-  .auth-storage-note {
-    display: none;
-  }
-
   .auth-main {
     padding: 32px 20px 56px;
   }
@@ -3446,7 +3450,6 @@ button:disabled {
     margin: 36px 0 12px;
   }
 
-  .auth-intro-copy > p:last-child,
   .auth-intro-icon {
     display: none;
   }
