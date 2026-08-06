@@ -63,8 +63,10 @@ async function installFakeMap(page: Page): Promise<void> {
       const calls: {
         zoom: number[]
         center: { lat: number; lng: number }[]
+        /** `panTo`로 옮긴 자리만 따로 센다. 목록에서 골랐을 때의 가운데 정렬이다. */
+        panned: { lat: number; lng: number }[]
         clickHandlers: (() => void)[]
-      } = { zoom: [], center: [], clickHandlers: [] }
+      } = { zoom: [], center: [], panned: [], clickHandlers: [] }
       ;(window as unknown as { mapCalls: typeof calls }).mapCalls = calls
 
       class LatLng {
@@ -118,6 +120,10 @@ async function installFakeMap(page: Page): Promise<void> {
           center = { lat: next.lat(), lng: next.lng() }
           calls.center.push(center)
         },
+        panTo: (next: LatLng) => {
+          center = { lat: next.lat(), lng: next.lng() }
+          calls.panned.push(center)
+        },
         fitBounds: () => {},
       }
 
@@ -170,6 +176,8 @@ async function installFakeMap(page: Page): Promise<void> {
 async function stubMap(
   page: Page,
   features: ReturnType<typeof featuresAt>,
+  /** 지도 아래 목록 표에 실을 결함. 표를 쓰지 않는 시험은 비워둔다. */
+  listContent: ReturnType<typeof defectAt>[] = [],
 ): Promise<void> {
   await page.route('**/api/v1/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname
@@ -192,11 +200,64 @@ async function stubMap(
     }
     if (pathname === '/api/v1/defects') {
       return fulfillJson(route, {
-        content: [], page: 0, size: 20, totalElements: 0, totalPages: 0,
+        content: listContent,
+        page: 0,
+        size: 20,
+        totalElements: listContent.length,
+        totalPages: listContent.length === 0 ? 0 : 1,
       })
+    }
+    /*
+     * 묶음 목록은 결함마다 상세(위치 이름)와 사진 URL을 따로 받는다. 지도 GeoJSON에는
+     * 결함 코드까지만 담겨 있기 때문이다.
+     */
+    const detail = /^\/api\/v1\/defects\/([\w-]+)(\/image-url)?$/.exec(pathname)
+    if (detail !== null) {
+      const [, defectId, imageUrl] = detail
+      // `defectAt(i)`가 만든 id의 끝 12자리가 i+1이다.
+      const index = Number(defectId.slice(-12)) - 1
+      if (imageUrl === undefined) {
+        return fulfillJson(route, {
+          defect: defectAt(index),
+          resolutionNote: null,
+          riskScore: 50,
+          riskRuleVersion: 'v1',
+          riskCalculatedAt: '2026-08-01T00:00:00Z',
+          mergedIntoDefectId: null,
+          mergedDefectIds: [],
+          createdAt: '2026-08-01T00:00:00Z',
+          updatedAt: '2026-08-01T00:00:00Z',
+        })
+      }
+      // 첫 건에만 사진이 있다. 나머지는 아직 연결되지 않은 정상 상태(404)다.
+      return index === 0
+        ? fulfillJson(route, {
+            defectId,
+            eventId: null,
+            imageId: 'e2e-image',
+            imageUrl: '/e2e-defect-photo.png',
+            expiresAt: '2099-01-01T00:00:00Z',
+            imageWidth: 1,
+            imageHeight: 1,
+            bboxNorm: null,
+          })
+        : fulfillJson(route, {}, 404)
     }
     return fulfillJson(route, {}, 404)
   })
+
+  // 사진은 실제로 받아지는 URL이어야 `<img>`가 깨진 상태로 남지 않는다.
+  await page.route('**/e2e-defect-photo.png', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'image/png',
+      body: Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8'
+        + 'BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        'base64',
+      ),
+    }),
+  )
 }
 
 interface ClickOutcome {
@@ -327,5 +388,321 @@ test.describe('결함 지도 묶음 클릭', () => {
 
     expect(outcome.visible).toBe(coordinates.length)
     expect(outcome.groups, '여유가 있으면 전부 갈린다').toBe(coordinates.length)
+  })
+})
+
+/**
+ * 셀 만한 묶음은 확대만 하지 않고 구성원 목록까지 편다. 확대만으로는 "이 동네에 몇 건"
+ * 까지만 알 수 있고, 코드를 보려면 마커를 하나씩 눌러야 했다.
+ */
+/** 8m 격자 — 시작 배율에서는 한 묶음이고, 확대하면 갈린다. */
+function tightPoints(count: number): [number, number][] {
+  return Array.from(
+    { length: count },
+    (_, index): [number, number] =>
+      pointAt(Math.floor(index / 4) * 8, (index % 4) * 8),
+  )
+}
+
+/** 한 묶음으로 모인 `count`건을 띄우고 그 묶음을 클릭한다. */
+async function openCluster(
+  page: Page,
+  count: number,
+  listContent: ReturnType<typeof defectAt>[] = [],
+): Promise<void> {
+  await installFakeMap(page)
+  await stubMap(page, featuresAt(tightPoints(count)), listContent)
+  await page.goto('/defects?allStatus=1')
+  await expect(page.locator('.defect-map-canvas-wrap')).toBeVisible()
+  await expect
+    .poll(() => page.evaluate(() =>
+      (window as unknown as { mapCalls: { clickHandlers: unknown[] } })
+        .mapCalls.clickHandlers.length))
+    .toBe(1)
+  await page.evaluate(() =>
+    (window as unknown as { mapCalls: { clickHandlers: (() => void)[] } })
+      .mapCalls.clickHandlers[0]?.())
+}
+
+/**
+ * 카드 안 좌표를 재기 전에 **부드러운 스크롤이 끝나기를** 기다린다. 행을 누르면
+ * 페이지가 지도까지 스크롤하는데, 그 도중에는 카드 헤더가 고정 상단 바 밑에 들어가
+ * 마우스 조작이 상단 바로 간다.
+ */
+async function waitForCardSettled(page: Page): Promise<void> {
+  await expect(page.locator('.defect-card')).toBeVisible()
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const header = document
+            .querySelector('.defect-card-header')!
+            .getBoundingClientRect()
+          const topbar = document
+            .querySelector('.topbar')!
+            .getBoundingClientRect()
+          return Math.round(header.top - topbar.bottom)
+        }),
+      { timeout: 5000 },
+    )
+    .toBeGreaterThan(0)
+}
+
+/**
+ * 지도 영역 안에서의 카드 위치. 뷰포트 좌표로 재면 페이지 스크롤이 섞여, 다른 결함을
+ * 골랐을 때(다시 스크롤한다) 자리를 지켰는지 알 수 없다.
+ */
+function cardOffset(page: Page): Promise<{ x: number; y: number }> {
+  return page.evaluate(() => {
+    const card = document.querySelector('.defect-card')!.getBoundingClientRect()
+    const wrap = document
+      .querySelector('.defect-map-canvas-wrap')!
+      .getBoundingClientRect()
+    return { x: card.left - wrap.left, y: card.top - wrap.top }
+  })
+}
+
+/** 목록 표 첫 행을 눌러 지도 위 상세 카드를 띄운다. */
+async function openDetailCard(page: Page): Promise<void> {
+  await installFakeMap(page)
+  await stubMap(page, featuresAt(tightPoints(2)), [defectAt(0), defectAt(1)])
+  await page.goto('/defects?allStatus=1')
+  await expect(page.locator('.defect-table-body-row')).toHaveCount(2)
+  await page.locator('.defect-table-body-row').first().click()
+  await waitForCardSettled(page)
+}
+
+/** `panTo`로 옮겨간 마지막 자리. */
+function pannedTo(page: Page): Promise<{ lat: number; lng: number } | null> {
+  return page.evaluate(() => {
+    const { panned } = (window as unknown as {
+      mapCalls: { panned: { lat: number; lng: number }[] }
+    }).mapCalls
+    return panned.at(-1) ?? null
+  })
+}
+
+test.describe('묶음 결함 목록', () => {
+  test('10건 이하를 누르면 코드·사진·위치가 담긴 목록이 열린다', async ({ page }) => {
+    await openCluster(page, 3)
+
+    const list = page.getByRole('region', { name: '묶인 결함 목록' })
+    await expect(list).toContainText('이 위치의 결함 3건')
+    const items = list.getByRole('listitem')
+    await expect(items).toHaveCount(3)
+
+    // 결함 코드는 지도 GeoJSON에 있어 바로 보인다.
+    await expect(items.nth(0)).toContainText('INC-20260805-000001')
+    // 위치 이름과 사진은 결함마다 따로 받는다.
+    await expect(items.nth(0)).toContainText('역삼역 3번 출구 앞 보도')
+    await expect(items.nth(0).locator('img')).toBeVisible()
+    // 이름이 없는 결함은 구역 코드로 떨어진다.
+    await expect(items.nth(2)).toContainText('ZONE-GN-0007')
+    // 사진이 없는 결함은 자리표시가 아니라 "없음"으로 끝나야 한다.
+    await expect(items.nth(1).getByLabel('사진 없음')).toBeVisible()
+    await expect(items.nth(1).locator('img')).toHaveCount(0)
+  })
+
+  test('11건 이상이면 확대만 하고 목록은 열지 않는다', async ({ page }) => {
+    await openCluster(page, 11)
+
+    await expect(page.locator('.defect-cluster-list')).toHaveCount(0)
+    // 확대는 그대로 일어난다.
+    const zoomed = await page.evaluate(() =>
+      (window as unknown as { mapCalls: { zoom: number[] } }).mapCalls.zoom)
+    expect(zoomed).toHaveLength(1)
+    expect(zoomed[0]).toBeGreaterThan(START_ZOOM)
+  })
+
+  test('목록에서 고르면 상세 카드가 뜨고 그 줄이 선택으로 남는다', async ({ page }) => {
+    await openCluster(page, 3)
+
+    const list = page.getByRole('region', { name: '묶인 결함 목록' })
+    const second = list.getByRole('listitem').nth(1)
+    await second.getByRole('button').click()
+
+    // 목록 표에서 고른 것과 같다 — 지도 위 상세 카드가 열린다.
+    const card = page.locator('.defect-card')
+    await expect(card).toBeVisible()
+    await expect(card).toContainText('INC-20260805-000002')
+
+    // 고른 줄은 표시가 남는다. 지도 마커의 선택 표시와 짝이다.
+    await expect(second.locator('.defect-cluster-list-item'))
+      .toHaveClass(/is-selected/)
+    // 목록은 닫지 않는다. 형제 결함을 이어서 훑는 것이 이 목록의 쓸모다.
+    await expect(list).toBeVisible()
+  })
+
+  test('닫으면 목록만 사라지고 지도는 그대로다', async ({ page }) => {
+    await openCluster(page, 3)
+
+    await page.getByRole('button', { name: '묶인 결함 목록 닫기' }).click()
+    await expect(page.locator('.defect-cluster-list')).toHaveCount(0)
+    await expect(page.locator('.defect-map-canvas-wrap')).toBeVisible()
+  })
+})
+
+/**
+ * 목록에서 결함을 고르면 그 마커가 지도 가운데로 온다. 카드만 떠도 마커가 화면 밖이면
+ * 어디 일인지 알 수 없다.
+ *
+ * <p>`reducedMotion`을 고정한다 — 움직임을 줄이는 설정에서는 `panTo`가 아니라
+ * `setCenter`로 떨어지도록 만들어 뒀기 때문이다.
+ */
+test.describe('고른 결함 가운데 정렬', () => {
+  test.use({ reducedMotion: 'no-preference' })
+
+  test('묶음 목록에서 고르면 그 마커가 가운데로 온다', async ({ page }) => {
+    const points = tightPoints(3)
+    await openCluster(page, 3)
+
+    const list = page.getByRole('region', { name: '묶인 결함 목록' })
+    await list.getByRole('listitem').nth(2).getByRole('button').click()
+
+    const [longitude, latitude] = points[2]
+    const panned = await pannedTo(page)
+    expect(panned).not.toBeNull()
+    expect(panned!.lat).toBeCloseTo(latitude, 6)
+    expect(panned!.lng).toBeCloseTo(longitude, 6)
+  })
+
+  test('아래 목록 표에서 골라도 그 마커가 가운데로 온다', async ({ page }) => {
+    const rows = [defectAt(0), defectAt(1), defectAt(2)]
+    await installFakeMap(page)
+    await stubMap(page, featuresAt(tightPoints(3)), rows)
+    await page.goto('/defects?allStatus=1')
+    await expect(page.locator('.defect-table-body-row')).toHaveCount(3)
+
+    await page.locator('.defect-table-body-row').nth(1).click()
+
+    // 표 행의 좌표로 옮긴다. 지도 GeoJSON과 같은 결함의 같은 값이다.
+    const panned = await pannedTo(page)
+    expect(panned).not.toBeNull()
+    expect(panned!.lat).toBeCloseTo(rows[1].location.latitude, 6)
+    expect(panned!.lng).toBeCloseTo(rows[1].location.longitude, 6)
+  })
+
+  test('같은 행을 다시 눌러도 가운데로 되돌아온다', async ({ page }) => {
+    const rows = [defectAt(0), defectAt(1)]
+    await installFakeMap(page)
+    await stubMap(page, featuresAt(tightPoints(2)), rows)
+    await page.goto('/defects?allStatus=1')
+    await expect(page.locator('.defect-table-body-row')).toHaveCount(2)
+
+    const row = page.locator('.defect-table-body-row').nth(0)
+    await row.click()
+    await row.click()
+
+    /*
+     * 선택이 그대로라 좌표만 보고 있으면 두 번째 클릭은 아무 일도 하지 않는다.
+     * 요청마다 token을 올리는 이유가 이것이다.
+     */
+    const pannedCount = await page.evaluate(() =>
+      (window as unknown as { mapCalls: { panned: unknown[] } })
+        .mapCalls.panned.length)
+    expect(pannedCount).toBe(2)
+  })
+})
+
+/**
+ * 지도 위 상세 카드를 끌어 옮기기. 위치는 CSP 때문에 inline style이 아니라 CSS class로
+ * 표현된다(`defectCardDrag.ts`). 그래서 "클래스가 붙었나"와 "실제로 움직였나"를 함께 본다.
+ */
+test.describe('상세 카드 끌어 옮기기', () => {
+  /** 카드 헤더의 빈 곳(제목 옆)을 잡는다. 버튼에서 시작한 끌기는 무시되기 때문이다. */
+  async function dragCardBy(
+    page: Page,
+    deltaX: number,
+    deltaY: number,
+  ): Promise<void> {
+    const header = page.locator('.defect-card-header')
+    const box = (await header.boundingBox())!
+    const startX = box.x + box.width / 2
+    const startY = box.y + box.height / 2
+    await page.mouse.move(startX, startY)
+    await page.mouse.down()
+    // 여러 단계로 나눠야 pointermove가 실제로 여러 번 들어온다.
+    await page.mouse.move(startX + deltaX, startY + deltaY, { steps: 8 })
+    await page.mouse.up()
+  }
+
+  test('헤더를 끌면 카드가 그만큼 움직인다', async ({ page }) => {
+    await openDetailCard(page)
+    const before = await cardOffset(page)
+
+    await dragCardBy(page, -300, 120)
+
+    await expect(page.locator('.defect-card')).toHaveClass(/is-dragged/)
+    const after = await cardOffset(page)
+    // 1%p 간격으로 맞춰지므로 컨테이너의 1%(≈10px)까지는 어긋날 수 있다.
+    expect(after.x - before.x).toBeGreaterThan(-315)
+    expect(after.x - before.x).toBeLessThan(-285)
+    expect(after.y - before.y).toBeGreaterThan(105)
+    expect(after.y - before.y).toBeLessThan(135)
+  })
+
+  test('컨테이너 밖으로는 나가지 않는다', async ({ page }) => {
+    await openDetailCard(page)
+
+    // 지도 폭보다 훨씬 큰 값으로 끌어본다.
+    await dragCardBy(page, -4000, 4000)
+
+    const { cardBox, wrapBox } = await page.evaluate(() => ({
+      cardBox: document.querySelector('.defect-card')!.getBoundingClientRect(),
+      wrapBox: document
+        .querySelector('.defect-map-canvas-wrap')!
+        .getBoundingClientRect(),
+    }))
+    expect(cardBox.left, '왼쪽으로 잘려나가지 않는다')
+      .toBeGreaterThanOrEqual(wrapBox.left)
+    expect(cardBox.top).toBeGreaterThanOrEqual(wrapBox.top)
+    expect(cardBox.bottom, '아래로 잘려나가지 않는다')
+      .toBeLessThanOrEqual(wrapBox.bottom + 1)
+  })
+
+  test('닫기 버튼에서 시작한 끌기는 카드를 옮기지 않는다', async ({ page }) => {
+    await openDetailCard(page)
+    const card = page.locator('.defect-card')
+
+    const close = card.getByRole('button', { name: '닫기' })
+    const box = (await close.boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x - 200, box.y + 100, { steps: 6 })
+
+    await expect(card).not.toHaveClass(/is-dragged/)
+    await page.mouse.up()
+  })
+
+  test('손잡이에 포커스를 두고 방향키로도 옮긴다', async ({ page }) => {
+    await openDetailCard(page)
+    const card = page.locator('.defect-card')
+    const before = await cardOffset(page)
+
+    await card.getByRole('button', { name: /카드 위치 옮기기/ }).focus()
+    // 한 번에 2%p. 다섯 번이면 10%p다.
+    for (let index = 0; index < 5; index += 1) {
+      await page.keyboard.press('ArrowLeft')
+    }
+
+    await expect(card).toHaveClass(/is-dragged/)
+    const after = await cardOffset(page)
+    expect(after.x, '왼쪽으로 옮겨져야 한다').toBeLessThan(before.x - 30)
+  })
+
+  test('다른 결함을 골라도 옮겨둔 자리를 지킨다', async ({ page }) => {
+    await openDetailCard(page)
+    const card = page.locator('.defect-card')
+
+    await dragCardBy(page, -260, 60)
+    const moved = await cardOffset(page)
+
+    // 카드는 결함마다 새로 마운트된다. 자리를 카드가 들고 있으면 여기서 튀어오른다.
+    await page.locator('.defect-table-body-row').nth(1).click()
+    await expect(card).toContainText('INC-20260805-000002')
+
+    const after = await cardOffset(page)
+    expect(Math.abs(after.x - moved.x)).toBeLessThan(2)
+    expect(Math.abs(after.y - moved.y)).toBeLessThan(2)
   })
 })

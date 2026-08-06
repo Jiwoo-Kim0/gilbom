@@ -83,6 +83,11 @@ declare namespace naver.maps {
     getBounds(): LatLngBounds
     getZoom(): number
     setCenter(latlng: LatLng): void
+    /**
+     * 중심을 부드럽게 옮긴다. SDK 버전에 따라 없을 수 있어 호출부에서
+     * `typeof map.panTo === 'function'`으로 확인하고 `setCenter`로 떨어진다.
+     */
+    panTo?(latlng: LatLng): void
     setZoom(zoom: number): void
     fitBounds(bounds: LatLngBounds): void
     destroy(): void

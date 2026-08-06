@@ -3,10 +3,18 @@ import test from 'node:test'
 import {
   bboxForDefectMapFilter,
   clusterZoomPlan,
+  isPointOutsideMapView,
   defectMapFilterKey,
   defectTypeTone,
 } from '../src/features/defect/defectMapState.ts'
 import {
+  cardPositionClasses,
+  cardPositionFromDrag,
+  cardPositionFromKey,
+} from '../src/features/defect/defectCardDrag.ts'
+import {
+  countActiveFilterGroups,
+  DEFAULT_DEFECT_FILTERS,
   DEFECT_SORT_OPTIONS,
   EMPTY_DEFECT_FILTERS,
 } from '../src/features/defect/defectTypes.ts'
@@ -172,5 +180,165 @@ test('배율이나 화면 크기를 재지 못하면 한 단계만 확대한다'
     clusterZoomPlan(members, ONE_METER_PER_PIXEL, { widthPx: 0, heightPx: 0 })
       .step,
     1,
+  )
+})
+
+/*
+ * "필터" 버튼 배지. 조건이 전부 모달 안으로 들어가면서, 화면에 무엇이 걸렸는지 알리는
+ * 것이 이 숫자 하나뿐이다. 고른 항목 수가 아니라 **손댄 조건 묶음 수**를 센다.
+ */
+test('기본 조건에서는 배지에 셀 것이 없다', () => {
+  assert.equal(countActiveFilterGroups(DEFAULT_DEFECT_FILTERS), 0)
+  // 검색어는 검색창에 그대로 보이므로 세지 않는다.
+  assert.equal(
+    countActiveFilterGroups({ ...DEFAULT_DEFECT_FILTERS, q: 'INC' }),
+    0,
+  )
+})
+
+test('한 묶음에서 여럿을 골라도 조건 하나로 센다', () => {
+  assert.equal(
+    countActiveFilterGroups({
+      ...DEFAULT_DEFECT_FILTERS,
+      severities: ['LOW', 'HIGH', 'CRITICAL'],
+    }),
+    1,
+  )
+  assert.equal(
+    countActiveFilterGroups({
+      ...DEFAULT_DEFECT_FILTERS,
+      severities: ['CRITICAL'],
+      defectTypes: ['DAMAGED'],
+      from: '2026-08-03T00:00',
+      minConfidence: 0.6,
+    }),
+    4,
+  )
+})
+
+test('처리 상태는 기본 셋과 다를 때만 센다', () => {
+  // 순서만 다른 것은 같은 조건이다.
+  assert.equal(
+    countActiveFilterGroups({
+      ...DEFAULT_DEFECT_FILTERS,
+      workflowStatuses: ['IN_PROGRESS', 'NEW', 'ACCEPTED'],
+    }),
+    0,
+  )
+  assert.equal(
+    countActiveFilterGroups({
+      ...DEFAULT_DEFECT_FILTERS,
+      workflowStatuses: ['NEW', 'ACCEPTED', 'IN_PROGRESS', 'RESOLVED'],
+    }),
+    1,
+  )
+  // 전부 푼 것("전체 보기")도 기본과 다르다.
+  assert.equal(
+    countActiveFilterGroups({ ...DEFAULT_DEFECT_FILTERS, workflowStatuses: [] }),
+    1,
+  )
+})
+
+/*
+ * 상세 카드 끌어 옮기기. 위치는 CSP 때문에 정수 백분율 + CSS class다
+ * (`defectCardDrag.ts`). 자리 자르기 규칙을 여기서 고정한다.
+ */
+const WIDE_MAP = {
+  originLeft: 600,
+  originTop: 16,
+  containerWidth: 1000,
+  containerHeight: 600,
+  cardWidth: 340,
+  cardHeight: 300,
+}
+
+test('끌면 백분율로 바뀌고 1%p 간격으로 맞춰진다', () => {
+  // 600 - 300 = 300px → 30%
+  assert.deepEqual(cardPositionFromDrag(WIDE_MAP, -300, 120), { x: 30, y: 23 })
+  // 소수점은 반올림한다. 604px → 60.4% → 60%
+  assert.equal(cardPositionFromDrag(WIDE_MAP, 4, 0).x, 60)
+})
+
+test('컨테이너 밖으로는 자른다', () => {
+  const far = cardPositionFromDrag(WIDE_MAP, 9_999, 9_999)
+  // 1000 - 340 - 16 = 644px → 64%
+  assert.equal(far.x, 64)
+  // 600 - 300 - 16 = 284px → 47%
+  assert.equal(far.y, 47)
+
+  const near = cardPositionFromDrag(WIDE_MAP, -9_999, -9_999)
+  // 여백 16px은 남긴다. ceil(1.6%) = 2%, ceil(2.67%) = 3%
+  assert.equal(near.x, 2)
+  assert.equal(near.y, 3)
+})
+
+test('지도 높이를 꽉 채운 카드도 아래로는 움직인다', () => {
+  /*
+   * 기본 카드는 `top: 16; bottom: 16`이라 높이가 컨테이너-32다. "전부 보이는 자리"만
+   * 허용하면 위아래로 1px도 못 움직인다. 손잡이(96px)가 남는 자리까지 넓힌다.
+   */
+  const tall = { ...WIDE_MAP, originTop: 16, cardHeight: 600 - 32 }
+  const moved = cardPositionFromDrag(tall, 0, 200)
+  assert.equal(moved.y, 36)
+  // 손잡이는 남아야 한다. 600 - 96 = 504px → 84%
+  assert.equal(cardPositionFromDrag(tall, 0, 9_999).y, 84)
+})
+
+test('위치 클래스는 10%p 자리와 1%p 자리로 갈린다', () => {
+  assert.equal(
+    cardPositionClasses({ x: 37, y: 4 }),
+    'is-dragged dc-x-3 dc-xf-7 dc-y-0 dc-yf-4',
+  )
+  // 옮긴 적이 없으면 기본 자리다. 클래스를 붙이지 않는다.
+  assert.equal(cardPositionClasses(null), '')
+})
+
+test('방향키는 2%p씩 옮기고 모르는 키는 흘려보낸다', () => {
+  const at = { x: 30, y: 20 }
+  assert.deepEqual(cardPositionFromKey(at, 'ArrowLeft', WIDE_MAP), { x: 28, y: 20 })
+  assert.deepEqual(cardPositionFromKey(at, 'ArrowDown', WIDE_MAP), { x: 30, y: 22 })
+  assert.equal(cardPositionFromKey(at, 'Enter', WIDE_MAP), null)
+  // 자르기는 끌기와 같은 규칙을 쓴다.
+  assert.equal(cardPositionFromKey({ x: 64, y: 20 }, 'ArrowRight', WIDE_MAP).x, 64)
+})
+
+/*
+ * 새로 탐지된 결함이 화면 밖인지 판단하는 규칙. 지도 한 화면이 위경도 0.01도(약 1.1km)를
+ * 덮는다고 두고 본다.
+ */
+const VIEW = { south: 37.495, west: 127.04, north: 37.505, east: 127.05 }
+
+test('화면 가운데 있는 좌표는 밖이 아니다', () => {
+  assert.equal(
+    isPointOutsideMapView({ latitude: 37.5, longitude: 127.045 }, VIEW),
+    false,
+  )
+})
+
+test('화면 범위를 벗어난 좌표는 밖이다', () => {
+  // 위·아래·좌·우 네 방향을 모두 본다. 한 방향만 보면 부호 실수를 놓친다.
+  assert.equal(
+    isPointOutsideMapView({ latitude: 37.52, longitude: 127.045 }, VIEW), true)
+  assert.equal(
+    isPointOutsideMapView({ latitude: 37.48, longitude: 127.045 }, VIEW), true)
+  assert.equal(
+    isPointOutsideMapView({ latitude: 37.5, longitude: 127.02 }, VIEW), true)
+  assert.equal(
+    isPointOutsideMapView({ latitude: 37.5, longitude: 127.07 }, VIEW), true)
+})
+
+test('가장자리에 걸친 좌표는 밖으로 친다', () => {
+  /*
+   * 범위 안이긴 하지만 경계에서 8%(여기서는 0.0008도, 약 90m) 안쪽까지는 마커가 반쯤
+   * 잘려 보이지 않는다. 그대로 두면 "새 결함이 왔다는데 어디 있는지 안 보인다"가 된다.
+   */
+  assert.equal(
+    isPointOutsideMapView({ latitude: 37.5049, longitude: 127.045 }, VIEW),
+    true,
+  )
+  // 여유 밖으로 들어오면 보이는 것으로 본다.
+  assert.equal(
+    isPointOutsideMapView({ latitude: 37.5040, longitude: 127.045 }, VIEW),
+    false,
   )
 })

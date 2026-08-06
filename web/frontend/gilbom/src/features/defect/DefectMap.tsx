@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import { loadNaverMapsScript } from '../../lib/naverMaps'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
+import { CLUSTER_LIST_MAX, DefectClusterList } from './DefectClusterList'
 import { DefectDetailCard } from './DefectDetailCard'
+import type { DefectCardPosition } from './defectCardDrag'
 import { getDefectMap } from './defectApi'
 import {
   bboxForDefectMapFilter,
+  isPointOutsideMapView,
   clusterZoomPlan,
   defectMapFilterKey,
   defectTypeTone,
@@ -218,6 +221,29 @@ function createMarkerIcon(
   }
 }
 
+/**
+ * "이 좌표를 지도 가운데로" 요청. 목록 표에서 결함을 고를 때 상위가 넘긴다.
+ *
+ * <p>`token`이 있는 이유는 **같은 결함을 다시 고르는 경우** 때문이다. 좌표만 보고
+ * 있으면 지도를 딴 곳으로 끌어놓고 같은 행을 다시 눌러도 값이 그대로라 아무 일도
+ * 일어나지 않는다. 요청마다 token을 올려 "또 요청했다"를 구분한다.
+ */
+export type DefectMapCenterRequest = {
+  latitude: number
+  longitude: number
+  token: number
+}
+
+/**
+ * 실시간으로 새 결함이 들어왔다는 신호. 좌표는 여기 없다 — SSE 이벤트가 위치를 주지
+ * 않으므로 지도가 직접 조회해서 찾는다.
+ *
+ * <p>새 이벤트마다 객체를 새로 만들어야 지도가 반응한다.
+ */
+export type DefectMapRevealRequest = {
+  defectId: string
+}
+
 interface DefectMapProps {
   filters: DefectFilters
   selectedDefectId: string | null
@@ -226,6 +252,21 @@ interface DefectMapProps {
   onChanged: () => void
   /** 목록에서 결함을 고르면 페이지가 이 카드로 스크롤한다. */
   cardRef?: RefObject<HTMLElement | null>
+  /** 목록에서 고른 결함을 지도 가운데로 옮긴다. {@link DefectMapCenterRequest} 참고. */
+  centerRequest?: DefectMapCenterRequest | null
+  /**
+   * 방금 탐지된 결함. **화면 밖에 있을 때만** 그 위치로 지도를 옮긴다.
+   * {@link DefectMapRevealRequest} 참고.
+   */
+  revealRequest?: DefectMapRevealRequest | null
+  /**
+   * 값이 바뀌면 같은 필터·같은 뷰포트라도 GeoJSON을 다시 받는다.
+   *
+   * <p>SSE로 새 결함이 들어오면 목록은 갱신되는데 지도는 그대로였다. 필터와 bbox가
+   * 안 바뀌니 다시 읽을 이유가 없었기 때문이다. 부모의 재조회 신호를 여기까지
+   * 내려야 마커가 새로고침 없이 올라온다.
+   */
+  reloadToken?: number
 }
 
 export function DefectMap({
@@ -234,6 +275,9 @@ export function DefectMap({
   onSelect,
   onChanged,
   cardRef,
+  centerRequest = null,
+  revealRequest = null,
+  reloadToken = 0,
 }: DefectMapProps) {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<naver.maps.Map | null>(null)
@@ -255,7 +299,7 @@ export function DefectMap({
     bbox: '',
   })
   const bbox = bboxForDefectMapFilter(viewport, filterKey)
-  const requestKey = `${filterKey}\u0000${bbox}`
+  const requestKey = `${filterKey}\u0000${bbox}\u0000${reloadToken}`
   const [featureSnapshot, setFeatureSnapshot] = useState<{
     key: string
     features: DefectMapFeature[]
@@ -282,6 +326,60 @@ export function DefectMap({
     ? featureSnapshot.error
     : null
   const [scale, setScale] = useState<MapScale | null>(null)
+  /**
+   * 묶음을 눌러 펼친 구성원 목록. 지도 위 왼쪽에 뜬다. 닫기 전까지 남아 있어
+   * 형제 결함을 이어서 훑을 수 있다.
+   *
+   * <p>어느 조건에서 편 것인지 함께 들고 있다가, 조건이 바뀌면 파생값 쪽에서 가린다.
+   * 걸러진 결함을 가리키는 목록이 남지 않는다 — effect로 지우면 그만큼 렌더가 한 번 더 돈다.
+   */
+  const [clusterList, setClusterList] = useState<{
+    filterKey: string
+    features: DefectMapFeature[]
+  } | null>(null)
+  /**
+   * 상세 카드를 끌어 옮긴 자리. 카드가 아니라 지도가 들고 있다 — 카드는 결함마다
+   * `key`로 새로 마운트되므로, 카드 안에 두면 결함을 바꿀 때마다 제자리로 돌아간다.
+   */
+  const [cardPosition, setCardPosition] = useState<DefectCardPosition | null>(
+    null,
+  )
+  const visibleClusterList = clusterList?.filterKey === filterKey
+    ? clusterList.features
+    : null
+
+  /**
+   * 좌표를 지도 가운데로 옮긴다. 배율은 건드리지 않는다 — 고른 결함을 보려는 것이지
+   * 더 들여다보려는 것이 아니고, 확대까지 바뀌면 주변 결함이 화면에서 사라진다.
+   */
+  const centerMapOn = useCallback((latitude: number, longitude: number) => {
+    const map = mapRef.current
+    if (map === null || !window.naver) return
+
+    const position = new window.naver.maps.LatLng(latitude, longitude)
+    // 움직임을 줄여달라고 설정한 사용자에게 미끄러지는 지도는 멀미를 준다.
+    // SDK 버전에 panTo가 없을 수도 있어 그때도 setCenter로 떨어진다.
+    const reduceMotion = window.matchMedia(
+      '(prefers-reduced-motion: reduce)',
+    ).matches
+    if (reduceMotion || typeof map.panTo !== 'function') {
+      map.setCenter(position)
+      return
+    }
+    map.panTo(position)
+  }, [])
+
+  /*
+   * 목록 표에서 고른 결함을 가운데로 옮긴다.
+   *
+   * 지도 마커를 눌렀을 때는 옮기지 않는다 — 이미 그 자리를 보고 있고, 손가락 밑에서
+   * 지도가 미끄러지면 방금 무엇을 눌렀는지 놓친다. 그래서 선택(`selectedDefectId`)이
+   * 아니라 **상위가 보낸 요청**에 반응한다.
+   */
+  useEffect(() => {
+    if (centerRequest === null || mapStatus !== 'ready') return
+    centerMapOn(centerRequest.latitude, centerRequest.longitude)
+  }, [centerRequest, centerMapOn, mapStatus])
   // 확대·이동이 끝나면 화면 좌표가 달라져 마커 묶음을 다시 계산해야 한다.
   const [idleToken, setIdleToken] = useState(0)
   /**
@@ -294,6 +392,64 @@ export function DefectMap({
   useEffect(() => {
     filterKeyRef.current = filterKey
   }, [filterKey])
+
+  /*
+   * 아래 "새 결함이 화면 밖이면 옮기기"가 최신 필터를 읽되, 필터가 바뀔 때마다 다시
+   * 실행되지는 않게 하려고 ref로 들고 있는다. 그 효과는 **새 이벤트에만** 반응해야 한다.
+   */
+  const filtersRef = useRef(filters)
+  useEffect(() => {
+    filtersRef.current = filters
+  }, [filters])
+
+  /**
+   * 새로 탐지된 결함이 **화면 밖일 때만** 그 위치로 지도를 옮긴다.
+   *
+   * <p>SSE 이벤트에는 좌표가 없어서(계약상 알림만 준다) 지금 필터로 지도용 GeoJSON을
+   * 한 번 더 받아 그 결함을 찾는다. **뷰포트 bbox 없이** 받는 것이 요점이다 — 화면 밖에
+   * 있는 결함이 목적인데 bbox를 걸면 애초에 응답에 없다.
+   *
+   * <p>이 응답으로 마커를 바꾸지는 않는다. 찾는 목적만이다. 지도를 옮기면 idle이 오고,
+   * 그때 뷰포트 bbox로 정상 조회가 다시 돌아 마커가 올라온다.
+   *
+   * <p>서버 필터를 그대로 쓰기 때문에 **지금 조건에 맞지 않는 결함이면 응답에 없어
+   * 지도가 움직이지 않는다.** 필터에 걸려 그려지지도 않을 마커로 화면을 끌고 가면
+   * 사용자는 빈 지도를 보게 된다.
+   */
+  useEffect(() => {
+    if (revealRequest === null || mapStatus !== 'ready') return
+    let cancelled = false
+
+    getDefectMap({ ...filtersRef.current, bbox: '' })
+      .then((response) => {
+        const map = mapRef.current
+        if (cancelled || map === null) return
+        const target = response.features.find(
+          (feature) => feature.properties.defectId === revealRequest.defectId,
+        )
+        if (target === undefined) return
+
+        const [longitude, latitude] = target.geometry.coordinates
+        const bounds = map.getBounds()
+        const southWest = bounds.getSW()
+        const northEast = bounds.getNE()
+        const outside = isPointOutsideMapView({ latitude, longitude }, {
+          south: southWest.lat(),
+          west: southWest.lng(),
+          north: northEast.lat(),
+          east: northEast.lng(),
+        })
+        // 이미 보이는 자리면 움직이지 않는다. 보던 위치를 빼앗지 않는 것이 기본이다.
+        if (!outside) return
+        centerMapOn(latitude, longitude)
+      })
+      // 못 찾거나 조회가 실패하면 지도를 움직이지 않는다. 알림 줄은 이미 떠 있다.
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [revealRequest, mapStatus, centerMapOn])
 
   useEffect(() => {
     if (!naverMapClientId) return
@@ -502,7 +658,10 @@ export function DefectMap({
               defectId === selectedDefectId,
             ),
         title: grouped
-          ? `결함 ${cluster.features.length}건 — 확대하면 나뉩니다`
+          ? `결함 ${cluster.features.length}건 — 누르면 확대합니다`
+            + (cluster.features.length <= CLUSTER_LIST_MAX
+              ? ' (목록도 함께 열립니다)'
+              : '')
           : `${incidentCode} · ${DEFECT_TYPE_LABELS[defectType] ?? defectType}`
             + ` · ${RISK_LEVEL_LABELS[riskLevel] ?? riskLevel}`
             + ` · ${WORKFLOW_STATUS_LABELS[workflowStatus] ?? workflowStatus}`,
@@ -533,6 +692,17 @@ export function DefectMap({
         )
         map.setCenter(new maps.LatLng(plan.center.latitude, plan.center.longitude))
         map.setZoom(Math.min(map.getZoom() + plan.step, MAX_MAP_ZOOM))
+
+        /*
+         * 셀 만한 수면 그 자리에서 구성원 목록까지 편다. 확대만 하면 "이 동네에 몇
+         * 건"까지만 알 수 있고 코드를 보려면 마커를 하나씩 눌러야 한다. 그보다 많으면
+         * 목록이 지도를 가리기만 하므로 확대에서 멈춘다.
+         */
+        setClusterList(
+          cluster.features.length <= CLUSTER_LIST_MAX
+            ? { filterKey: filterKeyRef.current, features: cluster.features }
+            : null,
+        )
       })
       return marker
     })
@@ -629,6 +799,22 @@ export function DefectMap({
               {error}
             </p>
           )}
+          {visibleClusterList !== null && (
+            // 다른 묶음을 누르면 새로 마운트해 이전 묶음의 사진·위치를 들고 있지 않게 한다.
+            <DefectClusterList
+              key={visibleClusterList
+                .map((feature) => feature.properties.defectId)
+                .join(',')}
+              features={visibleClusterList}
+              selectedDefectId={selectedDefectId}
+              // 이 목록도 목록이다. 고른 결함의 마커가 가운데로 온다.
+              onSelect={(defectId, latitude, longitude) => {
+                onSelect(defectId)
+                centerMapOn(latitude, longitude)
+              }}
+              onClose={() => setClusterList(null)}
+            />
+          )}
           {selectedDefectId !== null && (
             <DefectDetailCard
               key={selectedDefectId}
@@ -636,6 +822,10 @@ export function DefectMap({
               onClose={() => onSelect(null)}
               onChanged={onChanged}
               onSelectDefect={onSelect}
+              /* 카드는 결함마다 새로 마운트된다(`key`). 옮겨둔 자리는 여기서 들고
+                 있어야 결함을 바꿀 때 제자리로 튀어오르지 않는다. */
+              position={cardPosition}
+              onMove={setCardPosition}
             />
           )}
         </div>

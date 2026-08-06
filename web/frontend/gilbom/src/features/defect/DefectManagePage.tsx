@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
-import { DefectFilter } from './DefectFilter'
+import { DefectFilterBar } from './DefectFilterBar'
 import { DefectList } from './DefectList'
 import { DefectMap } from './DefectMap'
+import type { DefectMapCenterRequest } from './DefectMap'
 import { DefectMergeModal } from './DefectMergeModal'
 import { DefectSearchBar } from './DefectSearchBar'
 import { getDefects } from './defectApi'
@@ -98,6 +99,9 @@ export function DefectManagePage() {
     : requestedSort
 
   const [selectedDefectId, setSelectedDefectId] = useState<string | null>(null)
+  /** 지도에 "이 좌표를 가운데로" 보내는 요청. 목록 표에서 고를 때만 만든다. */
+  const [centerRequest, setCenterRequest] =
+    useState<DefectMapCenterRequest | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
   const [checkedIds, setCheckedIds] = useState<string[]>([])
   const [merging, setMerging] = useState(false)
@@ -168,13 +172,25 @@ export function DefectManagePage() {
 
   /**
    * 목록에서 고른 결함의 상세 카드는 **지도 위에** 뜬다. 목록은 지도 아래에 있어
-   * 행을 눌러도 카드가 화면 밖일 수 있으니 지도까지 올려준다.
+   * 행을 눌러도 카드가 화면 밖일 수 있으니 지도까지 올려주고, 그 결함의 마커를
+   * 지도 가운데로 옮긴다 — 카드만 떠도 마커가 화면 밖이면 어디 일인지 알 수 없다.
    *
    * 지도 마커로 고를 때는 이 함수를 쓰지 않는다. 이미 지도를 보고 있으므로 화면이
    * 움직일 이유가 없다.
    */
   const selectFromList = useCallback((defectId: string) => {
     setSelectedDefectId(defectId)
+    const location = snapshot?.result?.content.find(
+      (defect) => defect.defectId === defectId,
+    )?.location
+    if (location != null) {
+      // token을 올려 같은 행을 다시 눌렀을 때도 가운데로 되돌아오게 한다.
+      setCenterRequest((previous) => ({
+        latitude: location.latitude,
+        longitude: location.longitude,
+        token: (previous?.token ?? 0) + 1,
+      }))
+    }
     // 접근성 설정을 켠 사용자에게 긴 스크롤 애니메이션은 멀미를 준다.
     const reduceMotion = window.matchMedia(
       '(prefers-reduced-motion: reduce)',
@@ -183,7 +199,7 @@ export function DefectManagePage() {
       behavior: reduceMotion ? 'auto' : 'smooth',
       block: 'start',
     })
-  }, [])
+  }, [snapshot])
 
   const toggleCheck = useCallback((defectId: string) => {
     setCheckedIds((previous) =>
@@ -205,6 +221,19 @@ export function DefectManagePage() {
   // 실시간 알림은 "다시 읽어라"만 알려준다. 데이터는 목록·지도가 각자 다시 읽는다.
   const { lastEvent } = useDefectRealtime(refresh)
 
+  /**
+   * 새로 탐지된 결함을 지도에 알린다. 지도는 그 결함이 **화면 밖일 때만** 그 위치로
+   * 옮긴다 — 판단은 지도가 한다(지금 보이는 범위를 아는 쪽이 지도다).
+   *
+   * <p>`lastEvent`가 바뀔 때마다 새 객체가 되므로 같은 결함이 다시 들어와도 전달된다.
+   */
+  const revealRequest = useMemo(
+    () => (lastEvent?.eventType === 'defect.created'
+      ? { defectId: lastEvent.defectId }
+      : null),
+    [lastEvent],
+  )
+
   const changeSort = useCallback(
     (next: string) => {
       setSearchParams(writeFilters(filters, 0, next), { replace: true })
@@ -221,12 +250,29 @@ export function DefectManagePage() {
 
   return (
     <section className="page-stack" aria-label="실시간 결함 상태 모니터링">
-      <DefectSearchBar
-        key={searchResetToken}
-        value={filters.q}
-        onChange={(q) => applyFilters({ ...filters, q })}
-        disabled={loading && result === null}
-      />
+      {/*
+        검색과 조건이 한 줄이다. 검색창은 결함 코드(`INC-20260805-000001`) 한 줄이
+        들어갈 만큼만 차지하고, 남는 폭은 조건 알약들이 쓴다.
+
+        key를 바꿔 초기화 때 검색창을 새로 마운트한다. 검색어를 비우는 것만으로는
+        부족하다 — 이미 비어 있던 상태에서 무언가 치다가 초기화를 누르면 `value`가
+        그대로 ''라 컴포넌트가 변화를 알 수 없고, 디바운스 대기 중이던 입력이
+        300ms 뒤에 되살아난다.
+      */}
+      <div className="content-card defect-toolbar">
+        <DefectSearchBar
+          key={searchResetToken}
+          value={filters.q}
+          onChange={(q) => applyFilters({ ...filters, q })}
+          disabled={loading && result === null}
+        />
+        <DefectFilterBar
+          filters={filters}
+          onChange={applyFilters}
+          disabled={loading && result === null}
+          onReset={() => setSearchResetToken((token) => token + 1)}
+        />
+      </div>
 
       {lastEvent !== null && lastEvent.eventType === 'defect.created' && (
         <p className="defect-toast" role="status">
@@ -235,31 +281,20 @@ export function DefectManagePage() {
           {RISK_LEVEL_LABELS[lastEvent.riskLevel] ?? lastEvent.riskLevel}
         </p>
       )}
-      {/*
-        key를 바꿔 초기화 때 검색창을 새로 마운트한다. 검색어를 비우는 것만으로는
-        부족하다 — 이미 비어 있던 상태에서 무언가 치다가 초기화를 누르면 `value`가
-        그대로 ''라 컴포넌트가 변화를 알 수 없고, 디바운스 대기 중이던 입력이
-        300ms 뒤에 되살아난다.
-      */}
-      {/* 지도가 왼쪽, 조건 패널이 오른쪽이다. DOM 순서도 그대로 두고 좁은 화면에서만
-          CSS order로 패널을 위로 올린다. */}
-      <div className="defect-layout">
-        {/* 지도는 목록 페이지와 별개로 뷰포트 bbox 기준의 GeoJSON을 직접 조회한다.
-            목록 20건에 묶이지 않고 화면에 보이는 범위 전체를 그린다. */}
-        <DefectMap
-          filters={filters}
-          selectedDefectId={selectedDefectId}
-          onSelect={setSelectedDefectId}
-          onChanged={refresh}
-          cardRef={mapCardRef}
-        />
-        <DefectFilter
-          filters={filters}
-          onChange={applyFilters}
-          disabled={loading && result === null}
-          onReset={() => setSearchResetToken((token) => token + 1)}
-        />
-      </div>
+      {/* 조건이 위 툴바로 올라가면서 지도가 가로 폭을 전부 쓴다. 지도는 목록 페이지와
+          별개로 뷰포트 bbox 기준의 GeoJSON을 직접 조회한다 — 목록 20건에 묶이지 않고
+          화면에 보이는 범위 전체를 그린다. */}
+      <DefectMap
+        filters={filters}
+        selectedDefectId={selectedDefectId}
+        onSelect={setSelectedDefectId}
+        onChanged={refresh}
+        cardRef={mapCardRef}
+        centerRequest={centerRequest}
+        revealRequest={revealRequest}
+        // SSE로 새 결함이 오면 목록과 함께 지도도 다시 읽어야 마커가 올라온다.
+        reloadToken={reloadToken}
+      />
       {/*
         선택이 없어도 자리는 남겨둔다. 조건부로 렌더하면 체크할 때마다 이 줄이 생겼다
         사라지며 아래 목록이 위아래로 움직여, 방금 누른 행이 손가락 밑에서 달아난다.

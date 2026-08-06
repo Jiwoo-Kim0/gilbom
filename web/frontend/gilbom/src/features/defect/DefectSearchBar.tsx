@@ -14,8 +14,10 @@ interface DefectSearchBarProps {
 const SEARCH_DEBOUNCE_MS = 300
 
 /**
- * 검색만 떼어내 지도·필터 위에 가로로 깔아둔다. 조건 패널 안에 있으면 폭이 280px로
- * 묶여 결함 코드 하나도 다 안 보였다.
+ * 화면 맨 위 툴바의 왼쪽 칸이다. 오른쪽에는 조건 알약들이 붙는다.
+ *
+ * <p>폭은 결함 코드 한 줄(`INC-20260805-000001`)이 들어갈 만큼만 준다. 예전에는 툴바
+ * 전체를 혼자 썼는데, 검색어는 대개 코드 하나라 남는 폭이 전부 놀았다.
  *
  * <p>검색어는 상위에서 URL로 가고 **URL 변경이 곧 조회 요청**이다. 그래서 타자마다
  * 올려보내지 않고 {@link SEARCH_DEBOUNCE_MS}만큼 묶는다. 급할 때는 Enter로 즉시 보낸다.
@@ -90,7 +92,7 @@ export function DefectSearchBar({
 
   return (
     <form
-      className="content-card defect-search-bar"
+      className="defect-search-bar"
       aria-label="결함 검색"
       onSubmit={(event) => event.preventDefault()}
     >

@@ -121,6 +121,43 @@ export function clusterZoomPlan(
   return { step: Math.min(Math.max(fits, 1), maxStep), center }
 }
 
+/** 지도에 지금 보이는 범위. 지도 SDK의 bounds를 그대로 옮겨 담는다. */
+export interface MapViewBounds {
+  south: number
+  west: number
+  north: number
+  east: number
+}
+
+/**
+ * 마커 아이콘이 가장자리에서 잘리는 만큼을 "안 보이는 것"으로 치는 여유.
+ *
+ * <p>화면 폭·높이의 8%다. 마커(44px)가 절반만 걸쳐 있으면 사용자에게는 보이지 않는
+ * 것과 같다.
+ */
+const VIEW_EDGE_MARGIN_RATIO = 0.08
+
+/**
+ * 좌표가 지금 화면 밖에 있나.
+ *
+ * <p>새로 탐지된 결함이 **화면 밖일 때만** 지도를 옮기려고 쓴다. 보고 있는 자리에 이미
+ * 들어와 있으면 지도가 움직이지 않아야 한다 — 사용자가 보던 위치를 이유 없이 빼앗는다.
+ *
+ * <p>가장자리는 {@link VIEW_EDGE_MARGIN_RATIO}만큼 안쪽으로 당겨서 본다. 딱 경계에 걸린
+ * 마커는 반쯤 잘려 보이지 않으므로 "밖"으로 친다.
+ */
+export function isPointOutsideMapView(
+  point: { latitude: number; longitude: number },
+  view: MapViewBounds,
+): boolean {
+  const latitudeMargin = (view.north - view.south) * VIEW_EDGE_MARGIN_RATIO
+  const longitudeMargin = (view.east - view.west) * VIEW_EDGE_MARGIN_RATIO
+  return point.latitude < view.south + latitudeMargin
+    || point.latitude > view.north - latitudeMargin
+    || point.longitude < view.west + longitudeMargin
+    || point.longitude > view.east - longitudeMargin
+}
+
 export function defectMapFilterKey(filters: DefectFilters): string {
   return JSON.stringify({ ...filters, bbox: '' })
 }

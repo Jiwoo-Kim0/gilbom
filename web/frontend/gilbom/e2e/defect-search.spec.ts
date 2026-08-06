@@ -97,10 +97,7 @@ test.describe('결함 검색 디바운스', () => {
     // 타이머가 도는 중에 초기화를 누른다. 페이지 안에서 눌러 300ms를 넘기지 않는다.
     await typeInSearch(page, 'INC', 10)
     await page.evaluate(() => {
-      const reset = [...document.querySelectorAll('button')].find(
-        (button) => button.textContent?.includes('필터 초기화'),
-      )
-      ;(reset as HTMLButtonElement).click()
+      document.querySelector<HTMLButtonElement>('.defect-filter-reset')!.click()
     })
     await page.waitForTimeout(600)
 
@@ -116,15 +113,21 @@ test.describe('결함 검색 디바운스', () => {
     await openDefectPage(page)
     listQueries.length = 0
 
+    /*
+     * 조건이 전부 모달 안으로 들어가서, 창을 띄워놓고 검색어를 치는 것으로 겹침을
+     * 만든다. `typeInSearch`는 DOM에 값을 직접 넣으므로 창이 덮고 있어도 들어간다.
+     */
+    await page.getByRole('button', { name: /^필터/ }).click()
+    const dialog = page.getByRole('dialog', { name: '상세 필터' })
+    await dialog.getByRole('group', { name: '심각도' }).getByText('심각').click()
     await typeInSearch(page, 'INC', 10)
-    const filter = page.getByRole('form', { name: '결함 필터' })
-    await filter.getByRole('button', { name: /심각도/ }).click()
-    await filter.getByRole('group', { name: '심각도' }).getByText('심각').click()
+    await dialog.getByRole('button', { name: '적용하기' }).click()
 
     /*
-     * 심각도는 즉시, 검색어는 300ms 뒤에 나가므로 **마지막** 조회에 둘이 함께 실려야
-     * 한다. 타이머가 렌더 당시의 onChange를 물고 있으면 낡은 조건으로 URL을 덮어써
-     * 방금 고른 심각도가 사라진다.
+     * 심각도는 적용하기에서 즉시, 검색어는 300ms 뒤에 나가므로 **마지막** 조회에 둘이
+     * 함께 실려야 한다. 타이머가 렌더 당시의 onChange를 물고 있으면 낡은 조건으로 URL을
+     * 덮어써 방금 고른 심각도가 사라진다. 반대로 모달이 열 때 찍어둔 검색어를 그대로
+     * 내보내면 방금 친 검색어가 지워진다.
      */
     await expect
       .poll(
