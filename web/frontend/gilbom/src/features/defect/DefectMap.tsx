@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import { loadNaverMapsScript } from '../../lib/naverMaps'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
+import { CLUSTER_LIST_MAX, DefectClusterList } from './DefectClusterList'
 import { DefectDetailCard } from './DefectDetailCard'
 import { getDefectMap } from './defectApi'
 import {
@@ -282,6 +283,20 @@ export function DefectMap({
     ? featureSnapshot.error
     : null
   const [scale, setScale] = useState<MapScale | null>(null)
+  /**
+   * 묶음을 눌러 펼친 구성원 목록. 지도 위 왼쪽에 뜬다. 닫기 전까지 남아 있어
+   * 형제 결함을 이어서 훑을 수 있다.
+   *
+   * <p>어느 조건에서 편 것인지 함께 들고 있다가, 조건이 바뀌면 파생값 쪽에서 가린다.
+   * 걸러진 결함을 가리키는 목록이 남지 않는다 — effect로 지우면 그만큼 렌더가 한 번 더 돈다.
+   */
+  const [clusterList, setClusterList] = useState<{
+    filterKey: string
+    features: DefectMapFeature[]
+  } | null>(null)
+  const visibleClusterList = clusterList?.filterKey === filterKey
+    ? clusterList.features
+    : null
   // 확대·이동이 끝나면 화면 좌표가 달라져 마커 묶음을 다시 계산해야 한다.
   const [idleToken, setIdleToken] = useState(0)
   /**
@@ -502,7 +517,10 @@ export function DefectMap({
               defectId === selectedDefectId,
             ),
         title: grouped
-          ? `결함 ${cluster.features.length}건 — 확대하면 나뉩니다`
+          ? `결함 ${cluster.features.length}건 — 누르면 확대합니다`
+            + (cluster.features.length <= CLUSTER_LIST_MAX
+              ? ' (목록도 함께 열립니다)'
+              : '')
           : `${incidentCode} · ${DEFECT_TYPE_LABELS[defectType] ?? defectType}`
             + ` · ${RISK_LEVEL_LABELS[riskLevel] ?? riskLevel}`
             + ` · ${WORKFLOW_STATUS_LABELS[workflowStatus] ?? workflowStatus}`,
@@ -533,6 +551,17 @@ export function DefectMap({
         )
         map.setCenter(new maps.LatLng(plan.center.latitude, plan.center.longitude))
         map.setZoom(Math.min(map.getZoom() + plan.step, MAX_MAP_ZOOM))
+
+        /*
+         * 셀 만한 수면 그 자리에서 구성원 목록까지 편다. 확대만 하면 "이 동네에 몇
+         * 건"까지만 알 수 있고 코드를 보려면 마커를 하나씩 눌러야 한다. 그보다 많으면
+         * 목록이 지도를 가리기만 하므로 확대에서 멈춘다.
+         */
+        setClusterList(
+          cluster.features.length <= CLUSTER_LIST_MAX
+            ? { filterKey: filterKeyRef.current, features: cluster.features }
+            : null,
+        )
       })
       return marker
     })
@@ -628,6 +657,18 @@ export function DefectMap({
             <p className="defect-map-loading" role="alert">
               {error}
             </p>
+          )}
+          {visibleClusterList !== null && (
+            // 다른 묶음을 누르면 새로 마운트해 이전 묶음의 사진·위치를 들고 있지 않게 한다.
+            <DefectClusterList
+              key={visibleClusterList
+                .map((feature) => feature.properties.defectId)
+                .join(',')}
+              features={visibleClusterList}
+              selectedDefectId={selectedDefectId}
+              onSelect={onSelect}
+              onClose={() => setClusterList(null)}
+            />
           )}
           {selectedDefectId !== null && (
             <DefectDetailCard

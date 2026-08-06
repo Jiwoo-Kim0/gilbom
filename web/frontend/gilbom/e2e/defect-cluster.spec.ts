@@ -195,8 +195,57 @@ async function stubMap(
         content: [], page: 0, size: 20, totalElements: 0, totalPages: 0,
       })
     }
+    /*
+     * 묶음 목록은 결함마다 상세(위치 이름)와 사진 URL을 따로 받는다. 지도 GeoJSON에는
+     * 결함 코드까지만 담겨 있기 때문이다.
+     */
+    const detail = /^\/api\/v1\/defects\/([\w-]+)(\/image-url)?$/.exec(pathname)
+    if (detail !== null) {
+      const [, defectId, imageUrl] = detail
+      // `defectAt(i)`가 만든 id의 끝 12자리가 i+1이다.
+      const index = Number(defectId.slice(-12)) - 1
+      if (imageUrl === undefined) {
+        return fulfillJson(route, {
+          defect: defectAt(index),
+          resolutionNote: null,
+          riskScore: 50,
+          riskRuleVersion: 'v1',
+          riskCalculatedAt: '2026-08-01T00:00:00Z',
+          mergedIntoDefectId: null,
+          mergedDefectIds: [],
+          createdAt: '2026-08-01T00:00:00Z',
+          updatedAt: '2026-08-01T00:00:00Z',
+        })
+      }
+      // 첫 건에만 사진이 있다. 나머지는 아직 연결되지 않은 정상 상태(404)다.
+      return index === 0
+        ? fulfillJson(route, {
+            defectId,
+            eventId: null,
+            imageId: 'e2e-image',
+            imageUrl: '/e2e-defect-photo.png',
+            expiresAt: '2099-01-01T00:00:00Z',
+            imageWidth: 1,
+            imageHeight: 1,
+            bboxNorm: null,
+          })
+        : fulfillJson(route, {}, 404)
+    }
     return fulfillJson(route, {}, 404)
   })
+
+  // 사진은 실제로 받아지는 URL이어야 `<img>`가 깨진 상태로 남지 않는다.
+  await page.route('**/e2e-defect-photo.png', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'image/png',
+      body: Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8'
+        + 'BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        'base64',
+      ),
+    }),
+  )
 }
 
 interface ClickOutcome {
@@ -327,5 +376,96 @@ test.describe('결함 지도 묶음 클릭', () => {
 
     expect(outcome.visible).toBe(coordinates.length)
     expect(outcome.groups, '여유가 있으면 전부 갈린다').toBe(coordinates.length)
+  })
+})
+
+/**
+ * 셀 만한 묶음은 확대만 하지 않고 구성원 목록까지 편다. 확대만으로는 "이 동네에 몇 건"
+ * 까지만 알 수 있고, 코드를 보려면 마커를 하나씩 눌러야 했다.
+ */
+test.describe('묶음 결함 목록', () => {
+  /** 8m 격자 — 시작 배율에서는 한 묶음이고, 확대하면 갈린다. */
+  function tightPoints(count: number): [number, number][] {
+    return Array.from(
+      { length: count },
+      (_, index): [number, number] =>
+        pointAt(Math.floor(index / 4) * 8, (index % 4) * 8),
+    )
+  }
+
+  async function openCluster(
+    page: Page,
+    count: number,
+  ): Promise<void> {
+    await installFakeMap(page)
+    await stubMap(page, featuresAt(tightPoints(count)))
+    await page.goto('/defects?allStatus=1')
+    await expect(page.locator('.defect-map-canvas-wrap')).toBeVisible()
+    await expect
+      .poll(() => page.evaluate(() =>
+        (window as unknown as { mapCalls: { clickHandlers: unknown[] } })
+          .mapCalls.clickHandlers.length))
+      .toBe(1)
+    await page.evaluate(() =>
+      (window as unknown as { mapCalls: { clickHandlers: (() => void)[] } })
+        .mapCalls.clickHandlers[0]?.())
+  }
+
+  test('10건 이하를 누르면 코드·사진·위치가 담긴 목록이 열린다', async ({ page }) => {
+    await openCluster(page, 3)
+
+    const list = page.getByRole('region', { name: '묶인 결함 목록' })
+    await expect(list).toContainText('이 위치의 결함 3건')
+    const items = list.getByRole('listitem')
+    await expect(items).toHaveCount(3)
+
+    // 결함 코드는 지도 GeoJSON에 있어 바로 보인다.
+    await expect(items.nth(0)).toContainText('INC-20260805-000001')
+    // 위치 이름과 사진은 결함마다 따로 받는다.
+    await expect(items.nth(0)).toContainText('역삼역 3번 출구 앞 보도')
+    await expect(items.nth(0).locator('img')).toBeVisible()
+    // 이름이 없는 결함은 구역 코드로 떨어진다.
+    await expect(items.nth(2)).toContainText('ZONE-GN-0007')
+    // 사진이 없는 결함은 자리표시가 아니라 "없음"으로 끝나야 한다.
+    await expect(items.nth(1).getByLabel('사진 없음')).toBeVisible()
+    await expect(items.nth(1).locator('img')).toHaveCount(0)
+  })
+
+  test('11건 이상이면 확대만 하고 목록은 열지 않는다', async ({ page }) => {
+    await openCluster(page, 11)
+
+    await expect(page.locator('.defect-cluster-list')).toHaveCount(0)
+    // 확대는 그대로 일어난다.
+    const zoomed = await page.evaluate(() =>
+      (window as unknown as { mapCalls: { zoom: number[] } }).mapCalls.zoom)
+    expect(zoomed).toHaveLength(1)
+    expect(zoomed[0]).toBeGreaterThan(START_ZOOM)
+  })
+
+  test('목록에서 고르면 상세 카드가 뜨고 그 줄이 선택으로 남는다', async ({ page }) => {
+    await openCluster(page, 3)
+
+    const list = page.getByRole('region', { name: '묶인 결함 목록' })
+    const second = list.getByRole('listitem').nth(1)
+    await second.getByRole('button').click()
+
+    // 목록 표에서 고른 것과 같다 — 지도 위 상세 카드가 열린다.
+    const card = page.locator('.defect-card')
+    await expect(card).toBeVisible()
+    await expect(card).toContainText('INC-20260805-000002')
+
+    // 고른 줄은 표시가 남는다. 지도 마커의 선택 표시와 짝이다.
+    await expect(second.locator('.defect-cluster-list-item'))
+      .toHaveClass(/is-selected/)
+    // 목록은 닫지 않는다. 형제 결함을 이어서 훑는 것이 이 목록의 쓸모다.
+    await expect(list).toBeVisible()
+  })
+
+  test('닫으면 목록만 사라지고 지도는 그대로다', async ({ page }) => {
+    await openCluster(page, 3)
+
+    await page.getByRole('button', { name: '묶인 결함 목록 닫기' }).click()
+    await expect(page.locator('.defect-cluster-list')).toHaveCount(0)
+    await expect(page.locator('.defect-map-canvas-wrap')).toBeVisible()
   })
 })
