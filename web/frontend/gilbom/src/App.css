@@ -2880,6 +2880,7 @@
   margin-bottom: 22px;
   place-items: center;
   color: #f1d58c;
+  transform: translateY(10px);
 }
 
 .auth-intro .eyebrow {
