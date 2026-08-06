@@ -7,7 +7,7 @@ const pageTitles: Record<string, string> = {
   '/patrol-areas': '순찰 구역 관리',
   '/missions': '순찰 임무 관리',
   '/defects': '점자 보도블록 결함 관리',
-  '/reports': '리포트',
+  '/reports': '보고서 관리',
   '/admin/approvals': '가입 요청 승인',
   '/admin/users': '사용자 역할 관리',
   '/admin/roles': '역할·권한 관리',
@@ -20,7 +20,7 @@ export function AppLayout() {
   const location = useLocation()
   const { user } = useAuthentication()
   const pageTitle = location.pathname.startsWith('/reports')
-    ? '리포트'
+    ? '보고서 관리'
     : (pageTitles[location.pathname] ?? '길봄 관리자')
   const displayName = user?.displayName ?? '관리자'
 

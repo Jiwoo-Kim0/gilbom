@@ -220,7 +220,12 @@ export function ReportListPage() {
           className="report-period-filter"
           aria-describedby="report-period-help"
         >
-          <legend>기간 검색</legend>
+          <legend>
+            <span>기간 검색</span>
+            <span id="report-period-help" className="report-contract-note">
+              선택한 기간과 하루라도 겹치는 보고서를 조회합니다.
+            </span>
+          </legend>
           <input
             type="date"
             aria-label="조회 기간 시작"
@@ -243,9 +248,6 @@ export function ReportListPage() {
             }))}
           />
         </fieldset>
-        <p id="report-period-help" className="report-contract-note">
-          선택한 기간과 하루라도 겹치는 보고서를 조회합니다.
-        </p>
         <div className="report-filter-actions">
           <button className="secondary-button" type="button" onClick={resetFilters}>
             초기화
@@ -266,10 +268,7 @@ export function ReportListPage() {
 
       <div className="content-card report-list-card">
         <div className="table-heading">
-          <div>
-            <h3>보고서 목록</h3>
-            <p>소프트 삭제된 보고서는 서버 목록 계약에서 제외됩니다.</p>
-          </div>
+          <h3>보고서 목록</h3>
           <strong>{reports?.totalElements ?? 0}건</strong>
         </div>
 

@@ -58,7 +58,7 @@ const navigationItems: readonly NavigationItem[] = [
   },
   {
     to: '/reports',
-    label: '리포트',
+    label: '보고서 관리',
     icon: BarChart3,
     requiredPermission: REPORT_VIEW,
   },

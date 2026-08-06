@@ -409,26 +409,10 @@ export function ReportDetailPage() {
                   <SafeReportDocument
                     text={formatReportContentIdentifiers(version.content)}
                     documentTitle={version.title}
+                    hiddenSectionTitles={['통계']}
                   />
                 </>
               )}
-            </div>
-          </article>
-
-          <article className="content-card report-statistics-card">
-            <div className="report-section-heading">
-              <div>
-                <p className="eyebrow">STATISTICS SNAPSHOT</p>
-                <h3>버전 통계</h3>
-              </div>
-              <span>저장 시점 불변 snapshot</span>
-            </div>
-            <div className="report-metric-grid">
-              <div><span>임무</span><strong>{version.statistics.aggregate.missionCount}</strong></div>
-              <div><span>완료율</span><strong>{version.statistics.aggregate.completionRatePercent}%</strong></div>
-              <div><span>Incident</span><strong>{version.statistics.aggregate.incidentEventCount}</strong></div>
-              <div><span>결함</span><strong>{version.statistics.aggregate.defectCount}</strong></div>
-              <div><span>관측</span><strong>{version.statistics.aggregate.observationCount}</strong></div>
             </div>
           </article>
 
