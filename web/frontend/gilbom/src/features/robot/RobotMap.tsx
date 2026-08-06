@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import carMarkerImage from '../../assets/car.png'
 import { loadNaverMapsScript } from '../../lib/naverMaps'
-import type { RobotMarker, RobotStatus } from './robotTypes'
+import type { RobotMarker, RobotStatus, RobotSummary } from './robotTypes'
 
 interface RobotMapProps {
   markers?: RobotMarker[]
+  summary?: RobotSummary | null
 }
 
-const legendItems: { tone: RobotStatus; label: string }[] = [
+const legendItems: { tone: 'total' | RobotStatus; label: string }[] = [
+  { tone: 'total', label: '전체' },
   { tone: 'online', label: '온라인' },
-  { tone: 'warning', label: '경고' },
-  { tone: 'charging', label: '충전 중' },
   { tone: 'offline', label: '오프라인' },
+  { tone: 'warning', label: '경고' },
 ]
 
 // 구미시청 인근 — 로봇 위치 API가 연결되기 전까지 사용하는 기본 뷰포트.
@@ -46,7 +47,7 @@ function createMarkerIcon(
   }
 }
 
-export function RobotMap({ markers = [] }: RobotMapProps) {
+export function RobotMap({ markers = [], summary = null }: RobotMapProps) {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<naver.maps.Map | null>(null)
   const hasCenteredOnRobotRef = useRef(false)
@@ -106,10 +107,17 @@ export function RobotMap({ markers = [] }: RobotMapProps) {
     }
   }, [markers, mapStatus])
 
-  const countByStatus = (tone: RobotStatus) =>
-    markers.filter((marker) => marker.status === tone).length
-  const alertCount = countByStatus('warning')
-  const activeCount = markers.filter((marker) => marker.status !== 'offline').length
+  const statusCounts: Record<'total' | RobotStatus, number> = {
+    total: summary?.totalRobots ?? markers.length,
+    online: summary?.onlineRobots
+      ?? markers.filter((marker) => marker.connectivityStatus === 'ONLINE').length,
+    offline: summary?.offlineRobots
+      ?? markers.filter((marker) => marker.connectivityStatus === 'OFFLINE').length,
+    warning: summary === null
+      ? markers.filter((marker) => marker.status === 'warning').length
+      : summary.warningRobots + summary.criticalRobots,
+  }
+  const statusCountReady = summary !== null || mapStatus === 'ready'
 
   return (
     <article className="content-card robot-map-card" aria-label="로봇 위치 지도">
@@ -117,7 +125,7 @@ export function RobotMap({ markers = [] }: RobotMapProps) {
         {legendItems.map(({ tone, label }) => (
           <span key={tone} className={`robot-legend-item robot-legend-item-${tone}`}>
             <span className="robot-status-dot" aria-hidden="true" />
-            {label} ({mapStatus === 'ready' ? countByStatus(tone) : '—'})
+            {label} ({statusCountReady ? statusCounts[tone] : '—'})
           </span>
         ))}
       </div>
@@ -133,20 +141,6 @@ export function RobotMap({ markers = [] }: RobotMapProps) {
       ) : (
         <div className="robot-map-canvas-wrap">
           <div className="robot-map-canvas" ref={mapElementRef} />
-          {mapStatus === 'ready' && (
-            <div className="robot-map-overlay" aria-live="polite">
-              <span className="robot-map-overlay-live">
-                <span className="robot-map-overlay-dot" aria-hidden="true" />
-                라이브 함대 데이터
-              </span>
-              <span className="robot-map-overlay-stat">
-                활성 로봇<strong>{activeCount}</strong>
-              </span>
-              <span className="robot-map-overlay-stat">
-                경고 알림<strong>{alertCount}</strong>
-              </span>
-            </div>
-          )}
           {mapStatus === 'loading' && (
             <p className="robot-map-loading">지도를 불러오는 중입니다…</p>
           )}

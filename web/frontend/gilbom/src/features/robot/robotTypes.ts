@@ -1,4 +1,4 @@
-export type RobotStatus = 'online' | 'warning' | 'charging' | 'offline'
+export type RobotStatus = 'online' | 'warning' | 'offline'
 
 export type RobotConnectivityStatus = 'ONLINE' | 'OFFLINE'
 export type RobotHealthStatus = 'OK' | 'WARNING' | 'CRITICAL' | 'UNKNOWN'
@@ -155,6 +155,7 @@ export interface RobotMarker {
   lng: number
   headingDeg: number | null
   missionStatus: string | null
+  connectivityStatus: RobotConnectivityStatus
   status: RobotStatus
 }
 
@@ -163,7 +164,6 @@ export interface RobotFleetItem {
   name: string
   mqttId: string
   serialNumber: string
-  status: RobotStatus
   connectivityStatus: RobotConnectivityStatus
   batteryPercent: number | null
   jetsonTempC: number | null

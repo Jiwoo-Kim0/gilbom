@@ -6,18 +6,27 @@ import {
   Thermometer,
 } from 'lucide-react'
 import { Link } from 'react-router'
-import type { RobotFleetItem, RobotStatus } from './robotTypes'
+import type {
+  RobotConnectivityStatus,
+  RobotFleetItem,
+  RobotHealthStatus,
+} from './robotTypes'
 
 interface RobotFleetGridProps {
   robots?: RobotFleetItem[]
   loading?: boolean
 }
 
-const statusLabel: Record<RobotStatus, string> = {
-  online: 'ONLINE',
-  warning: 'WARNING',
-  charging: 'CHARGING',
-  offline: 'OFFLINE',
+const connectivityStatusLabel: Record<RobotConnectivityStatus, string> = {
+  ONLINE: '온라인',
+  OFFLINE: '오프라인',
+}
+
+const healthStatusLabel: Record<RobotHealthStatus, string> = {
+  OK: '정상',
+  WARNING: '경고',
+  CRITICAL: '심각',
+  UNKNOWN: '확인 필요',
 }
 
 function formatMetric(value: number | null, suffix: string): string {
@@ -70,7 +79,7 @@ export function RobotFleetGrid({
           {robots.map((robot) => (
             <article
               key={robot.id}
-              className={`content-card robot-fleet-card robot-fleet-card-${robot.status}`}
+              className="content-card robot-fleet-card"
             >
               <div className="robot-fleet-card-head">
                 <div className="robot-fleet-identity">
@@ -90,9 +99,21 @@ export function RobotFleetGrid({
                 </button>
               </div>
 
-              <span className={`robot-status-badge robot-status-badge-${robot.status}`}>
-                {statusLabel[robot.status]}
-              </span>
+              <div className="robot-status-badges" aria-label="연결 및 장비 상태">
+                <span
+                  className={`robot-status-badge robot-status-badge-${
+                    robot.connectivityStatus === 'ONLINE' ? 'online' : 'offline'
+                  }`}
+                >
+                  {connectivityStatusLabel[robot.connectivityStatus]}
+                </span>
+                {robot.overallHealthStatus === 'WARNING'
+                  || robot.overallHealthStatus === 'CRITICAL' ? (
+                    <span className="robot-status-badge robot-status-badge-warning">
+                      {healthStatusLabel[robot.overallHealthStatus]}
+                    </span>
+                  ) : null}
+              </div>
 
               <div className="robot-fleet-metrics">
                 <div className="robot-fleet-metric">
@@ -139,7 +160,7 @@ export function RobotFleetGrid({
               <div className="robot-fleet-context">
                 <span>모드 <strong>{robot.robotMode ?? '—'}</strong></span>
                 <span>임무 <strong>{robot.missionStatus ?? '—'}</strong></span>
-                <span>상태 <strong>{robot.overallHealthStatus}</strong></span>
+                <span>장비 <strong>{healthStatusLabel[robot.overallHealthStatus]}</strong></span>
               </div>
               <Link
                 className="robot-command-link"

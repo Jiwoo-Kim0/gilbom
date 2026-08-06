@@ -57,9 +57,6 @@ function toRobotStatus(robot: RobotListItem): RobotStatus {
   ) {
     return 'warning'
   }
-  if (robot.charging === true) {
-    return 'charging'
-  }
   return 'online'
 }
 
@@ -69,7 +66,6 @@ function toFleetItem(robot: RobotListItem): RobotFleetItem {
     name: robot.robotName,
     mqttId: robot.mqttId,
     serialNumber: robot.serialNumber,
-    status: toRobotStatus(robot),
     connectivityStatus: robot.connectivityStatus,
     batteryPercent: robot.batteryPercent,
     jetsonTempC: robot.jetsonTempC,
@@ -101,6 +97,7 @@ function toMarker(
     lng: robot.longitude,
     headingDeg: robot.headingDeg,
     missionStatus: robot.missionStatus,
+    connectivityStatus: robot.connectivityStatus,
     status: listItem === undefined
       ? robot.connectivityStatus === 'ONLINE' ? 'online' : 'offline'
       : toRobotStatus(listItem),
@@ -217,10 +214,6 @@ export function RobotManagePage() {
       .map((robot) => toMarker(robot, listById.get(robot.robotId)))
       .filter((robot): robot is RobotMarker => robot !== null)
   }, [mapRobots, robots])
-  const attentionCount = summary === null
-    ? null
-    : summary.warningRobots + summary.criticalRobots
-
   function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const normalizedSearch = searchDraft.trim()
@@ -358,25 +351,7 @@ export function RobotManagePage() {
         </div>
       ) : null}
 
-      <RobotMap markers={markerItems} />
-
-      <div className="summary-grid" aria-label="로봇 현황">
-        <article className="summary-card">
-          <span>전체 로봇</span>
-          <strong>{summary?.totalRobots ?? '—'}</strong>
-          <small>현재 사용자 조회 범위</small>
-        </article>
-        <article className="summary-card">
-          <span>온라인</span>
-          <strong>{summary?.onlineRobots ?? '—'}</strong>
-          <small>오프라인 {summary?.offlineRobots ?? '—'}대</small>
-        </article>
-        <article className="summary-card">
-          <span>확인 필요</span>
-          <strong>{attentionCount ?? '—'}</strong>
-          <small>경고·심각 상태 합계</small>
-        </article>
-      </div>
+      <RobotMap markers={markerItems} summary={summary} />
 
       <RobotFleetGrid robots={fleetItems} loading={loading} />
 
