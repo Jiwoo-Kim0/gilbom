@@ -90,6 +90,9 @@ class TelemetrySampler:
         self._thermal_root = thermal_root
         self._next_due = None  # None 이면 아직 한 번도 안 보냈다.
         self._failures = 0  # 연속 실패 횟수. 성공하면 0 으로 돌아간다.
+        #: 직전 읽기가 준 telemetry 전용 선택 멤버 (§6.3 estimated_runtime_sec 등).
+        #: RobotState 에 넣지 않는다 — state·event payload 에 없는 값이다.
+        self._battery_extra = None
 
     # -- 발행 타이밍 (계약 §6.1) -------------------------------------------
 
@@ -148,6 +151,9 @@ class TelemetrySampler:
             battery_percent=snapshot.battery_percent,
             battery_state=snapshot.battery_state,
             battery_source=snapshot.battery_source,
+            # 못 믿는 표본에는 부가 정보도 싣지 않는다 — 남은 시간만 살아남으면
+            # 잔량이 null 인 표본에 '3시간 남았다' 가 붙는다.
+            battery_extra=self._battery_extra if snapshot.battery_valid else None,
             jetson_temp_c=jetson_temp_c(self._thermal_root),
             # 보관함은 start_mission()·end_mission() 이 통째로 움직인다 — 셋이
             # 반쯤 채워져 factory 가 표본을 거부하는 상태가 생기지 않는다.
@@ -159,10 +165,17 @@ class TelemetrySampler:
         )
 
     def _refresh_battery(self) -> None:
-        """센서 읽기는 RobotState 로만 들어간다 — state·telemetry 의 단일 출처."""
+        """센서 읽기는 RobotState 로만 들어간다 — state·telemetry 의 단일 출처.
+
+        읽기가 준 `extra` 만 여기서 떼어 둔다. valid·percent·source 는 등급 판정과
+        함께 RobotState 를 거쳐야 하지만(§9), estimated_runtime_sec 같은 선택 멤버는
+        telemetry payload 에만 있는 자리라 state 에 넣을 곳이 없다 (§6.3).
+        """
         if self._battery is None:
             return
-        self._state.set_battery(**self._battery())
+        reading = dict(self._battery())
+        self._battery_extra = reading.pop("extra", None) or None
+        self._state.set_battery(**reading)
 
     def _position(self) -> tuple:
         """(valid, lat, lon, heading_deg). Fix 가 없으면 넷 다 null 이다 (§16-7).

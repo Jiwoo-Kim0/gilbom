@@ -30,6 +30,7 @@ import yaml
 
 import reporting
 from comms.codec import utc_now
+from driving.start_interlock import StartInterlock
 from driving.state_machine import StateMachineParams, StateMachine
 from driving.states import DriveState
 from hardware.interfaces import DriveMotor, Imu, SteeringServo
@@ -81,6 +82,9 @@ def build_real_perception(config: dict, root: str, optional_inspect: bool = Fals
         post=PostParams.from_config(seg["post"]),
         costmap=CostmapParams.from_config(seg["costmap"], classes),
         free_space=FreeSpaceParams.from_config(seg["free_space"]),
+        # 클래스별 신뢰도 하한 — 점자블록은 재현율이, 차도는 정밀도가 미션이다
+        # (perception/segmentation.keep_instances)
+        class_conf=seg.get("class_conf") or {},
     )
     inspector = None
     if inspect_camera is not None:
@@ -108,6 +112,9 @@ def build_devices(config: dict, live: bool):
         gyro_bias_samples=imu_config["gyro_bias_samples"],
         complementary_alpha=imu_config["complementary_alpha"],
         yaw_sign=imu_config["yaw_sign"],
+        # 장착 기울기는 **상수**다 (재지 않는다 — docs/IMU-ZERO-REFERENCE.md)
+        mount_pitch_offset_deg=imu_config["mount_pitch_offset_deg"],
+        zero_max_rate_dps=imu_config["zero_max_rate_dps"],
     )
 
     if live:
@@ -138,7 +145,8 @@ def build_devices(config: dict, live: bool):
     return motor, servo, imu
 
 
-def build_operator(config: dict, machine: StateMachine, enabled: bool):
+def build_operator(config: dict, machine: StateMachine, enabled: bool,
+                   on_start=None):
     """조작자 입력(Xbox 컨트롤러) 연결 — IDLE·ESTOP에서 나올 수 있는 유일한 경로.
 
     왜 필요한가: IDLE과 ESTOP은 설계상 **수동 개입만이 출구**인 흡수 상태다. 그런데
@@ -154,6 +162,10 @@ def build_operator(config: dict, machine: StateMachine, enabled: bool):
     않으므로 '하드웨어 명령은 apply_command 한 곳'이라는 single writer 계약은 그대로다.
     장치가 없으면 None을 돌려주고 주행은 종전대로 진행한다 — 컨트롤러를 요구해서
     주행 자체를 막지는 않는다.
+
+    on_start: A 버튼의 출발 요청을 대신 받는 훅. 출발 인터록이 걸린 구성에서는
+    A 버튼도 '원격 신호'와 같은 급이라(무선 컨트롤러는 로봇 앞에 있다는 증거가
+    아니다) 터치 확인을 거쳐야 한다 — driving/start_interlock.py.
     """
     device = str(config["hardware"]["joystick"]["device"])
     if not enabled:
@@ -165,7 +177,7 @@ def build_operator(config: dict, machine: StateMachine, enabled: bool):
     from scripts.xbox_controller import XboxControllerReader
 
     def on_resume() -> None:
-        machine.request_start()
+        (on_start or machine.request_start)()
         machine.request_estop_release()
         logger.info("[조작] A — 출발/ESTOP 해제 요청")
 
@@ -245,9 +257,8 @@ def capture_verdict(camera, inspector, flush_frames: int = 0):
         return None, image
 
 
-def run_detection(camera, inspector, machine, screen_confirm=None,
-                  on_defect=None, clock=time.monotonic) -> Optional[bool]:
-    """TRACE 상시 탐지 1주기: 주행 중 캡처 → 판정 → 파손이면 **보고 + FSM 통지**.
+def run_detection(camera, inspector, machine) -> Optional[bool]:
+    """TRACE 상시 탐지 1주기: 주행 중 캡처 → 판정 → 파손 후보면 FSM에 통지.
 
     돌려주는 값은 계측용이다(reporting.TraceSession) — 파손 후보였나(True/False),
     또는 추론 자체가 못 돈 경우 None.
@@ -255,53 +266,31 @@ def run_detection(camera, inspector, machine, screen_confirm=None,
     통지를 받은 FSM은 INSPECT로 정차해 같은 모델로 정밀 판정을 다시 한다 — 단
     정차 쿨다운(driving.inspect.cooldown_sec) 안이면 통지를 무시하고 추종을 계속한다
     (같은 파손 위에서 정차가 무한 반복되는 것을 막는다). 주행 중 판정을 그대로
-    신뢰하지 않는 이유는 모션 블러다 — defect_partial(≈55px)부터 먼저 무너진다.
-
-    **보고를 여기서도 낸다 (0805 개편).** 종전에는 파손 보고가 INSPECT 정차 경로에만
-    있었고, 그래서 세그가 블록을 못 잡아 TRACE→INSPECT에 도달하지 못하면 파손을 눈으로
-    보고 있어도 **한 건도** 보고되지 않았다(0805 오전 실측: TRACE 15표본 / INSPECT 0회).
-    미설치 보고는 인지 프레임만 보고 FSM과 무관하게 나가는데 파손만 FSM에 매여 있었던
-    비대칭을 없앤 것이다. 정차 판정은 여전히 돌고(더 깨끗한 사진), 중복은 두 경로가
-    공유하는 게이트가 막는다 — 근거는 config `reporting.defect_confirm_frames`.
-
-    screen_confirm: 연속 확정 게이트(주행 중 블러 오탐 1프레임 배제). None이면 보고를
-        건너뛰고 종전처럼 통지만 한다 — 보고 정책을 모르는 호출자(테스트·dry-run)를
-        위한 기본값이다.
-    on_defect(verdict, image, captured_at, source): 보고 훅. run_inspection과 **같은**
-        훅을 받는다 — 두 경로가 같은 출구를 쓰는 것이 중복 제거의 전제다.
+    신뢰하지 않는 이유는 모션 블러다 — defect_partial(≈55px)부터 먼저 무너지므로
+    여기서는 '멈춰 볼 가치가 있는가'만 판단한다(1차 스크리닝).
     검사기가 없는 mock 인지에서는 아무 일도 하지 않는다 — TRACE는 소실·타임아웃으로
     정상 종료되므로 흐름 검증에 지장이 없다.
     """
-    captured_at = utc_now()
-    verdict, image = capture_verdict(camera, inspector, flush_frames=0)
+    verdict, _ = capture_verdict(camera, inspector, flush_frames=0)
     if verdict is None:
         return None
     logger.debug("[탐지] %s — %s", "후보" if verdict.is_defect else "정상", verdict.reason)
-    # 블록이 하나라도 잡혔으면 **파손 여부와 무관하게** 추종 유지 신호를 낸다.
-    # 주행 카메라는 하향각이 낮아 블록에 올라탄 뒤에도 세그가 자주 놓치는데, 그 틱에
-    # 추종이 끊기면 '블록을 따라가며 순차 탐지'가 성립하지 않는다(0805 실기).
-    # 새 추론이 아니다 — 방금 돌린 그 판정의 band_count를 읽는 것뿐이다(추가 비용 0).
-    if verdict.band_count > 0:
-        machine.notify_braille_seen()
-    # 확정 게이트는 **파손이 아닐 때도** 먹여야 한다 — 연속 판정이 끊긴 것을 알려야
-    # streak이 리셋된다. 안 먹이면 띄엄띄엄 잡힌 오탐이 누적돼 확정된다.
-    confirmed = (screen_confirm is not None
-                 and screen_confirm.should_report(bool(verdict.is_defect), clock()))
     if verdict.is_defect:
         logger.info("[탐지] 파손 후보 — %s → 정차 판정 요청", verdict.reason)
         machine.notify_defect_found()
-        if confirmed and on_defect is not None:
-            if image is None:
-                # 계약이 증거 사진을 요구한다 — 프레임이 없으면 보고를 만들 수 없다.
-                logger.warning("[탐지] 원본 프레임이 없어 상시 보고를 건너뛴다")
-            else:
-                logger.info("[탐지] 주행 중 파손 확정 → 보고 (정차 판정과 게이트 공유)")
-                on_defect(verdict, image, captured_at, "trace-screen")
     return bool(verdict.is_defect)
 
 
-def detection_due(frame, arrived_proximity: float, arrived_latched: bool) -> bool:
+def detection_due(frame, arrived_proximity: float, tracking: bool = False) -> bool:
     """이번 틱에 탐지 추론을 돌릴 상황인가 — 블록에 **도착했는가**로 판단한다.
+
+    `tracking`은 FSM이 아직 블록을 잡고 있다는 뜻이다(braille_stable — 소실
+    디바운스 안). 이 인자가 있는 이유는 실측된 재현율 때문이다: 세그가 블록을
+    **놓친 틱**에는 근접도가 0으로 떨어지므로, 근접도 조건만 보면 그 순간 검사
+    추론이 함께 꺼진다 — 블록 위를 지나는 바로 그 구간에서 미션이 멈춘다.
+    놓친 것과 멀어진 것은 다르고, 놓쳤을 때 남은 유일한 눈이 하향 검사 카메라다.
+    그래서 '추종 중인데 이번 틱에 세그가 못 봤다'면 돌린다.
+    (추종을 시작하지도 않은 원거리 구간은 tracking=False라 종전대로 돌지 않는다.)
 
     TRACE는 이제 발견 즉시 시작되고 접근 구간까지 포함한다(블록 최우선 이동). 그
     구간에서는 탐지를 돌리지 않는다. 이유가 둘이고 둘 다 실측 근거가 있다:
@@ -313,15 +302,12 @@ def detection_due(frame, arrived_proximity: float, arrived_latched: bool) -> boo
          가능하던 비용과 같은 비용이 아니다.
     기준은 새 임계값이 아니라 FSM이 '블록에 붙었다'로 쓰는 것과 같은 값
     (driving.inspect.enter_proximity — 추종 비중과 탐지 저속이 완성되는 지점)이다.
-
-    **한 번 도착했으면 그 뒤로는 주행캠 근접도를 다시 묻지 않는다**(arrived_latched).
-    근접도는 세그가 블록을 잡고 있을 때만 유효한 값이라(미검출 틱에는 0.0), 래치가
-    없으면 세그가 놓치는 순간 탐지가 멈추고 → 탐지캠 유지 신호가 끊기고 → 추종이
-    소실로 종료된다. 즉 세그를 보완하려고 만든 신호가 세그에 의존해 같이 죽는다.
-    래치는 TRACE를 떠날 때 풀린다(호출부).
     """
-    return arrived_latched or (frame is not None
-                               and frame.braille_proximity >= arrived_proximity)
+    if frame is None:
+        return False
+    if frame.braille_proximity >= arrived_proximity:
+        return True
+    return tracking and not frame.braille_detected
 
 
 def run_inspection(camera, inspector, machine, flush_frames: int = 0,
@@ -354,7 +340,8 @@ def run_inspection(camera, inspector, machine, flush_frames: int = 0,
     machine.notify_inspection_done()
 
 
-def main() -> None:
+def _build_parser() -> argparse.ArgumentParser:
+    """CLI 정의 — 실행 형태(모의/실물, 인지 소스, 원격 미션)를 고르는 자리."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=_DEFAULT_CONFIG, help="config.yaml 경로")
     parser.add_argument("--scenario", default="obstacle_avoid",
@@ -367,8 +354,267 @@ def main() -> None:
                         help="MQTT v2 설정 경로. 주면 원격 미션 모드, 안 주면 종전 자동 시작")
     parser.add_argument("--duration", type=float, default=None,
                         help="최대 실행 시간(초) — 미지정 시 시나리오 종료(mock) / 무제한(real)")
+    parser.add_argument("--battery-full", action="store_true",
+                        help="방금 충전을 끝냈다 — 잔량 추정을 만충으로 되돌리고 시작한다. "
+                             "기본 구성은 기동할 때마다 만충이라 줄 필요가 없고, "
+                             "config 의 battery.estimate.resume_on_restart 를 켠 "
+                             "경우에만 의미가 있다 (hardware/battery.py)")
     parser.add_argument("--no-operator", action="store_true",
                         help="조작자 입력(Xbox: A=출발·ESTOP 해제, B=비상 정지)을 붙이지 않는다")
+    return parser
+
+
+def build_perception(args, config: dict, config_root: str, parser) -> tuple:
+    """인지 소스 조립 → (provider, 주행 카메라, 검사 카메라, 검사기).
+
+    mock 은 시나리오 재생기 하나뿐이라 카메라·검사기가 없다(전부 None) — 그 경우에도
+    주행 흐름은 그대로 돈다(검사는 즉시 완료 통지로 흘러간다).
+    """
+    if args.perception != "real":
+        scenarios = config["mock_scenarios"]
+        if args.scenario not in scenarios:
+            parser.error(f"시나리오 '{args.scenario}' 없음 — 선택지: {', '.join(scenarios)}")
+        return ScriptedSegmentationProvider.from_config(scenarios[args.scenario]), None, None, None
+
+    provider, nav_camera, inspect_camera, inspector = build_real_perception(
+        config, config_root)
+    # 검사 카메라 프라이밍: V4L2 스트리밍은 첫 read에서 시작되고 AE(자동 노출)는
+    # 그때부터 수렴한다. 이 카메라는 INSPECT 때만 읽히므로 프라이밍이 없으면
+    # 첫 검사가 노출이 덜 잡힌 화면으로 판정된다. 두 카메라 동시 스트리밍은
+    # MJPG 강제로 이미 전제된 운용이다 (docs/HARDWARE.md).
+    inspect_camera.read()
+    logger.info("실추론 인지: 주행 카메라 %s(세그멘테이션) + 검사 카메라 %s(점자블록 파손)",
+                config["perception"]["nav_camera_device"],
+                config["perception"]["inspect_camera_device"])
+    return provider, nav_camera, inspect_camera, inspector
+
+
+def build_start_interlock(config: dict) -> tuple:
+    """터치 센서 + 출발 인터록 → (touch, interlock).
+
+    센서가 없으면(핀 미지정·초기화 실패) 인터록을 내린다: 확인할 장치가 없다고 로봇을
+    세워 두면 단선 하나가 곧 출발 불가다. 대신 경고를 남긴다.
+    """
+    from hardware.jetson.touch import build_touch_sensor
+
+    touch = build_touch_sensor(config)
+    interlock = StartInterlock.from_config(config["hardware"].get("touch"))
+    if touch is None:
+        interlock.disable("터치 센서 없음")
+    return touch, interlock
+
+
+class MissionReporter:
+    """보고 3종을 한 곳에 모은다 — 파손·미설치·추종 세션 (명세 4·5단계).
+
+    로컬 기록과 서버 전송은 **각각 독립**이다: 쿨다운·연속 프레임 확정은 로컬 기록
+    정책이고, 서버 쪽 중복은 event_id 멱등 처리가 받는다(계약 §3.4). 둘을 같은
+    게이트로 묶으면 로컬 디스크 정책 하나가 결함 보고 유실로 이어진다.
+    `comms` 는 통신 런타임이 조립된 뒤에 꽂는다(없으면 로컬 기록만 남는다).
+    """
+
+    def __init__(self, config: dict, config_root: str, gps=None):
+        report_cfg = config["reporting"]
+        self._dir = os.path.join(config_root, str(report_cfg["output_dir"]))
+        self._save_images = bool(report_cfg["save_images"])
+        self._crosswalk_gate = reporting.ReportGate(
+            confirm_frames=int(report_cfg["crosswalk_confirm_frames"]),
+            cooldown_sec=float(report_cfg["crosswalk_cooldown_sec"]))
+        # 파손 보고는 INSPECT 정차 판정 1회당 1건이므로 프레임 확정이 필요 없다 —
+        # 쿨다운만 걸어 같은 타일 재판정의 중복 보고를 막는다.
+        self._defect_gate = reporting.ReportGate(
+            confirm_frames=1, cooldown_sec=float(report_cfg["defect_cooldown_sec"]))
+        self._gps = gps
+        self.comms = None
+        self.trace = reporting.TraceSession()
+
+    def _gps_status(self):
+        return self._gps.status() if self._gps is not None else None
+
+    def defect(self, verdict, image, captured_at) -> None:
+        """INSPECT 정밀 판정이 불량을 냈다 — 로컬 기록 + 서버 보고."""
+        if self._defect_gate.should_report(True, time.monotonic()):
+            reporting.write_report(
+                self._dir, reporting.KIND_DEFECT, self._gps_status(), image=image,
+                save_images=self._save_images,
+                extra={"reason": verdict.reason, "bands": verdict.band_count,
+                       "defect_bands": verdict.defect_band_count,
+                       "partials": verdict.partial_count})
+        if self.comms is not None:
+            try:
+                self.comms.report_inspection(verdict, image, captured_at)
+            except Exception:
+                # 업로드·발행 실패가 주행을 멈추게 하지 않는다. event는 Outbox가
+                # 재전송하고, 그마저 실패해도 로봇은 계속 순찰해야 한다.
+                logger.exception("[INSPECT] 결함 보고 실패 — 주행은 계속한다")
+
+    def missing_crosswalk(self, frame, image, now: float) -> None:
+        """횡단보도 점자블록 **미설치 구역** 보고 (명세 5단계). 주행 상태는 바꾸지 않는다.
+
+        판정은 인지 계층이 하고(세그 프레임 필드), 여기서는 연속 프레임 확정 + 쿨다운만
+        걸어 기록한다. 증거 사진은 판정 근거가 된 주행 카메라 프레임 그대로다 — 다시
+        읽으면 그새 횡단보도가 화면에서 벗어난다.
+        서버 보고도 **같은 게이트**를 쓴다: 파손은 INSPECT 정차가 블록당 1회를 보장하지만
+        미설치는 이 게이트가 판정 자체이고, 서버 멱등 처리로는 프레임마다 달라지는
+        event_id 를 묶을 수 없다.
+        """
+        if frame is None or not self._crosswalk_gate.should_report(
+                frame.braille_missing_at_crosswalk, now):
+            return
+        reporting.write_report(
+            self._dir, reporting.KIND_MISSING, self._gps_status(), image=image,
+            save_images=self._save_images,
+            extra={"note": "횡단보도-인도 이음부 점자블록 미설치"})
+        if self.comms is not None:
+            try:
+                self.comms.report_missing_braille(image)
+            except Exception:
+                # 파손과 같은 원칙 — 보고가 실패해도 순찰은 계속한다.
+                logger.exception("[미설치] 서버 보고 실패 — 주행은 계속한다")
+
+    def transition(self, prev: DriveState, new: DriveState, reason: str,
+                   now: float) -> None:
+        """FSM 전이 훅 — 안전·운용 요구인 전이 로깅과 추종 세션 계측이 여기 붙는다.
+
+        이 훅이 상태 전이 알림의 유일한 출구다 (통신 계층도 여길 구독한다).
+        """
+        logger.info("[FSM] %s → %s (%s) t=%.3f", prev.value, new.value, reason, now)
+        summary = self.trace.on_transition(prev, new, reason, now)
+        if summary is None:
+            return
+        logger.info("[추종] 세션 종료 — %.1f초, 탐지 %d회, 파손 후보 %d회",
+                    summary["duration_sec"], summary["detections"],
+                    summary["defect_candidates"])
+        reporting.write_report(self._dir, reporting.KIND_TRACE, self._gps_status(),
+                               save_images=False, extra=summary)
+
+
+class StartupZeroing:
+    """출발 신호 → **정지 자이로 영점 2초** → 출발. 매 시작 다시 재는 것은 바이어스뿐이다.
+
+    **출발 신호가 무엇이든 여기를 지난다** — 터치·웹 '시작'·서버 START_MISSION·
+    조작자 A·자동 출발. 신호를 받은 자리에서 바퀴를 돌리지 않고, 로봇이 선 채로
+    zero_sec 만큼 표본을 모아 자이로 바이어스를 잡은 **뒤에** request_start()가 나간다.
+    터치만 이 대기를 지나던 종전 배선에서는 웹 버튼으로 출발한 주행이 창고에서 잰
+    바이어스로 돌았다 — 같은 로봇이 출발 경로에 따라 다른 yaw 를 읽었다는 뜻이다.
+
+    왜 출발 직전인가: 자이로 바이어스는 기준점이 아니라 **센서 오차**이고 온도로 변한다.
+    기동 때 잰 값은 창고에서 잰 값일 수 있고, 그 오차가 그대로 yaw 적분 드리프트가 되어
+    회전·회차 판정을 갉아먹는다. 정지 중 참값이 0인 것은 물리적으로 확실하므로 어느
+    경사에 서 있든 유효하다 — 그래서 출발선에서 다시 재는 것이 언제나 이득이다.
+
+    **pitch 기준면은 여기서 절대 건드리지 않는다** (docs/IMU-ZERO-REFERENCE.md §5):
+    시작 자세를 0으로 잡으면 출발선 경사가 매번 지워져, 15° 오르막에서 출발한 로봇이
+    '나는 평지에 있다'고 읽고 등판 보정도 하강 안전 정지도 걸리지 않는다. 장착 기울기는
+    차체 기준 상수라 config 에서 받는다.
+
+    영점이 **끝나야** on_ready 가 불린다. 그래야 두 가지가 성립한다:
+      · 로봇이 정지한 채로 표본을 모은다 (출발 요청이 아직 안 나갔으므로)
+      · 흔들려서 실패하면 출발도 하지 않는다 (다시 눌러야 한다)
+    센서가 없으면 영점을 건너뛰고 곧바로 출발시킨다 — IMU 없는 구성에서 출발이
+    막히면 안 된다.
+    """
+
+    def __init__(self, imu, zero_sec: float, on_ready) -> None:
+        self._imu = imu
+        self._zero_sec = float(zero_sec)
+        self._on_ready = on_ready
+        self._started_at = None
+        self._zeroed = False      # 이번 정차에서 이미 쟀는가 (rearm()이 푼다)
+
+    @property
+    def busy(self) -> bool:
+        """영점 표본을 모으는 중인가 (화면·로그 표시용)."""
+        return self._started_at is not None
+
+    def begin(self, now: float, source: str = "") -> None:
+        """출발 신호 하나 — 영점을 시작한다. 진행 중이면 아무 일도 하지 않는다.
+
+        **재요청에 창을 늘리지 않는다.** 출발 신호는 여러 경로가 매 틱 다시 보내는
+        것이 정상이고(자동 출발·유지창 재시도), 그때마다 타이머를 리셋하면 표본이
+        영영 안 찬다. 같은 이유로 이번 정차에서 이미 잰 뒤라면 다시 재지 않고 곧바로
+        출발시킨다 — 바이어스는 로봇이 서 있는 동안 변하지 않는다. 실제로 움직이고
+        나면 rearm()이 이 기억을 지운다.
+        """
+        if self._started_at is not None:
+            return
+        if self._zeroed:
+            self._on_ready()
+            return
+        if not self._imu.begin_zeroing():
+            self._zeroed = True       # IMU 없음 — 종전대로 즉시 출발
+            self._on_ready()
+            return
+        self._started_at = now
+        logger.info("[출발] %s → 자이로 영점 — %.1f초간 로봇을 그대로 두세요",
+                    source or "출발 신호", self._zero_sec)
+
+    def rearm(self) -> None:
+        """로봇이 실제로 움직였다 — 다음 출발에는 다시 잰다 (main 루프가 매 틱 부른다)."""
+        self._zeroed = False
+
+    def poll(self, now: float) -> None:
+        """매 틱. 정지 시간이 차면 바이어스를 확정하고 출발을 넘긴다."""
+        if self._started_at is None or now - self._started_at < self._zero_sec:
+            return
+        self._started_at = None
+        if self._imu.finish_zeroing():
+            self._zeroed = True
+            self._on_ready()
+        else:
+            logger.warning("[출발] 영점 실패(움직임 감지) — 로봇을 세운 뒤 다시 누르세요")
+
+
+def _sleep_remaining(period: float, started_at: float) -> None:
+    """루프 주기 유지 (main.py에서만 허용) — 작업 시간을 차감한 잔여만 잔다.
+
+    고정 sleep이면 보드에서 실주기가 period + 추론 시간으로 늘어진다.
+    """
+    time.sleep(max(0.0, period - (time.monotonic() - started_at)))
+
+
+def _apply_urgent_remote(comms_runtime, machine, motor, servo, now: float) -> bool:
+    """긴급 원격 명령(PAUSE·CANCEL·ESTOP)을 인지보다 먼저 반영한다. 처리했으면 True.
+
+    이 셋은 새 YOLO 추론을 기다리지 않는다: 공통 가드가 인지보다 우선이므로
+    frame=None으로도 즉시 정지 전이가 되며, result는 하드웨어 쓰기 뒤에 나간다.
+    """
+    if not comms_runtime.poll_before_step(machine):
+        return False
+    command = machine.step(None, None, now)
+    apply_command(motor, servo, command)
+    comms_runtime.poll_after_step(machine, command, camera_ok=None)
+    return True
+
+
+def _poll_start_inputs(machine, touch, operator, interlock, zeroing, arm_start,
+                       now) -> None:
+    """수동 입력 한 틱 소비 — 조작자 B(비상정지)·터치(=시작 버튼)·영점 진행.
+
+    **터치는 시작 버튼을 대신한다** — 웹 '시작'·서버 START_MISSION 과 같은 급의
+    출발 신호 하나다(hardware.touch.required_for_start 주석). 다만 어느 신호든
+    곧바로 바퀴를 돌리지는 않는다: 정지 자이로 영점(zero_sec)이 끝나야 출발 요청이
+    나간다 (StartupZeroing). ESTOP 해제만은 즉시 한다 — 영점과 무관한 복구 수단이다.
+    엣지로 읽으므로 손을 얹어 둔 채 자동 재출발이 되지는 않는다.
+    """
+    # 래치는 스로틀 입력을 다 놓으면 리더가 스스로 풀지만(컨트롤러 정책),
+    # FSM의 ESTOP은 A(해제 요청)로만 나온다.
+    if operator is not None and operator.estop_latched:
+        machine.request_estop()
+    if touch is not None and touch.pressed():
+        machine.request_estop_release()
+        logger.info("[터치] 눌림 — ESTOP 해제 + 출발(영점 시작)")
+        interlock.touched()
+        arm_start("터치")
+    zeroing.poll(now)
+    # 인터록이 켜진 구성에서, 먼저 와서 보류돼 있던 출발 신호를 터치가 뒤늦게
+    # 확정하는 경로. 여기서도 바로 달리지 않고 영점을 먼저 지난다.
+    if interlock.poll():
+        zeroing.begin(now, "터치 확인")
+
+
+def main() -> None:
+    parser = _build_parser()
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO,
@@ -382,99 +628,31 @@ def main() -> None:
     else:
         logger.info("dry-run 모드: 모든 장치 명령은 로그로만 나갑니다 (--live로 실구동)")
 
-    nav_camera = None
-    inspect_camera = None
-    inspector = None
-    if args.perception == "real":
-        provider, nav_camera, inspect_camera, inspector = build_real_perception(
-            config, config_root)
-        # 검사 카메라 프라이밍: V4L2 스트리밍은 첫 read에서 시작되고 AE(자동 노출)는
-        # 그때부터 수렴한다. 이 카메라는 INSPECT 때만 읽히므로 프라이밍이 없으면
-        # 첫 검사가 노출이 덜 잡힌 화면으로 판정된다. 두 카메라 동시 스트리밍은
-        # MJPG 강제로 이미 전제된 운용이다 (docs/HARDWARE.md).
-        inspect_camera.read()
-        logger.info("실추론 인지: 주행 카메라 %s(세그멘테이션) + 검사 카메라 %s(점자블록 파손)",
-                    config["perception"]["nav_camera_device"],
-                    config["perception"]["inspect_camera_device"])
-    else:
-        scenarios = config["mock_scenarios"]
-        if args.scenario not in scenarios:
-            parser.error(f"시나리오 '{args.scenario}' 없음 — 선택지: {', '.join(scenarios)}")
-        provider = ScriptedSegmentationProvider.from_config(scenarios[args.scenario])
+    provider, nav_camera, inspect_camera, inspector = build_perception(
+        args, config, config_root, parser)
     motor, servo, imu = build_devices(config, live=args.live)
-
-    # 터치 센서 — 명세의 '터치 시 주행 탐지 시작'. 핀 미지정이면 None(조작자 입력만).
-    from hardware.jetson.touch import build_touch_sensor
-    touch = build_touch_sensor(config)
-
+    touch, interlock = build_start_interlock(config)
     # 보고(사진 + GPS 태깅) — 명세 4·5단계. 전송은 젯슨의 통신 코드가 이어받는다.
     gps = build_gps(config) if args.perception == "real" else None
-    report_cfg = config["reporting"]
-    report_dir = os.path.join(config_root, str(report_cfg["output_dir"]))
-    save_images = bool(report_cfg["save_images"])
-    crosswalk_gate = reporting.ReportGate(
-        confirm_frames=int(report_cfg["crosswalk_confirm_frames"]),
-        cooldown_sec=float(report_cfg["crosswalk_cooldown_sec"]))
-    # 파손 보고는 INSPECT 정차 판정 1회당 1건이므로 프레임 확정이 필요 없다 —
-    # 쿨다운만 걸어 같은 타일 재판정의 중복 보고를 막는다.
-    # 파손 보고의 **단일 출구 게이트** — 상시 탐지 경로와 INSPECT 정차 경로가 공유한다.
-    # 두 경로가 같은 블록을 두 번 보고하는 것을 막는 것이 이 게이트의 일이고, 그래서
-    # 로컬 기록과 서버 전송에 **함께** 적용한다.
-    # ※ 종전에는 서버 전송이 게이트 밖이었다('디스크 정책이 결함 유실이 되면 안 된다').
-    #   그 근거는 보고 경로가 INSPECT 하나였을 때 성립했다 — 이제는 경로가 둘이라
-    #   게이트를 서버까지 걸지 않으면 같은 파손이 두 번 발행된다. 디스크 정책 자체
-    #   (save_images)는 여전히 별개이므로 원래 우려는 남지 않는다.
-    defect_gate = reporting.ReportGate(
-        confirm_frames=1, cooldown_sec=float(report_cfg["defect_cooldown_sec"]))
-    # 상시 경로만 쓰는 연속 확정 — 주행 중 프레임이라 모션 블러 오탐을 걸러야 한다.
-    # 쿨다운은 위 공유 게이트가 담당하므로 여기서는 0이다(두 벌로 두면 창이 곱해진다).
-    defect_screen_confirm = reporting.ReportGate(
-        confirm_frames=int(report_cfg["defect_confirm_frames"]), cooldown_sec=0.0)
-
-    def gps_status():
-        return gps.status() if gps is not None else None
-
-    def report_defect(verdict, image, captured_at, source: str = "inspect") -> None:
-        """파손 1건 보고 — 로컬 기록 + 서버 전송. 두 경로의 공통 출구다.
-
-        `source`는 로컬 기록에만 남는다(서버 payload는 계약이 정한 형식 그대로다) —
-        나중에 events.jsonl에서 '정차 판정이 낸 건가, 주행 중 상시 탐지가 낸 건가'를
-        가릴 수 있어야 증거 사진의 블러를 해석할 수 있다.
-        """
-        if not defect_gate.should_report(True, time.monotonic()):
-            return
-        reporting.write_report(
-            report_dir, reporting.KIND_DEFECT, gps_status(), image=image,
-            save_images=save_images,
-            extra={"reason": verdict.reason, "bands": verdict.band_count,
-                   "defect_bands": verdict.defect_band_count,
-                   "partials": verdict.partial_count, "source": source})
-        if comms_runtime is not None:
-            try:
-                comms_runtime.report_inspection(verdict, image, captured_at)
-            except Exception:
-                # 업로드·발행 실패가 주행을 멈추게 하지 않는다. event는 Outbox가
-                # 재전송하고, 그마저 실패해도 로봇은 계속 순찰해야 한다.
-                logger.exception("[결함] 보고 실패 — 주행은 계속한다")
-
-    trace_session = reporting.TraceSession()
-
-    def log_transition(prev: DriveState, new: DriveState, reason: str, now: float) -> None:
-        # 안전·운용 요구: 모든 상태 전이를 타임스탬프와 함께 로깅.
-        # 이 훅이 상태 전이 알림의 유일한 출구다 — 3단계 MQTT 발행부도 여길 구독한다.
-        logger.info("[FSM] %s → %s (%s) t=%.3f", prev.value, new.value, reason, now)
-        # 추종 세션 계측 — 세션이 끝난 틱에만 한 줄 남는다 (사진 없음: 커버리지 기록이다)
-        summary = trace_session.on_transition(prev, new, reason, now)
-        if summary is not None:
-            logger.info("[추종] 세션 종료 — %.1f초, 탐지 %d회, 파손 후보 %d회",
-                        summary["duration_sec"], summary["detections"],
-                        summary["defect_candidates"])
-            reporting.write_report(report_dir, reporting.KIND_TRACE, gps_status(),
-                                   save_images=False, extra=summary)
+    reporter = MissionReporter(config, config_root, gps)
 
     machine = StateMachine(params=StateMachineParams.from_config(config["driving"]),
-                           now=time.monotonic(), on_event=log_transition)
-    operator = build_operator(config, machine, enabled=not args.no_operator)
+                           now=time.monotonic(), on_event=reporter.transition)
+
+    def arm_start(source: str) -> None:
+        """출발 신호 하나 접수 → **정지 자이로 영점** → 그것이 끝나면 FSM 출발 요청.
+
+        인터록(hardware.touch.required_for_start)이 켜져 있으면 그 논리곱을 먼저
+        통과해야 영점이 시작된다. 꺼져 있으면(기본) 어느 신호든 곧바로 영점으로
+        간다 — 터치도 웹 '시작'도 같은 급의 출발 버튼이라는 뜻이다.
+        """
+        if interlock.arm(source=source):
+            zeroing.begin(time.monotonic(), source)
+
+    zeroing = StartupZeroing(imu, float(config["hardware"]["imu"]["zero_sec"]),
+                             machine.request_start)
+    operator = build_operator(config, machine, enabled=not args.no_operator,
+                              on_start=lambda: arm_start("조작자 A"))
     comms_runtime = None
     if args.comms_config:
         # 통신 의존성은 옵션을 준 실기 경로에서만 import한다.
@@ -484,11 +662,14 @@ def main() -> None:
         # (mock 인지라 gps가 None이면 runtime이 스스로 만들어 소유한다)
         from communication import CommunicationRuntime
         comms_runtime = CommunicationRuntime.build(
-            args.comms_config, config, live=args.live, gps_reader=gps)
+            args.comms_config, config, live=args.live, gps_reader=gps,
+            battery_full=args.battery_full, start_interlock=interlock)
         comms_runtime.start()
-        logger.info("MQTT 원격 미션 모드 — START_MISSION 전까지 정지 대기")
+        logger.info("MQTT 원격 미션 모드 — START_MISSION 전까지 정지 대기%s",
+                    " (출발에 터치 확인 필요)" if interlock.required else "")
     else:
-        machine.request_start()
+        arm_start("자동 출발")
+    reporter.comms = comms_runtime
     if args.perception == "mock":
         logger.info("시나리오 '%s' 시작 — 상태: %s", args.scenario, machine.state.value)
     else:
@@ -512,7 +693,6 @@ def main() -> None:
     started = time.monotonic()
     inspected_entry = None   # INSPECT 1회 실행 마커 — 같은 진입(entered_at)에 재실행 금지
     last_detect_at = None    # TRACE 상시 탐지의 직전 추론 시각 (주기 제한)
-    arrived_latched = False   # 이번 추종에서 블록에 도착했는가 — 근거는 detection_due()
     mission_started = False  # 최초 CRUISE 진입 여부 — 시작 요청 유지의 종료 조건
 
     def mock_finished() -> bool:
@@ -532,32 +712,14 @@ def main() -> None:
             # 원격 미션 모드에서는 자동 재시작을 하지 않는다 — 출발은 서버의
             # START_MISSION만이 시킨다. 대신 큐에 쌓인 명령을 여기서 소비한다.
             if comms_runtime is not None:
-                # Paho 스레드는 큐에만 넣고, 실제 FSM 요청은 제어 루프가 소비한다.
-                urgent_stop = comms_runtime.poll_before_step(machine)
-                if urgent_stop:
-                    # PAUSE·CANCEL·ESTOP은 새 YOLO 추론을 기다리지 않는다.
-                    # 공통 가드가 인지보다 우선이므로 frame=None으로도 즉시
-                    # 정지 전이가 되며, result는 하드웨어 쓰기 뒤에 나간다.
-                    command = machine.step(None, None, now)
-                    apply_command(motor, servo, command)
-                    comms_runtime.poll_after_step(machine, command, camera_ok=None)
-                    time.sleep(max(0.0, period - (time.monotonic() - now)))
+                if _apply_urgent_remote(comms_runtime, machine, motor, servo, now):
+                    _sleep_remaining(period, now)
                     continue
             elif not mission_started and machine.state is DriveState.IDLE:
-                machine.request_start()
+                arm_start("자동 출발")
 
-            # 조작자 비상 정지(B) 래치 소비. 래치는 스로틀 입력을 다 놓으면 리더가
-            # 스스로 풀지만(컨트롤러 정책), FSM의 ESTOP은 A(해제 요청)로만 나온다.
-            if operator is not None and operator.estop_latched:
-                machine.request_estop()
-
-            # 터치 센서 — 누름 엣지 1회가 시작 요청 + ESTOP 해제다(Xbox A와 같은 역할).
-            # IDLE·ESTOP의 출구를 하나 더 주는 것이고, 엣지이므로 누르고 있어도
-            # 자동 재출발이 되지는 않는다.
-            if touch is not None and touch.pressed():
-                machine.request_start()
-                machine.request_estop_release()
-                logger.info("[터치] 시작/ESTOP 해제 요청")
+            _poll_start_inputs(machine, touch, operator, interlock, zeroing,
+                               arm_start, now)
 
             frame = provider.get_latest()          # 인지 입력 (풀 방식)
             if mock_finished():
@@ -571,46 +733,25 @@ def main() -> None:
                     machine, command, camera_ok=(frame is not None))
             if machine.state is not DriveState.IDLE:
                 mission_started = True
+                # 실제로 움직였다 — 다음 출발에는 바이어스를 다시 잰다.
+                zeroing.rearm()
 
-            # 횡단보도 점자블록 **미설치 구역** 보고 (명세 5단계) — 주행 상태는 바꾸지
-            # 않는다. 판정은 인지 계층이 하고(세그 프레임 필드), 여기서는 연속 프레임
-            # 확정 + 쿨다운만 걸어 기록한다. 증거 사진은 판정 근거가 된 주행 카메라
-            # 프레임 그대로다 — 다시 읽으면 그새 횡단보도가 화면에서 벗어난다.
-            if frame is not None and crosswalk_gate.should_report(
-                    frame.braille_missing_at_crosswalk, now):
-                missing_image = getattr(provider, "last_image", None)
-                reporting.write_report(
-                    report_dir, reporting.KIND_MISSING, gps_status(),
-                    image=missing_image,
-                    save_images=save_images,
-                    extra={"note": "횡단보도-인도 이음부 점자블록 미설치"})
-                # 서버 보고 — 파손과 달리 게이트를 공유한다. 파손은 INSPECT 정차가
-                # 블록당 1회를 보장하지만 미설치는 이 게이트가 판정 자체이고, 서버
-                # 멱등 처리로는 프레임마다 달라지는 event_id 를 묶을 수 없다.
-                if comms_runtime is not None:
-                    try:
-                        comms_runtime.report_missing_braille(missing_image)
-                    except Exception:
-                        # 파손과 같은 원칙 — 보고가 실패해도 순찰은 계속한다.
-                        logger.exception("[미설치] 서버 보고 실패 — 주행은 계속한다")
+            reporter.missing_crosswalk(frame, getattr(provider, "last_image", None), now)
 
             # TRACE: 블록에 **도착한 뒤** 저속 추종하는 동안 탐지 모델을
             # detect_period_sec 주기로 돌린다(상시 탐지). 접근 구간(도착 전)에는 돌리지
-            # 않는다 — 근거는 detection_due(). 매 틱 돌리지 않는 이유는 imgsz 960 추론이
-            # 단일 스레드 루프 전체를 수백 ms 멈춰 세우기 때문이다 — 그 사이 인지·조향
-            # 갱신도 함께 멈춘다. 파손 후보가 나오면 FSM이 INSPECT로 정차한다.
+            # 않는다 — 근거는 detection_due(). 매 틱 돌리지 않는 이유는 검사 추론이
+            # 단일 스레드 루프 전체를 멈춰 세우기 때문이다 — 그 사이 인지·조향 갱신도
+            # 함께 멈춘다. 파손 후보가 나오면 FSM이 INSPECT로 정차한다.
             if machine.state is DriveState.TRACE and detection_due(
-                    frame, arrived_proximity, arrived_latched):
-                arrived_latched = True   # 도착 뒤에는 주행캠 근접도를 다시 묻지 않는다
+                    frame, arrived_proximity,
+                    tracking=machine.context.braille_stable):
                 if last_detect_at is None or now - last_detect_at >= detect_period_sec:
                     last_detect_at = now
-                    trace_session.count_detection(
-                        run_detection(inspect_camera, inspector, machine,
-                                      screen_confirm=defect_screen_confirm,
-                                      on_defect=report_defect))
+                    reporter.trace.count_detection(
+                        run_detection(inspect_camera, inspector, machine))
             elif machine.state is not DriveState.TRACE:
                 last_detect_at = None   # 추종을 떠나면 주기를 새로 시작한다
-                arrived_latched = False  # 다음 추종은 다시 '도착'부터 판단한다
 
             # INSPECT: 정밀 판정도 I/O → FSM 밖(여기)이 유일한 실행 지점.
             # entered_at 마커로 진입 1회당 정확히 1번만 돌되, 정지 '명령'과 물리적
@@ -621,11 +762,9 @@ def main() -> None:
                 if entry != inspected_entry and now - entry >= settle_sec:
                     inspected_entry = entry
                     run_inspection(inspect_camera, inspector, machine, flush_frames,
-                                   on_defect=report_defect)
+                                   on_defect=reporter.defect)
 
-            # 루프 주기 유지 (main.py에서만 허용) — 작업 시간을 차감한 잔여만 잔다.
-            # 고정 sleep이면 보드에서 실주기가 period + 추론 시간으로 늘어진다.
-            time.sleep(max(0.0, period - (time.monotonic() - now)))
+            _sleep_remaining(period, now)
     except KeyboardInterrupt:
         logger.info("종료 요청(Ctrl+C/SIGTERM) — 안전 정지 진행")
     finally:

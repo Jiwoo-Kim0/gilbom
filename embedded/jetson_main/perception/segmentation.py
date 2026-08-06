@@ -97,7 +97,7 @@ import logging
 import random
 import time
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional, Sequence, Tuple
+from typing import Callable, Dict, Mapping, Optional, Sequence, Tuple
 
 from perception.interfaces import (ObstacleRegion, SegmentationFrame,
                                    SegmentationProvider)
@@ -192,21 +192,15 @@ class PostParams:
     obstacle_bottom_margin_ratio: float  # 판정 밴드에서 제외할 최하단 비율 (로봇 몸체·그림자)
     obstacle_min_height_ratio: float     # 영역 세로 폭 하한 (노면 오분류 띠 배제)
     braille_min_fraction: float
-    braille_corridor_min_fraction: float  # **코리도 분모** 기준 발견 임계. 위 값과 OR다 —
-                                # 하향각이 낮아 화면 전체 분모로는 앞쪽 블록의 얇은 띠가
-                                # 문턱을 못 넘기 때문이다 (MaskSummary 필드 주석에 근거).
     proximity_quantile: float   # 근접도 = 이 퍼센타일 행 — 최하단 노이즈 픽셀 1개가
                                 # 근접도를 1로 튀게 하는 것을 막는 강건성 노브
     crosswalk_min_fraction: float               # ≥ → 횡단보도 발견
     crosswalk_seam_band_ratio: float            # 이음 띠 높이 / 화면 높이
     crosswalk_seam_braille_min_fraction: float  # 띠 내 블록 비율 미만 → 미설치
     crosswalk_seam_drivable_min_fraction: float  # 띠 내 주행가능 비율 미만 → 판정 보류
-    crosswalk_seam_min_near_ratio: float    # 횡단보도 최근접 행이 화면 이 비율보다 위면
-                                # (= 아직 멀면) 판정 보류. 원거리에서는 원근압축으로
-                                # 점형블록이 아직 몇 픽셀이라 '없다'가 관측이 아니다
-    crosswalk_seam_max_tilt_band_ratio: float  # 하단 경계 기울기 허용치 / 띠 높이.
-                                # 초과 시 보류 — 수평 띠 하나로 사선 이음부를 덮는
-                                # 전제가 깨진다
+    # 빈 프레임 — 세그가 어느 클래스도 못 잡은 틱. 근거는 BlankFrameGate.
+    blank_max_known_fraction: float   # 분류된 픽셀 비율이 이 값 이하면 '빈 프레임'
+    blank_confirm_sec: float          # 이만큼 이어져야 '앞이 막혔다'로 인정한다
     centerline: CenterlineParams
 
     @classmethod
@@ -223,8 +217,6 @@ class PostParams:
             obstacle_bottom_margin_ratio=float(post["obstacle_bottom_margin_ratio"]),
             obstacle_min_height_ratio=float(post["obstacle_min_height_ratio"]),
             braille_min_fraction=float(post["braille_min_fraction"]),
-            braille_corridor_min_fraction=float(
-                post["braille_corridor_min_fraction"]),
             proximity_quantile=float(post["proximity_quantile"]),
             crosswalk_min_fraction=float(post["crosswalk_min_fraction"]),
             crosswalk_seam_band_ratio=float(post["crosswalk_seam_band_ratio"]),
@@ -232,10 +224,8 @@ class PostParams:
                 post["crosswalk_seam_braille_min_fraction"]),
             crosswalk_seam_drivable_min_fraction=float(
                 post["crosswalk_seam_drivable_min_fraction"]),
-            crosswalk_seam_min_near_ratio=float(
-                post["crosswalk_seam_min_near_ratio"]),
-            crosswalk_seam_max_tilt_band_ratio=float(
-                post["crosswalk_seam_max_tilt_band_ratio"]),
+            blank_max_known_fraction=float(post["blank_max_known_fraction"]),
+            blank_confirm_sec=float(post["blank_confirm_sec"]),
             centerline=CenterlineParams.from_config(post["centerline"]),
         )
 
@@ -265,15 +255,23 @@ class FreeSpaceParams:
     notch_cost: 노치 깊이에 곱해 코스트맵 슬롯 비용에 가산하는 계수. 이 경로가
         **상태 전이 없이 좌우로 비껴가는** 동작을 만든다 (CRUISE 코스트맵 조향).
     blocking_reach_ratio: 자유거리 비율이 이 값 미만이면 blocking (절대 판정 —
-        '바로 앞에서 막혔다'). AVOID 회피 기동의 트리거. **한 슬롯**에 적용하는
-        확인 임계값이다 — 상대 노치가 '이 방향이 이상하다'를 이미 세운 뒤에 온다.
-    all_blocked_enabled: 위 임계값을 **전 슬롯에 동시** 적용해 막다른 길
-        (all_directions_blocked)을 판정할지. 기본 off이고, 그 이유는 config.yaml의
-        같은 키 주석에 있다 — 요약하면 자유거리 상한은 장면이 정하므로(경사로의
-        정상, 코너) 전 슬롯 동시 미만이 '벽'을 뜻하지 않는다. notch_min_ratio가
-        절대 임계를 피하는 이유와 같은 이야기다.
+        '바로 앞에서 막혔다'). AVOID 회피 기동의 트리거.
     obstacle_min_slots: 노치가 이 개수 이상 연속돼야 장애물로 보고한다 (세그 노이즈
         한 슬롯이 회피를 유발하는 것을 막는 하한).
+    blocking_seam_px: 끊긴 행에서 **위로 몇 행까지** 보고 원인을 정할지. 서로 다른
+        인스턴스 마스크는 맞닿지 않고 몇 px 이음새를 남기므로, 한 행만 보면 인도와
+        차도 사이의 모든 경계가 미분류(=물체)로 읽힌다 — 실측 진단에서 슬롯 하나에
+        66~89열이 그랬다. 이음새 두께만 덮을 만큼만 둔다 (넓히면 낮은 물체 뒤의
+        원거리 노면이 창에 들어와 물체가 경계로 지워진다).
+    blocking_object_min_ratio: 그 짧은 자유거리를 만든 열 중 **미분류에서 끊긴** 비율의
+        하한. 자유거리는 '주행가능이 어디까지 이어지나'만 재고 **왜 끊겼는지**를 묻지
+        않았다 — 그래서 인도가 끝나고 차도가 시작되는 지점(횡단보도 연석)이 정면을
+        가로막은 물체와 똑같이 취급됐다. 실측(2026-08-05, 실사 38장): blocking 22건 중
+        **6건이 crosswalk·roadway 에서 끊긴 것**이었고, 그 6건은 전부 횡단보도 접근
+        프레임이다 — 미설치 판정(명세 5단계)을 하러 가야 하는 바로 그 자리에서 회피가
+        걸렸다는 뜻이다. 차도 자체의 방어는 그대로다: 코리도 차도 비율이 선회(20%)와
+        ESTOP(55%)을 따로 보고 있고, 이 조건은 같은 사실에 두 계층이 각각 반응하던
+        중복을 없앤다. 횡단보도 위에 선 차·사람은 미분류라 여전히 물체로 잡힌다.
     """
 
     enabled: bool
@@ -281,8 +279,9 @@ class FreeSpaceParams:
     notch_min_ratio: float
     notch_cost: float
     blocking_reach_ratio: float
-    all_blocked_enabled: bool
     obstacle_min_slots: int
+    blocking_object_min_ratio: float = 0.0
+    blocking_seam_px: int = 1
 
     @classmethod
     def from_config(cls, free_space: dict) -> "FreeSpaceParams":
@@ -292,8 +291,9 @@ class FreeSpaceParams:
             notch_min_ratio=float(free_space["notch_min_ratio"]),
             notch_cost=float(free_space["notch_cost"]),
             blocking_reach_ratio=float(free_space["blocking_reach_ratio"]),
-            all_blocked_enabled=bool(free_space["all_blocked_enabled"]),
             obstacle_min_slots=int(free_space["obstacle_min_slots"]),
+            blocking_object_min_ratio=float(free_space["blocking_object_min_ratio"]),
+            blocking_seam_px=int(free_space["blocking_seam_px"]),
         )
 
 
@@ -335,6 +335,10 @@ class MaskSummary:
     비용을 원소별로 더할 수 있다. None이면 자유공간 판정 비활성.
     이 값만이 원거리(4~5m) 물체를 볼 수 있는 통로다 — 나머지 obstacle_* 필드는 전부
     판정 밴드(지면 약 0.4~1.2m) 안에서만 유효하다. 근거는 FreeSpaceParams 독스트링.
+    free_block_object_ratios는 그 자유거리가 **무엇에서 끊겼는지** — 슬롯별로, 짧은
+    도달을 만든 열 중 미분류(=7클래스 어디에도 안 잡힌 = 물체)에서 끊긴 비율이다.
+    0이면 인도가 끝나고 알려진 클래스(차도·횡단보도·자전거도로…)가 시작된 것이고,
+    1이면 정면을 뭔가가 막은 것이다. 같은 짧은 도달이라도 대응이 달라야 한다.
     """
 
     drivable_fraction: float                        # 하단 절반 기준
@@ -350,28 +354,49 @@ class MaskSummary:
     centerline_samples: Tuple[Tuple[float, float], ...] = ()
     slot_class_fractions: Optional[Tuple[Dict[str, float], ...]] = None
     free_reach_ratios: Optional[Tuple[float, ...]] = None
+    free_block_object_ratios: Optional[Tuple[float, ...]] = None
     crosswalk_fraction: float = 0.0              # 화면 전체 기준 횡단보도 비율
+    known_fraction: float = 1.0                  # 어느 클래스로든 잡힌 픽셀 비율(화면 전체).
+                                # 0 이면 세그가 이 프레임에서 **아무것도 못 잡았다**는
+                                # 뜻이고, 그 경우 나머지 통계는 전부 '미분류'가 만들어낸
+                                # 허상이다 — 정면 장애물·막다른 길이 그렇게 만들어진다.
+                                # 기본값이 1.0인 이유: 이 필드를 안 채우는 옛 테스트·mock
+                                # 요약이 '빈 프레임'으로 오인되지 않게 (BlankFrameGate)
     crosswalk_seam_braille_fraction: Optional[float] = None  # 이음 띠 내 점자블록 비율.
                                 # 띠는 '횡단보도 최근접 행 바로 아래(로봇 쪽)' 구간이고
                                 # x 범위는 횡단보도가 걸친 폭이다 — 명세 5단계의 '횡단보도와
                                 # sidewalk 사이'를 화면 좌표로 옮긴 것.
                                 # **None = 판정 보류**(횡단보도 없음 / 띠가 화면 밖 / 띠가
                                 # 인도가 아님). 0.0과 구별해야 한다 — 0.0은 '봤는데 없다'다
-    braille_corridor_fraction: float = 0.0       # **진행 코리도 안** 점자블록 비율.
-                                # braille_fraction(화면 전체)과 분모가 다른 같은 픽셀이다.
-                                # 주행 카메라는 하향각이 낮아 앞쪽 블록이 화면 상단에 얇게
-                                # 찍히고, 화면 전체 분모에서는 그 띠가 0.5% 문턱을 못 넘는다
-                                # (0805 실기: 세그 주행 중 블록 발견이 잘 안 됨). 코리도
-                                # (중앙 폭 50% × 하단 40% = 화면의 20%)로 분모를 좁히면 같은
-                                # 픽셀이 5배로 보인다 — roadway_corridor_fraction이 같은
-                                # 이유로 코리도 분모를 쓰는 것과 같은 산식이다.
-                                # 발견 판정은 둘의 OR다 (build_frame) — 어느 하나가 잡으면
-                                # 발견이고, 코리도 밖 원거리 블록은 종전 경로가 그대로 받는다
 
 
 # ======================================================================
 # 순수 계층 — MaskSummary + 임계값 → SegmentationFrame (개발 PC에서 테스트)
 # ======================================================================
+
+def keep_instances(names: Sequence[str], confidences: Sequence[float],
+                   thresholds: Mapping[str, float], default: float
+                   ) -> Tuple[bool, ...]:
+    """인스턴스별 채택 여부 — **클래스마다 다른 신뢰도 하한**을 적용한다 (순수).
+
+    한 개의 전역 conf 로는 이 모델을 쓸 수 없다는 것이 실측 결론이다
+    (2026-08-05, 실사 31장면 육안 라벨):
+
+        conf 0.25(종전 운영점) — 점자블록 재현율 **2/8**, 오탐 0/20
+        conf 0.10             — 3/8, 오탐 0
+        conf 0.05             — 5/8, 오탐 1/20
+
+    미검출의 병목이 면적 임계가 아니라 conf 였다(놓친 프레임 대부분이 인스턴스 자체
+    0개). 그렇다고 전역 conf 를 내리면 **roadway·crosswalk 도 함께 내려간다** — 그쪽
+    오탐은 코리도 20%면 차도 이탈 선회, 55%면 즉시 ESTOP 이라 미션을 끝낸다.
+    두 클래스의 요구가 정반대이므로(블록은 재현율, 차도는 정밀도) 하한도 따로 둔다.
+
+    추론은 하한 중 **가장 낮은 값**으로 한 번만 돌리고(그래야 낮은 임계 클래스의
+    인스턴스가 결과에 들어온다) 여기서 클래스별로 걸러 낸다.
+    """
+    return tuple(float(conf) >= float(thresholds.get(name, default))
+                 for name, conf in zip(names, confidences))
+
 
 def _clamp_ratio(value: float) -> float:
     return max(-1.0, min(1.0, value))
@@ -598,8 +623,32 @@ def _overlaps_path(start: int, end: int, slot_count: int,
                for index in range(start, end))
 
 
+def _blocked_by_object(object_ratios: Optional[Sequence[float]],
+                       reaches: Sequence[float], start: int, end: int,
+                       params: FreeSpaceParams) -> bool:
+    """그 짧은 자유거리가 **물체 때문인가** (순수).
+
+    묻는 대상은 **막힘을 실제로 만든 슬롯들**이다 — 노치 구간 전체가 아니라 그 안에서
+    자유거리가 blocking 임계 아래로 내려간 슬롯들. blocking 판정이 그 슬롯들의 값으로
+    나므로 원인도 같은 자리에서 찾아야 한다. 구간 전체를 보면 판정에 기여하지도 않은
+    먼 슬롯 하나가 결론을 뒤집는다.
+
+    그중 **가장 물체다운 것** 하나면 충분하다: 연석에 사람이 서 있으면 이웃 슬롯이
+    전부 연석에서 끊겨도 그 사람은 여전히 피해야 한다(그 사람의 슬롯이 더 짧으므로
+    후보에 들어온다). 평균을 쓰면 바로 그 경우가 지워진다.
+    """
+    if not object_ratios:
+        return True                      # 원인을 재지 않는 경로 — 종전 동작 유지
+    causes = [object_ratios[i] for i in range(start, min(end, len(object_ratios)))
+              if reaches[i] < params.blocking_reach_ratio]
+    if not causes:
+        return True
+    return max(causes) >= params.blocking_object_min_ratio
+
+
 def free_space_obstacle(reaches: Sequence[float], params: FreeSpaceParams,
-                        path_width_ratio: float = 1.0
+                        path_width_ratio: float = 1.0,
+                        object_ratios: Optional[Sequence[float]] = None
                         ) -> Optional[ObstacleRegion]:
     """자유공간 프로파일 → 장애물 영역 1개 요약 (순수). 없으면 None.
 
@@ -611,11 +660,17 @@ def free_space_obstacle(reaches: Sequence[float], params: FreeSpaceParams,
         이 반대쪽을 고른다. 슬롯 중심 좌표 관례는 cost_profile과 동일하다.
     proximity: 1 − (노치 구간의 최소 자유거리). 자유거리가 짧을수록 가깝다는
         단조 관계이고, 절대 거리가 아니라 ObstacleRegion.proximity 관례의 proxy다.
-    blocking: 노치 구간의 최소 자유거리가 blocking_reach_ratio 미만 **이고** 그 구간이
-        진행 경로와 겹칠 때. 앞은 **절대** 기준('바로 앞이 막혔다'), 뒤는 **경로 관련성**
-        (_overlaps_path — 없으면 회피가 끝나지 않는다)이다. 상대 노치만으로 회피 기동에
-        들어가지 않는 이유는 그것이 '옆이 더 열렸다'는 뜻일 뿐이어서다 — 그건 비껴가면
-        될 일이고, 기동까지 갈 근거는 내 길이 실제로 막혔을 때여야 한다.
+    blocking: 노치 구간의 최소 자유거리가 blocking_reach_ratio 미만 **이고**, 그 구간이
+        진행 경로와 겹치고, 그 짧은 자유거리가 **물체 때문일** 때. 첫째는 **절대**
+        기준('바로 앞이 막혔다'), 둘째는 **경로 관련성**(_overlaps_path — 없으면 회피가
+        끝나지 않는다), 셋째는 **원인**(object_ratios — 인도가 끝난 것과 뭔가가 막은
+        것은 다르다)이다. 상대 노치만으로 회피 기동에 들어가지 않는 이유는 그것이
+        '옆이 더 열렸다'는 뜻일 뿐이어서다 — 그건 비껴가면 될 일이고, 기동까지 갈
+        근거는 내 길이 실제로 막혔을 때여야 한다.
+
+    object_ratios: 슬롯별 '미분류에서 끊긴 열의 비율' (numpy 계층이 잰다). None 이면
+        원인을 묻지 않던 종전 동작 그대로다 — mock 인지처럼 프로파일만 있는 경로가
+        조용히 바뀌지 않게 한다.
     """
     if not params.enabled or len(reaches) < 1:
         return None
@@ -631,105 +686,197 @@ def free_space_obstacle(reaches: Sequence[float], params: FreeSpaceParams,
         lateral_bias=_clamp_ratio(bias),
         proximity=_clamp01(1.0 - min_reach),
         blocking=(min_reach < params.blocking_reach_ratio
-                  and _overlaps_path(start, end, len(reaches), path_width_ratio)),
+                  and _overlaps_path(start, end, len(reaches), path_width_ratio)
+                  and _blocked_by_object(object_ratios, reaches, start, end,
+                                        params)),
     )
+
+
+def _center_offset(summary: MaskSummary, post: PostParams) -> float:
+    """조향 목표 — 중심선 곡선을 lookahead 지점에서 읽는다.
+
+    적합 실패 시에만 무게중심으로 강등된다 — 무게중심은 인도가 한쪽으로 넓어지면
+    통째로 끌려가고 형상 정보가 스칼라 1개로 뭉개진다 (docs/ALGORITHMS.md N6).
+    """
+    centerline = fit_centerline(summary.centerline_samples, post.centerline)
+    if centerline is not None:
+        return _clamp_ratio(evaluate_centerline(centerline,
+                                                post.centerline.lookahead_ratio))
+    if summary.drivable_center_offset_ratio is not None:
+        return _clamp_ratio(summary.drivable_center_offset_ratio)
+    return 0.0
+
+
+def _near_band_obstacle(summary: MaskSummary, post: PostParams
+                        ) -> Optional[ObstacleRegion]:
+    """근거리 밴드(지면 약 0.5~1.1m)의 **미분류** 덩어리 → 장애물 1개. 없으면 None.
+
+    보고 조건은 비율 **과** 세로 폭 둘 다다 — 비율만으로는 노면 오분류 띠(얇고 넓다)와
+    지면에 선 물체(좁고 높다)가 구분되지 않는다. 모듈 독스트링의 '장애물' 항목이 근거.
+    미검출을 장애물로 보고하지 않는 것이 목적이므로 조건 미달은 '장애물 없음'이지
+    '먼 장애물'이 아니다.
+    """
+    if (summary.obstacle_corridor_fraction < post.obstacle_min_fraction
+            or summary.obstacle_height_ratio < post.obstacle_min_height_ratio):
+        return None
+    proximity = _clamp01(summary.obstacle_proximity)
+    return ObstacleRegion(
+        lateral_bias=_clamp_ratio(summary.obstacle_lateral_bias),
+        proximity=proximity,
+        blocking=proximity >= post.obstacle_blocking_proximity)
+
+
+def _cost_profile(summary: MaskSummary, costmap: Optional[CostmapParams],
+                  free_space: Optional[FreeSpaceParams], use_free_space: bool
+                  ) -> Optional[Tuple[float, ...]]:
+    """시맨틱 코스트맵 + 자유공간 노치 비용. 이 합이 CRUISE 의 방향 선택 입력이다.
+
+    노치 비용을 여기 더하는 것이 **상태 전이 없이 좌우로 비껴가는** 1차 경로다
+    (회피 기동보다 먼저·부드럽게 작동한다). 슬롯 수가 어긋나면 가산을 건너뛴다 —
+    원소별 zip 이 짧은 쪽에서 잘려 프로파일이 조용히 짧아지는 것을 막는다.
+    """
+    if costmap is None or summary.slot_class_fractions is None:
+        return None
+    profile = build_cost_profile(summary.slot_class_fractions, costmap)
+    reaches = summary.free_reach_ratios
+    if use_free_space and len(reaches) == len(profile):
+        extra = free_space_costs(reaches, free_space)
+        profile = tuple(base + add for base, add in zip(profile, extra))
+    return profile
+
+
+def _dead_end_verdict(summary: MaskSummary, free_space: Optional[FreeSpaceParams],
+                      use_free_space: bool, near_band_obstacle: bool) -> bool:
+    """좌우로도 갈 길이 없는가 — **자유거리 + 근거리 확증** 둘 다 요구한다.
+
+    모든 슬롯의 자유거리가 blocking 절대 기준 미만이면 상대 노치 판정으로는 안 잡힌다
+    (가로 담장·벽이면 전 슬롯이 균등하게 막혀 노치가 전부 0이 된다 —
+    free_space_notches 독스트링의 명시된 한계). 그래서 같은 절대 기준을 전 슬롯에
+    직접 적용한다.
+
+    **다만 자유거리 하나로는 이 판정을 낼 수 없다.** 자유거리는 '주행가능이 어디까지
+    이어지나'이고, 그것이 짧아지는 이유는 물체만이 아니다 — 오르막·크레스트·코너에서는
+    지면이 시야에서 먼저 끝난다. 그 장면들은 전 슬롯이 **균등하게** 짧아지므로 이 all()
+    조건에 그대로 걸리고, 결과는 정지 → 재확인 → **후진 + 재정향**이다. 인도 한복판에서
+    후진하는 그 기동이 '경사면에서 쓸데없이 멈춘다'의 가장 무거운 형태다.
+
+    그래서 근거리 확증을 함께 요구한다: 코리도 판정 밴드에 미분류 덩어리가 실제로
+    있어야 '갈 수 없다'로 인정한다. 벽·담장은 다가서면 그 밴드를 채우므로 이 조건을
+    넘고(반응이 1m 남짓 늦어질 뿐이다), 크레스트·오르막은 바로 앞 노면이 멀쩡한 인도라
+    넘지 못한다. 두 신호가 같은 물체를 서로 다른 거리에서 보는 것이라, 함께 요구하는
+    것이 곧 '물체인지 지형인지'를 가르는 기준이 된다.
+    """
+    return bool(use_free_space and near_band_obstacle
+                and all(reach < free_space.blocking_reach_ratio
+                        for reach in summary.free_reach_ratios))
+
+
+def _crosswalk_verdict(summary: MaskSummary, post: PostParams) -> Tuple[bool, bool]:
+    """(횡단보도 보임, 이음부 점자블록 **미설치**) — 명세 5단계.
+
+    횡단보도가 보일 때만 의미가 있다. 보이지 않으면 '이음 띠에 블록이 없다'가 항상
+    참이므로, 이 게이트가 없으면 인도 한복판에서 미설치 보고가 계속 나간다.
+    seam 이 None 이면 **판정 보류**다 — 보고하지 않는다. '관측하지 못했다'를 '없다'로
+    바꾸면 카메라가 하늘을 보거나 이음부를 이미 밟고 있는 프레임이 전부 미설치가
+    된다(0804 실외 오탐의 구조적 원인).
+    """
+    ahead = summary.crosswalk_fraction >= post.crosswalk_min_fraction
+    seam = summary.crosswalk_seam_braille_fraction
+    missing = (ahead and seam is not None
+               and seam < post.crosswalk_seam_braille_min_fraction)
+    return ahead, missing
+
+
+def is_blank(summary: MaskSummary, post: PostParams) -> bool:
+    """이 프레임에서 세그가 **아무것도 못 잡았는가** (순수). 근거는 BlankFrameGate."""
+    return summary.known_fraction <= post.blank_max_known_fraction
+
+
+class BlankFrameGate:
+    """빈 프레임 디바운스 — '못 봤다'를 '앞이 막혔다'로 읽지 않게 한다.
+
+    **관측된 사실** (2026-08-05 실기, var/drive_trace.jsonl 세션 4): 주행 틱의 22.8%가
+    세그 마스크가 하나도 없는 프레임이었고, 그 프레임은 예외 없이 이렇게 찍힌다 —
+    코스트맵 전 슬롯 동일값(2.7), sidewalk=false, 근접도 0.95/1.00 장애물 2개,
+    all_directions_blocked=true. 미분류 픽셀이 곧 장애물이라는 정의(_class_unions)의
+    당연한 귀결이다: 아무것도 분류되지 않았으므로 **화면 전체가 장애물**이 된다.
+
+    그 한 틱이 만든 결과는 작지 않았다. 같은 세션에서 AVOID 20회 중 13회가
+    SWERVE→PASS→(빈 프레임)→SWERVE 왕복으로 RETURN에 닿지 못한 채 회피 상한 6초를
+    다 쓰고 재정향으로 승격됐고, 그 후진 8회가 '전 방향 막힘 → 정지 + 수동 대기'로
+    미션을 끝냈다. 즉 순찰이 끊긴 가장 큰 원인이 **없는 벽**이었다.
+
+    그렇다고 빈 프레임을 무조건 무시할 수는 없다 — 로봇이 벽에 코를 붙이면 화면에
+    분류할 것이 정말로 없을 수 있고, 그때는 같은 신호가 참이다. 둘을 가르는 것은
+    **지속 시간**이다: 추론 지터는 한두 틱이고 벽은 사라지지 않는다. 실측 런길이
+    분포도 그렇게 갈린다(1~2틱이 다수, 그리고 30~35틱짜리 덩어리 몇 개).
+
+    그래서 blank_confirm_sec 안의 빈 프레임은 장애물·막다른길 판정에서 빼고
+    (sidewalk_detected 는 원래대로 False 라 FSM의 인지 소실 유예가 그대로 받는다 —
+    저속 복구 주행), 그보다 오래 이어지면 종전대로 통과시킨다. 즉 '막혔다'의 판단이
+    사라지는 것이 아니라 confirm_sec 만큼 늦어질 뿐이다.
+
+    상태(빈 프레임이 언제부터인가)를 갖고 있으므로 순수 계층이 아니라 Provider가
+    소유한다. 대시보드(scripts/web_test.py)도 **같은 객체**를 써야 한다 — 따로
+    가지면 화면과 실주행의 회피 판정이 갈라진다.
+    """
+
+    def __init__(self) -> None:
+        self._blank_since: Optional[float] = None
+
+    def confirmed(self, summary: MaskSummary, post: PostParams, now: float) -> bool:
+        """이번 프레임의 막힘 판정을 **믿어도 되는가**. 빈 프레임 타이머도 여기서 민다."""
+        if not is_blank(summary, post):
+            self._blank_since = None
+            return True
+        if self._blank_since is None:
+            self._blank_since = now
+        return now - self._blank_since >= post.blank_confirm_sec
 
 
 def build_frame(summary: MaskSummary, post: PostParams, timestamp: float,
                 costmap: Optional[CostmapParams] = None,
-                free_space: Optional[FreeSpaceParams] = None) -> SegmentationFrame:
-    """요약 통계에 임계값을 적용해 FSM이 소비하는 프레임을 만든다 (순수)."""
-    sidewalk_detected = (summary.drivable_fraction >= post.sidewalk_min_fraction
-                        and summary.drivable_center_offset_ratio is not None)
+                free_space: Optional[FreeSpaceParams] = None,
+                blocking_confirmed: bool = True) -> SegmentationFrame:
+    """요약 통계에 임계값을 적용해 FSM이 소비하는 프레임을 만든다 (순수).
 
-    # 중심 오차: 중심선 곡선을 lookahead 지점에서 읽는다. 적합 실패 시에만 무게중심
-    # 으로 강등된다 — 무게중심은 인도가 한쪽으로 넓어지면 통째로 끌려가고 형상 정보가
-    # 스칼라 1개로 뭉개진다 (docs/ALGORITHMS.md N6).
-    centerline = fit_centerline(summary.centerline_samples, post.centerline)
-    if centerline is not None:
-        raw_offset = evaluate_centerline(centerline, post.centerline.lookahead_ratio)
-    elif summary.drivable_center_offset_ratio is not None:
-        raw_offset = summary.drivable_center_offset_ratio
-    else:
-        raw_offset = 0.0
-    center_offset = _clamp_ratio(raw_offset)
+    판정 하나하나의 근거는 각 헬퍼의 독스트링에 있고, 여기서는 **무엇이 무엇으로부터
+    나오는지**만 읽으면 된다.
 
-    # 장애물 보고 조건은 비율 **과** 세로 폭 둘 다다 — 비율만으로는 노면 오분류
-    # 띠(얇고 넓다)와 지면에 선 물체(좁고 높다)가 구분되지 않는다. 모듈 독스트링의
-    # '장애물' 항목이 근거. 미검출을 장애물로 보고하지 않는 것이 여기 목적이므로
-    # 조건 미달은 '장애물 없음'이지 '먼 장애물'이 아니다.
-    obstacles: Tuple[ObstacleRegion, ...] = ()
-    if (summary.obstacle_corridor_fraction >= post.obstacle_min_fraction
-            and summary.obstacle_height_ratio >= post.obstacle_min_height_ratio):
-        proximity = _clamp01(summary.obstacle_proximity)
-        obstacles = (ObstacleRegion(
-            lateral_bias=_clamp_ratio(summary.obstacle_lateral_bias),
-            proximity=proximity,
-            blocking=proximity >= post.obstacle_blocking_proximity,
-        ),)
-
-    # 자유공간 프로파일 — 원거리(밴드 밖) 장애물의 유일한 통로. 두 곳에 얹는다:
-    #  ① 코스트맵 슬롯 비용 → CRUISE가 상태 전이 없이 노치를 비껴간다 (1차, 부드럽다)
-    #  ② obstacles 목록   → 절대 기준을 넘으면 blocking = AVOID 회피 기동 (2차)
-    # 종전 밴드 판정을 대체하지 않고 더한다 — 유효 범위가 다르다(밴드는 0.4~1.2m).
+    blocking_confirmed=False 는 '이 프레임은 빈 프레임이고 아직 확정되지 않았다'는
+    뜻이다 — 장애물·막다른길 판정을 비운다(BlankFrameGate). 나머지 필드는 그대로
+    둔다: 인도 미검출·중심 오차 0 은 빈 프레임의 **정직한** 결과이고, FSM은 그것을
+    인지 소실로 이미 올바르게 처리한다.
+    """
     reaches = summary.free_reach_ratios
     use_free_space = (free_space is not None and free_space.enabled
                       and reaches is not None and len(reaches) > 0)
 
-    cost_profile = None
-    if costmap is not None and summary.slot_class_fractions is not None:
-        cost_profile = build_cost_profile(summary.slot_class_fractions, costmap)
-        if use_free_space and len(reaches) == len(cost_profile):
-            extra = free_space_costs(reaches, free_space)
-            cost_profile = tuple(base + add for base, add in zip(cost_profile, extra))
-
+    # 장애물은 두 경로가 각각 보고한다 — 유효 범위가 다르므로 대체가 아니라 병행이다:
+    #  · 근거리 밴드(0.5~1.1m)의 미분류 덩어리
+    #  · 자유공간 프로파일(원거리) — 절대 기준을 넘으면 blocking = AVOID 회피 기동
+    near = _near_band_obstacle(summary, post)
+    obstacles: Tuple[ObstacleRegion, ...] = () if near is None else (near,)
     if use_free_space:
         far = free_space_obstacle(reaches, free_space,
-                                  path_width_ratio=post.corridor_width_ratio)
+                                  path_width_ratio=post.corridor_width_ratio,
+                                  object_ratios=summary.free_block_object_ratios)
         if far is not None:
             obstacles = obstacles + (far,)
 
-    # 막다른 길: **모든** 슬롯의 자유거리가 blocking 절대 기준 미만 = 좌우로도 갈 길이
-    # 없다. free_space_obstacle의 상대 노치 판정으로는 이 장면이 잡히지 않는다 —
-    # 가로 담장·벽이면 전 슬롯이 균등하게 막혀 노치가 전부 0이 된다(free_space_notches
-    # 독스트링의 명시된 한계). 그래서 같은 절대 기준을 전 슬롯에 직접 적용한다.
-    #
-    # **all_blocked_enabled 기본 off** — 이 판정에는 벽 말고도 걸리는 것이 있다.
-    # 자유거리 상한은 장면이 정한다: 유한한 경사로는 정상(crest) 너머 지면이 보이지
-    # 않아 주행가능 런이 정상 라인에서 끊기고, 그 끊김은 특정 슬롯이 아니라 좌·정면·
-    # 우에 **균등하게** 걸린다(코너도 같다). 그러면 벽이 없는데 전 슬롯 미만이 된다 —
-    # 0805 실외에서 경사 영구 정지와 평지 오회차의 원인이다. notch_min_ratio가 절대
-    # 임계를 피하는 이유와 같은 이야기이고, 그 주석이 이미 경고하고 있었다.
-    # 재보정 조건은 config.yaml의 같은 키에 적어 두었다.
-    all_directions_blocked = bool(
-        use_free_space
-        and free_space.all_blocked_enabled
-        and all(reach < free_space.blocking_reach_ratio for reach in reaches))
+    braille_detected = summary.braille_fraction >= post.braille_min_fraction
+    crosswalk_ahead, braille_missing = _crosswalk_verdict(summary, post)
 
-    # 발견은 **두 분모의 OR**다. 화면 전체 분모는 멀리 크게 보이는 블록을, 코리도
-    # 분모는 앞쪽에 얇게 찍힌 블록을 잡는다 — 하향각이 낮은 주행 카메라에서는 후자가
-    # 지배적이고, 전체 분모만 쓰던 종전에는 그 장면이 통째로 미발견이었다(0805 실기).
-    # OR인 이유: 코리도는 중앙 폭 50%뿐이라 좌우로 벗어난 블록을 놓친다. 두 경로는
-    # 대체가 아니라 병행이다(자유공간 판정이 장애물 밴드와 병행인 것과 같은 구조).
-    braille_detected = bool(
-        summary.braille_fraction >= post.braille_min_fraction
-        or summary.braille_corridor_fraction >= post.braille_corridor_min_fraction)
-
-    # 횡단보도 미설치 판정 (명세 5단계) — 횡단보도가 보일 때만 의미가 있다.
-    # 보이지 않으면 '이음 띠에 블록이 없다'가 항상 참이므로, 이 게이트가 없으면
-    # 인도 한복판에서 미설치 보고가 계속 나간다.
-    # seam이 None이면 **판정 보류**다 — 보고하지 않는다. '관측하지 못했다'를 '없다'로
-    # 바꾸면 카메라가 하늘을 보거나 이음부를 이미 밟고 있는 프레임이 전부 미설치가
-    # 된다(0804 실외 오탐의 구조적 원인).
-    crosswalk_ahead = summary.crosswalk_fraction >= post.crosswalk_min_fraction
-    seam = summary.crosswalk_seam_braille_fraction
-    braille_missing = (crosswalk_ahead and seam is not None
-                       and seam < post.crosswalk_seam_braille_min_fraction)
+    blank = is_blank(summary, post)
+    dead_end = _dead_end_verdict(summary, free_space, use_free_space, near is not None)
+    if blank and not blocking_confirmed:
+        obstacles, dead_end = (), False
 
     return SegmentationFrame(
         timestamp=timestamp,
-        sidewalk_detected=sidewalk_detected,
-        sidewalk_center_offset_ratio=center_offset,
+        sidewalk_detected=(summary.drivable_fraction >= post.sidewalk_min_fraction
+                           and summary.drivable_center_offset_ratio is not None),
+        sidewalk_center_offset_ratio=_center_offset(summary, post),
         # 차도는 두 단계다: 위험(코리도에 들어왔다 → 선회로 이탈)과 치명(코리도를
         # 덮었다 → 즉시 ESTOP). 명세의 '차도를 만나면 좌 or 우로 방향 전환'이 전자,
         # '차도 절대 접근 금지'의 최후 방어선이 후자다.
@@ -741,17 +888,107 @@ def build_frame(summary: MaskSummary, post: PostParams, timestamp: float,
         braille_detected=braille_detected,
         braille_center_offset_ratio=(_clamp_ratio(summary.braille_center_offset_ratio)
                                      if braille_detected else 0.0),
-        braille_proximity=_clamp01(summary.braille_proximity) if braille_detected else 0.0,
+        braille_proximity=(_clamp01(summary.braille_proximity)
+                           if braille_detected else 0.0),
         crosswalk_ahead=crosswalk_ahead,
         braille_missing_at_crosswalk=braille_missing,
-        cost_profile=cost_profile,
-        all_directions_blocked=all_directions_blocked,
+        cost_profile=_cost_profile(summary, costmap, free_space, use_free_space),
+        all_directions_blocked=dead_end,
+        perception_blank=blank,
     )
 
 
 # ======================================================================
 # numpy 계층 — 클래스별 마스크 → MaskSummary (보드에서만 실행)
 # ======================================================================
+
+def _class_unions(np, class_masks: Dict[str, "object"], classes: ClassNames,
+                  shape: Tuple[int, int]):
+    """클래스 마스크 사전 → 판정에 쓰는 합집합 넷 (주행가능·차도·점자블록·**분류됨**).
+
+    `known`(어느 클래스든 잡힌 픽셀)의 여집합이 곧 장애물 후보다 — 명세의 '7개 클래스
+    제외 인도에서 발생하는 장애물(사람·킥보드·볼라드)'이 정확히 그것이다.
+    """
+    height, width = shape
+    empty = np.zeros((height, width), dtype=bool)
+
+    def union(names: Tuple[str, ...]):
+        merged = empty
+        for name in names:
+            if name in class_masks:
+                merged = merged | class_masks[name]
+        return merged
+
+    return (union(classes.drivable), union(classes.roadway),
+            class_masks.get(classes.braille, empty), union(tuple(class_masks.keys())),
+            empty)
+
+
+def _ego_drivable(np, raw_drivable, post: PostParams, scan_from: int):
+    """자차 연결 주행가능 → (ego_run, drivable). '차도를 인도로 본다'의 방어선.
+
+    세그가 길 건너 차도를 sidewalk로 오분류하면 그 픽셀이 무게중심·중심선·경계
+    판정에 그대로 섞여 조향을 차도 쪽으로 끌어당긴다(0803 실외 관찰). 로봇은
+    지금 인도 위에 서 있으므로, **내 발밑에서 끊기지 않고 이어진 영역만** 내
+    주행면이다 — 길 건너 영역은 사이에 차도가 있어 열이 끊긴다.
+    산식은 free_reach와 같은 것 하나뿐이다(열별 하단부터의 연속 구간) — 원거리
+    장애물 판정과 자차 연결이 같은 물리를 보고 있으므로 두 벌로 두지 않는다.
+    """
+    ego_run = _ego_run_mask(np, raw_drivable, scan_from=scan_from,
+                            gap_rows=post.ego_gap_rows)
+    drivable = raw_drivable.copy()
+    drivable[:scan_from + 1, :] = ego_run
+    return ego_run, drivable
+
+
+def _obstacle_stats(np, known, post: PostParams, band, width: int):
+    """판정 밴드 안 **미분류** 영역의 (비율, 치우침, 근접도, 세로 폭).
+
+    근접도·세로 폭은 이 밴드 내부 행 기준으로 정규화한다: 화면 전체 기준이면
+    밴드 안 어떤 픽셀도 (1-corridor_height_ratio) 아래로 못 내려가
+    obstacle_blocking_proximity 임계가 항상 참인 죽은 노브가 되기 때문이다.
+
+    장애물 = **미분류**(7클래스 어디에도 안 잡힌) 픽셀뿐이다. 종전 정의(~drivable &
+    ~roadway)는 bike_lane·caution_zone·alley를 장애물로 잡아, 자전거도로 옆을
+    지나는 것만으로 회피가 걸렸다. 그 클래스들은 코스트맵 비용(우선순위 표)이
+    담당한다 — '피한다'와 '못 지나간다'는 다른 판단이다.
+    """
+    (y0, y1), (x0, x1) = band
+    region = (~known)[(slice(y0, y1), slice(x0, x1))]
+    bias, proximity, height_ratio = _region_position(
+        np, region, x_origin=x0, full_width=width,
+        height_denominator=y1 - y0, quantile=post.proximity_quantile)
+    return _fraction(region), bias, proximity, height_ratio
+
+
+def _braille_stats(np, braille, post: PostParams, height: int, width: int):
+    """점자블록의 (화면 비율, 중심 오차, 근접도). 근접도 기준 공간은 **화면 전체**다."""
+    offset = _centroid_offset_ratio(braille, x_origin=0, full_width=width)
+    _, proximity, _ = _region_position(
+        np, braille, x_origin=0, full_width=width,
+        height_denominator=height, quantile=post.proximity_quantile)
+    return _fraction(braille), (offset if offset is not None else 0.0), proximity
+
+
+def _free_space_profiles(np, ego_run, known, free_space: Optional[FreeSpaceParams],
+                         slot_count: Optional[int], width: int, band_top: int):
+    """자유공간 두 프로파일 — (도달 비율, 물체 비율). 꺼져 있으면 (None, None).
+
+    코스트맵과 **같은 슬롯 분할**을 쓴다(비용을 원소별로 더한다). 밴드 위쪽 전체를
+    훑으므로 이것만이 원거리 물체를 볼 수 있다 (FreeSpaceParams 참조). 도달 비율과
+    함께 '무엇이 끊었나'(물체 vs 인도의 끝)를 **같은 열 집합에서** 낸다 — 두 값이
+    같은 사건을 설명해야 하기 때문이다.
+    """
+    if not (free_space is not None and free_space.enabled
+            and slot_count is not None and slot_count > 0):
+        return None, None
+    reach = _free_reach_ratios(np, ego_run, width=width, slot_count=slot_count,
+                               quantile=free_space.slot_quantile)
+    objects = _free_block_object_ratios(
+        np, ego_run, known[:band_top, :], width=width, slot_count=slot_count,
+        quantile=free_space.slot_quantile, seam_px=free_space.blocking_seam_px)
+    return reach, objects
+
 
 def summarize_class_masks(class_masks: Dict[str, "object"], shape: Tuple[int, int],
                           classes: ClassNames, post: PostParams,
@@ -767,81 +1004,29 @@ def summarize_class_masks(class_masks: Dict[str, "object"], shape: Tuple[int, in
     import numpy as np  # 보드 전용 경로 — 개발 PC 테스트는 이 함수를 부르지 않는다
 
     height, width = shape
-    empty = np.zeros((height, width), dtype=bool)
-
-    def union(names: Tuple[str, ...]):
-        merged = empty
-        for name in names:
-            if name in class_masks:
-                merged = merged | class_masks[name]
-        return merged
-
-    raw_drivable = union(classes.drivable)
-    roadway = union(classes.roadway)
-    braille = class_masks.get(classes.braille, empty)
-    known = union(tuple(class_masks.keys()))    # 7클래스 중 무엇이든 잡힌 픽셀
+    raw_drivable, roadway, braille, known, empty = _class_unions(
+        np, class_masks, classes, shape)
 
     # 진행 코리도 (경계 산식은 corridor_bounds — 관제 오버레이와 공유한다)
     x0, x1, y0 = corridor_bounds(height, width, post)
-    corridor = (slice(y0, height), slice(x0, x1))
     y1 = obstacle_band_y1(height, y0, post)
 
-    # ---- 자차 연결(ego-connected) 주행가능 — '차도를 인도로 본다'의 방어선 ----
-    # 세그가 길 건너 차도를 sidewalk로 오분류하면 그 픽셀이 무게중심·중심선·경계
-    # 판정에 그대로 섞여 조향을 차도 쪽으로 끌어당긴다(0803 실외 관찰). 로봇은
-    # 지금 인도 위에 서 있으므로, **내 발밑에서 끊기지 않고 이어진 영역만** 내
-    # 주행면이다 — 길 건너 영역은 사이에 차도가 있어 열이 끊긴다.
-    # 산식은 free_reach와 같은 것 하나뿐이다(열별 하단부터의 연속 구간) — 원거리
-    # 장애물 판정과 자차 연결이 같은 물리를 보고 있으므로 두 벌로 두지 않는다.
-    ego_run = _ego_run_mask(np, raw_drivable, scan_from=y1 - 1,
-                            gap_rows=post.ego_gap_rows)
-    drivable = raw_drivable.copy()
-    drivable[:y1, :] = ego_run
+    ego_run, drivable = _ego_drivable(np, raw_drivable, post, scan_from=y1 - 1)
 
     # 주행가능: 하단 절반 기준 (상단은 원경이라 경계 판정에 노이즈만 보탠다)
     bottom_half = drivable[height // 2:, :]
-    drivable_fraction = _fraction(bottom_half)
-    drivable_center = _centroid_offset_ratio(bottom_half, x_origin=0, full_width=width)
-
-    roadway_in = roadway[corridor]
-    roadway_fraction = _fraction(roadway_in)
-
-    # 장애물 판정 밴드는 코리도에서 최하단 여백을 뺀 구간이다 (obstacle_band_y1의
-    # 독스트링이 근거 — 로봇 몸체·그림자 구간의 세그 미검출을 장애물로 읽지 않는다).
-    # 근접도·세로 폭은 이 밴드 내부 행 기준으로 정규화한다: 화면 전체 기준이면
-    # 밴드 안 어떤 픽셀도 (1-corridor_height_ratio) 아래로 못 내려가
-    # obstacle_blocking_proximity 임계가 항상 참인 죽은 노브가 되기 때문이다.
-    #
-    # 장애물 = **미분류**(7클래스 어디에도 안 잡힌) 픽셀뿐이다 — 명세의 '7개 클래스
-    # 제외 인도에서 발생하는 장애물(사람·킥보드·볼라드)'. 종전 정의(~drivable &
-    # ~roadway)는 bike_lane·caution_zone·alley를 장애물로 잡아, 자전거도로 옆을
-    # 지나는 것만으로 회피가 걸렸다. 그 클래스들은 코스트맵 비용(우선순위 표)이
-    # 담당한다 — '피한다'와 '못 지나간다'는 다른 판단이다.
-    obstacle_in = (~known)[(slice(y0, y1), slice(x0, x1))]
-    obstacle_fraction = _fraction(obstacle_in)
-    obstacle_bias, obstacle_proximity, obstacle_height = _region_position(
-        np, obstacle_in, x_origin=x0, full_width=width,
-        height_denominator=y1 - y0, quantile=post.proximity_quantile)
-
-    braille_fraction = _fraction(braille)
-    # 코리도 분모 — 하향각이 낮아 화면 전체 분모로는 앞쪽 블록의 얇은 띠가 문턱을
-    # 못 넘는다. roadway_corridor_fraction과 **같은 슬라이스**를 쓴다(위 몇 줄).
-    braille_corridor_fraction = _fraction(braille[corridor])
-    braille_offset = _centroid_offset_ratio(braille, x_origin=0, full_width=width)
-    _, braille_proximity, _ = _region_position(
-        np, braille, x_origin=0, full_width=width,
-        height_denominator=height, quantile=post.proximity_quantile)
+    obstacle_fraction, obstacle_bias, obstacle_proximity, obstacle_height = (
+        _obstacle_stats(np, known, post, ((y0, y1), (x0, x1)), width))
+    braille_fraction, braille_offset, braille_proximity = _braille_stats(
+        np, braille, post, height, width)
 
     # 횡단보도 이음 띠 — 명세 5단계(미설치 구역 판정)의 재료 2개
     crosswalk = class_masks.get(classes.crosswalk, empty)
-    crosswalk_fraction = _fraction(crosswalk)
     seam_braille_fraction = _crosswalk_seam_braille_fraction(
         np, crosswalk, braille, drivable, height=height, width=width,
         band_ratio=post.crosswalk_seam_band_ratio,
         quantile=post.proximity_quantile,
-        drivable_min_fraction=post.crosswalk_seam_drivable_min_fraction,
-        min_near_ratio=post.crosswalk_seam_min_near_ratio,
-        max_tilt_band_ratio=post.crosswalk_seam_max_tilt_band_ratio)
+        drivable_min_fraction=post.crosswalk_seam_drivable_min_fraction)
 
     # 코스트맵 슬롯: 조향 후보는 전체 폭 — 코리도(중앙만)와 달리 옆으로 비껴갈
     # 방향까지 평가해야 한다. 높이는 코리도와 같은 하단 밴드(원경 노이즈 배제).
@@ -850,34 +1035,30 @@ def summarize_class_masks(class_masks: Dict[str, "object"], shape: Tuple[int, in
         slot_fractions = _slot_class_fractions(
             np, class_masks, band_y0=y0, height=height, width=width,
             slot_count=costmap_slot_count)
-
-    # 자유공간 프로파일 — 코스트맵과 **같은 슬롯 분할**을 쓴다(비용을 원소별로 더한다).
-    # 밴드 위쪽 전체를 훑으므로 이것만이 원거리 물체를 볼 수 있다 (FreeSpaceParams 참조).
-    free_reach = None
-    if (free_space is not None and free_space.enabled
-            and costmap_slot_count is not None and costmap_slot_count > 0):
-        free_reach = _free_reach_ratios(
-            np, ego_run, width=width, slot_count=costmap_slot_count,
-            quantile=free_space.slot_quantile)
+    free_reach, free_block_objects = _free_space_profiles(
+        np, ego_run, known, free_space, costmap_slot_count, width, band_top=y1)
 
     return MaskSummary(
         centerline_samples=_centerline_samples(np, drivable, height, width,
                                                post.centerline),
-        drivable_fraction=drivable_fraction,
-        drivable_center_offset_ratio=drivable_center,
-        roadway_corridor_fraction=roadway_fraction,
+        drivable_fraction=_fraction(bottom_half),
+        drivable_center_offset_ratio=_centroid_offset_ratio(bottom_half, x_origin=0,
+                                                            full_width=width),
+        roadway_corridor_fraction=_fraction(roadway[(slice(y0, height),
+                                                     slice(x0, x1))]),
         obstacle_corridor_fraction=obstacle_fraction,
         obstacle_lateral_bias=obstacle_bias,
         obstacle_proximity=obstacle_proximity,
         obstacle_height_ratio=obstacle_height,
         braille_fraction=braille_fraction,
-        braille_corridor_fraction=braille_corridor_fraction,
-        braille_center_offset_ratio=(braille_offset if braille_offset is not None else 0.0),
+        braille_center_offset_ratio=braille_offset,
         braille_proximity=braille_proximity,
         slot_class_fractions=slot_fractions,
         free_reach_ratios=free_reach,
-        crosswalk_fraction=crosswalk_fraction,
+        free_block_object_ratios=free_block_objects,
+        crosswalk_fraction=_fraction(crosswalk),
         crosswalk_seam_braille_fraction=seam_braille_fraction,
+        known_fraction=_fraction(known),
     )
 
 
@@ -923,6 +1104,58 @@ def _ego_run_mask(np, drivable, scan_from: int, gap_rows: int):
     return np.logical_and.accumulate(band[::-1, :], axis=0)[::-1, :]
 
 
+def _slot_edges(width: int, slot_count: int) -> list:
+    """슬롯 경계 픽셀 — 코스트맵·자유거리·종결자 판정이 **같은 분할**을 써야 한다."""
+    return [round(i * width / slot_count) for i in range(slot_count)] + [width]
+
+
+def _free_block_object_ratios(np, ego_run, known_band, width: int, slot_count: int,
+                              quantile: float, seam_px: int) -> Tuple[float, ...]:
+    """슬롯별 '자유거리를 끊은 것이 **물체**인 비율' (numpy 계층).
+
+    자유거리는 주행가능이 어디까지 이어지는지만 재고 왜 끊겼는지를 묻지 않는다.
+    그래서 인도가 끝나고 차도가 시작되는 지점이 정면을 가로막은 물체와 똑같이
+    취급됐다 — 실측 blocking 22건 중 6건이 그것이었고 전부 횡단보도 접근이다.
+
+    각 열의 **끊긴 행**(연속 주행가능 구간 바로 위)부터 위로 seam_px 행을 보고, 그
+    구간이 전부 미분류면 물체로 센다. 명세의 '7개 클래스 제외 장애물'과 같은 정의라,
+    근거리 밴드 판정과 원거리 판정이 같은 기준을 쓰게 된다.
+
+    **한 행만 보면 안 된다**: 서로 다른 인스턴스 마스크는 맞닿지 않고 1~3px 이음새를
+    남기므로, 인도가 끝나고 횡단보도가 시작되는 자리의 끊긴 행은 거의 항상 그 이음새
+    (미분류)다 — 실측 진단에서 '끊긴 자리 미분류 / 위 3px 는 crosswalk' 인 열이 슬롯
+    하나에 66~89개였다. 그 한 행만 보면 모든 경계가 물체가 되어 이 판정 자체가 죽는다.
+    반대로 창을 너무 넓히면 낮은 물체 뒤로 보이는 원거리 노면이 창에 들어와 물체가
+    경계로 지워진다 — 이음새 두께(수 px)만 덮는 값이어야 한다.
+
+    슬롯 값은 그 슬롯의 **짧은 도달을 만든 열들**(분위수 이하)만 본다 — 슬롯 전체를
+    평균하면 대부분 열려 있는 슬롯에서 소수의 막힌 열이 지워진다. 자유거리를 그
+    분위수로 잡는 것과 같은 이유이고, 같은 열 집합을 봐야 두 값이 같은 사건을 설명한다.
+    화면 최상단까지 열린 열은 애초에 끊긴 것이 아니므로 세지 않는다.
+    """
+    rows = ego_run.shape[0]
+    runs = ego_run.sum(axis=0)
+    ratios = runs / float(max(1, rows))
+    end_rows = rows - 1 - runs            # 끊긴 행. 음수면 최상단까지 열렸다는 뜻
+    edges = _slot_edges(width, slot_count)
+    out = []
+    for i in range(slot_count):
+        left, right = edges[i], max(edges[i] + 1, edges[i + 1])
+        columns = np.arange(left, right)
+        threshold = float(np.quantile(ratios[left:right], quantile))
+        columns = columns[ratios[columns] <= threshold]
+        columns = columns[end_rows[columns] >= 0]
+        if columns.size == 0:
+            out.append(0.0)              # 끊긴 열이 없다 = 막은 것도 없다
+            continue
+        known_above = np.zeros(columns.shape, dtype=bool)
+        for offset in range(max(1, seam_px)):
+            rows_above = np.maximum(end_rows[columns] - offset, 0)
+            known_above |= known_band[rows_above, columns]
+        out.append(float((~known_above).mean()))
+    return tuple(out)
+
+
 def _free_reach_ratios(np, ego_run, width: int, slot_count: int,
                        quantile: float) -> Tuple[float, ...]:
     """슬롯별 자유공간 도달 비율 — _ego_run_mask의 열별 길이를 슬롯으로 묶는다.
@@ -938,7 +1171,7 @@ def _free_reach_ratios(np, ego_run, width: int, slot_count: int,
     """
     rows = ego_run.shape[0]
     ratios = ego_run.sum(axis=0) / float(max(1, rows))   # 열별 연속 주행가능 행 수
-    edges = [round(i * width / slot_count) for i in range(slot_count)] + [width]
+    edges = _slot_edges(width, slot_count)
     return tuple(
         float(np.quantile(ratios[edges[i]:max(edges[i] + 1, edges[i + 1])], quantile))
         for i in range(slot_count))
@@ -947,9 +1180,7 @@ def _free_reach_ratios(np, ego_run, width: int, slot_count: int,
 def _crosswalk_seam_braille_fraction(np, crosswalk, braille, drivable,
                                      height: int, width: int, band_ratio: float,
                                      quantile: float,
-                                     drivable_min_fraction: float,
-                                     min_near_ratio: float,
-                                     max_tilt_band_ratio: float) -> Optional[float]:
+                                     drivable_min_fraction: float) -> Optional[float]:
     """횡단보도-인도 **이음 띠** 안의 점자블록 비율 (numpy 계층). 판정 불가면 None.
 
     명세 5단계('횡단보도와 sidewalk 클래스 사이에 점자블록 클래스 있는지 판단')를
@@ -963,53 +1194,25 @@ def _crosswalk_seam_braille_fraction(np, crosswalk, braille, drivable,
     픽셀 하나가 띠를 인도 쪽으로 통째로 밀어내리는 것을 막는다. x 범위도 같은 이유로
     양끝 분위수를 쓴다.
 
-    **None(판정 보류)을 돌려주는 네 경우.** 보고는 되돌릴 수 없는 외부 출력이므로
-    '관측하지 못했다'를 '없다'로 바꾸지 않는다 — 이 함수의 오탐은 전부 그 혼동이었다:
+    **None(판정 보류)을 돌려주는 두 경우** — 0804 실외에서 오탐 2건의 원인이다.
+    보고는 되돌릴 수 없으므로 '관측하지 못했다'를 '없다'로 바꾸지 않는다:
       ① 띠가 화면 안에 다 들어오지 않는다 — 횡단보도 최근접 행이 화면 하단에서
          band_px 안쪽이면 띠가 잘린다. 잘린 띠는 블록 비율이 구조적으로 0에 가깝다
          (로봇이 이음부를 이미 밟고 있는 순간도 여기 걸린다 — 그때 판정은 무의미하다).
       ② 띠 안에 주행가능면이 거의 없다 — 명세는 '횡단보도와 **sidewalk 사이**'다.
          띠가 차도·미분류 영역에 얹혀 있으면 애초에 그 '사이'가 아니다.
-      ③ **횡단보도가 아직 멀다** (min_near_ratio). ①이 '너무 가까움'만 막고 있어서
-         원거리 오탐이 통째로 열려 있었다 — 0805 실기의 지배적 오탐 경로다.
-         crosswalk_min_fraction(0.03)은 도색면이 넓어 **원거리에서도** 넘는데(그 키의
-         주석이 그렇게 적고 있다), 그 거리에서는 원근압축으로 band_px 58px가 지면
-         수 미터를 덮고 점형블록은 아직 몇 픽셀이거나 화각 밖이다. 즉 '블록이 보이기
-         전에 없다고 판정'한다. ①과 ③이 함께 **판정 창**을 만든다: 이음부가 화면에
-         온전히 들어오고(①) 충분히 가까울 때(③)만 판정한다.
-      ④ **횡단보도 하단 경계가 사선이다** (max_tilt_band_ratio). 수평 띠 하나로
-         이음부를 덮는 전제가 깨진다 — near_y는 가장 가까운 한쪽 코너가 정하는데
-         x 범위는 횡단보도가 걸친 폭 전체라, 기울기가 크면 띠가 반대쪽에서 실제
-         이음부를 완전히 비껴간다(0805 실기: '각도에 따라 오탐'). 허용 기울기를
-         **띠 높이에 상대적으로** 두는 이유는 그 기하 때문이다 — 띠가 두꺼우면 같은
-         기울기를 흡수할 수 있다. 픽셀 절대값으로 두면 band_ratio를 바꿀 때마다
-         따라 고쳐야 하는 숨은 결합이 생긴다.
-         (사선을 **보류가 아니라 판정**하려면 띠를 열별로 경계에 붙여 따야 한다 —
-          지금은 하지 않는다. 미보고가 오보고보다 안전한 쪽이고, 열별 띠는 실사
-          영상으로 노이즈 강건성을 확인한 뒤에 넣을 일이다.)
     """
     ys, xs = crosswalk.nonzero()
     if ys.size == 0:
         return None
     near_y = int(np.quantile(ys, quantile))
     band_px = max(1, int(round(height * band_ratio)))
-    if near_y < height * min_near_ratio:             # ③ 아직 멀다 — 블록이 안 보인다
-        return None
     y_from = min(height - 1, near_y)
     y_to = min(height, near_y + band_px)             # 아래(로봇 쪽)로 band_px
     if y_to - y_from < band_px:                      # ① 띠가 화면 밖으로 잘렸다
         return None
     x_from = int(np.quantile(xs, 1.0 - quantile))
     x_to = max(x_from + 1, int(np.quantile(xs, quantile)) + 1)
-    # ④ 하단 경계 기울기 — 좌/우 절반의 최근접 행 차이. 같은 quantile을 쓴다
-    # (near_y와 같은 노이즈 내성이어야 비교가 의미 있다).
-    mid_x = (x_from + x_to) // 2
-    left_ys, right_ys = ys[xs < mid_x], ys[xs >= mid_x]
-    if left_ys.size and right_ys.size:
-        tilt_px = abs(float(np.quantile(left_ys, quantile))
-                      - float(np.quantile(right_ys, quantile)))
-        if tilt_px > band_px * max_tilt_band_ratio:
-            return None
     band = (slice(y_from, y_to), slice(x_from, min(width, x_to)))
     if _fraction(drivable[band]) < drivable_min_fraction:   # ② 인도가 아니다
         return None
@@ -1033,7 +1236,7 @@ def _slot_class_fractions(np, class_masks: Dict[str, "object"], band_y0: int,
         banded[name] = cropped
         known = known | cropped
 
-    edges = [round(i * width / slot_count) for i in range(slot_count)] + [width]
+    edges = _slot_edges(width, slot_count)
     fractions = []
     for i in range(slot_count):
         columns = slice(edges[i], max(edges[i] + 1, edges[i + 1]))
@@ -1119,8 +1322,17 @@ def _region_position(np, mask, x_origin: int, full_width: int,
     return bias, proximity, min(1.0, height_ratio)
 
 
-def _class_masks_from_result(result) -> Tuple[Dict[str, "object"], Tuple[int, int]]:
+def _to_numpy(np, value):
+    return value.cpu().numpy() if hasattr(value, "cpu") else np.asarray(value)
+
+
+def _class_masks_from_result(result, thresholds: Optional[Mapping[str, float]] = None,
+                             default_conf: float = 0.0
+                             ) -> Tuple[Dict[str, "object"], Tuple[int, int]]:
     """ultralytics 세그 결과 → (클래스명→불리언 마스크 합집합, 마스크 공간 (H, W)).
+
+    `thresholds`가 있으면 **클래스별 신뢰도 하한**으로 인스턴스를 거른다 —
+    추론은 하한 중 최솟값으로 돌리고 걸러 내는 것이 이 계층의 일이다 (keep_instances).
 
     마스크가 하나도 없으면 빈 사전 + 원본 해상도 — 요약이 전부 0이 되어
     sidewalk_detected=False(경계 소실 정지)로 흘러간다. 안전한 기본값.
@@ -1131,14 +1343,19 @@ def _class_masks_from_result(result) -> Tuple[Dict[str, "object"], Tuple[int, in
         height, width = result.orig_shape[:2]
         return {}, (int(height), int(width))
 
-    data = result.masks.data
-    masks = data.cpu().numpy() if hasattr(data, "cpu") else np.asarray(data)
-    cls_ids = result.boxes.cls
-    cls_ids = cls_ids.cpu().numpy() if hasattr(cls_ids, "cpu") else np.asarray(cls_ids)
+    masks = _to_numpy(np, result.masks.data)
+    cls_ids = _to_numpy(np, result.boxes.cls)
+    names = [result.names[int(cls_id)] for cls_id in cls_ids]
+    if thresholds:
+        confidences = _to_numpy(np, result.boxes.conf)
+        keep = keep_instances(names, confidences, thresholds, default_conf)
+    else:
+        keep = (True,) * len(names)
 
     merged: Dict[str, "object"] = {}
-    for mask, cls_id in zip(masks, cls_ids):
-        name = result.names[int(cls_id)]
+    for mask, name, take in zip(masks, names, keep):
+        if not take:
+            continue
         boolean = mask > 0.5
         merged[name] = (merged[name] | boolean) if name in merged else boolean
     height, width = masks.shape[1], masks.shape[2]
@@ -1176,6 +1393,19 @@ def _warn_class_mismatch(model, classes: ClassNames,
             logger.info("[세그] 비용표에 없는 모델 클래스: %s — unknown_cost(%.2f)로 취급",
                         ", ".join(uncosted), costmap.unknown_cost)
 
+def _warn_unknown_conf_classes(model, class_conf: Mapping[str, float]) -> None:
+    """class_conf 에 모델에 없는 이름이 있으면 알린다 — 오타는 조용히 무효가 된다.
+
+    이 표의 유일한 목적이 '점자블록만 낮은 임계로 본다'인데 이름이 틀리면 그 클래스는
+    종전 전역 conf 로 돌아가고, 증상은 '재현율이 안 오른다' 하나뿐이라 원인을 찾기 어렵다.
+    """
+    names = set(getattr(model, "names", {}).values())
+    unknown = sorted(set(class_conf) - names) if names else []
+    if unknown:
+        logger.warning("[세그] class_conf에 모델에 없는 클래스: %s — 그 항목은 무시된다"
+                       " (모델 클래스: %s)", ", ".join(unknown), ", ".join(sorted(names)))
+
+
 class YoloSegmentationProvider(SegmentationProvider):
     """config perception.segmentation.model_path 실추론 Provider. 보드 전용 (ultralytics 필요).
 
@@ -1188,6 +1418,7 @@ class YoloSegmentationProvider(SegmentationProvider):
                  classes: ClassNames, post: PostParams,
                  costmap: Optional[CostmapParams] = None,
                  free_space: Optional[FreeSpaceParams] = None,
+                 class_conf: Optional[Mapping[str, float]] = None,
                  clock: Callable[[], float] = time.monotonic):
         from ultralytics import YOLO  # 보드 전용 — 개발 PC에서는 생성 자체를 안 한다
 
@@ -1196,12 +1427,20 @@ class YoloSegmentationProvider(SegmentationProvider):
         _warn_class_mismatch(self._model, classes, costmap)
         self._imgsz = imgsz
         self._conf = conf
+        #: 클래스별 신뢰도 하한 (keep_instances). 추론은 하한 중 최솟값으로 돌려야
+        #: 낮은 임계 클래스의 인스턴스가 결과에 들어온다 — 그 뒤 클래스별로 거른다.
+        self._class_conf = dict(class_conf or {})
+        self._conf_floor = min([conf] + list(self._class_conf.values()))
+        _warn_unknown_conf_classes(self._model, self._class_conf)
         self._classes = classes
         self._post = post
         self._costmap = costmap
         self._free_space = free_space
         self._clock = clock
         self._last_image = None
+        #: 빈 프레임 디바운스 — 상태를 가지므로 순수 계층이 아니라 여기가 소유한다.
+        #: 대시보드도 frame_from_summary() 를 지나 **이 객체**를 쓴다.
+        self._blank_gate = BlankFrameGate()
 
     @property
     def last_image(self):
@@ -1214,22 +1453,61 @@ class YoloSegmentationProvider(SegmentationProvider):
         """
         return self._last_image
 
-    def get_latest(self) -> Optional[SegmentationFrame]:
-        image = self._camera.read()
-        if image is None:
-            return None  # 카메라 장애 → FSM 공통 가드가 '인지 두절' 정지
-        self._last_image = image
+    def analyze(self, image) -> Tuple["object", SegmentationFrame]:
+        """이미지 1장 → (원시 추론 결과, 프레임). **추론 경로의 단일 출처**다.
 
-        # retina_masks=True: 마스크를 letterbox(패딩) 공간이 아닌 원본 이미지 공간으로
-        # 받는다 — 패딩 행이 섞이면 비율 통계가 희석되고 근접도 상한이 깎여
-        # 카메라 해상도·종횡비를 바꿀 때마다 임계 재보정이 필요해진다.
-        result = self._model.predict(image, imgsz=self._imgsz, conf=self._conf,
+        원시 결과까지 돌려주는 이유는 오버레이 때문이다: 관제 화면은 마스크를 그리려고
+        result 가 필요한데, 그걸 얻겠다고 호출부가 predict 를 직접 부르면 **운영점이
+        갈라진다** — 클래스별 신뢰도 하한·코스트맵·자유공간 인자를 하나라도 빠뜨리면
+        그 화면의 주행만 다른 인지로 도는 셈이고, 화면과 실주행이 갈라진다는 뜻이다.
+        그래서 계산은 여기 한 곳에만 둔다.
+
+        retina_masks=True: 마스크를 letterbox(패딩) 공간이 아닌 원본 이미지 공간으로
+        받는다 — 패딩 행이 섞이면 비율 통계가 희석되고 근접도 상한이 깎여
+        카메라 해상도·종횡비를 바꿀 때마다 임계 재보정이 필요해진다.
+        """
+        result, _summary, frame = self.analyze_full(image)
+        return result, frame
+
+    def analyze_full(self, image) -> Tuple["object", MaskSummary, SegmentationFrame]:
+        """analyze() + 중간 산출물(MaskSummary). 오버레이를 그리는 쪽이 쓴다.
+
+        관제 화면은 중심선 표본·자유거리 프로파일·차도 비율을 그려야 해서 summary 가
+        필요한데, 그걸 얻겠다고 호출부가 predict 를 직접 부르면 **운영점이 갈라진다** —
+        실제로 그랬다: 대시보드는 전역 conf(0.25)로 추론하고 클래스별 하한을 적용하지
+        않아, 점자블록 재현율이 실주행(drive.sh)과 다른 화면이었다(2026-08-05 실측
+        conf 0.25 → 2/8). 화면과 주행이 갈라진다는 것은 화면으로 보정한 값이 실주행에
+        안 맞는다는 뜻이므로, 추론 경로는 여기 한 곳으로 묶는다.
+        """
+        result = self._model.predict(image, imgsz=self._imgsz, conf=self._conf_floor,
                                      retina_masks=True, verbose=False)[0]
-        class_masks, shape = _class_masks_from_result(result)
+        class_masks, shape = _class_masks_from_result(
+            result, thresholds=self._class_conf, default_conf=self._conf)
         summary = summarize_class_masks(
             class_masks, shape, self._classes, self._post,
             costmap_slot_count=(self._costmap.slot_count
                                 if self._costmap is not None else None),
             free_space=self._free_space)
-        return build_frame(summary, self._post, timestamp=self._clock(),
-                           costmap=self._costmap, free_space=self._free_space)
+        return result, summary, self.frame_from_summary(summary)
+
+    def frame_from_summary(self, summary: MaskSummary,
+                           timestamp: Optional[float] = None) -> SegmentationFrame:
+        """요약 → 프레임. **빈 프레임 게이트가 걸리는 유일한 지점**이다.
+
+        analyze() 안에 두지 않고 따로 뺀 이유는 대시보드다: 오버레이를 그리려면
+        원시 result 와 summary 가 둘 다 필요해서 그쪽은 마스크 요약까지를 직접
+        밟는데(scripts/web_test.py), 마지막 한 걸음을 여기로 보내야 게이트 상태를
+        공유해 화면과 실주행의 회피 판정이 갈라지지 않는다.
+        """
+        now = self._clock() if timestamp is None else timestamp
+        return build_frame(
+            summary, self._post, timestamp=now, costmap=self._costmap,
+            free_space=self._free_space,
+            blocking_confirmed=self._blank_gate.confirmed(summary, self._post, now))
+
+    def get_latest(self) -> Optional[SegmentationFrame]:
+        image = self._camera.read()
+        if image is None:
+            return None  # 카메라 장애 → FSM 공통 가드가 '인지 두절' 정지
+        self._last_image = image
+        return self.analyze(image)[1]

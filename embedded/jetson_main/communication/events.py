@@ -382,16 +382,38 @@ class EventPublisher:
         return None  # 센서 고장·복구는 임계값과 무관하다.
 
     def _apply_battery_action(self, grade: str) -> None:
-        """등급이 떨어졌을 때의 조치.
+        """등급이 떨어졌을 때의 조치. mode 를 내리고, 돌던 미션도 함께 멈춘다.
 
-        미션 상태는 건드리지 않는다 — 미션 전이 정책은 R-5 다.
-        action_taken.mission_state 에는 조치 후 현재 값이 그대로 실린다.
+        바퀴를 세우는 것은 여기가 아니다 — RobotState 는 서버 투영이고 모터
+        제어권자가 아니다(commands.py 머리말). 주행 FSM 을 미는 것은 메인 루프의
+        BatteryDriveGuard 이고, 그쪽이 다음 tick(≤0.5초)에 실제 정지를 만든다.
+
+        미션을 PAUSED 로 내리는 이유는 스스로 건 ESTOP 과 같다
+        (runtime.DriveStateProjector._pause_mission_for_safety): 순찰이 멈췄는데
+        미션만 RUNNING 으로 남으면 서버 DB 에 '수행 중인 미션인데 로봇은 정지'
+        라는 조합이 생기고, 관제의 재개 버튼도 그 상태에서는 의미를 잃는다.
+        조치를 event 보다 먼저 하는 순서(§9.3)는 그대로다 —
+        action_taken.mission_state 에는 이 함수가 만든 값이 실린다.
         """
         mode = self._state.mode
+        stopped = False
         if grade == "CRITICAL" and mode in SAFE_STOPPABLE_MODES:
-            self._state.safe_stop("CRITICAL_BATTERY")
+            stopped = self._state.safe_stop("CRITICAL_BATTERY")
         elif grade == "LOW" and mode == "PATROLLING":
-            self._state.pause("LOW_BATTERY")
+            stopped = self._state.pause("LOW_BATTERY")
+        if stopped:
+            self._pause_mission_for_battery()
+
+    def _pause_mission_for_battery(self) -> None:
+        """돌던 미션을 PAUSED 로 내리고 MISSION_PAUSED 를 알린다 (§11.2).
+
+        재개는 여기서 하지 않는다 — 잔량이 회복되는 유일한 경로는 충전이고,
+        충전한 로봇을 다시 달리게 하는 것은 사람의 RESUME_MISSION 이다.
+        """
+        snapshot = self._state.snapshot()
+        if snapshot.mission_id is None or snapshot.mission_state != "RUNNING":
+            return
+        self.mission_paused()
 
     # -- events/incident (계약 §8) ----------------------------------------
 

@@ -134,7 +134,7 @@
         <button id="startBtn">▶ 시작</button>
         <button id="estopBtn">■ 비상 정지</button>
         <button id="releaseBtn">ESTOP 해제</button>
-        <div class="row"><span class="k">터치센서 (시작)</span><span class="v" id="touchState">–</span></div>
+        <div class="row"><span class="k">터치센서 (출발 확인)</span><span class="v" id="touchState">–</span></div>
         <div class="rec-info" id="ctrlInfo"></div>
       </div>
 
@@ -296,6 +296,14 @@ async function refresh() {
     if (!tc.connected) {
       touchEl.textContent = '미연결 (config hardware.touch.pin)';
       touchEl.className = 'v warn';
+    } else if (tc.zeroing) {
+      // 터치 직후 자이로 영점 — 몇 초 안 가는 것이 정상이다
+      touchEl.textContent = '자이로 영점 중 — 로봇을 그대로 두세요';
+      touchEl.className = 'v mid';
+    } else if (tc.waiting) {
+      // 출발 인터록 — 신호는 받아 뒀고 사람의 터치만 남았다. '눌렀는데 왜 안 가나'의 답.
+      touchEl.textContent = `출발 대기 — 로봇의 터치센서를 누르세요 (${tc.source ?? '출발 신호'})`;
+      touchEl.className = 'v mid';
     } else if (st.start_pending) {
       touchEl.textContent = '시작 요청 대기 — 인도 미확인 (카메라를 인도로)';
       touchEl.className = 'v mid';

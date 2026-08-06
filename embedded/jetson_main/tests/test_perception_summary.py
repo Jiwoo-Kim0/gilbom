@@ -268,77 +268,6 @@ class TestBraille:
         assert frame.braille_center_offset_ratio == pytest.approx(0.25)
         assert frame.braille_proximity == pytest.approx(0.6)
 
-    def test_corridor_denominator_catches_a_thin_near_strip(self, post):
-        """코리도 분모가 화면 전체 분모를 **보완**한다 (0805 실기 근거).
-
-        주행 카메라 하향각이 낮아 앞쪽 블록이 화면 상단에 얇게 찍히면, 화면 전체
-        분모에서는 그 띠가 braille_min_fraction을 못 넘어 발견 자체가 안 됐다.
-        같은 픽셀을 코리도(중앙 폭 50% × 하단 40% = 화면의 20%) 분모로 보면 크게
-        보인다 — roadway_corridor_fraction이 같은 이유로 코리도 분모를 쓴다.
-        """
-        frame = build_frame(
-            summary(braille_fraction=post.braille_min_fraction * 0.5,   # 전체로는 미만
-                    braille_corridor_fraction=post.braille_corridor_min_fraction,
-                    braille_center_offset_ratio=0.25, braille_proximity=0.6),
-            post, T)
-        assert frame.braille_detected                    # 코리도 경로가 잡았다
-        assert frame.braille_center_offset_ratio == pytest.approx(0.25)
-
-    def test_neither_denominator_reaching_threshold_is_not_detected(self, post):
-        frame = build_frame(
-            summary(braille_fraction=post.braille_min_fraction * 0.5,
-                    braille_corridor_fraction=post.braille_corridor_min_fraction * 0.5,
-                    braille_center_offset_ratio=0.9, braille_proximity=0.9),
-            post, T)
-        assert not frame.braille_detected
-        assert frame.braille_center_offset_ratio == 0.0
-
-    def test_screen_denominator_still_catches_an_off_corridor_block(self, post):
-        """코리도는 중앙 폭 50%뿐이라 좌우로 벗어난 블록을 못 잡는다 — 그래서 OR다."""
-        frame = build_frame(
-            summary(braille_fraction=post.braille_min_fraction,   # 전체로는 충족
-                    braille_corridor_fraction=0.0,               # 코리도 밖이다
-                    braille_center_offset_ratio=-0.8, braille_proximity=0.3),
-            post, T)
-        assert frame.braille_detected
-        assert frame.braille_center_offset_ratio == pytest.approx(-0.8)
-
-
-class TestAllDirectionsBlocked:
-    """막다른 길 판정(all_directions_blocked)은 config 게이트 뒤에 있고 기본 off다.
-
-    이 판정은 blocking_reach_ratio(**한 슬롯**에 쓰도록 보정된 절대 임계값)를 전
-    슬롯에 동시 적용한다. 그런데 자유거리 상한은 장면이 정한다 — 유한한 경사로는
-    정상 너머 지면이 보이지 않아 주행가능 런이 좌·정면·우에서 **균등하게** 끊기고,
-    코너도 같다. 그러면 벽이 없는데 전 슬롯 미만이 된다(0805 실외에서 경사 영구
-    정지·평지 오회차의 원인). free_space.notch_min_ratio 주석이 절대 임계를 피하는
-    이유로 이미 같은 것을 경고하고 있었다.
-    """
-
-    def blocked_reaches(self, fs) -> tuple:
-        """전 슬롯이 절대 기준 미만 — 벽에서도, 경사 정상에서도 이렇게 나온다."""
-        return (fs.blocking_reach_ratio / 2.0,) * 5
-
-    def test_disabled_by_default(self, post, fs):
-        assert not fs.all_blocked_enabled     # 실사 재보정 전까지 기본 off
-        frame = build_frame(summary(free_reach_ratios=self.blocked_reaches(fs)),
-                            post, T, free_space=fs)
-        assert not frame.all_directions_blocked
-
-    def test_enabled_reports_all_blocked(self, post, fs):
-        # 게이트를 켜면 종전 동작 — 판정 자체는 코드에 남아 있다
-        enabled = replace(fs, all_blocked_enabled=True)
-        frame = build_frame(summary(free_reach_ratios=self.blocked_reaches(fs)),
-                            post, T, free_space=enabled)
-        assert frame.all_directions_blocked
-
-    def test_one_open_direction_is_not_all_blocked(self, post, fs):
-        enabled = replace(fs, all_blocked_enabled=True)
-        reaches = self.blocked_reaches(fs)[:-1] + (1.0,)
-        frame = build_frame(summary(free_reach_ratios=reaches), post, T,
-                            free_space=enabled)
-        assert not frame.all_directions_blocked
-
 
 class TestMockBrailleMapping:
     """config mock_scenarios의 braille 절이 프레임 필드로 매핑되는지."""
@@ -365,3 +294,43 @@ class TestMockBrailleMapping:
             first["braille"]["center_offset_ratio"])
         assert frame.braille_proximity == pytest.approx(
             first["braille"]["proximity"])
+
+
+class TestPerClassConfidence:
+    """클래스별 신뢰도 하한 — 점자블록은 재현율이, 차도는 정밀도가 미션이다.
+
+    실측(2026-08-05, 실사 31장면 육안 라벨)이 이 분리의 근거다: 전역 conf 0.25에서
+    점자블록 재현율이 8장면 중 **2장면**이고, 낮추면 오르지만(0.05에서 5/8) 같은
+    손잡이가 차도·횡단보도까지 함께 내린다 — 그쪽 오탐은 코리도 20%면 선회,
+    55%면 즉시 ESTOP 이라 미션을 끝낸다. 그래서 하한을 클래스마다 따로 든다.
+    """
+
+    def thresholds(self, seg) -> dict:
+        return dict(seg.get("class_conf") or {})
+
+    def test_config_lowers_only_the_braille_class(self, seg):
+        overrides = self.thresholds(seg)
+        assert seg["braille_class"] in overrides, "점자블록 하한이 없으면 재현율 문제가 그대로다"
+        assert overrides[seg["braille_class"]] < seg["conf"]
+        # 차도 계열은 낮추지 않는다 — 오탐의 대가가 선회·ESTOP 이다
+        for name, policy in seg["classes"].items():
+            if policy.get("roadway"):
+                assert overrides.get(name, seg["conf"]) >= seg["conf"]
+
+    def test_low_confidence_braille_survives(self, seg):
+        from perception.segmentation import keep_instances
+
+        overrides = self.thresholds(seg)
+        braille, floor = seg["braille_class"], overrides[seg["braille_class"]]
+        keep = keep_instances([braille, braille], [floor, floor / 2.0],
+                              overrides, seg["conf"])
+        assert keep == (True, False)          # 하한 이상만 살아남는다
+
+    def test_other_classes_keep_the_default_floor(self, seg):
+        from perception.segmentation import keep_instances
+
+        overrides = self.thresholds(seg)
+        just_under = float(seg["conf"]) - 0.01
+        keep = keep_instances(["roadway", "roadway"], [seg["conf"], just_under],
+                              overrides, seg["conf"])
+        assert keep == (True, False)          # 표에 없는 클래스는 전역 conf 그대로

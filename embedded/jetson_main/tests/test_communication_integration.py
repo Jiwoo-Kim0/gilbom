@@ -2,6 +2,7 @@
 
 import queue
 import sqlite3
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -710,6 +711,111 @@ def test_remote_clear_estop_is_rejected_for_a_local_estop(params, clear_frame):
     assert machine.state is DriveState.ESTOP     # 여전히 정지 — 현장 해제가 필요하다
 
 
+def test_web_estop_is_reported_as_a_remote_estop(params, clear_frame):
+    """웹 대시보드 비상 정지는 관제가 누른 것과 **같은 사건**으로 보고한다.
+
+    앞 테스트의 물리 정지(Xbox B·터치)와 갈리는 자리다: 웹 버튼은 원격 조작면이므로
+    관제가 CLEAR_EMERGENCY_STOP 으로 풀 수 있어야 한다. 종전에는 이것도
+    INTERNAL_ERROR 로 나가 관제가 풀 수 없었고, 그러면 그 뒤 RESUME·START 까지 전부
+    거부되어 버튼 한 번에 원격 조작이 통째로 잠겼다.
+    """
+    client, state, machine, runner = wired_session(params)
+    projector = DriveStateProjector(state, runner._events)
+
+    def tick(now):
+        runner.poll_before_step(machine)
+        machine.step(clear_frame, None, now)
+        runner.poll_after_step(machine)
+        projector.sync(machine)
+
+    client.commands.put(mqtt_command("start", "START_MISSION", {
+        "mission_id": "MIS-1", "zone_id": "A-01",
+    }))
+    tick(1.0)
+
+    # web_test.DrivingSession.request_estop 과 같은 순서 (알림 먼저, FSM 요청 뒤)
+    projector.note_operator_estop()
+    machine.request_estop()
+    tick(2.0)
+
+    snapshot = state.snapshot()
+    assert (snapshot.mode, snapshot.reason_code) == ("SAFE_STOP", "REMOTE_ESTOP")
+    assert snapshot.mission_state == "PAUSED"
+
+    client.commands.put(mqtt_command(
+        "clear", "CLEAR_EMERGENCY_STOP", {"reason": "operator"}))
+    tick(3.0)
+    assert client.results()[-1]["status"] == "COMPLETED"
+    assert machine.state is DriveState.IDLE
+
+    client.commands.put(mqtt_command("resume", "RESUME_MISSION", {}))
+    tick(4.0)
+    assert client.results()[-1]["status"] == "COMPLETED"
+    assert machine.state is DriveState.CRUISE
+
+
+def test_local_estop_release_unpins_the_server_projection(params, clear_frame):
+    """현장에서 푼 ESTOP 은 서버 투영도 함께 풀어야 한다.
+
+    ESTOP 의 출구는 IDLE 뿐이고 미션은 진입 때 PAUSED 로 내려가 있다. 종전에는
+    _project_idle 의 세 분기 어디에도 걸리지 않아 mode 가 SAFE_STOP 으로 남았고,
+    그 값에서는 CLEAR·RESUME·START 가 전부 거부된다 — 로컬에서 푼 정지가 원격 조작을
+    영구히 잠갔다. 물리 정지(원격 해제 불가)에서도 복구 경로가 있어야 하므로
+    이 확인은 앞 테스트와 별개다.
+    """
+    client, state, machine, runner = wired_session(params)
+    projector = DriveStateProjector(state, runner._events)
+
+    def tick(now):
+        runner.poll_before_step(machine)
+        machine.step(clear_frame, None, now)
+        runner.poll_after_step(machine)
+        projector.sync(machine)
+
+    client.commands.put(mqtt_command("start", "START_MISSION", {
+        "mission_id": "MIS-1", "zone_id": "A-01",
+    }))
+    tick(1.0)
+
+    machine.request_estop()          # 물리 정지 — 알림 없음(INTERNAL_ERROR 로 나간다)
+    tick(2.0)
+    assert state.snapshot().reason_code == "INTERNAL_ERROR"
+
+    machine.request_estop_release()  # 현장에서 해제 (터치·Xbox A·웹 해제 버튼)
+    tick(3.0)
+    snapshot = state.snapshot()
+    assert machine.state is DriveState.IDLE
+    assert (snapshot.mode, snapshot.reason_code) == ("PAUSED", "REMOTE_PAUSE")
+    assert snapshot.mission_state == "PAUSED"
+
+    # 관제가 다시 붙는다 — 해제 뒤에는 재개가 먹어야 한다.
+    client.commands.put(mqtt_command("resume", "RESUME_MISSION", {}))
+    tick(4.0)
+    assert client.results()[-1]["status"] == "COMPLETED"
+    assert machine.state is DriveState.CRUISE
+    assert state.snapshot().mode == "PATROLLING"
+
+
+def test_local_estop_release_without_a_mission_returns_to_ready(params, clear_frame):
+    """미션 없이(로컬 시험 주행) 건 ESTOP 을 풀면 READY 로 돌아온다."""
+    client, state, machine, runner = wired_session(params)
+    projector = DriveStateProjector(state, runner._events)
+
+    machine.request_start()
+    machine.step(clear_frame, None, 1.0)
+    projector.sync(machine)
+
+    machine.request_estop()
+    machine.step(clear_frame, None, 2.0)
+    projector.sync(machine)
+    assert state.snapshot().mode == "SAFE_STOP"
+
+    machine.request_estop_release()
+    machine.step(clear_frame, None, 3.0)
+    projector.sync(machine)
+    assert (state.snapshot().mode, state.snapshot().reason_code) == ("READY", "NONE")
+
+
 def test_paused_cancel_works_during_camera_loss(params, clear_frame):
     machine = StateMachine(params, now=0.0)
     machine.request_start()
@@ -1031,3 +1137,118 @@ def test_projector_distinguishes_avoid_hold_from_bypass(params, clear_frame):
     assert machine.context.avoid_phase is AvoidPhase.SWERVE
     projector.sync(machine)
     assert state.snapshot().mode == "PATROLLING"
+
+
+def test_projector_shows_dead_end_reorientation(params, clear_frame):
+    """재정향(후진·U턴)이 관제에 보여야 한다 — 종전에는 '순찰 중'으로 나갔다.
+
+    DEAD_END 는 로봇이 뒤로 물러나며 방향을 되찾는 기동이고 후방은 카메라 사각이다.
+    그 사이 서버가 PATROLLING 을 보고 있으면, 인도에서 후진하는 로봇을 아무도
+    모른다. mode enum 에 '재정향'이 없어 가장 가까운 참(SAFE_STOP/OBSTACLE =
+    장애물 때문에 정상 순찰을 못 한다)으로 투영한다.
+    """
+    state = RobotState()
+    state.boot_completed()
+    state.start_patrol()
+    state.start_mission("MIS-1", zone_id="A-01")
+    machine = StateMachine(params, now=0.0)
+    machine.request_start()
+    machine.step(clear_frame, None, 0.0)
+    projector = DriveStateProjector(state)
+
+    blocked = SegmentationFrame(
+        timestamp=1.0, sidewalk_detected=True,
+        obstacles=(ObstacleRegion(lateral_bias=0.0, proximity=1.0, blocking=True),),
+        all_directions_blocked=True,
+    )
+    machine.step(blocked, None, 1.0)                      # AVOID(HOLD)
+    recheck = 1.0 + params.avoid_recheck_sec
+    machine.step(blocked, None, recheck)                  # → DEAD_END(후진)
+    assert machine.state is DriveState.DEAD_END
+
+    projector.sync(machine)
+    snapshot = state.snapshot()
+    assert (snapshot.mode, snapshot.reason_code) == ("SAFE_STOP", "OBSTACLE")
+
+    # 탈출해서 순찰로 돌아오면 그 자리에서 풀린다 (형제 분기의 release_safe_stop)
+    machine._context = replace(machine.context, state=DriveState.CRUISE)
+    projector.sync(machine)
+    assert state.snapshot().mode == "PATROLLING"
+
+
+class TestIdleProjection:
+    """IDLE 투영 — **미션이 도는데 스스로 섰으면 그 자체가 결함이다.**
+
+    종전에는 사유 문자열 세 개로 갈랐고 매칭이 없으면 아무 일도 하지 않았다. 그래서
+    가장 흔한 두 정지("후진 복구 상한 — 전 방향 막힘", "재정향 실패")가 서버에
+    PATROLLING(순찰 중)으로 남았다 — 로봇은 인도에 서 있는데 관제는 모른다.
+    세 문자열 중 `"회차 실패"` 는 0804 의 이름 변경(회차 → 재정향) 뒤로 FSM 이 한 번도
+    내지 않는 죽은 값이었다. 이 클래스가 고정하는 것은 '어느 사유로 보고하는가'가 아니라
+    **'빠지는 사유가 없다'** 이다.
+    """
+
+    def running(self, reason: str) -> RobotState:
+        """미션이 RUNNING 인 채 로봇이 그 사유로 IDLE 에 떨어진 상태를 만든다."""
+        state = RobotState()
+        state.boot_completed()
+        state.start_patrol()
+        state.start_mission("MIS-1", zone_id="A-01")
+        return state
+
+    def sync(self, state, reason: str, params) -> None:
+        machine = StateMachine(params, now=0.0)
+        machine._context = replace(machine.context, state=DriveState.IDLE,
+                                   reason=reason)
+        DriveStateProjector(state).sync(machine)
+
+    def test_stuck_reverse_recovery_is_reported(self, params):
+        # 0805 실기에서 미션이 끝난 33회 중 11회가 이 사유였고, 그동안 서버는
+        # 순찰 중으로 알고 있었다
+        state = self.running("후진 복구 상한 — 전 방향 막힘")
+        self.sync(state, "후진 복구 상한 — 전 방향 막힘 (U턴 탈출 3회 소진) "
+                         "→ 정지 + 수동 대기", params)
+        snapshot = state.snapshot()
+        assert snapshot.mode == "ERROR"
+        assert snapshot.reason_code == "INTERNAL_ERROR"
+
+    def test_reorientation_failure_is_reported(self, params):
+        # 종전 매칭 문자열은 '회차 실패'였는데 FSM 은 '재정향 실패'를 낸다
+        state = self.running("재정향 실패")
+        self.sync(state, "재정향 실패(회전 312° 초과 — 갇힘) → 정지 + 수동 대기", params)
+        assert state.snapshot().mode == "ERROR"
+
+    def test_an_unknown_reason_still_reports(self, params):
+        """**이 시험이 요점이다** — 사유 문구가 또 바뀌어도 조용히 사라지지 않는다."""
+        state = self.running("...")
+        self.sync(state, "다음 사람이 새로 지은 사유 문구", params)
+        assert state.snapshot().mode == "ERROR"
+
+    def test_boundary_loss_still_maps_to_its_own_code(self, params):
+        # 인지 계열만 따로 갈린다 (종전 동작 유지)
+        state = self.running("경계 소실")
+        self.sync(state, "인도 경계 소실 (U턴 탈출 3회 소진) → 정지 + 수동 대기", params)
+        snapshot = state.snapshot()
+        assert snapshot.mode == "ERROR"
+        assert snapshot.reason_code == "BOUNDARY_LOST"
+
+    def test_no_mission_returns_to_standby(self, params):
+        # 미션 없이 도는 것은 로컬 시험이다 — 결함이 아니라 대기 복귀 (종전 동작)
+        state = RobotState()
+        state.boot_completed()
+        state.start_patrol()
+        self.sync(state, "재정향 실패(타임아웃) → 정지 + 수동 대기", params)
+        assert state.snapshot().mode == "READY"
+
+    def test_a_paused_mission_is_left_alone(self, params):
+        """사람이 세워 둔 미션은 건드리지 않는다 — CLEAR_EMERGENCY_STOP 뒤의 조합이다.
+
+        그 명령은 미션을 PAUSED 로 내리고 FSM 은 IDLE 에 남는다. 여기서 결함을 내면
+        '사람이 해제해 둔 로봇'이 매 tick ERROR 로 보고된다.
+        """
+        state = self.running("...")
+        state.pause("REMOTE_PAUSE")
+        state.set_mission_state("PAUSED")
+        self.sync(state, "ESTOP 수동 해제", params)
+        snapshot = state.snapshot()
+        assert snapshot.mode == "PAUSED"
+        assert snapshot.mission_state == "PAUSED"
