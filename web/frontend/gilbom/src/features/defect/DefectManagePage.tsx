@@ -189,6 +189,8 @@ export function DefectManagePage() {
         latitude: location.latitude,
         longitude: location.longitude,
         token: (previous?.token ?? 0) + 1,
+        // 지도가 이웃과의 거리를 잴 때 자기 자신을 빼려면 이 값이 필요하다.
+        defectId,
       }))
     }
     // 접근성 설정을 켠 사용자에게 긴 스크롤 애니메이션은 멀미를 준다.

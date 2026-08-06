@@ -27,6 +27,67 @@ export function defectTypeTone(defectType: DefectType): DefectTypeTone {
   }
 }
 
+/**
+ * 묶음 격자에서 두 좌표가 얼마나 떨어져 있나(m).
+ *
+ * <p>격자가 정사각형이라 **축 방향 차이가 둘 다** 한 칸보다 작을 때만 같은 칸에 들어간다.
+ * 그래서 직선거리가 아니라 **축 방향 최대값**(Chebyshev)을 본다. 남북 500m·동서 1m인 쌍은
+ * 직선거리로는 멀지만 격자로는 이미 갈려 있다.
+ *
+ * <p>짧은 거리라 등거리 근사로 충분하다. 경도 간격이 위도에 따라 줄어드는 것만 보정한다.
+ */
+export function gridDistanceMeters(
+  a: { latitude: number; longitude: number },
+  b: { latitude: number; longitude: number },
+): number {
+  const centerLatitude = ((a.latitude + b.latitude) / 2) * (Math.PI / 180)
+  const northSouth = Math.abs(a.latitude - b.latitude) * 111_320
+  const eastWest = Math.abs(a.longitude - b.longitude) * 111_320
+    * Math.cos(centerLatitude)
+  return Math.max(northSouth, eastWest)
+}
+
+/**
+ * 고른 결함의 마커가 **이웃과 묶이지 않을** 만큼 확대해야 하는 단계.
+ *
+ * <p>목록에서 결함을 고르면 그 마커로 화면을 옮기는데, 묶음 안에 들어 있으면 정작 그
+ * 마커가 보이지 않는다(숫자만 보인다). 가장 가까운 이웃이 격자 한 칸(`cellPx`)만큼
+ * 떨어지면 갈리므로, 확대 한 단계가 화면 거리를 두 배로 만든다는 성질에서 단계가 나온다.
+ *
+ * <p>이미 갈려 있으면 **0**이다 — 확대할 이유가 없다. 이웃이 아예 없으면(혼자면) 어떤
+ * 배율에서도 묶이지 않으니 역시 0이다.
+ *
+ * @param target 고른 결함의 좌표
+ * @param others 그 결함을 뺀 나머지 결함 좌표
+ * @param metersPerPixel 지금 배율에서 1px이 몇 m인가(지도에서 직접 잰 값)
+ * @param cellPx 묶음 격자 한 칸의 크기
+ * @param maxStep 좌표가 똑같아 계산이 서지 않을 때의 상한. 지도 최대 배율은 부르는 쪽이
+ *   따로 자른다.
+ */
+export function unclusterZoomStep(
+  target: { latitude: number; longitude: number },
+  others: { latitude: number; longitude: number }[],
+  metersPerPixel: number,
+  cellPx: number,
+  maxStep = 21,
+): number {
+  if (!(metersPerPixel > 0) || others.length === 0) {
+    return 0
+  }
+  let nearestMeters = Number.POSITIVE_INFINITY
+  for (const other of others) {
+    nearestMeters = Math.min(nearestMeters, gridDistanceMeters(target, other))
+  }
+  const nearestPx = nearestMeters / metersPerPixel
+  // 좌표가 완전히 같으면 어떤 배율에서도 갈리지 않는다. 갈 수 있는 데까지 간다.
+  if (nearestPx <= 0) {
+    return maxStep
+  }
+  // 1e-9는 딱 떨어질 때(예: 44px) 한 단계를 더 얹지 않으려는 보정이다.
+  const needed = Math.ceil(Math.log2(cellPx / nearestPx) - 1e-9)
+  return Math.min(Math.max(needed, 0), maxStep)
+}
+
 /** 묶음을 클릭했을 때 어디를 얼마나 확대할지. */
 export interface ClusterZoomPlan {
   /** 지금 배율에서 몇 단계 더 확대할지. 최소 1이다. */
