@@ -1,6 +1,6 @@
 # 시간 기반 Mission 계약
 
-- 기준일: 2026-07-30
+- 기준일: 2026-08-06
 - 대상: `S15P11D101-489`, `DAY6-B-00-6`
 - 상태: 구현·자동 검증·실제 로그인 Backend Browser 연동 완료
 
@@ -47,15 +47,25 @@ progressPercent
 - 오래된 Telemetry: 더 최신 표본이 있으면 진행률에 반영하지 않는다.
 - 역행 값: 저장 진행률은 `GREATEST`로 단조 증가한다.
 - 완료 전 상한: `99.99%`
+- 관리자 수동 완료: 진행률과 무관하게 요청할 수 있으며 Backend가 Online·최신
+  Telemetry·Robot Mode·Mission 일치를 확인한 뒤 `COMPLETE_MISSION`을 발행
 - 자동 종료 요청: `RUNNING`의 `startedAt + plannedDurationSec`가 서버 시각에
-  도달하면 최대 5초 안에 `SYSTEM/COMPLETE_MISSION` 명령을 MQTT로 발행
+  도달하고 동일한 Robot 상태 검사를 통과하면 최대 5초 안에
+  `SYSTEM/COMPLETE_MISSION` 명령을 MQTT로 발행
+- 완료 명령 Payload: 대상 `mission_id`와 자동
+  `PLANNED_DURATION_REACHED` 또는 수동 `OPERATOR_COMPLETED` 사유를 포함
 - 완료 확정: 로봇이 정지한 뒤 `MISSION_COMPLETED`를 발행해야
-  Backend가 `COMPLETED·100%`로 전이
+  Backend가 원인 Command를 검증·저장하고 `COMPLETED·100%`로 전이
 - 로봇 완료 Event: 계획시간 전 실제 종료를 `MISSION_COMPLETED·100%`로 확정
 - `PAUSED`는 자동 종료 명령 대상에서 제외하며 재개 후 이미
   계획시간이 지났으면 다음 검사에서 `COMPLETE_MISSION`을 발행
 - Broker 발행 실패·ACK Timeout은 명령 이력에 표시하고 Mission을 거짓으로
   `COMPLETED`로 바꾸지 않는다.
+
+완료 Command Result의 `COMPLETED`는 명령 실행 결과일 뿐 Mission 완료 확정이 아니다.
+최종 성공 기준은 `MISSION_COMPLETED` Event와 Mission·상태 이력이 같은 DB
+Transaction에 저장된 상태다. 현재 범위에는 Event 저장 Receipt와 미수신 자동 복구가
+포함되지 않으므로 해당 장애는 운영 확인이 필요하다.
 
 현재 Embedded 계약에서 `mission.elapsed_sec`는 Mission 시작 후 벽시계 누적
 시간이다. `PAUSED` 중에도 증가하지만 서버 자동 종료 명령은 안전한 명시적 재개를 위해

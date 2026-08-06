@@ -135,14 +135,38 @@
     {
       "properties": {
         "command_type": {
-          "enum": [
-            "RESUME_MISSION",
-            "COMPLETE_MISSION"
-          ]
+          "const": "RESUME_MISSION"
         },
         "parameters": {
           "type": "object",
           "maxProperties": 0
+        }
+      }
+    },
+    {
+      "properties": {
+        "command_type": {
+          "const": "COMPLETE_MISSION"
+        },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mission_id",
+            "completion_reason"
+          ],
+          "properties": {
+            "mission_id": {
+              "$ref": "common.schema.json#/definitions/nonBlankString"
+            },
+            "completion_reason": {
+              "type": "string",
+              "enum": [
+                "PLANNED_DURATION_REACHED",
+                "OPERATOR_COMPLETED"
+              ]
+            }
+          }
         }
       }
     }
