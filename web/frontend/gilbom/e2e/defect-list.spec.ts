@@ -238,11 +238,18 @@ test.describe('결함 목록 표', () => {
       )
       .toBeGreaterThanOrEqual(0)
 
-    const after = await page.evaluate(() =>
-      document.querySelector('.defect-map-card')!.getBoundingClientRect().top,
-    )
-    // scroll-margin-top(24px)만큼 띄우고 화면 안에 들어온다.
-    expect(after).toBeLessThan(60)
+    const { after, topbarHeight } = await page.evaluate(() => ({
+      after: document.querySelector('.defect-map-card')!
+        .getBoundingClientRect().top,
+      topbarHeight: document.querySelector('.topbar')!
+        .getBoundingClientRect().height,
+    }))
+    /*
+     * 상단 바가 고정(sticky)이라 그 높이 아래에 놓여야 카드가 가려지지 않는다.
+     * `scroll-margin-top`이 바 높이를 따라가는지 함께 지킨다.
+     */
+    expect(after).toBeGreaterThanOrEqual(topbarHeight - 1)
+    expect(after).toBeLessThan(topbarHeight + 40)
     await expect(page.locator('.defect-table-body-row.is-selected'))
       .toHaveCount(1)
   })

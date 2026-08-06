@@ -23,6 +23,11 @@
 }
 
 .app-shell {
+  /*
+   * 고정된 상단 바 높이. 스크롤로 가려지면 안 되는 요소(`scroll-margin-top`)가 이 값을
+   * 참조하므로 한 곳에서만 정한다.
+   */
+  --topbar-height: 96px;
   display: grid;
   grid-template-columns: 256px minmax(0, 1fr);
   min-height: 100vh;
@@ -130,9 +135,19 @@
   min-width: 0;
 }
 
+/*
+ * 스크롤해도 붙어 있는다. 어느 페이지를 보고 있는지와 로그인한 사람이 늘 보여야 하고,
+ * 긴 목록에서 위로 되돌아가지 않고도 계정 메뉴로 갈 수 있어야 한다.
+ *
+ * <p>반투명 배경 + `backdrop-filter`는 원래 이 용도로 들어가 있었다. 사이드바도 이미
+ * `position: sticky`다.
+ */
 .topbar {
+  position: sticky;
+  z-index: 50;
+  top: 0;
   display: flex;
-  min-height: 96px;
+  min-height: var(--topbar-height);
   padding: 20px var(--app-content-gutter);
   border-bottom: 1px solid var(--line);
   align-items: center;
@@ -580,8 +595,11 @@
   /* 범례와 지도 사이 간격. 범례가 없던 시기에 지워졌던 값이다. */
   gap: 16px;
   padding: 20px;
-  /* 목록에서 결함을 고르면 이 카드로 스크롤한다. 화면 맨 위에 딱 붙지 않게 띄운다. */
-  scroll-margin-top: 24px;
+  /*
+   * 목록에서 결함을 고르면 이 카드로 스크롤한다. 상단 바가 고정이라 그 높이만큼 더
+   * 띄워야 카드가 바 밑에 숨지 않는다.
+   */
+  scroll-margin-top: calc(var(--topbar-height) + 16px);
 }
 
 /*
@@ -2136,8 +2154,11 @@
     display: none;
   }
 
+  .app-shell {
+    --topbar-height: 78px;
+  }
+
   .topbar {
-    min-height: 78px;
     padding: 16px var(--app-content-gutter);
   }
 
