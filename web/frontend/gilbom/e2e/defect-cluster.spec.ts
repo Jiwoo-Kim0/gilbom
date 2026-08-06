@@ -782,6 +782,32 @@ test.describe('상세 카드 끌어 옮기기', () => {
       .toBeLessThanOrEqual(wrapBox.bottom + 1)
   })
 
+  test('끌어서 지도 꼭대기까지 올릴 수 있다', async ({ page }) => {
+    await openDetailCard(page)
+
+    // 아래로 내렸다가 다시 끝까지 올린다.
+    await dragCardBy(page, 0, 200)
+    await dragCardBy(page, -4000, -4000)
+
+    const gaps = await page.evaluate(() => {
+      const card = document.querySelector('.defect-card')!.getBoundingClientRect()
+      const wrap = document
+        .querySelector('.defect-map-canvas-wrap')!
+        .getBoundingClientRect()
+      return {
+        top: Math.round(card.top - wrap.top),
+        left: Math.round(card.left - wrap.left),
+      }
+    })
+
+    /*
+     * 기본 자리가 지도 모서리에 붙어 있으므로, 한 번 끌었다고 다시는 붙일 수 없게 되면
+     * 안 된다. 예전에는 모서리마다 16px을 남겨 꼭대기까지 못 올라갔다.
+     */
+    expect(gaps.top, '지도 위변에 닿는다').toBe(0)
+    expect(gaps.left, '왼쪽 변에도 닿는다').toBe(0)
+  })
+
   test('닫기 버튼에서 시작한 끌기는 카드를 옮기지 않는다', async ({ page }) => {
     await openDetailCard(page)
     const card = page.locator('.defect-card')

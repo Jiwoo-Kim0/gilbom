@@ -268,15 +268,18 @@ test('끌면 백분율로 바뀌고 1%p 간격으로 맞춰진다', () => {
 
 test('컨테이너 밖으로는 자른다', () => {
   const far = cardPositionFromDrag(WIDE_MAP, 9_999, 9_999)
-  // 1000 - 340 - 16 = 644px → 64%
-  assert.equal(far.x, 64)
-  // 600 - 300 - 16 = 284px → 47%
-  assert.equal(far.y, 47)
+  // 오른쪽·아래 모서리에 딱 붙는다. 1000 - 340 = 660px → 66%
+  assert.equal(far.x, 66)
+  // 600 - 300 = 300px → 50%
+  assert.equal(far.y, 50)
 
+  /*
+   * 왼쪽·위도 모서리까지 간다. 기본 자리가 지도 모서리에 붙어 있으므로, 한 번 끌면
+   * 다시는 붙일 수 없게 되면 안 된다.
+   */
   const near = cardPositionFromDrag(WIDE_MAP, -9_999, -9_999)
-  // 여백 16px은 남긴다. ceil(1.6%) = 2%, ceil(2.67%) = 3%
-  assert.equal(near.x, 2)
-  assert.equal(near.y, 3)
+  assert.equal(near.x, 0)
+  assert.equal(near.y, 0)
 })
 
 test('지도 높이를 꽉 채운 카드도 아래로는 움직인다', () => {
@@ -306,7 +309,7 @@ test('방향키는 2%p씩 옮기고 모르는 키는 흘려보낸다', () => {
   assert.deepEqual(cardPositionFromKey(at, 'ArrowDown', WIDE_MAP), { x: 30, y: 22 })
   assert.equal(cardPositionFromKey(at, 'Enter', WIDE_MAP), null)
   // 자르기는 끌기와 같은 규칙을 쓴다.
-  assert.equal(cardPositionFromKey({ x: 64, y: 20 }, 'ArrowRight', WIDE_MAP).x, 64)
+  assert.equal(cardPositionFromKey({ x: 66, y: 20 }, 'ArrowRight', WIDE_MAP).x, 66)
 })
 
 /*
