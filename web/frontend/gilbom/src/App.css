@@ -2871,6 +2871,7 @@
   z-index: 1;
   max-width: 480px;
   margin: auto 0;
+  transform: translateY(-15px);
 }
 
 .auth-intro-icon {
