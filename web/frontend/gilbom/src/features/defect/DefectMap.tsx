@@ -4,6 +4,7 @@ import { loadNaverMapsScript } from '../../lib/naverMaps'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { CLUSTER_LIST_MAX, DefectClusterList } from './DefectClusterList'
 import { DefectDetailCard } from './DefectDetailCard'
+import type { DefectCardPosition } from './defectCardDrag'
 import { getDefectMap } from './defectApi'
 import {
   bboxForDefectMapFilter,
@@ -310,6 +311,13 @@ export function DefectMap({
     filterKey: string
     features: DefectMapFeature[]
   } | null>(null)
+  /**
+   * 상세 카드를 끌어 옮긴 자리. 카드가 아니라 지도가 들고 있다 — 카드는 결함마다
+   * `key`로 새로 마운트되므로, 카드 안에 두면 결함을 바꿀 때마다 제자리로 돌아간다.
+   */
+  const [cardPosition, setCardPosition] = useState<DefectCardPosition | null>(
+    null,
+  )
   const visibleClusterList = clusterList?.filterKey === filterKey
     ? clusterList.features
     : null
@@ -730,6 +738,10 @@ export function DefectMap({
               onClose={() => onSelect(null)}
               onChanged={onChanged}
               onSelectDefect={onSelect}
+              /* 카드는 결함마다 새로 마운트된다(`key`). 옮겨둔 자리는 여기서 들고
+                 있어야 결함을 바꿀 때 제자리로 튀어오르지 않는다. */
+              position={cardPosition}
+              onMove={setCardPosition}
             />
           )}
         </div>

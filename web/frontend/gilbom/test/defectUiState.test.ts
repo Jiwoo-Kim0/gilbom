@@ -7,6 +7,11 @@ import {
   defectTypeTone,
 } from '../src/features/defect/defectMapState.ts'
 import {
+  cardPositionClasses,
+  cardPositionFromDrag,
+  cardPositionFromKey,
+} from '../src/features/defect/defectCardDrag.ts'
+import {
   countActiveFilterGroups,
   DEFAULT_DEFECT_FILTERS,
   DEFECT_SORT_OPTIONS,
@@ -231,4 +236,67 @@ test('처리 상태는 기본 셋과 다를 때만 센다', () => {
     countActiveFilterGroups({ ...DEFAULT_DEFECT_FILTERS, workflowStatuses: [] }),
     1,
   )
+})
+
+/*
+ * 상세 카드 끌어 옮기기. 위치는 CSP 때문에 정수 백분율 + CSS class다
+ * (`defectCardDrag.ts`). 자리 자르기 규칙을 여기서 고정한다.
+ */
+const WIDE_MAP = {
+  originLeft: 600,
+  originTop: 16,
+  containerWidth: 1000,
+  containerHeight: 600,
+  cardWidth: 340,
+  cardHeight: 300,
+}
+
+test('끌면 백분율로 바뀌고 1%p 간격으로 맞춰진다', () => {
+  // 600 - 300 = 300px → 30%
+  assert.deepEqual(cardPositionFromDrag(WIDE_MAP, -300, 120), { x: 30, y: 23 })
+  // 소수점은 반올림한다. 604px → 60.4% → 60%
+  assert.equal(cardPositionFromDrag(WIDE_MAP, 4, 0).x, 60)
+})
+
+test('컨테이너 밖으로는 자른다', () => {
+  const far = cardPositionFromDrag(WIDE_MAP, 9_999, 9_999)
+  // 1000 - 340 - 16 = 644px → 64%
+  assert.equal(far.x, 64)
+  // 600 - 300 - 16 = 284px → 47%
+  assert.equal(far.y, 47)
+
+  const near = cardPositionFromDrag(WIDE_MAP, -9_999, -9_999)
+  // 여백 16px은 남긴다. ceil(1.6%) = 2%, ceil(2.67%) = 3%
+  assert.equal(near.x, 2)
+  assert.equal(near.y, 3)
+})
+
+test('지도 높이를 꽉 채운 카드도 아래로는 움직인다', () => {
+  /*
+   * 기본 카드는 `top: 16; bottom: 16`이라 높이가 컨테이너-32다. "전부 보이는 자리"만
+   * 허용하면 위아래로 1px도 못 움직인다. 손잡이(96px)가 남는 자리까지 넓힌다.
+   */
+  const tall = { ...WIDE_MAP, originTop: 16, cardHeight: 600 - 32 }
+  const moved = cardPositionFromDrag(tall, 0, 200)
+  assert.equal(moved.y, 36)
+  // 손잡이는 남아야 한다. 600 - 96 = 504px → 84%
+  assert.equal(cardPositionFromDrag(tall, 0, 9_999).y, 84)
+})
+
+test('위치 클래스는 10%p 자리와 1%p 자리로 갈린다', () => {
+  assert.equal(
+    cardPositionClasses({ x: 37, y: 4 }),
+    'is-dragged dc-x-3 dc-xf-7 dc-y-0 dc-yf-4',
+  )
+  // 옮긴 적이 없으면 기본 자리다. 클래스를 붙이지 않는다.
+  assert.equal(cardPositionClasses(null), '')
+})
+
+test('방향키는 2%p씩 옮기고 모르는 키는 흘려보낸다', () => {
+  const at = { x: 30, y: 20 }
+  assert.deepEqual(cardPositionFromKey(at, 'ArrowLeft', WIDE_MAP), { x: 28, y: 20 })
+  assert.deepEqual(cardPositionFromKey(at, 'ArrowDown', WIDE_MAP), { x: 30, y: 22 })
+  assert.equal(cardPositionFromKey(at, 'Enter', WIDE_MAP), null)
+  // 자르기는 끌기와 같은 규칙을 쓴다.
+  assert.equal(cardPositionFromKey({ x: 64, y: 20 }, 'ArrowRight', WIDE_MAP).x, 64)
 })

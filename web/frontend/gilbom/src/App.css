@@ -886,11 +886,118 @@
   overflow-y: auto;
 }
 
+/*
+ * 끌어 옮긴 카드. 위치를 **클래스로** 정하는 이유는 CSP다 — `style-src 'self'`가 inline
+ * style을 막아 계산된 px을 넣을 수 없다(`defectCardDrag.ts` 주석 참고).
+ *
+ * <p>10%p 자리와 1%p 자리를 각각 변수에 담아 `calc()`로 합친다. 축마다 11 + 10개면
+ * 0~100%를 1%p 간격으로 덮는다. 곱하지 않으므로 규칙이 42개로 끝난다.
+ */
+.defect-card {
+  --defect-card-x: 0%;
+  --defect-card-xf: 0%;
+  --defect-card-y: 0%;
+  --defect-card-yf: 0%;
+}
+
+.defect-card.is-dragged {
+  top: calc(var(--defect-card-y) + var(--defect-card-yf));
+  right: auto;
+  bottom: auto;
+  left: calc(var(--defect-card-x) + var(--defect-card-xf));
+  /*
+   * 아래로 끌면 남은 공간만큼 줄어든다. `bottom`을 놓아버린 자리에 이것을 두지 않으면
+   * 카드가 지도 밖으로 자라 `overflow: hidden`에 잘린다(내용이 사라진다).
+   */
+  max-height: calc(
+    100% - var(--defect-card-y) - var(--defect-card-yf) - 16px
+  );
+}
+
+.dc-x-0 { --defect-card-x: 0%; }
+.dc-x-1 { --defect-card-x: 10%; }
+.dc-x-2 { --defect-card-x: 20%; }
+.dc-x-3 { --defect-card-x: 30%; }
+.dc-x-4 { --defect-card-x: 40%; }
+.dc-x-5 { --defect-card-x: 50%; }
+.dc-x-6 { --defect-card-x: 60%; }
+.dc-x-7 { --defect-card-x: 70%; }
+.dc-x-8 { --defect-card-x: 80%; }
+.dc-x-9 { --defect-card-x: 90%; }
+.dc-x-10 { --defect-card-x: 100%; }
+
+.dc-xf-0 { --defect-card-xf: 0%; }
+.dc-xf-1 { --defect-card-xf: 1%; }
+.dc-xf-2 { --defect-card-xf: 2%; }
+.dc-xf-3 { --defect-card-xf: 3%; }
+.dc-xf-4 { --defect-card-xf: 4%; }
+.dc-xf-5 { --defect-card-xf: 5%; }
+.dc-xf-6 { --defect-card-xf: 6%; }
+.dc-xf-7 { --defect-card-xf: 7%; }
+.dc-xf-8 { --defect-card-xf: 8%; }
+.dc-xf-9 { --defect-card-xf: 9%; }
+
+.dc-y-0 { --defect-card-y: 0%; }
+.dc-y-1 { --defect-card-y: 10%; }
+.dc-y-2 { --defect-card-y: 20%; }
+.dc-y-3 { --defect-card-y: 30%; }
+.dc-y-4 { --defect-card-y: 40%; }
+.dc-y-5 { --defect-card-y: 50%; }
+.dc-y-6 { --defect-card-y: 60%; }
+.dc-y-7 { --defect-card-y: 70%; }
+.dc-y-8 { --defect-card-y: 80%; }
+.dc-y-9 { --defect-card-y: 90%; }
+.dc-y-10 { --defect-card-y: 100%; }
+
+.dc-yf-0 { --defect-card-yf: 0%; }
+.dc-yf-1 { --defect-card-yf: 1%; }
+.dc-yf-2 { --defect-card-yf: 2%; }
+.dc-yf-3 { --defect-card-yf: 3%; }
+.dc-yf-4 { --defect-card-yf: 4%; }
+.dc-yf-5 { --defect-card-yf: 5%; }
+.dc-yf-6 { --defect-card-yf: 6%; }
+.dc-yf-7 { --defect-card-yf: 7%; }
+.dc-yf-8 { --defect-card-yf: 8%; }
+.dc-yf-9 { --defect-card-yf: 9%; }
+
 .defect-card-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
+}
+
+/*
+ * 카드를 끄는 손잡이 줄. `touch-action: none`이 없으면 손가락 끌기가 브라우저 스크롤로
+ * 먹혀 pointermove가 끊긴다.
+ */
+.defect-card-header-draggable {
+  cursor: grab;
+  touch-action: none;
+}
+
+.defect-card-header-draggable:active {
+  cursor: grabbing;
+}
+
+/* 옮길 수 있다는 표시 겸 키보드 통로. 방향키로 2%p씩 옮긴다. */
+.defect-card-grip {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  place-items: center;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: grab;
+}
+
+.defect-card-grip:hover {
+  color: var(--text);
+  background: var(--surface-muted);
 }
 
 .defect-card-header h3 {

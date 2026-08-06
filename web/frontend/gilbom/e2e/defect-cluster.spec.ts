@@ -424,6 +424,54 @@ async function openCluster(
       .mapCalls.clickHandlers[0]?.())
 }
 
+/**
+ * 카드 안 좌표를 재기 전에 **부드러운 스크롤이 끝나기를** 기다린다. 행을 누르면
+ * 페이지가 지도까지 스크롤하는데, 그 도중에는 카드 헤더가 고정 상단 바 밑에 들어가
+ * 마우스 조작이 상단 바로 간다.
+ */
+async function waitForCardSettled(page: Page): Promise<void> {
+  await expect(page.locator('.defect-card')).toBeVisible()
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const header = document
+            .querySelector('.defect-card-header')!
+            .getBoundingClientRect()
+          const topbar = document
+            .querySelector('.topbar')!
+            .getBoundingClientRect()
+          return Math.round(header.top - topbar.bottom)
+        }),
+      { timeout: 5000 },
+    )
+    .toBeGreaterThan(0)
+}
+
+/**
+ * 지도 영역 안에서의 카드 위치. 뷰포트 좌표로 재면 페이지 스크롤이 섞여, 다른 결함을
+ * 골랐을 때(다시 스크롤한다) 자리를 지켰는지 알 수 없다.
+ */
+function cardOffset(page: Page): Promise<{ x: number; y: number }> {
+  return page.evaluate(() => {
+    const card = document.querySelector('.defect-card')!.getBoundingClientRect()
+    const wrap = document
+      .querySelector('.defect-map-canvas-wrap')!
+      .getBoundingClientRect()
+    return { x: card.left - wrap.left, y: card.top - wrap.top }
+  })
+}
+
+/** 목록 표 첫 행을 눌러 지도 위 상세 카드를 띄운다. */
+async function openDetailCard(page: Page): Promise<void> {
+  await installFakeMap(page)
+  await stubMap(page, featuresAt(tightPoints(2)), [defectAt(0), defectAt(1)])
+  await page.goto('/defects?allStatus=1')
+  await expect(page.locator('.defect-table-body-row')).toHaveCount(2)
+  await page.locator('.defect-table-body-row').first().click()
+  await waitForCardSettled(page)
+}
+
 /** `panTo`로 옮겨간 마지막 자리. */
 function pannedTo(page: Page): Promise<{ lat: number; lng: number } | null> {
   return page.evaluate(() => {
@@ -553,5 +601,108 @@ test.describe('고른 결함 가운데 정렬', () => {
       (window as unknown as { mapCalls: { panned: unknown[] } })
         .mapCalls.panned.length)
     expect(pannedCount).toBe(2)
+  })
+})
+
+/**
+ * 지도 위 상세 카드를 끌어 옮기기. 위치는 CSP 때문에 inline style이 아니라 CSS class로
+ * 표현된다(`defectCardDrag.ts`). 그래서 "클래스가 붙었나"와 "실제로 움직였나"를 함께 본다.
+ */
+test.describe('상세 카드 끌어 옮기기', () => {
+  /** 카드 헤더의 빈 곳(제목 옆)을 잡는다. 버튼에서 시작한 끌기는 무시되기 때문이다. */
+  async function dragCardBy(
+    page: Page,
+    deltaX: number,
+    deltaY: number,
+  ): Promise<void> {
+    const header = page.locator('.defect-card-header')
+    const box = (await header.boundingBox())!
+    const startX = box.x + box.width / 2
+    const startY = box.y + box.height / 2
+    await page.mouse.move(startX, startY)
+    await page.mouse.down()
+    // 여러 단계로 나눠야 pointermove가 실제로 여러 번 들어온다.
+    await page.mouse.move(startX + deltaX, startY + deltaY, { steps: 8 })
+    await page.mouse.up()
+  }
+
+  test('헤더를 끌면 카드가 그만큼 움직인다', async ({ page }) => {
+    await openDetailCard(page)
+    const before = await cardOffset(page)
+
+    await dragCardBy(page, -300, 120)
+
+    await expect(page.locator('.defect-card')).toHaveClass(/is-dragged/)
+    const after = await cardOffset(page)
+    // 1%p 간격으로 맞춰지므로 컨테이너의 1%(≈10px)까지는 어긋날 수 있다.
+    expect(after.x - before.x).toBeGreaterThan(-315)
+    expect(after.x - before.x).toBeLessThan(-285)
+    expect(after.y - before.y).toBeGreaterThan(105)
+    expect(after.y - before.y).toBeLessThan(135)
+  })
+
+  test('컨테이너 밖으로는 나가지 않는다', async ({ page }) => {
+    await openDetailCard(page)
+
+    // 지도 폭보다 훨씬 큰 값으로 끌어본다.
+    await dragCardBy(page, -4000, 4000)
+
+    const { cardBox, wrapBox } = await page.evaluate(() => ({
+      cardBox: document.querySelector('.defect-card')!.getBoundingClientRect(),
+      wrapBox: document
+        .querySelector('.defect-map-canvas-wrap')!
+        .getBoundingClientRect(),
+    }))
+    expect(cardBox.left, '왼쪽으로 잘려나가지 않는다')
+      .toBeGreaterThanOrEqual(wrapBox.left)
+    expect(cardBox.top).toBeGreaterThanOrEqual(wrapBox.top)
+    expect(cardBox.bottom, '아래로 잘려나가지 않는다')
+      .toBeLessThanOrEqual(wrapBox.bottom + 1)
+  })
+
+  test('닫기 버튼에서 시작한 끌기는 카드를 옮기지 않는다', async ({ page }) => {
+    await openDetailCard(page)
+    const card = page.locator('.defect-card')
+
+    const close = card.getByRole('button', { name: '닫기' })
+    const box = (await close.boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x - 200, box.y + 100, { steps: 6 })
+
+    await expect(card).not.toHaveClass(/is-dragged/)
+    await page.mouse.up()
+  })
+
+  test('손잡이에 포커스를 두고 방향키로도 옮긴다', async ({ page }) => {
+    await openDetailCard(page)
+    const card = page.locator('.defect-card')
+    const before = await cardOffset(page)
+
+    await card.getByRole('button', { name: /카드 위치 옮기기/ }).focus()
+    // 한 번에 2%p. 다섯 번이면 10%p다.
+    for (let index = 0; index < 5; index += 1) {
+      await page.keyboard.press('ArrowLeft')
+    }
+
+    await expect(card).toHaveClass(/is-dragged/)
+    const after = await cardOffset(page)
+    expect(after.x, '왼쪽으로 옮겨져야 한다').toBeLessThan(before.x - 30)
+  })
+
+  test('다른 결함을 골라도 옮겨둔 자리를 지킨다', async ({ page }) => {
+    await openDetailCard(page)
+    const card = page.locator('.defect-card')
+
+    await dragCardBy(page, -260, 60)
+    const moved = await cardOffset(page)
+
+    // 카드는 결함마다 새로 마운트된다. 자리를 카드가 들고 있으면 여기서 튀어오른다.
+    await page.locator('.defect-table-body-row').nth(1).click()
+    await expect(card).toContainText('INC-20260805-000002')
+
+    const after = await cardOffset(page)
+    expect(Math.abs(after.x - moved.x)).toBeLessThan(2)
+    expect(Math.abs(after.y - moved.y)).toBeLessThan(2)
   })
 })
