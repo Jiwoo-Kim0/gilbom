@@ -23,6 +23,11 @@
 }
 
 .app-shell {
+  /*
+   * 고정된 상단 바 높이. 스크롤로 가려지면 안 되는 요소(`scroll-margin-top`)가 이 값을
+   * 참조하므로 한 곳에서만 정한다.
+   */
+  --topbar-height: 96px;
   display: grid;
   grid-template-columns: 256px minmax(0, 1fr);
   min-height: 100vh;
@@ -130,15 +135,25 @@
   min-width: 0;
 }
 
+/*
+ * 스크롤해도 붙어 있는다. 어느 페이지를 보고 있는지와 로그인한 사람이 늘 보여야 하고,
+ * 긴 목록에서 위로 되돌아가지 않고도 계정 메뉴로 갈 수 있어야 한다.
+ *
+ * <p>배경은 **불투명**이어야 한다. 반투명(90%) + `backdrop-filter`로 두었더니 뒤로
+ * 지나가는 지도 내용(`© NAVER Corp.` 저작권 표시 등)이 그대로 비쳐 글자와 겹쳐 읽혔다.
+ * 10%만 통과해도 대비가 큰 글자는 보이고, blur는 그걸 흐리게 만들 뿐 감추지 못한다.
+ */
 .topbar {
+  position: sticky;
+  z-index: 50;
+  top: 0;
   display: flex;
-  min-height: 96px;
+  min-height: var(--topbar-height);
   padding: 20px var(--app-content-gutter);
   border-bottom: 1px solid var(--line);
   align-items: center;
   justify-content: space-between;
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(16px);
+  background: var(--surface);
 }
 
 .topbar h1 {
@@ -580,8 +595,11 @@
   /* 범례와 지도 사이 간격. 범례가 없던 시기에 지워졌던 값이다. */
   gap: 16px;
   padding: 20px;
-  /* 목록에서 결함을 고르면 이 카드로 스크롤한다. 화면 맨 위에 딱 붙지 않게 띄운다. */
-  scroll-margin-top: 24px;
+  /*
+   * 목록에서 결함을 고르면 이 카드로 스크롤한다. 상단 바가 고정이라 그 높이만큼 더
+   * 띄워야 카드가 바 밑에 숨지 않는다.
+   */
+  scroll-margin-top: calc(var(--topbar-height) + 16px);
 }
 
 /*
@@ -621,8 +639,15 @@
   border-radius: 14px;
 }
 
+/*
+ * `isolation: isolate`로 stacking context를 만든다. Naver SDK가 컨트롤·저작권 표시에
+ * 큰 z-index(1000대)를 쓰는데, 이걸 두지 않으면 그 값이 상단 바(z-index 50)와 같은 층에서
+ * 경쟁해 **지도 요소가 고정된 상단 바 위에 그려진다.** `overflow: hidden`은 상자 밖으로
+ * 나가는 것만 자르고, 스크롤로 상자가 상단 바와 겹치는 구간은 막아주지 못한다.
+ */
 .defect-map-canvas-wrap {
   position: relative;
+  isolation: isolate;
   height: clamp(520px, 62vh, 700px);
   border-radius: 14px;
   overflow: hidden;
@@ -2136,8 +2161,11 @@
     display: none;
   }
 
+  .app-shell {
+    --topbar-height: 78px;
+  }
+
   .topbar {
-    min-height: 78px;
     padding: 16px var(--app-content-gutter);
   }
 

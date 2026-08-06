@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Minus, Plus, X } from 'lucide-react'
 import { lockBodyScroll } from '../../shared/dom/bodyScrollLock'
 import { BoundingBoxOverlay } from './DefectBoundingBox'
@@ -198,7 +199,12 @@ export function DefectPhotoViewer({
 
   const endDrag = () => setDragging(false)
 
-  return (
+  /*
+   * 지도 컨테이너가 `isolation: isolate`로 stacking context를 만들기 때문에, 그 안에
+   * 남겨두면 화면 전체를 덮어야 하는 이 창이 고정된 상단 바 밑에 깔린다.
+   * 모달은 문서 최상단에 그린다.
+   */
+  return createPortal(
     <div
       className="defect-photo-backdrop"
       role="dialog"
@@ -287,6 +293,7 @@ export function DefectPhotoViewer({
         </div>
 
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
