@@ -1,56 +1,53 @@
 **Source visual truth**
 
 - Path: `/home/ssafy/common-proj/web/docs/img/main.png`
-- Pixel dimensions: 2878 × 1534
-- Reference state: desktop, navigation expanded, red annotation marking the sidebar-edge toggle location
+- Pixel dimensions: 2878 × 1536
+- State: desktop defect screen with expanded navigation and the `≪` boundary control
+- The screenshot is the user-reported problem state: the navigation control appears to have been pushed behind another layer.
 
 **Implementation evidence**
 
-- Expanded state: `/home/ssafy/common-proj/web/.artifacts/sidebar-expanded.png`
-- Collapsed state: `/home/ssafy/common-proj/web/.artifacts/sidebar-collapsed.png`
-- Pagination state: `/home/ssafy/common-proj/web/.artifacts/defect-pagination.png`
+- Screenshot: `/home/ssafy/common-proj/web/.artifacts/sidebar-front-layer.png`
+- Pixel dimensions: 2878 × 1536
 - Browser viewport: 1439 × 768 CSS pixels at device scale factor 2
-- Implementation captures: 2878 × 1536 pixels
-- Density normalization: source and implementation were compared at the same 1439 CSS-pixel display width
+- State: desktop defect screen with expanded navigation
 
 **Full-view comparison evidence**
 
-- Comparison image: `/home/ssafy/common-proj/web/.artifacts/sidebar-comparison.png`
-- The source and expanded implementation are shown side by side at the same normalized viewport.
-- The toggle sits on the navigation/content boundary at the annotated vertical region.
+- Comparison: `/home/ssafy/common-proj/web/.artifacts/sidebar-front-layer-full-comparison.png`
+- The problem capture and corrected browser render are shown together at the same normalized viewport and density.
+- The navigation width, toggle position, top bar, search region, and map card retain their existing proportions.
 
 **Focused region comparison evidence**
 
-- Comparison image: `/home/ssafy/common-proj/web/.artifacts/sidebar-focused-comparison.png`
-- Target region: the left navigation boundary around 44% of viewport height.
-- The implementation control is centered on the boundary and uses left-facing chevrons while expanded.
+- Comparison: `/home/ssafy/common-proj/web/.artifacts/sidebar-front-layer-comparison.png`
+- The `≪` control remains centered on the navigation/content boundary and its complete icon and clickable surface remain visible.
+- The corrected control is a positive stacking item and is the top hit target in its visible region.
 
 **Findings**
 
-- No P0, P1, or P2 fidelity issue remains in the requested sidebar control.
-- The reference uses a hand-drawn marker, so its width and shape are treated as positional guidance rather than button styling.
-- The browser QA container lacks the project’s Korean font packages; missing glyph boxes in the implementation capture are environment-only and do not alter layout measurements.
+- No remaining P0, P1, or P2 issue was found in the requested layer correction.
+- The implementation capture uses mocked map data and the QA container lacks the project Korean font package; these differences do not affect the measured control position or stacking behavior.
 
 **Required fidelity surfaces**
 
-- Fonts and typography: application styles remain unchanged; the QA container font limitation is documented above.
-- Spacing and layout rhythm: expanded width is 256px, collapsed width is 76px, and the toggle center is between 42% and 46% of sidebar height.
-- Colors and visual tokens: the existing neutral border, surface, shadow, and focus tokens are reused.
-- Image quality and asset fidelity: the existing logo and Lucide chevrons are used.
-- Copy and content: navigation labels are unchanged; accessible labels are `네비게이션 접기` and `네비게이션 펼치기`.
+- Fonts and typography: unchanged by this correction.
+- Spacing and layout rhythm: control dimensions and 44% vertical anchor are unchanged.
+- Colors and visual tokens: existing border, surface, and shadow tokens are preserved.
+- Image quality and asset fidelity: existing logo, map component, and Lucide chevron icon are preserved.
+- Copy and content: no user-facing copy changed.
 
 **Primary interactions and console**
 
-- Playwright clicked the collapse control and verified the reverse expand control appeared.
-- Expanded width, collapsed width, and hidden collapsed labels were asserted.
-- Defect pagination left and right gaps were both asserted at 23px or greater; the applied gap is 24px.
-- The Naver map authentication request was isolated from visual QA.
-- No failed responses or console errors remained in the final run.
+- Playwright verified computed `z-index: 1`.
+- Playwright verified the visible control is the top pointer hit target.
+- Playwright clicked `네비게이션 접기` and verified `네비게이션 펼치기` appeared.
+- Browser console errors: none.
 
 **Comparison history**
 
-- Initial implementation: added the sidebar boundary toggle and collapsed state.
-- Visual iteration: matched the reference marker’s vertical region and verified both navigation states.
-- Pagination iteration: widened and centered the previous/counter/next controls.
+- Earlier P1: `.nb-sidebar-toggle` used `z-index: -1`, placing the interactive control in a negative child layer.
+- Fix: changed the control to `z-index: 1` while preserving the bookmark position and complete `≪ / ≫` icon.
+- Post-fix evidence: Playwright interaction passed and both full and focused comparison captures were reviewed.
 
 final result: passed
