@@ -8,6 +8,7 @@ import type { DefectCardPosition } from './defectCardDrag'
 import { getDefectMap } from './defectApi'
 import {
   bboxForDefectMapFilter,
+  isPointOutsideMapView,
   clusterZoomPlan,
   defectMapFilterKey,
   defectTypeTone,
@@ -233,6 +234,16 @@ export type DefectMapCenterRequest = {
   token: number
 }
 
+/**
+ * 실시간으로 새 결함이 들어왔다는 신호. 좌표는 여기 없다 — SSE 이벤트가 위치를 주지
+ * 않으므로 지도가 직접 조회해서 찾는다.
+ *
+ * <p>새 이벤트마다 객체를 새로 만들어야 지도가 반응한다.
+ */
+export type DefectMapRevealRequest = {
+  defectId: string
+}
+
 interface DefectMapProps {
   filters: DefectFilters
   selectedDefectId: string | null
@@ -243,6 +254,19 @@ interface DefectMapProps {
   cardRef?: RefObject<HTMLElement | null>
   /** 목록에서 고른 결함을 지도 가운데로 옮긴다. {@link DefectMapCenterRequest} 참고. */
   centerRequest?: DefectMapCenterRequest | null
+  /**
+   * 방금 탐지된 결함. **화면 밖에 있을 때만** 그 위치로 지도를 옮긴다.
+   * {@link DefectMapRevealRequest} 참고.
+   */
+  revealRequest?: DefectMapRevealRequest | null
+  /**
+   * 값이 바뀌면 같은 필터·같은 뷰포트라도 GeoJSON을 다시 받는다.
+   *
+   * <p>SSE로 새 결함이 들어오면 목록은 갱신되는데 지도는 그대로였다. 필터와 bbox가
+   * 안 바뀌니 다시 읽을 이유가 없었기 때문이다. 부모의 재조회 신호를 여기까지
+   * 내려야 마커가 새로고침 없이 올라온다.
+   */
+  reloadToken?: number
 }
 
 export function DefectMap({
@@ -252,6 +276,8 @@ export function DefectMap({
   onChanged,
   cardRef,
   centerRequest = null,
+  revealRequest = null,
+  reloadToken = 0,
 }: DefectMapProps) {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<naver.maps.Map | null>(null)
@@ -273,7 +299,7 @@ export function DefectMap({
     bbox: '',
   })
   const bbox = bboxForDefectMapFilter(viewport, filterKey)
-  const requestKey = `${filterKey}\u0000${bbox}`
+  const requestKey = `${filterKey}\u0000${bbox}\u0000${reloadToken}`
   const [featureSnapshot, setFeatureSnapshot] = useState<{
     key: string
     features: DefectMapFeature[]
@@ -366,6 +392,64 @@ export function DefectMap({
   useEffect(() => {
     filterKeyRef.current = filterKey
   }, [filterKey])
+
+  /*
+   * 아래 "새 결함이 화면 밖이면 옮기기"가 최신 필터를 읽되, 필터가 바뀔 때마다 다시
+   * 실행되지는 않게 하려고 ref로 들고 있는다. 그 효과는 **새 이벤트에만** 반응해야 한다.
+   */
+  const filtersRef = useRef(filters)
+  useEffect(() => {
+    filtersRef.current = filters
+  }, [filters])
+
+  /**
+   * 새로 탐지된 결함이 **화면 밖일 때만** 그 위치로 지도를 옮긴다.
+   *
+   * <p>SSE 이벤트에는 좌표가 없어서(계약상 알림만 준다) 지금 필터로 지도용 GeoJSON을
+   * 한 번 더 받아 그 결함을 찾는다. **뷰포트 bbox 없이** 받는 것이 요점이다 — 화면 밖에
+   * 있는 결함이 목적인데 bbox를 걸면 애초에 응답에 없다.
+   *
+   * <p>이 응답으로 마커를 바꾸지는 않는다. 찾는 목적만이다. 지도를 옮기면 idle이 오고,
+   * 그때 뷰포트 bbox로 정상 조회가 다시 돌아 마커가 올라온다.
+   *
+   * <p>서버 필터를 그대로 쓰기 때문에 **지금 조건에 맞지 않는 결함이면 응답에 없어
+   * 지도가 움직이지 않는다.** 필터에 걸려 그려지지도 않을 마커로 화면을 끌고 가면
+   * 사용자는 빈 지도를 보게 된다.
+   */
+  useEffect(() => {
+    if (revealRequest === null || mapStatus !== 'ready') return
+    let cancelled = false
+
+    getDefectMap({ ...filtersRef.current, bbox: '' })
+      .then((response) => {
+        const map = mapRef.current
+        if (cancelled || map === null) return
+        const target = response.features.find(
+          (feature) => feature.properties.defectId === revealRequest.defectId,
+        )
+        if (target === undefined) return
+
+        const [longitude, latitude] = target.geometry.coordinates
+        const bounds = map.getBounds()
+        const southWest = bounds.getSW()
+        const northEast = bounds.getNE()
+        const outside = isPointOutsideMapView({ latitude, longitude }, {
+          south: southWest.lat(),
+          west: southWest.lng(),
+          north: northEast.lat(),
+          east: northEast.lng(),
+        })
+        // 이미 보이는 자리면 움직이지 않는다. 보던 위치를 빼앗지 않는 것이 기본이다.
+        if (!outside) return
+        centerMapOn(latitude, longitude)
+      })
+      // 못 찾거나 조회가 실패하면 지도를 움직이지 않는다. 알림 줄은 이미 떠 있다.
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [revealRequest, mapStatus, centerMapOn])
 
   useEffect(() => {
     if (!naverMapClientId) return

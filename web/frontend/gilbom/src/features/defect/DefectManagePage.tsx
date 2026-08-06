@@ -221,6 +221,19 @@ export function DefectManagePage() {
   // 실시간 알림은 "다시 읽어라"만 알려준다. 데이터는 목록·지도가 각자 다시 읽는다.
   const { lastEvent } = useDefectRealtime(refresh)
 
+  /**
+   * 새로 탐지된 결함을 지도에 알린다. 지도는 그 결함이 **화면 밖일 때만** 그 위치로
+   * 옮긴다 — 판단은 지도가 한다(지금 보이는 범위를 아는 쪽이 지도다).
+   *
+   * <p>`lastEvent`가 바뀔 때마다 새 객체가 되므로 같은 결함이 다시 들어와도 전달된다.
+   */
+  const revealRequest = useMemo(
+    () => (lastEvent?.eventType === 'defect.created'
+      ? { defectId: lastEvent.defectId }
+      : null),
+    [lastEvent],
+  )
+
   const changeSort = useCallback(
     (next: string) => {
       setSearchParams(writeFilters(filters, 0, next), { replace: true })
@@ -278,6 +291,9 @@ export function DefectManagePage() {
         onChanged={refresh}
         cardRef={mapCardRef}
         centerRequest={centerRequest}
+        revealRequest={revealRequest}
+        // SSE로 새 결함이 오면 목록과 함께 지도도 다시 읽어야 마커가 올라온다.
+        reloadToken={reloadToken}
       />
       {/*
         선택이 없어도 자리는 남겨둔다. 조건부로 렌더하면 체크할 때마다 이 줄이 생겼다

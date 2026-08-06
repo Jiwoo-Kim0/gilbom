@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   bboxForDefectMapFilter,
   clusterZoomPlan,
+  isPointOutsideMapView,
   defectMapFilterKey,
   defectTypeTone,
 } from '../src/features/defect/defectMapState.ts'
@@ -299,4 +300,45 @@ test('방향키는 2%p씩 옮기고 모르는 키는 흘려보낸다', () => {
   assert.equal(cardPositionFromKey(at, 'Enter', WIDE_MAP), null)
   // 자르기는 끌기와 같은 규칙을 쓴다.
   assert.equal(cardPositionFromKey({ x: 64, y: 20 }, 'ArrowRight', WIDE_MAP).x, 64)
+})
+
+/*
+ * 새로 탐지된 결함이 화면 밖인지 판단하는 규칙. 지도 한 화면이 위경도 0.01도(약 1.1km)를
+ * 덮는다고 두고 본다.
+ */
+const VIEW = { south: 37.495, west: 127.04, north: 37.505, east: 127.05 }
+
+test('화면 가운데 있는 좌표는 밖이 아니다', () => {
+  assert.equal(
+    isPointOutsideMapView({ latitude: 37.5, longitude: 127.045 }, VIEW),
+    false,
+  )
+})
+
+test('화면 범위를 벗어난 좌표는 밖이다', () => {
+  // 위·아래·좌·우 네 방향을 모두 본다. 한 방향만 보면 부호 실수를 놓친다.
+  assert.equal(
+    isPointOutsideMapView({ latitude: 37.52, longitude: 127.045 }, VIEW), true)
+  assert.equal(
+    isPointOutsideMapView({ latitude: 37.48, longitude: 127.045 }, VIEW), true)
+  assert.equal(
+    isPointOutsideMapView({ latitude: 37.5, longitude: 127.02 }, VIEW), true)
+  assert.equal(
+    isPointOutsideMapView({ latitude: 37.5, longitude: 127.07 }, VIEW), true)
+})
+
+test('가장자리에 걸친 좌표는 밖으로 친다', () => {
+  /*
+   * 범위 안이긴 하지만 경계에서 8%(여기서는 0.0008도, 약 90m) 안쪽까지는 마커가 반쯤
+   * 잘려 보이지 않는다. 그대로 두면 "새 결함이 왔다는데 어디 있는지 안 보인다"가 된다.
+   */
+  assert.equal(
+    isPointOutsideMapView({ latitude: 37.5049, longitude: 127.045 }, VIEW),
+    true,
+  )
+  // 여유 밖으로 들어오면 보이는 것으로 본다.
+  assert.equal(
+    isPointOutsideMapView({ latitude: 37.5040, longitude: 127.045 }, VIEW),
+    false,
+  )
 })
