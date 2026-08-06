@@ -207,15 +207,15 @@
 }
 
 .robot-legend-item-online .robot-status-dot {
-  background: var(--brand-strong);
+  background: var(--robot-online);
 }
 
 .robot-legend-item-warning .robot-status-dot {
-  background: #c0392b;
+  background: var(--robot-warning);
 }
 
 .robot-legend-item-charging .robot-status-dot {
-  background: var(--nb-gold);
+  background: var(--robot-charging);
 }
 
 .robot-legend-item-offline .robot-status-dot {
@@ -323,16 +323,16 @@
   height: 10px;
   border: 2px solid #fff;
   border-radius: 50%;
-  background: var(--brand-strong);
+  background: var(--robot-online);
   box-shadow: 0 1px 3px rgb(15 23 42 / 30%);
 }
 
 .robot-map-marker-warning .robot-map-marker-status {
-  background: #c0392b;
+  background: var(--robot-warning);
 }
 
 .robot-map-marker-charging .robot-map-marker-status {
-  background: var(--nb-gold);
+  background: var(--robot-charging);
 }
 
 .robot-map-marker-offline .robot-map-marker-status {
@@ -452,18 +452,18 @@
 }
 
 .robot-status-badge-online {
-  color: var(--brand-strong);
-  background: var(--brand-soft);
+  color: var(--robot-online-strong);
+  background: var(--robot-online-soft);
 }
 
 .robot-status-badge-warning {
-  color: #c0392b;
-  background: #fbe4e1;
+  color: var(--robot-warning-strong);
+  background: var(--robot-warning-soft);
 }
 
 .robot-status-badge-charging {
-  color: var(--nb-ink);
-  background: var(--nb-gold-soft);
+  color: var(--robot-charging-strong);
+  background: var(--robot-charging-soft);
 }
 
 .robot-status-badge-offline {
