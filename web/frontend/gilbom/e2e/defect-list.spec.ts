@@ -310,3 +310,69 @@ test.describe('결함 목록 표', () => {
       .toHaveCount(1)
   })
 })
+
+/**
+ * 정렬 고르개. 네이티브 `<select>`를 직접 그린 목록으로 바꿨다 —
+ * `<select>`가 공짜로 주던 것(스크린리더 역할·키보드 조작)을 잃지 않았는지 본다.
+ */
+test.describe('정렬 고르개', () => {
+  test('열어서 고르면 URL과 조회에 실린다', async ({ page }) => {
+    const listQueries: string[] = []
+    await stubDefectPage(page, { listQueries })
+    await openDefectPage(page, '?allStatus=1')
+
+    // 닫힌 채로도 지금 무엇으로 정렬 중인지 보인다.
+    const trigger = page.getByRole('button', { name: /정렬 방식/ })
+    await expect(trigger).toContainText('최근 관측순')
+    await expect(page.getByRole('listbox')).toHaveCount(0)
+
+    await trigger.click()
+    const options = page.getByRole('option')
+    await expect(options).toHaveCount(5)
+    await expect(page.getByRole('option', { name: '최근 관측순' }))
+      .toHaveAttribute('aria-selected', 'true')
+
+    await page.getByRole('option', { name: '위험도순' }).click()
+    await expect(page.getByRole('listbox')).toHaveCount(0)
+    await expect(trigger).toContainText('위험도순')
+    await expect(page).toHaveURL(/sort=riskScore%2Cdesc/)
+    await expect
+      .poll(() => listQueries.at(-1) ?? '')
+      .toContain('sort=riskScore%2Cdesc')
+  })
+
+  test('키보드로만도 고를 수 있다', async ({ page }) => {
+    await stubDefectPage(page)
+    await openDefectPage(page, '?allStatus=1')
+
+    const trigger = page.getByRole('button', { name: /정렬 방식/ })
+    await trigger.focus()
+    // 닫힌 상태에서 ↓는 목록을 연다. 포커스는 버튼에 남는다.
+    await page.keyboard.press('ArrowDown')
+    await expect(page.getByRole('listbox')).toBeVisible()
+    await expect(trigger).toBeFocused()
+
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+
+    // 첫 항목에서 한 칸 내려간 "최초 발견순"이 걸린다.
+    await expect(trigger).toContainText('최초 발견순')
+    await expect(page).toHaveURL(/sort=firstSeenAt%2Casc/)
+    // 날짜 열 제목도 정렬 기준을 따라간다.
+    await expect(page.locator('.defect-table-head')).toContainText('최초 발견')
+  })
+
+  test('Esc로 닫으면 고르지 않은 것이다', async ({ page }) => {
+    await stubDefectPage(page)
+    await openDefectPage(page, '?allStatus=1')
+
+    const trigger = page.getByRole('button', { name: /정렬 방식/ })
+    await trigger.click()
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Escape')
+
+    await expect(page.getByRole('listbox')).toHaveCount(0)
+    await expect(trigger).toContainText('최근 관측순')
+    await expect(page).not.toHaveURL(/sort=/)
+  })
+})

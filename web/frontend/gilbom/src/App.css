@@ -1578,22 +1578,140 @@
   font-size: 13px;
 }
 
-.defect-sort-button {
+/*
+ * 값 하나를 고르는 목록(`DefectSelectMenu`). 네이티브 `<select>`를 직접 그린 것으로
+ * 바꿨다 — 목록 정렬과 상세 카드의 처리 상태·처리 결과가 함께 쓴다.
+ *
+ * <p>`is-pill`은 카드 머리줄에 놓는 좁은 알약, `is-block`은 폼 칸처럼 가로를 다 쓰는
+ * 모양이다. 목록 카드는 필터 패널과 같은 결로 둔다.
+ */
+.defect-select {
+  position: relative;
+}
+
+.defect-select-trigger {
   display: inline-flex;
   gap: 6px;
   height: 36px;
   padding: 0 12px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 999px;
   align-items: center;
-  color: var(--text-muted);
-  background: #fff;
+  color: var(--text);
+  background: var(--surface);
+  font-size: 13px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
-.defect-sort-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
+/* 폼 칸 모양. 값이 왼쪽, 화살표가 오른쪽 끝에 붙는다. */
+.defect-select-trigger.is-block {
+  display: flex;
+  width: 100%;
+  height: 40px;
+  border-radius: 10px;
+  justify-content: space-between;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.defect-select-trigger.is-block .defect-select-value {
+  flex: 1;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+}
+
+/* 아직 고르지 않았다는 것이 값처럼 읽히면 안 된다. */
+.defect-select-trigger.is-placeholder .defect-select-value {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.defect-select-trigger:hover:not(:disabled),
+.defect-select-trigger.is-open {
+  border-color: var(--nb-gold);
+}
+
+.defect-select-trigger.is-open {
+  background: var(--brand-soft);
+}
+
+.defect-select-trigger:disabled {
+  color: var(--text-muted);
+  background: var(--surface-muted);
+}
+
+.defect-select-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 20;
+  display: grid;
+  /* 항목이 많아도 카드를 다 먹지 않는다. 넘치면 목록 안에서 스크롤한다. */
+  max-height: 240px;
+  min-width: 100%;
+  overflow-y: auto;
+  margin: 0;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  list-style: none;
+}
+
+/* 버튼의 어느 쪽 끝에 맞출지. 오른쪽 끝에 놓인 버튼(정렬)은 `end`다. */
+.defect-select-panel.align-start {
+  left: 0;
+}
+
+.defect-select-panel.align-end {
+  right: 0;
+}
+
+/*
+ * 아래에 자리가 모자라면 위로 뒤집는다. 상세 카드는 스스로 스크롤해서, 카드 바닥 쪽
+ * 버튼이 아래로 펼치면 목록이 잘린다.
+ */
+.defect-select-panel.is-above {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+.defect-select-option {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  align-items: center;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* 마우스로 훑는 자리와 키보드로 짚는 자리가 같은 표시를 쓴다. */
+.defect-select-option.is-active {
+  background: var(--surface-muted);
+}
+
+.defect-select-option.is-selected {
+  color: var(--brand-strong);
+  font-weight: 800;
+}
+
+/*
+ * 체크 표시 자리는 늘 잡아둔다. 고른 줄에만 아이콘을 넣고 나머지를 비우면 글자가
+ * 좌우로 흔들린다.
+ */
+.defect-select-check {
+  flex: none;
+  visibility: hidden;
+}
+
+.defect-select-option.is-selected .defect-select-check {
+  visibility: visible;
 }
 
 .defect-table {

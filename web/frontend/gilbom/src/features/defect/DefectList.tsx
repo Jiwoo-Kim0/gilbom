@@ -1,3 +1,5 @@
+import { ArrowUpDown } from 'lucide-react'
+import { DefectSelectMenu } from './DefectSelectMenu'
 import {
   DEFECT_SORT_OPTIONS,
   DEFECT_TYPE_LABELS,
@@ -129,20 +131,15 @@ export function DefectList({
               ? '총 —건의 항목'
               : `총 ${page.totalElements}건의 항목`}
           </span>
-          <label className="defect-sort-select">
-            <span className="sr-only">정렬 방식</span>
-            <select
-              value={sort}
-              disabled={loading}
-              onChange={(event) => onSortChange(event.target.value)}
-            >
-              {DEFECT_SORT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <DefectSelectMenu
+            label="정렬 방식"
+            options={DEFECT_SORT_OPTIONS}
+            value={sort}
+            disabled={loading}
+            align="end"
+            icon={<ArrowUpDown size={14} aria-hidden="true" />}
+            onChange={onSortChange}
+          />
         </div>
       </div>
 
