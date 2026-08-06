@@ -87,11 +87,17 @@ class PendingCommand:
 class DriveCommandRunner:
     """commands/request 검증·FSM 요청·적용 확인·commands/result 발행."""
 
-    def __init__(self, client, state, events, *, now=utc_now, memory=None) -> None:
+    def __init__(self, client, state, events, *, now=utc_now, memory=None,
+                 start_interlock=None) -> None:
         self._client = client
         self._state = state
         self._events = events
         self._now = now
+        #: 출발 인터록 (driving/start_interlock.py). 있으면 START_MISSION 은 곧바로
+        #: 달리지 않고 로봇 몸체의 터치를 기다린다 — 관제가 누른 출발과 '로봇 앞에
+        #: 사람이 있다'는 사실은 다른 정보다. 실제 request_start 는 메인 루프의
+        #: interlock.poll() 이 낸다. 없으면 종전대로 즉시 요청한다.
+        self._interlock = start_interlock
         self._memory = memory or HANDLED_COMMAND_MEMORY
         self._pending: "OrderedDict[str, PendingCommand]" = OrderedDict()
         self._handled: "OrderedDict[str, dict]" = OrderedDict()
@@ -301,20 +307,32 @@ class DriveCommandRunner:
                 return REASON_SAFETY_NOT_CLEARED
         return None
 
+    def _start(self, machine, source: str) -> None:
+        """출발 요청 — 인터록이 걸려 있으면 터치 확인이 올 때까지 보류한다.
+
+        보류 중에도 명령은 pending 으로 남아 있다: 터치가 TTL(expires_at) 안에
+        오지 않으면 계약대로 EXPIRED 로 끝나고(_finish 가 무장도 거둔다), 관제는
+        '출발하지 않았다' 를 그 결과로 알게 된다. 조용히 성공으로 처리하지 않는다.
+        """
+        if self._interlock is None or self._interlock.arm(source=source):
+            machine.request_start()
+
     def _request(self, machine, pending: PendingCommand) -> None:
         command_type = pending.command_type
         if command_type == "START_MISSION":
             zone_id = pending.parameters["zone_id"]
             if not re.match(ZONE_ID_PATTERN, str(zone_id)):
                 log.warning("zone_id %r does not match %s", zone_id, ZONE_ID_PATTERN)
-            machine.request_start()
+            self._start(machine, "서버 START_MISSION")
         elif command_type == "PAUSE_MISSION":
             machine.request_pause()
         elif command_type == "RESUME_MISSION":
             # CLEAR_EMERGENCY_STOP과 경계 소실 폴백은 IDLE에 남는다.
-            # 이 경우의 원격 RESUME는 사람이 보낸 수동 재시작 요청이다.
+            # 이 경우의 원격 RESUME는 사람이 보낸 수동 재시작 요청이다 — 즉 '서 있던
+            # 로봇을 다시 달리게 하는' 출발이므로 인터록을 지난다. 달리다 선
+            # PAUSED 에서의 재개는 그대로다 (그때 로봇은 이미 멀리 있다).
             if machine.state is DriveState.IDLE:
-                machine.request_start()
+                self._start(machine, "서버 RESUME_MISSION")
             else:
                 machine.request_resume()
         elif command_type == "COMPLETE_MISSION":
@@ -324,6 +342,9 @@ class DriveCommandRunner:
         elif command_type == "CANCEL_MISSION":
             machine.request_cancel()
         elif command_type == "EMERGENCY_STOP":
+            # 접수해 둔 출발 신호부터 버린다 — 비상 정지를 받은 뒤에 누군가 로봇을
+            # 만졌다고 그 출발이 살아나면 안 된다.
+            self._disarm_start()
             machine.request_estop()
         elif command_type == "CLEAR_EMERGENCY_STOP":
             machine.request_estop_release()
@@ -444,7 +465,16 @@ class DriveCommandRunner:
         self._remember(pending.command_id, payload)
         return True
 
+    def _disarm_start(self) -> None:
+        if self._interlock is not None:
+            self._interlock.disarm()
+
     def _finish(self, pending: PendingCommand, status: str, reason_code: str) -> None:
+        if status != "COMPLETED" and pending.command_type in {"START_MISSION",
+                                                              "RESUME_MISSION"}:
+            # 만료·거절로 끝난 출발이다. 무장을 남겨 두면 한참 뒤의 터치 한 번에
+            # 아무도 시키지 않은(서버는 실패로 아는) 출발이 된다.
+            self._disarm_start()
         payload = self._publish(status, pending, reason_code, completed_at=self._now())
         self._pending.pop(pending.command_id, None)
         self._remember(pending.command_id, payload)

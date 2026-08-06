@@ -33,6 +33,10 @@ def main() -> None:
         gyro_bias_samples=imu_config["gyro_bias_samples"],
         complementary_alpha=imu_config["complementary_alpha"],
         yaw_sign=imu_config["yaw_sign"],
+        # 실주행과 **같은 pitch** 를 보여야 한다 — 장착 보정을 빼먹으면 이 화면만
+        # 오프셋만큼 다른 값을 내고, 경사 임계를 그 숫자로 맞추게 된다.
+        mount_pitch_offset_deg=imu_config["mount_pitch_offset_deg"],
+        zero_max_rate_dps=imu_config["zero_max_rate_dps"],
     )
     print(__doc__)
     deadline = time.monotonic() + duration_sec

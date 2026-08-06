@@ -7,7 +7,6 @@ paho 클라이언트를 가짜로 갈아끼워 브로커 없이 검증한다.
 import json
 import logging
 import queue
-import time
 
 import pytest
 from paho.mqtt.packettypes import PacketTypes
@@ -31,6 +30,10 @@ ROBOT_ID = "RBT-001"
 #: 실브로커가 실제로 돌려준 거부 사유들 (MQTT5 §3.4.2.1).
 NOT_AUTHORIZED = 0x87
 QUOTA_EXCEEDED = 0x97
+
+#: 재전송 주기 (client fixture 의 indirect 인자) — 시간에 기대는 테스트 전용.
+RESEND_NOW = 0.0        # 방금 시도한 건도 곧바로 재전송 대상이 된다
+RESEND_NEVER = 30.0     # 테스트가 잠들지 않는 한 재전송될 일이 없다
 
 
 def reason(packet_type, identifier):
@@ -174,11 +177,22 @@ def paho():
 
 
 @pytest.fixture
-def client(config, paho):
+def client(config, paho, request):
+    """재전송 주기는 **테스트가 정한다** (기본 0.05초).
+
+        @pytest.mark.parametrize("client", [RESEND_NEVER], indirect=True)
+
+    재전송 여부는 `attempted_at <= now - 주기` 로 갈린다. 주기를 짧게 두면 그
+    경계가 테스트 코드 몇 줄을 실행하는 시간과 같은 크기가 되어, 보드가 잠깐
+    느려지는 것만으로 판정이 뒤집힌다 — 실제로 젯슨에서 이 파일 전체를 돌리면
+    그 사이에 주기가 지나 버려 서로 반대 방향으로 두 테스트가 번갈아 깨졌다.
+    그래서 시간에 기대는 테스트는 주기를 **명시**한다: 아직 나가면 안 되는 쪽은
+    넉넉히(RESEND_NEVER), 지금 나가야 하는 쪽은 0(RESEND_NOW)으로.
+    """
     instance = MqttClient(
         config,
         client_factory=lambda _config: paho,
-        resend_interval_sec=0.05,
+        resend_interval_sec=getattr(request, "param", 0.05),
     )
     yield instance
     instance.outbox.close()
@@ -467,7 +481,13 @@ def test_offline_event_is_queued_not_published(client, paho):
     assert client.outbox.pending_count() == 1
 
 
+@pytest.mark.parametrize("client", [RESEND_NEVER], indirect=True)
 def test_reconnect_resends_with_same_event_id(client, paho):
+    """끊긴 채 쌓인 건은 접속 절차가 내보낸다 — 그리고 **한 번만** 나간다.
+
+    아래 flush_outbox() 는 그 확인이다: 접속이 이미 보낸 건을 주기도 안 지났는데
+    또 보내면 서버는 같은 event 를 두 번 받는다.
+    """
     paho.auto_ack = False
     stored = incident(client)
     client.publish(TopicKind.EVENT_INCIDENT, stored)
@@ -625,6 +645,19 @@ def test_rejected_puback_is_detected_from_plain_int_code(client, paho):
     assert client.outbox.pending_count() == 1
 
 
+@pytest.mark.parametrize("client", [RESEND_NEVER], indirect=True)
+def test_rejected_event_waits_for_its_next_period(client, paho):
+    """거부당한 건을 그 자리에서 다시 쏘면 브로커를 두들기게 된다 — 주기를 기다린다."""
+    paho.auto_ack = False
+    paho.simulate_connect()
+    client.publish(TopicKind.EVENT_INCIDENT, incident(client))
+    paho.ack(paho.last()[4], reason(PacketTypes.PUBACK, NOT_AUTHORIZED))
+
+    assert client.flush_outbox() == 0
+    assert client.outbox.pending_count() == 1   # 기다릴 뿐 버리지는 않는다
+
+
+@pytest.mark.parametrize("client", [RESEND_NOW], indirect=True)
 def test_rejected_event_is_resent_by_flush(client, paho):
     paho.auto_ack = False
     paho.simulate_connect()
@@ -632,10 +665,7 @@ def test_rejected_event_is_resent_by_flush(client, paho):
     client.publish(TopicKind.EVENT_INCIDENT, payload)
     paho.ack(paho.last()[4], reason(PacketTypes.PUBACK, NOT_AUTHORIZED))
 
-    # 다음 재전송 주기에 같은 event_id 로 다시 나간다.
-    # (fixture 의 주기는 0.05초 — 방금 시도한 건은 그 전에는 다시 안 나간다.)
-    assert client.flush_outbox() == 0
-    time.sleep(0.1)
+    # 주기가 돌아오면 **같은 event_id** 로 다시 나간다 — 재발행이지 새 event 가 아니다.
     assert client.flush_outbox() == 1
     resent = paho.payloads_on("tbs/v2/robots/RBT-001/events/incident")
     assert [p["event_id"] for p in resent] == [payload["event_id"]] * 2
