@@ -119,7 +119,10 @@ def test_complete_mission_stops_then_publishes_terminal_event(wired, clear_frame
     }))
     apply_one(client, machine, runner, clear_frame, 1.0)
 
-    client.commands.put(mqtt_command("complete", "COMPLETE_MISSION", {}))
+    client.commands.put(mqtt_command("complete", "COMPLETE_MISSION", {
+        "mission_id": "MIS-1",
+        "completion_reason": "PLANNED_DURATION_REACHED",
+    }))
     assert runner.poll_before_step(machine)
     assert [result["command_id"] for result in client.results()] == ["start", "start"]
     command = machine.step(clear_frame, None, 2.0)
@@ -130,6 +133,9 @@ def test_complete_mission_stops_then_publishes_terminal_event(wired, clear_frame
     assert [event["event_type"] for event in _mission_events(client.published)] == [
         "MISSION_STARTED", "MISSION_COMPLETED"
     ]
+    completed_event = _mission_events(client.published)[-1]
+    assert completed_event["causation_command_id"] == "complete"
+    assert completed_event["result"]["completion_reason"] == "PLANNED_DURATION_REACHED"
     completed = client.results()[-1]
     assert completed["command_id"] == "complete"
     assert completed["status"] == "COMPLETED"
@@ -337,6 +343,24 @@ def test_complete_mission_is_rejected_while_paused(wired, clear_frame):
     ]
 
 
+def test_complete_mission_rejects_a_different_mission_id(wired, clear_frame):
+    client, state, machine, runner = wired
+    client.commands.put(mqtt_command("start", "START_MISSION", {
+        "mission_id": "MIS-1", "zone_id": "A-01",
+    }))
+    apply_one(client, machine, runner, clear_frame, 1.0)
+
+    client.commands.put(mqtt_command("complete-other", "COMPLETE_MISSION", {
+        "mission_id": "MIS-OTHER",
+        "completion_reason": "OPERATOR_COMPLETED",
+    }))
+    runner.poll_before_step(machine)
+
+    assert client.results()[-1]["status"] == "REJECTED"
+    assert client.results()[-1]["reason_code"] == "MISSION_MISMATCH"
+    assert state.snapshot().mission_id == "MIS-1"
+
+
 def test_estop_preempts_pending_complete_without_false_completion(wired, clear_frame):
     client, state, machine, runner = wired
     client.commands.put(mqtt_command("start", "START_MISSION", {
@@ -374,7 +398,7 @@ def test_expired_command_uses_backend_contract_reason(wired):
     runner.poll_before_step(machine)
 
     assert client.results()[-1]["status"] == "EXPIRED"
-    assert client.results()[-1]["reason_code"] == "OK"
+    assert client.results()[-1]["reason_code"] == "COMMAND_TTL_EXPIRED"
 
 
 class _PassivePaho:

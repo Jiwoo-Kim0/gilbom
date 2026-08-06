@@ -60,8 +60,15 @@ REASON_INTERNAL_ERROR = "INTERNAL_ERROR"
 REASON_NO_ACTIVE_MISSION = "NO_ACTIVE_MISSION"
 REASON_ALREADY_IN_STATE = "ALREADY_IN_STATE"
 REASON_SAFETY_NOT_CLEARED = "SAFETY_CONDITION_NOT_CLEARED"
+REASON_MISSION_MISMATCH = "MISSION_MISMATCH"
+REASON_COMMAND_TTL_EXPIRED = "COMMAND_TTL_EXPIRED"
+REASON_STOP_APPLICATION_FAILED = "STOP_APPLICATION_FAILED"
 #: mission.result.completion_reason 에 싣는 값 — reason_code 와 다른 필드다.
 REASON_OPERATOR_CANCELLED = "OPERATOR_CANCELLED"
+COMPLETION_REASONS = frozenset({
+    "PLANNED_DURATION_REACHED",
+    "OPERATOR_COMPLETED",
+})
 
 
 def _as_datetime(stamp) -> Optional[datetime]:
@@ -149,7 +156,7 @@ class DriveCommandRunner:
             if (pending.command_type not in UNCONDITIONAL_COMMAND_TYPES
                     and pending.expires_at is not None and now_dt is not None
                     and now_dt > pending.expires_at):
-                self._finish(pending, "EXPIRED", REASON_OK)
+                self._finish(pending, "EXPIRED", REASON_COMMAND_TTL_EXPIRED)
                 completed += 1
                 continue
             if (machine.state is DriveState.ESTOP
@@ -178,7 +185,10 @@ class DriveCommandRunner:
                 self._commit_state(pending)
             except Exception:
                 log.exception("command state commit failed: %s", pending.command_type)
-                self._finish(pending, "FAILED", REASON_INTERNAL_ERROR)
+                reason = (REASON_STOP_APPLICATION_FAILED
+                          if pending.command_type == "COMPLETE_MISSION"
+                          else REASON_INTERNAL_ERROR)
+                self._finish(pending, "FAILED", reason)
             else:
                 if pending.stop_before_reporting:
                     # 이 함수는 apply_command 뒤에만 호출된다. 즉, 바퀴가 멈춘 뒤 ACK.
@@ -218,7 +228,7 @@ class DriveCommandRunner:
         if (command_type not in UNCONDITIONAL_COMMAND_TYPES
                 and expires_at is not None and received_dt is not None
                 and received_dt > expires_at):
-            return self._reject(command_id, received_at, REASON_OK, "EXPIRED",
+            return self._reject(command_id, received_at, REASON_COMMAND_TTL_EXPIRED, "EXPIRED",
                                 command_type=command_type)
         parameters = command.get("parameters")
         if not isinstance(parameters, dict) or any(
@@ -226,6 +236,17 @@ class DriveCommandRunner:
         ):
             return self._reject(command_id, received_at, REASON_INTERNAL_ERROR,
                                 command_type=command_type)
+        if command_type == "COMPLETE_MISSION":
+            completion_reason = parameters.get("completion_reason")
+            mission_id = parameters.get("mission_id")
+            # 무중단 전환 중에는 구형 빈 parameters도 받는다. 한 필드만 온 불완전한
+            # 신규 payload나 허용되지 않은 완료 사유는 실행하지 않는다.
+            if (parameters
+                    and (set(parameters) != {"mission_id", "completion_reason"}
+                         or not mission_id
+                         or completion_reason not in COMPLETION_REASONS)):
+                return self._reject(command_id, received_at, REASON_INTERNAL_ERROR,
+                                    command_type=command_type)
 
         # 적용 대기 중인 미션 명령이 두 개 겹치면, 둘 다 같은 다음
         # DriveState를 보고 다른 mission_id를 순서대로 커밋할 수 있다.
@@ -246,7 +267,7 @@ class DriveCommandRunner:
             for superseded in list(self._pending.values()):
                 self._finish(superseded, "REJECTED", REASON_ALREADY_IN_STATE)
 
-        reason = self._precondition(command_type, machine)
+        reason = self._precondition(command_type, machine, parameters)
         if reason is not None:
             return self._reject(command_id, received_at, reason,
                                 command_type=command_type)
@@ -265,7 +286,7 @@ class DriveCommandRunner:
             self._publish("ACCEPTED", pending, REASON_OK)
         return True
 
-    def _precondition(self, command_type: str, machine) -> Optional[str]:
+    def _precondition(self, command_type: str, machine, parameters: dict) -> Optional[str]:
         if command_type in UNCONDITIONAL_COMMAND_TYPES:
             return None
         snapshot = self._state.snapshot()
@@ -289,6 +310,10 @@ class DriveCommandRunner:
             if command_type == "COMPLETE_MISSION":
                 if machine.state is DriveState.ESTOP or snapshot.mode == "SAFE_STOP":
                     return REASON_SAFETY_NOT_CLEARED
+                target_mission_id = parameters.get("mission_id")
+                if (target_mission_id is not None
+                        and target_mission_id != snapshot.mission_id):
+                    return REASON_MISSION_MISMATCH
                 if snapshot.mission_state != "RUNNING":
                     return REASON_ALREADY_IN_STATE
         elif command_type == "EMERGENCY_STOP":
@@ -370,7 +395,11 @@ class DriveCommandRunner:
                 self._state.resume()
             self._events.mission_resumed()
         elif kind == "COMPLETE_MISSION":
-            self._events.mission_completed("OPERATOR_COMPLETED")
+            completion_reason = pending.parameters.get(
+                "completion_reason", "OPERATOR_COMPLETED")
+            self._events.mission_completed(
+                completion_reason,
+                causation_command_id=pending.command_id)
             self._state.stand_by()
         elif kind == "CANCEL_MISSION":
             self._cancel_mission(pending, snapshot)

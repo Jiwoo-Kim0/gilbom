@@ -492,8 +492,18 @@ class EventPublisher:
         self._state.set_mission_state("RUNNING")
         return self._publish_mission("MISSION_RESUMED")
 
-    def mission_completed(self, completion_reason: str = "ROUTE_COMPLETED") -> dict:
-        return self._finish_mission("MISSION_COMPLETED", "COMPLETED", completion_reason)
+    def mission_completed(
+        self,
+        completion_reason: str = "ROUTE_COMPLETED",
+        *,
+        causation_command_id: str = None,
+    ) -> dict:
+        return self._finish_mission(
+            "MISSION_COMPLETED",
+            "COMPLETED",
+            completion_reason,
+            causation_command_id=causation_command_id,
+        )
 
     def mission_cancelled(self, completion_reason: str = "OPERATOR_CANCELLED") -> dict:
         return self._finish_mission("MISSION_CANCELLED", "CANCELLED", completion_reason)
@@ -527,7 +537,14 @@ class EventPublisher:
     def mission_failed(self, completion_reason: str = "INTERNAL_ERROR") -> dict:
         return self._finish_mission("MISSION_FAILED", "FAILED", completion_reason)
 
-    def _finish_mission(self, event_type, mission_state, completion_reason) -> dict:
+    def _finish_mission(
+        self,
+        event_type,
+        mission_state,
+        completion_reason,
+        *,
+        causation_command_id=None,
+    ) -> dict:
         """종료 3종. 집계를 실어 보내고 보관함을 비운다.
 
         result 는 payload 로 이미 복사된 뒤라 여기서 비워도 안전하다. 비우는 것을
@@ -535,11 +552,21 @@ class EventPublisher:
         mode 전이(→ READY)는 완료·취소·실패에 따라 갈리므로 명령 쪽에서 한다.
         """
         self._state.set_mission_state(mission_state)
-        payload = self._publish_mission(event_type, completion_reason=completion_reason)
+        payload = self._publish_mission(
+            event_type,
+            completion_reason=completion_reason,
+            causation_command_id=causation_command_id,
+        )
         self._state.end_mission()
         return payload
 
-    def _publish_mission(self, event_type: str, *, completion_reason: str = None) -> dict:
+    def _publish_mission(
+        self,
+        event_type: str,
+        *,
+        completion_reason: str = None,
+        causation_command_id: str = None,
+    ) -> dict:
         # 미션 집계는 한 시점의 값이어야 한다 — 스냅샷 하나에서 전부 읽는다.
         snapshot = self._state.snapshot()
         if snapshot.mission_id is None:
@@ -557,6 +584,7 @@ class EventPublisher:
             event_type=event_type,
             occurred_at=self._now(),
             mission_id=snapshot.mission_id,
+            causation_command_id=causation_command_id,
             **result,
         )
         self._client.publish(TopicKind.EVENT_MISSION, payload)

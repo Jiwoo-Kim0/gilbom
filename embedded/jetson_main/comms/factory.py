@@ -415,6 +415,7 @@ class MessageFactory:
         incident_count: int = None,
         normal_detection_count: int = None,
         completion_reason: str = None,
+        causation_command_id: str = None,
     ) -> dict:
         """기기는 총거리·진행률·남은 거리·ETA 를 보내지 않는다 (v2 결정)."""
         event_type = _enum(event_type, MISSION_EVENT_TYPES, "event_type")
@@ -443,6 +444,8 @@ class MessageFactory:
             occurred_at=occurred_at,
             mission_id=mission_id,
         )
+        if causation_command_id is not None:
+            payload["causation_command_id"] = causation_command_id
         if result is not None:
             payload["result"] = result
         return payload
