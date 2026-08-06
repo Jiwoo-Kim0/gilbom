@@ -2878,11 +2878,8 @@
   width: 52px;
   height: 52px;
   margin-bottom: 22px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 16px;
   place-items: center;
   color: #f1d58c;
-  background: rgba(255, 255, 255, 0.08);
 }
 
 .auth-intro .eyebrow {
@@ -3056,9 +3053,9 @@
 }
 
 .form-notice-success {
-  border: 1px solid #bfe1ca;
+  border: 1px solid #b9dcf4;
   color: var(--brand-strong);
-  background: #edf8f1;
+  background: #e8f5ff;
 }
 
 .input-action-row {
