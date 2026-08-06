@@ -23,18 +23,21 @@ public record RobotCommandCreateRequest(
             case START_MISSION ->
                     hasText(parameters.missionId())
                             && hasText(parameters.zoneId())
-                            && parameters.reason() == null;
+                            && parameters.reason() == null
+                            && parameters.completionReason() == null;
             case RESUME_MISSION, COMPLETE_MISSION ->
                     parameters.missionId() == null
                             && parameters.zoneId() == null
-                            && parameters.reason() == null;
+                            && parameters.reason() == null
+                            && parameters.completionReason() == null;
             case PAUSE_MISSION,
                     CANCEL_MISSION,
                     EMERGENCY_STOP,
                     CLEAR_EMERGENCY_STOP ->
                     parameters.missionId() == null
                             && parameters.zoneId() == null
-                            && hasText(parameters.reason());
+                            && hasText(parameters.reason())
+                            && parameters.completionReason() == null;
         };
     }
 
@@ -45,7 +48,15 @@ public record RobotCommandCreateRequest(
     public record Parameters(
             @Size(max = 100) String missionId,
             @Size(max = 100) String zoneId,
-            @Size(max = 500) String reason
+            @Size(max = 500) String reason,
+            @Size(max = 100) String completionReason
     ) {
+        public Parameters(
+                String missionId,
+                String zoneId,
+                String reason
+        ) {
+            this(missionId, zoneId, reason, null);
+        }
     }
 }

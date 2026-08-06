@@ -86,6 +86,7 @@ public class TelemetryIngestionService {
         boolean currentStateUpdated = updateCurrentState(
                 robotId,
                 payload,
+                missionId,
                 sampledAt,
                 receivedAt);
         if (!currentStateUpdated) {
@@ -321,6 +322,7 @@ public class TelemetryIngestionService {
     private boolean updateCurrentState(
             UUID robotId,
             TelemetryPayload payload,
+            UUID missionId,
             OffsetDateTime sampledAt,
             OffsetDateTime receivedAt
     ) {
@@ -343,6 +345,7 @@ public class TelemetryIngestionService {
                             THEN ?
                         ELSE last_received_at
                     END,
+                    mission_id = COALESCE(?, mission_id),
                     mission_status = COALESCE(?, mission_status),
                     battery_valid = ?,
                     battery_percent = ?,
@@ -420,6 +423,7 @@ public class TelemetryIngestionService {
                 payload.bootId(),
                 receivedAt,
                 receivedAt,
+                missionId,
                 mission == null ? null : mission.state().name(),
                 battery.valid(),
                 battery.percent(),

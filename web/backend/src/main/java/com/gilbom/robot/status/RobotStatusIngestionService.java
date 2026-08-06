@@ -71,6 +71,11 @@ public class RobotStatusIngestionService {
     public RobotStatusIngestionResult ingestState(StateIngestionCommand command) {
         StatePayload payload = command.payload();
         RobotReference robot = findRobot(payload.mqttId());
+        UUID missionId = findMissionId(
+                robot.robotId(),
+                payload.mission() == null
+                        ? null
+                        : payload.mission().missionId());
         CurrentState current = lockCurrentState(robot.robotId());
         assertBootOwnership(robot.robotId(), payload.bootId());
 
@@ -109,6 +114,7 @@ public class RobotStatusIngestionService {
                 && updateCurrentState(
                         robot.robotId(),
                         payload,
+                        missionId,
                         observedAt,
                         receivedAt);
 
@@ -393,6 +399,7 @@ public class RobotStatusIngestionService {
     private boolean updateCurrentState(
             UUID robotId,
             StatePayload payload,
+            UUID missionId,
             OffsetDateTime observedAt,
             OffsetDateTime receivedAt
     ) {
@@ -421,6 +428,7 @@ public class RobotStatusIngestionService {
                     state_received_at = ?,
                     robot_mode = ?,
                     state_reason_code = ?,
+                    mission_id = ?,
                     mission_status = ?,
                     battery_valid = CASE
                         WHEN battery_observed_at IS NULL
@@ -473,6 +481,7 @@ public class RobotStatusIngestionService {
                 receivedAt,
                 payload.mode().name(),
                 payload.reasonCode().name(),
+                missionId,
                 mission == null ? null : mission.state().name(),
                 observedAt,
                 battery.valid(),
@@ -505,6 +514,7 @@ public class RobotStatusIngestionService {
                     state_received_at = NULL,
                     robot_mode = NULL,
                     state_reason_code = NULL,
+                    mission_id = NULL,
                     mission_status = NULL,
                     battery_valid = NULL,
                     battery_percent = NULL,
@@ -539,6 +549,30 @@ public class RobotStatusIngestionService {
             throw new IllegalStateException(
                     "Registered robot does not have a current-state row");
         }
+    }
+
+    private UUID findMissionId(UUID robotId, String missionCode) {
+        if (missionCode == null) {
+            return null;
+        }
+        UUID missionId = jdbcTemplate.query("""
+                        SELECT mission_id
+                        FROM robot.mission
+                        WHERE mission_code = ?
+                          AND robot_id = ?
+                          AND deleted_at IS NULL
+                        """,
+                resultSet -> resultSet.next()
+                        ? resultSet.getObject(
+                                "mission_id",
+                                UUID.class)
+                        : null,
+                missionCode,
+                robotId);
+        if (missionId == null) {
+            throw new BusinessException(ErrorCode.MISSION_NOT_FOUND);
+        }
+        return missionId;
     }
 
     private void updateCurrentConnectivity(

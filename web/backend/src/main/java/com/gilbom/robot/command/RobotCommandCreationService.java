@@ -10,9 +10,11 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,6 +54,7 @@ public class RobotCommandCreationService {
     private final AuditLogService auditLogService;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final Duration completionTelemetryMaxAge;
 
     public RobotCommandCreationService(
             JdbcTemplate jdbcTemplate,
@@ -59,7 +62,11 @@ public class RobotCommandCreationService {
             RobotCommandRepository repository,
             AuditLogService auditLogService,
             ObjectMapper objectMapper,
-            Clock clock
+            Clock clock,
+            @Value(
+                    "${gilbom.robot.mission."
+                            + "completion-telemetry-max-age:15s}"
+            ) Duration completionTelemetryMaxAge
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.scopeService = scopeService;
@@ -68,6 +75,7 @@ public class RobotCommandCreationService {
         this.objectMapper = objectMapper.copy().setPropertyNamingStrategy(
                 PropertyNamingStrategies.SNAKE_CASE);
         this.clock = clock;
+        this.completionTelemetryMaxAge = completionTelemetryMaxAge;
     }
 
     @Transactional
@@ -137,7 +145,8 @@ public class RobotCommandCreationService {
         UUID commandId = UUID.randomUUID();
         MissionCommandTarget missionTarget = resolveMissionTarget(
                 robotId,
-                request);
+                request,
+                issuedAt);
         RobotCommandCreateRequest.Parameters commandParameters =
                 commandParameters(request, missionTarget);
 
@@ -216,7 +225,8 @@ public class RobotCommandCreationService {
 
     private MissionCommandTarget resolveMissionTarget(
             UUID robotId,
-            RobotCommandCreateRequest request
+            RobotCommandCreateRequest request,
+            Instant issuedAt
     ) {
         return switch (request.commandType()) {
             case START_MISSION -> resolveStartMissionTarget(robotId, request);
@@ -228,16 +238,118 @@ public class RobotCommandCreationService {
                     robotId,
                     request.commandType(),
                     Set.of("PAUSED"));
-            case COMPLETE_MISSION -> resolveActiveMissionTarget(
+            case COMPLETE_MISSION -> resolveCompletionMissionTarget(
                     robotId,
-                    request.commandType(),
-                    Set.of("RUNNING"));
+                    issuedAt);
             case CANCEL_MISSION -> resolveActiveMissionTarget(
                     robotId,
                     request.commandType(),
                     Set.of("READY", "RUNNING", "PAUSED"));
             case EMERGENCY_STOP, CLEAR_EMERGENCY_STOP -> null;
         };
+    }
+
+    private MissionCommandTarget resolveCompletionMissionTarget(
+            UUID robotId,
+            Instant issuedAt
+    ) {
+        MissionCommandTarget target = resolveActiveMissionTarget(
+                robotId,
+                CommandRequestPayload.CommandType.COMPLETE_MISSION,
+                Set.of("RUNNING"));
+        CompletionRobotState state = jdbcTemplate.query("""
+                        SELECT
+                            robot.operational_status,
+                            current_state.connectivity_status,
+                            current_state.robot_mode,
+                            current_state.mission_id,
+                            current_state.mission_status,
+                            current_state.telemetry_received_at
+                        FROM robot.robot robot
+                        LEFT JOIN telemetry.robot_current_state current_state
+                          ON current_state.robot_id = robot.robot_id
+                        WHERE robot.robot_id = ?
+                        """,
+                resultSet -> resultSet.next()
+                        ? new CompletionRobotState(
+                                resultSet.getString(
+                                        "operational_status"),
+                                resultSet.getString(
+                                        "connectivity_status"),
+                                resultSet.getString("robot_mode"),
+                                resultSet.getObject(
+                                        "mission_id",
+                                        UUID.class),
+                                resultSet.getString("mission_status"),
+                                resultSet.getObject(
+                                        "telemetry_received_at",
+                                        OffsetDateTime.class))
+                        : null,
+                robotId);
+        requireCompletionReady(target, state, issuedAt);
+        if (hasInFlightCompletion(target.missionId())) {
+            throw new BusinessException(
+                    ErrorCode.COMMON_BUSINESS_RULE_VIOLATION,
+                    "동일 Mission의 완료 명령이 이미 처리 중입니다.");
+        }
+        return target;
+    }
+
+    private void requireCompletionReady(
+            MissionCommandTarget target,
+            CompletionRobotState state,
+            Instant issuedAt
+    ) {
+        if (state == null
+                || !"ACTIVE".equals(state.operationalStatus())) {
+            throw completionUnavailable("현재 운영 가능한 Robot이 아닙니다.");
+        }
+        if (!"ONLINE".equals(state.connectivityStatus())) {
+            throw completionUnavailable(
+                    "Robot이 Offline이어서 완료 명령을 보류합니다.");
+        }
+        if (!"PATROLLING".equals(state.robotMode())) {
+            throw completionUnavailable(
+                    "Robot이 안전하게 순찰 중인 상태가 아닙니다.");
+        }
+        OffsetDateTime freshnessThreshold = utc(
+                issuedAt.minus(completionTelemetryMaxAge));
+        if (state.telemetryReceivedAt() == null
+                || state.telemetryReceivedAt().isBefore(
+                        freshnessThreshold)) {
+            throw completionUnavailable(
+                    "최신 Telemetry를 확인할 수 없어 완료 명령을 보류합니다.");
+        }
+        if (!Objects.equals(state.missionId(), target.missionId())
+                || !"RUNNING".equals(state.missionStatus())) {
+            throw completionUnavailable(
+                    "서버 Mission과 Robot이 보고한 실행 Mission이 일치하지 않습니다.");
+        }
+    }
+
+    private boolean hasInFlightCompletion(UUID missionId) {
+        Boolean exists = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM robot.robot_command command
+                    WHERE command.mission_id = ?
+                      AND command.command_type = 'COMPLETE_MISSION'
+                      AND command.command_status IN (
+                          'CREATED',
+                          'SENT',
+                          'ACCEPTED'
+                      )
+                )
+                """,
+                Boolean.class,
+                missionId);
+        return Boolean.TRUE.equals(exists);
+    }
+
+    private BusinessException completionUnavailable(String message) {
+        return new BusinessException(
+                ErrorCode.COMMON_BUSINESS_RULE_VIOLATION,
+                message);
     }
 
     private MissionCommandTarget resolveStartMissionTarget(
@@ -311,6 +423,7 @@ public class RobotCommandCreationService {
                           AND m.status IN (%s)
                         ORDER BY m.updated_at DESC, m.mission_id
                         LIMIT 1
+                        FOR UPDATE OF m
                         """.formatted(statusPlaceholders),
                 resultSet -> resultSet.next()
                         ? new MissionCommandTarget(
@@ -359,18 +472,24 @@ public class RobotCommandCreationService {
             RobotCommandCreateRequest request,
             MissionCommandTarget missionTarget
     ) {
-        if (request.commandType()
-                != CommandRequestPayload.CommandType.CANCEL_MISSION) {
+        if (missionTarget == null) {
             return request.parameters();
         }
-        if (missionTarget == null) {
-            throw new IllegalStateException(
-                    "CANCEL_MISSION target was not resolved");
-        }
-        return new RobotCommandCreateRequest.Parameters(
-                missionTarget.missionCode(),
-                null,
-                request.parameters().reason());
+        return switch (request.commandType()) {
+            case COMPLETE_MISSION ->
+                    new RobotCommandCreateRequest.Parameters(
+                            missionTarget.missionCode(),
+                            null,
+                            null,
+                            "OPERATOR_COMPLETED");
+            case CANCEL_MISSION ->
+                    new RobotCommandCreateRequest.Parameters(
+                            missionTarget.missionCode(),
+                            null,
+                            request.parameters().reason(),
+                            null);
+            default -> request.parameters();
+        };
     }
 
     private static String missionStateConflictMessage(
@@ -555,6 +674,16 @@ public class RobotCommandCreationService {
             String missionCode,
             UUID patrolAreaId,
             String areaCode
+    ) {
+    }
+
+    private record CompletionRobotState(
+            String operationalStatus,
+            String connectivityStatus,
+            String robotMode,
+            UUID missionId,
+            String missionStatus,
+            OffsetDateTime telemetryReceivedAt
     ) {
     }
 }
