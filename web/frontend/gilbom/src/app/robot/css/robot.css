@@ -331,6 +331,12 @@
   justify-content: space-between;
 }
 
+.robot-fleet-heading-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
 .robot-fleet-refreshing {
   color: var(--text-muted);
   font-size: 12px;

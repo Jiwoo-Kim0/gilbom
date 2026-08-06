@@ -269,30 +269,7 @@ export function PatrolAreaManagePage() {
   const areaCodeConflict = matchingAreaCodeAvailability?.available === false
 
   return (
-    <section className="page-stack" aria-labelledby="patrol-area-page-title">
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">PATROL AREA</p>
-          <h2 id="patrol-area-page-title">순찰 구역 관리</h2>
-          <p>
-            지도에서 관할 경계를 등록하고 임무에 사용할 활성 구역을 관리합니다.
-          </p>
-        </div>
-        <div className="mission-page-actions">
-          {canManage ? (
-            <button
-              ref={registrationTriggerRef}
-              className="primary-button button-with-icon"
-              type="button"
-              onClick={openRegistration}
-            >
-              <Plus size={17} aria-hidden="true" />
-              새 구역 등록
-            </button>
-          ) : null}
-        </div>
-      </div>
-
+    <section className="page-stack" aria-label="순찰 구역 관리">
       <div className="summary-grid" aria-label="순찰 구역 현황">
         <article className="summary-card">
           <span>등록된 전체 구역</span>
@@ -495,7 +472,20 @@ export function PatrolAreaManagePage() {
             <h3>등록 구역 목록</h3>
             <p>ACTIVE 구역만 순찰 임무 생성 화면의 선택 목록에 표시됩니다.</p>
           </div>
-          <span className="status-badge">{areas.length}건</span>
+          <div className="table-heading-actions">
+            <span className="status-badge">{areas.length}건</span>
+            {canManage ? (
+              <button
+                ref={registrationTriggerRef}
+                className="primary-button button-with-icon"
+                type="button"
+                onClick={openRegistration}
+              >
+                <Plus size={17} aria-hidden="true" />
+                새 구역 등록
+              </button>
+            ) : null}
+          </div>
         </div>
 
         {loading && areas.length === 0 ? (

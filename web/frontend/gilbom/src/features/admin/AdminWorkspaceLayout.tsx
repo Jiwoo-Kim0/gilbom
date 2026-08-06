@@ -9,15 +9,7 @@ const adminTabs = [
 
 export function AdminWorkspaceLayout() {
   return (
-    <section className="page-stack" aria-labelledby="admin-page-title">
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">ADMINISTRATION</p>
-          <h2 id="admin-page-title">관리자 설정</h2>
-          <p>계정 승인, 사용자 역할, 역할 권한, MFA 초기화를 서버 정책에 따라 관리합니다.</p>
-        </div>
-      </div>
-
+    <section className="page-stack" aria-label="관리자 설정">
       <nav className="admin-tabs" aria-label="관리자 설정 메뉴">
         {adminTabs.map((tab) => (
           <NavLink

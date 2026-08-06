@@ -5,6 +5,7 @@ import {
   MoreVertical,
   Thermometer,
 } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import type {
   RobotConnectivityStatus,
@@ -15,6 +16,7 @@ import type {
 interface RobotFleetGridProps {
   robots?: RobotFleetItem[]
   loading?: boolean
+  headingAction?: ReactNode
 }
 
 const connectivityStatusLabel: Record<RobotConnectivityStatus, string> = {
@@ -54,12 +56,16 @@ function formatLastReceivedAt(value: string | null): string {
 export function RobotFleetGrid({
   robots = [],
   loading = false,
+  headingAction,
 }: RobotFleetGridProps) {
   return (
     <section className="robot-fleet-section" aria-label="로봇 상세 현황">
       <div className="robot-fleet-heading-row">
         <h3 className="robot-fleet-heading">로봇 상세 현황</h3>
-        {loading && <span className="robot-fleet-refreshing">최신 상태 확인 중…</span>}
+        <div className="robot-fleet-heading-actions">
+          {loading && <span className="robot-fleet-refreshing">최신 상태 확인 중…</span>}
+          {headingAction}
+        </div>
       </div>
 
       {robots.length === 0 ? (

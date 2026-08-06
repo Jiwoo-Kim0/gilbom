@@ -41,13 +41,76 @@
 .report-period-filter legend {
   display: flex;
   width: 100%;
-  gap: 10px;
+  gap: 6px;
   margin-bottom: 7px;
   align-items: center;
   color: var(--text);
   font-size: 13px;
   font-weight: 750;
   white-space: nowrap;
+}
+
+.report-period-info {
+  display: inline-grid;
+  position: relative;
+  width: 17px;
+  height: 17px;
+  border: 1px solid var(--text-muted);
+  border-radius: 50%;
+  align-self: flex-start;
+  place-items: center;
+  color: var(--text-muted);
+  cursor: help;
+  transform: translateY(-1px);
+}
+
+.report-period-info:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.report-period-tooltip {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 10px);
+  left: -58px;
+  width: max-content;
+  max-width: calc(100vw - 48px);
+  padding: 8px 11px;
+  border-radius: 8px;
+  color: #fff;
+  background: #252a28;
+  box-shadow: 0 8px 24px rgba(17, 37, 28, 0.2);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    visibility 140ms ease;
+  visibility: hidden;
+  white-space: nowrap;
+}
+
+.report-period-tooltip::after {
+  position: absolute;
+  top: 100%;
+  left: 63px;
+  width: 8px;
+  height: 8px;
+  background: #252a28;
+  content: '';
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.report-period-info:hover .report-period-tooltip,
+.report-period-info:focus-visible .report-period-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
 }
 
 .report-period-filter input {
@@ -57,15 +120,6 @@
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface-muted);
-}
-
-.report-contract-note {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1.5;
-  white-space: nowrap;
 }
 
 .report-filter-actions {
@@ -115,6 +169,18 @@
 .report-table td {
   height: 64px;
   font-size: 14px;
+}
+
+.report-table th:nth-child(2),
+.report-table td:nth-child(2) {
+  min-width: 230px;
+  white-space: nowrap;
+}
+
+.report-table th:nth-child(5),
+.report-table td:nth-child(5) {
+  min-width: 180px;
+  white-space: nowrap;
 }
 
 .report-table tbody tr + tr td {
@@ -381,6 +447,7 @@
 
 .safe-report-document p {
   color: var(--text);
+  font-weight: 400;
   white-space: pre-wrap;
 }
 
@@ -392,6 +459,7 @@
 
 .safe-report-document li {
   padding-left: 3px;
+  font-weight: 400;
 }
 
 .safe-report-document li::marker {
@@ -409,7 +477,7 @@
 }
 
 .safe-report-structured-field {
-  font-weight: 650;
+  font-weight: 400;
 }
 
 .safe-report-structured-body {

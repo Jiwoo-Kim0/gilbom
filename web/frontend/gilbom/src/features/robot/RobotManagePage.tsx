@@ -274,28 +274,7 @@ export function RobotManagePage() {
   }
 
   return (
-    <section className="page-stack" aria-labelledby="robot-page-title">
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">FLEET</p>
-          <h2 id="robot-page-title">로봇 상태 모니터링</h2>
-          <p>권한 범위 내 로봇의 최신 위치 및 운영 데이터를 추적합니다.</p>
-        </div>
-
-        <div className="robot-page-actions">
-          {canRegister ? (
-            <button
-              className="primary-button button-with-icon"
-              type="button"
-              onClick={openRegistration}
-            >
-              <Plus size={16} aria-hidden="true" />
-              로봇 등록
-            </button>
-          ) : null}
-        </div>
-      </div>
-
+    <section className="page-stack" aria-label="로봇 상태 모니터링">
       {registrationNotice ? (
         <div className="page-alert page-alert-success" role="status">
           {registrationNotice}
@@ -353,7 +332,20 @@ export function RobotManagePage() {
 
       <RobotMap markers={markerItems} summary={summary} />
 
-      <RobotFleetGrid robots={fleetItems} loading={loading} />
+      <RobotFleetGrid
+        robots={fleetItems}
+        loading={loading}
+        headingAction={canRegister ? (
+          <button
+            className="primary-button button-with-icon"
+            type="button"
+            onClick={openRegistration}
+          >
+            <Plus size={16} aria-hidden="true" />
+            로봇 등록
+          </button>
+        ) : null}
+      />
 
       <div className="pagination" aria-label="로봇 목록 페이지">
         <button

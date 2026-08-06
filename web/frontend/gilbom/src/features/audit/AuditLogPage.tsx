@@ -133,15 +133,7 @@ export function AuditLogPage() {
   }
 
   return (
-    <section className="page-stack" aria-labelledby="audit-page-title">
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">SECURITY AUDIT</p>
-          <h2 id="audit-page-title">감사 로그</h2>
-          <p>주요 보안 이벤트와 관리자 변경 이력을 append-only 원본에서 조회합니다.</p>
-        </div>
-      </div>
-
+    <section className="page-stack" aria-label="감사 로그">
       <form className="content-card audit-filter-grid" onSubmit={handleFilter}>
         <label className="admin-form-field" htmlFor="audit-action">
           작업 유형
