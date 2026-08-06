@@ -17,6 +17,7 @@ import type {
   AuditLogItem,
   AuditLogPageResponse,
 } from './auditTypes'
+import { SEOUL_TIME_ZONE } from '../../shared/time/seoulTime.ts'
 
 const emptyFilters: AuditLogFilters = {
   actionType: '',
@@ -28,6 +29,7 @@ const emptyFilters: AuditLogFilters = {
 
 function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: SEOUL_TIME_ZONE,
     dateStyle: 'short',
     timeStyle: 'medium',
   }).format(new Date(value))

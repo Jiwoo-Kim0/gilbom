@@ -20,6 +20,7 @@ import {
 import { useAuthentication } from '../auth/authenticationContext'
 import type { MyProfile } from '../auth/authTypes'
 import { validatePassword } from '../auth/authValidation'
+import { SEOUL_TIME_ZONE } from '../../shared/time/seoulTime.ts'
 
 const mfaLabels: Record<MyProfile['mfaStatus'], string> = {
   ENROLLED: '등록 완료',
@@ -32,6 +33,7 @@ function formatDateTime(value: string | null): string {
     return '기록 없음'
   }
   return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: SEOUL_TIME_ZONE,
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(value))

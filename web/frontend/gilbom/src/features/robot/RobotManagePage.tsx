@@ -37,6 +37,7 @@ import type {
   RobotStreamStatus,
 } from './robotTypes'
 import { useRobotRealtime } from './useRobotRealtime'
+import { SEOUL_TIME_ZONE } from '../../shared/time/seoulTime.ts'
 
 const PAGE_SIZE = 20
 const SNAPSHOT_DEBOUNCE_MILLIS = 400
@@ -116,6 +117,7 @@ function formatDateTime(value: string | null): string {
     return value
   }
   return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: SEOUL_TIME_ZONE,
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',

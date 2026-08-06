@@ -60,6 +60,7 @@ import type {
   RobotOption,
 } from './missionTypes'
 import './mission.css'
+import { SEOUL_TIME_ZONE } from '../../shared/time/seoulTime.ts'
 
 const PAGE_SIZE = 20
 
@@ -116,6 +117,7 @@ function formatDateTime(value: string | null): string {
     return '—'
   }
   return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: SEOUL_TIME_ZONE,
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(value))

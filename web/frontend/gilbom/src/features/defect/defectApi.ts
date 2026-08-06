@@ -14,6 +14,7 @@ import type {
   DefectUpdateRequest,
   PageResponse,
 } from './defectTypes'
+import { seoulInputToInstant } from '../../shared/time/seoulTime.ts'
 
 const BASE_PATH = '/api/v1/defects'
 
@@ -28,12 +29,14 @@ function toQuery(filters: DefectFilters): URLSearchParams {
   if (q.length > 0) {
     query.set('q', q)
   }
-  // date-time 입력은 로컬 시각이므로 UTC ISO로 바꿔 보낸다.
-  if (filters.from.length > 0) {
-    query.set('from', new Date(filters.from).toISOString())
+  // 화면 입력은 타임존이 없는 값이다. 서울 기준으로 해석해 UTC로 보낸다.
+  const from = seoulInputToInstant(filters.from)
+  if (from !== null) {
+    query.set('from', from)
   }
-  if (filters.to.length > 0) {
-    query.set('to', new Date(filters.to).toISOString())
+  const to = seoulInputToInstant(filters.to)
+  if (to !== null) {
+    query.set('to', to)
   }
   for (const status of filters.workflowStatuses) {
     query.append('workflowStatuses', status)
@@ -88,11 +91,13 @@ export function getDefectSummary(
   filters: Pick<DefectFilters, 'from' | 'to' | 'patrolAreaId'>,
 ): Promise<DefectSummary> {
   const query = new URLSearchParams()
-  if (filters.from.length > 0) {
-    query.set('from', new Date(filters.from).toISOString())
+  const from = seoulInputToInstant(filters.from)
+  if (from !== null) {
+    query.set('from', from)
   }
-  if (filters.to.length > 0) {
-    query.set('to', new Date(filters.to).toISOString())
+  const to = seoulInputToInstant(filters.to)
+  if (to !== null) {
+    query.set('to', to)
   }
   if (filters.patrolAreaId.length > 0) {
     query.set('patrolAreaId', filters.patrolAreaId)

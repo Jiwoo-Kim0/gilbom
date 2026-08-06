@@ -12,6 +12,7 @@ import { useAuthentication } from './authenticationContext'
 import { AuthCardHeader, ErrorNotice, FormField } from './AuthFormParts'
 import type { TotpEnrollment } from './authTypes'
 import { validateTotp } from './authValidation'
+import { SEOUL_TIME_ZONE } from '../../shared/time/seoulTime.ts'
 
 export function MfaEnrollmentPage() {
   const navigate = useNavigate()
@@ -170,7 +171,7 @@ export function MfaEnrollmentPage() {
             <FormField
               label="2. 인증 코드 확인"
               htmlFor="mfa-enrollment-code"
-              hint={`등록 정보 유효 시각: ${new Date(enrollment.enrollmentExpiresAt).toLocaleTimeString('ko-KR')}`}
+              hint={`등록 정보 유효 시각: ${new Date(enrollment.enrollmentExpiresAt).toLocaleTimeString('ko-KR', { timeZone: SEOUL_TIME_ZONE })}`}
             >
               <input
                 className="totp-input"

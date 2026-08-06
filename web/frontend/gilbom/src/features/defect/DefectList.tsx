@@ -5,6 +5,7 @@ import {
   WORKFLOW_STATUS_LABELS,
 } from './defectTypes'
 import type { DefectListItem, PageResponse } from './defectTypes'
+import { seoulParts } from '../../shared/time/seoulTime.ts'
 
 const columns = [
   '결함 코드',
@@ -29,13 +30,14 @@ function pad(value: number): string {
  *   폭만 먹었다. 해가 넘어간 결함에만 붙으니 그때는 오히려 눈에 걸린다.
  */
 function formatDateTime(value: string): string {
-  const date = new Date(value)
-  const dayAndTime =
-    `${pad(date.getMonth() + 1)}.${pad(date.getDate())}`
-    + ` ${pad(date.getHours())}:${pad(date.getMinutes())}`
-  return date.getFullYear() === new Date().getFullYear()
+  // 로컬 getter(getHours 등)를 쓰면 보는 사람 기계 설정에 따라 시각이 달라진다.
+  const parts = seoulParts(new Date(value))
+  const dayAndTime = `${pad(parts.month)}.${pad(parts.day)}`
+    + ` ${pad(parts.hour)}:${pad(parts.minute)}`
+  const thisYear = seoulParts(new Date()).year
+  return parts.year === thisYear
     ? dayAndTime
-    : `${String(date.getFullYear()).slice(2)}.${dayAndTime}`
+    : `${String(parts.year).slice(2)}.${dayAndTime}`
 }
 
 function formatCoordinates(defect: DefectListItem): string | null {

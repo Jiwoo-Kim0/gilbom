@@ -28,6 +28,7 @@ import type {
   RobotTelemetryStatistics,
 } from './robotTypes'
 import './robot-telemetry-statistics.css'
+import { SEOUL_TIME_ZONE } from '../../shared/time/seoulTime.ts'
 
 type RobotTelemetryStatisticsCardProps = {
   robotId: string
@@ -49,6 +50,7 @@ function formatDateTime(value: string | null): string {
     return value
   }
   return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: SEOUL_TIME_ZONE,
     dateStyle: 'medium',
     timeStyle: 'medium',
     hour12: false,

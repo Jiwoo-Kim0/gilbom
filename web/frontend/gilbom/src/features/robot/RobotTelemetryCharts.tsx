@@ -13,6 +13,7 @@ import type {
   RobotTelemetrySeriesInterval,
   RobotTelemetrySeriesPoint,
 } from './robotTypes'
+import { SEOUL_TIME_ZONE } from '../../shared/time/seoulTime.ts'
 
 type NumericSeriesKey =
   | 'averageBatteryPercent'
@@ -56,6 +57,7 @@ const intervalMilliseconds: Record<
 }
 
 const bucketFormatter = new Intl.DateTimeFormat('ko-KR', {
+  timeZone: SEOUL_TIME_ZONE,
   month: '2-digit',
   day: '2-digit',
   hour: '2-digit',

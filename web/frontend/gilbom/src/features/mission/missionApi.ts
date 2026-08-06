@@ -18,6 +18,7 @@ import type {
   PatrolRouteListResponse,
   RobotListResponse,
 } from './missionTypes.ts'
+import { seoulInputToInstant } from '../../shared/time/seoulTime.ts'
 
 const MISSION_BASE_PATH = '/api/v1/missions'
 
@@ -26,8 +27,10 @@ function appendInstant(
   name: string,
   value: string,
 ): void {
-  if (value.length > 0) {
-    query.set(name, new Date(value).toISOString())
+  // 입력은 타임존이 없는 값이다. 서울 기준으로 해석해 UTC로 보낸다.
+  const instant = seoulInputToInstant(value)
+  if (instant !== null) {
+    query.set(name, instant)
   }
 }
 

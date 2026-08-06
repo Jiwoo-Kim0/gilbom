@@ -23,8 +23,8 @@ interface DefectFilterProps {
 }
 
 /**
- * `filters.from`은 서버로 나갈 때 시각까지 쓰는 datetime-local 문자열인데, 화면에서는
- * 날짜만 받는다. 그래서 앞 10자만 잘라 보여주고, 고른 날짜는 그 날 0시로 되돌린다.
+ * `filters.from`은 서버로 나갈 때 시각까지 쓰는 문자열인데 화면에서는 날짜만 받는다.
+ * 그래서 앞 10자만 잘라 보여주고, 고른 날짜는 **서울 기준 그 날 0시**로 되돌린다.
  * 상한(`to`)은 받지 않는다. 결함은 미래에 생기지 않으니 늘 "지금"이다.
  */
 function toDateInputValue(from: string): string {

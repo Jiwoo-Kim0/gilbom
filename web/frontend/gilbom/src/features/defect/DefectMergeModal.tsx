@@ -8,9 +8,11 @@ import {
   type DefectListItem,
   type DefectMergeResult,
 } from './defectTypes'
+import { SEOUL_TIME_ZONE } from '../../shared/time/seoulTime.ts'
 
 function formatDateTime(value: string): string {
   return new Date(value).toLocaleString('ko-KR', {
+    timeZone: SEOUL_TIME_ZONE,
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',

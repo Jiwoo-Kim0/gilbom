@@ -4,6 +4,7 @@ import type {
   CommandStatus,
   CommandType,
 } from './commandTypes'
+import { SEOUL_TIME_ZONE } from '../../shared/time/seoulTime.ts'
 
 export type CommandStatusTone =
   | 'progress'
@@ -132,6 +133,7 @@ export function formatCommandDateTime(value: string | null): string {
     return value
   }
   return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: SEOUL_TIME_ZONE,
     dateStyle: 'short',
     timeStyle: 'medium',
     hour12: false,
