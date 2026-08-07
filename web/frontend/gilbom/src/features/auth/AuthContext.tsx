@@ -31,6 +31,7 @@ import {
   AuthenticationContext,
   type AuthenticationContextValue,
 } from './authenticationContext'
+import { createUnauthorizedRecovery } from './unauthorizedRecovery'
 
 type AuthenticationState = {
   status: AuthenticationStatus
@@ -178,9 +179,24 @@ export function AuthenticationProvider({ children }: { children: ReactNode }) {
     void refreshAuthentication()
   }, [refreshAuthentication])
 
-  useEffect(
-    () => subscribeToUnauthorized(clearAuthentication),
+  /*
+   * 401 한 건으로 바로 끊지 않는다. 보조 조회 하나가 실패했을 뿐인데 로그인 화면으로
+   * 튕기던 원인이다 — 세션을 한 번 다시 확인하고, 정말 끊겼을 때만 지운다.
+   */
+  const recoverFromUnauthorized = useMemo(
+    () => createUnauthorizedRecovery(
+      async () => {
+        const sessionState = await getAuthenticationSessionState()
+        return sessionState.authenticationState === 'AUTHENTICATED'
+      },
+      clearAuthentication,
+    ),
     [clearAuthentication],
+  )
+
+  useEffect(
+    () => subscribeToUnauthorized(recoverFromUnauthorized),
+    [recoverFromUnauthorized],
   )
 
   useEffect(() => {

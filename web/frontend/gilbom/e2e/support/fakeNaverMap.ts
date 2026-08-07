@@ -27,6 +27,11 @@ export interface MapCalls {
   clickHandlers: number
   /** 지금 지도에 붙어 있는 마커 좌표. */
   markers: { lat: number; lng: number }[]
+  /**
+   * 지금까지 **만들어진** 마커 수(뗀 것까지 포함). 같은 결과를 다시 읽었을 때 마커를
+   * 통째로 다시 만드는지 — 지도가 깜빡이는지 — 를 이 값으로 본다.
+   */
+  markersCreated: number
 }
 
 export async function installFakeMap(
@@ -280,6 +285,7 @@ export function readMapCalls(page: Page): Promise<MapCalls> {
       markers: calls.markers
         .filter((marker) => marker.live)
         .map(({ lat, lng }) => ({ lat, lng })),
+      markersCreated: calls.markers.length,
     }
   })
 }

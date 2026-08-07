@@ -3448,6 +3448,52 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /api/v1/defects/cluster-details:
+    get:
+      tags: [Defects]
+      operationId: listDefectClusterDetails
+      summary: 지도 묶음 목록용 결함 여러 건 조회
+      description: |
+        지도에서 묶음을 눌렀을 때 펴는 목록의 재료를 한 번에 반환합니다.
+        GeoJSON(`/map`)에는 결함 코드까지만 담겨 있어 위치 이름과 사진이 더 필요한데,
+        결함마다 `GET /{defectId}`와 `GET /{defectId}/image-url`을 부르면 10건짜리
+        묶음 하나에 20개의 요청이 한꺼번에 나갑니다.
+
+        읽기이므로 GET입니다. 조회 권한 범위 밖이거나 다른 결함으로 병합된 id는 404가
+        아니라 응답 배열에서 빠집니다 — 여러 건을 한 번에 묻는 요청이라 한 건 때문에
+        전체가 실패하면 목록이 통째로 비고, 어떤 id가 존재하는지 알려주는 탐색 통로가
+        되지도 않습니다.
+      x-required-permission: DEFECT_STATUS_VIEW
+      security:
+        - serverSession: []
+      parameters:
+        - name: defectIds
+          in: query
+          required: true
+          description: 쉼표로 이어 붙인 결함 id입니다.
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 50
+            items:
+              type: string
+              format: uuid
+          style: form
+          explode: false
+      responses:
+        "200":
+          description: 묶음 목록 항목
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DefectClusterDetailsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /api/v1/defects/merge:
     post:
       tags: [Defects]
@@ -6372,6 +6418,39 @@ components:
           items:
             type: number
             format: double
+
+    DefectClusterItem:
+      type: object
+      additionalProperties: false
+      required: [defectId, incidentCode]
+      description: |
+        지도 묶음 목록 한 줄에 필요한 최소 정보입니다. 위치 이름은 `locationLabel`을
+        먼저 쓰고 없으면 `zoneId`로 떨어지며, 둘 다 없으면 화면이 좌표로 표시합니다.
+      properties:
+        defectId: { type: string, format: uuid }
+        incidentCode: { type: string }
+        locationLabel: { type: string, nullable: true }
+        zoneId: { type: string, nullable: true }
+        imageUrl:
+          type: string
+          nullable: true
+          description: |
+            대표 관측의 만료 있는 조회 URL입니다. 사진이 아직 연결되지 않았거나 저장소를
+            쓸 수 없으면 null이며, 이는 오류가 아닙니다.
+        imageUrlExpiresAt: { type: string, format: date-time, nullable: true }
+
+    DefectClusterDetailsResponse:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          description: |
+            요청한 순서가 아니라 `defectId` 오름차순입니다. 조회 권한 범위 밖이거나
+            다른 결함으로 병합된 id는 404가 아니라 이 배열에서 빠집니다.
+          items:
+            $ref: "#/components/schemas/DefectClusterItem"
 
     DefectUpdateRequest:
       type: object

@@ -176,14 +176,32 @@ async function installFakeMap(page: Page): Promise<void> {
   )
 }
 
+interface StubMapOptions {
+  /** 지도 아래 목록 표에 실을 결함. 표를 쓰지 않는 시험은 비워둔다. */
+  listContent?: ReturnType<typeof defectAt>[]
+  /** 묶음 목록 조회에 이 상태로 답한다. 401 회귀 시험이 쓴다. */
+  clusterDetailsStatus?: number
+  /** 묶음 목록 조회가 들어올 때마다 query string을 담는다. 요청 수를 세는 데 쓴다. */
+  clusterDetailsQueries?: string[]
+  /** 결함 한 건짜리 조회(상세·이미지)가 들어올 때마다 경로를 담는다. */
+  memberQueries?: string[]
+}
+
 async function stubMap(
   page: Page,
   features: ReturnType<typeof featuresAt>,
-  /** 지도 아래 목록 표에 실을 결함. 표를 쓰지 않는 시험은 비워둔다. */
-  listContent: ReturnType<typeof defectAt>[] = [],
+  options: StubMapOptions = {},
 ): Promise<void> {
+  const {
+    listContent = [],
+    clusterDetailsStatus = 200,
+    clusterDetailsQueries,
+    memberQueries,
+  } = options
+
   await page.route('**/api/v1/**', async (route) => {
-    const pathname = new URL(route.request().url()).pathname
+    const url = new URL(route.request().url())
+    const pathname = url.pathname
     if (pathname === '/api/v1/auth/session-state') {
       return fulfillJson(route, {
         authenticationState: 'AUTHENTICATED',
@@ -211,28 +229,65 @@ async function stubMap(
       })
     }
     /*
-     * 묶음 목록은 결함마다 상세(위치 이름)와 사진 URL을 따로 받는다. 지도 GeoJSON에는
-     * 결함 코드까지만 담겨 있기 때문이다.
+     * 묶음 목록은 지도 GeoJSON에 없는 값(위치 이름·사진)을 **한 번에** 받는다. 예전에는
+     * 결함마다 상세와 이미지 URL을 따로 불러 10건이면 20개가 한꺼번에 나갔고, 그중
+     * 하나만 401이어도 로그인이 끊겼다.
      */
-    const detail = /^\/api\/v1\/defects\/([\w-]+)(\/image-url)?$/.exec(pathname)
-    if (detail !== null) {
-      const [, defectId, imageUrl] = detail
-      // `defectAt(i)`가 만든 id의 끝 12자리가 i+1이다.
-      const index = Number(defectId.slice(-12)) - 1
-      if (imageUrl === undefined) {
+    if (pathname === '/api/v1/defects/cluster-details') {
+      clusterDetailsQueries?.push(url.search)
+      if (clusterDetailsStatus !== 200) {
         return fulfillJson(route, {
-          defect: defectAt(index),
-          resolutionNote: null,
-          riskScore: 50,
-          riskRuleVersion: 'v1',
-          riskCalculatedAt: '2026-08-01T00:00:00Z',
-          mergedIntoDefectId: null,
-          mergedDefectIds: [],
-          createdAt: '2026-08-01T00:00:00Z',
-          updatedAt: '2026-08-01T00:00:00Z',
-        })
+          status: clusterDetailsStatus,
+          code: 'AUTH_UNAUTHENTICATED',
+          message: '인증이 필요합니다.',
+          requestId: '00000000-0000-4000-8000-000000000009',
+          details: [],
+        }, clusterDetailsStatus)
       }
-      // 첫 건에만 사진이 있다. 나머지는 아직 연결되지 않은 정상 상태(404)다.
+      const requested = (url.searchParams.get('defectIds') ?? '')
+        .split(',')
+        .filter((value) => value.length > 0)
+      return fulfillJson(route, {
+        items: requested.map((defectId) => {
+          // `defectAt(i)`가 만든 id의 끝 12자리가 i+1이다.
+          const index = Number(defectId.slice(-12)) - 1
+          const defect = defectAt(index)
+          return {
+            defectId,
+            incidentCode: defect.incidentCode,
+            locationLabel: defect.locationLabel,
+            zoneId: defect.zoneId,
+            // 첫 건에만 사진이 있다. 나머지는 아직 연결되지 않은 정상 상태다.
+            imageUrl: index === 0 ? '/e2e-defect-photo.png' : null,
+            imageUrlExpiresAt: index === 0 ? '2099-01-01T00:00:00Z' : null,
+          }
+        }),
+      })
+    }
+
+    const detail = /^\/api\/v1\/defects\/([\w-]+)$/.exec(pathname)
+    if (detail !== null) {
+      const [, defectId] = detail
+      memberQueries?.push(pathname)
+      const index = Number(defectId.slice(-12)) - 1
+      return fulfillJson(route, {
+        defect: defectAt(index),
+        resolutionNote: null,
+        riskScore: 50,
+        riskRuleVersion: 'v1',
+        riskCalculatedAt: '2026-08-01T00:00:00Z',
+        mergedIntoDefectId: null,
+        mergedDefectIds: [],
+        createdAt: '2026-08-01T00:00:00Z',
+        updatedAt: '2026-08-01T00:00:00Z',
+      })
+    }
+    // 상세 카드의 사진은 여전히 단건 발급을 쓴다.
+    const image = /^\/api\/v1\/defects\/([\w-]+)\/image-url$/.exec(pathname)
+    if (image !== null) {
+      const [, defectId] = image
+      memberQueries?.push(pathname)
+      const index = Number(defectId.slice(-12)) - 1
       return index === 0
         ? fulfillJson(route, {
             defectId,
@@ -411,10 +466,10 @@ function tightPoints(count: number): [number, number][] {
 async function openCluster(
   page: Page,
   count: number,
-  listContent: ReturnType<typeof defectAt>[] = [],
+  options: StubMapOptions = {},
 ): Promise<void> {
   await installFakeMap(page)
-  await stubMap(page, featuresAt(tightPoints(count)), listContent)
+  await stubMap(page, featuresAt(tightPoints(count)), options)
   await page.goto('/defects?allStatus=1')
   await expect(page.locator('.defect-map-canvas-wrap')).toBeVisible()
   await expect
@@ -478,7 +533,9 @@ function cardOffset(page: Page): Promise<{ x: number; y: number }> {
 /** 목록 표 첫 행을 눌러 지도 위 상세 카드를 띄운다. */
 async function openDetailCard(page: Page): Promise<void> {
   await installFakeMap(page)
-  await stubMap(page, featuresAt(tightPoints(2)), [defectAt(0), defectAt(1)])
+  await stubMap(page, featuresAt(tightPoints(2)), {
+    listContent: [defectAt(0), defectAt(1)],
+  })
   await page.goto('/defects?allStatus=1')
   await expect(page.locator('.defect-table-body-row')).toHaveCount(2)
   await page.locator('.defect-table-body-row').first().click()
@@ -602,6 +659,56 @@ test.describe('묶음 결함 목록', () => {
     expect(gaps.radius).toBe(gaps.mapRadius)
   })
 
+  test('10건짜리 묶음도 구성원마다 조회하지 않는다', async ({ page }) => {
+    const clusterDetailsQueries: string[] = []
+    const memberQueries: string[] = []
+    await openCluster(page, 10, { clusterDetailsQueries, memberQueries })
+
+    const list = page.getByRole('region', { name: '묶인 결함 목록' })
+    await expect(list.getByRole('listitem')).toHaveCount(10)
+    // 사진 자리표시가 다 걷힐 때까지 기다린다 — 조회가 끝난 시점이다.
+    await expect(page.locator('.defect-cluster-list-photo-loading'))
+      .toHaveCount(0)
+
+    /*
+     * 예전에는 결함마다 상세와 이미지 URL을 따로 불러 **20개**가 한꺼번에 나갔다.
+     * 그 폭증이 401 한 건을 만날 확률을 그만큼 키웠다. 이제 구성원 단건 조회는 0이다.
+     */
+    expect(memberQueries, '구성원마다 따로 묻지 않는다').toEqual([])
+
+    /*
+     * 요청 수는 세지 않는다 — 개발 빌드의 StrictMode가 effect를 두 번 돌려 첫 요청은
+     * 곧바로 취소된다. 중요한 것은 **구성원 수만큼 늘어나지 않는다**는 것이다.
+     */
+    expect(clusterDetailsQueries.length).toBeLessThanOrEqual(2)
+    for (const query of clusterDetailsQueries) {
+      const requested = new URLSearchParams(query).get('defectIds')?.split(',')
+      expect(requested, '구성원 전부를 한 번에 묻는다').toHaveLength(10)
+    }
+  })
+
+  test('목록 조회가 401이어도 로그인 화면으로 튕기지 않는다', async ({ page }) => {
+    /*
+     * 사용자가 겪은 증상. 지도 묶음을 누르면 로그인 창으로 튕겼다. 로그아웃 버튼을 누른
+     * 적이 없는데도, 보조 조회 하나의 401이 전역 처리를 타고 인증 상태를 통째로 지웠다.
+     *
+     * <p>세션 조회(`/auth/session-state`)는 AUTHENTICATED로 답한다 — 세션은 멀쩡하고
+     * 이 요청만 실패한 상황이다.
+     */
+    await openCluster(page, 3, { clusterDetailsStatus: 401 })
+
+    // 목록은 열려 있고, 값을 못 받은 자리는 좌표·사진 없음으로 접힌다.
+    const list = page.getByRole('region', { name: '묶인 결함 목록' })
+    await expect(list).toBeVisible()
+    await expect(page.locator('.defect-cluster-list-photo-loading'))
+      .toHaveCount(0)
+    await expect(list.getByLabel('사진 없음')).toHaveCount(3)
+
+    // 그리고 무엇보다 — 로그인 화면으로 가지 않는다.
+    await expect(page).toHaveURL(/\/defects/)
+    await expect(page.locator('.defect-map-canvas-wrap')).toBeVisible()
+  })
+
   test('닫으면 목록만 사라지고 지도는 그대로다', async ({ page }) => {
     await openCluster(page, 3)
 
@@ -690,7 +797,7 @@ test.describe('고른 결함 가운데 정렬', () => {
   test('아래 목록 표에서 골라도 그 마커가 가운데로 온다', async ({ page }) => {
     const rows = [defectAt(0), defectAt(1), defectAt(2)]
     await installFakeMap(page)
-    await stubMap(page, featuresAt(tightPoints(3)), rows)
+    await stubMap(page, featuresAt(tightPoints(3)), { listContent: rows })
     await page.goto('/defects?allStatus=1')
     await expect(page.locator('.defect-table-body-row')).toHaveCount(3)
 
@@ -706,7 +813,7 @@ test.describe('고른 결함 가운데 정렬', () => {
   test('같은 행을 다시 눌러도 가운데로 되돌아온다', async ({ page }) => {
     const rows = [defectAt(0), defectAt(1)]
     await installFakeMap(page)
-    await stubMap(page, featuresAt(tightPoints(2)), rows)
+    await stubMap(page, featuresAt(tightPoints(2)), { listContent: rows })
     await page.goto('/defects?allStatus=1')
     await expect(page.locator('.defect-table-body-row')).toHaveCount(2)
 

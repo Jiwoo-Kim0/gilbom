@@ -1,5 +1,6 @@
 import { apiJson, jsonBody } from '../../shared/api/apiClient'
 import type {
+  DefectClusterDetails,
   DefectDetail,
   DefectFilters,
   DefectHistoryItem,
@@ -102,6 +103,23 @@ export function getDefectSummary(
 
 export function getDefect(defectId: string): Promise<DefectDetail> {
   return apiJson(`${BASE_PATH}/${defectId}`)
+}
+
+/**
+ * 지도 묶음 목록의 재료를 **한 번에** 받는다.
+ *
+ * <p>예전에는 결함마다 상세와 이미지 URL을 따로 불러 10건짜리 묶음 하나에 스무 개가
+ * 한꺼번에 나갔다. 그중 하나만 401이어도 전역 처리가 로그인을 끊었다.
+ *
+ * <p>`signal`로 끊을 수 있다. 목록을 닫거나 다른 묶음을 누르면 이전 요청은 취소한다 —
+ * 결과만 버리면 서버 일은 그대로 남는다.
+ */
+export function getDefectClusterDetails(
+  defectIds: string[],
+  signal?: AbortSignal,
+): Promise<DefectClusterDetails> {
+  const query = new URLSearchParams({ defectIds: defectIds.join(',') })
+  return apiJson(`${BASE_PATH}/cluster-details?${query}`, { signal })
 }
 
 export function getDefectObservations(

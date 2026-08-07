@@ -252,6 +252,26 @@ export type DefectImageUrl = {
   bboxNorm: number[] | null
 }
 
+/**
+ * 지도 묶음 목록 한 줄. 지도 GeoJSON에 없는 값(위치 이름, 사진)만 담는다.
+ *
+ * <p>`imageUrl`은 사진이 아직 연결되지 않았거나 저장소를 쓸 수 없으면 null이다 —
+ * 목록의 사진 한 칸이 비는 것은 오류가 아니다.
+ */
+export type DefectClusterItem = {
+  defectId: string
+  incidentCode: string
+  locationLabel: string | null
+  zoneId: string | null
+  imageUrl: string | null
+  imageUrlExpiresAt: string | null
+}
+
+export type DefectClusterDetails = {
+  /** 보이지 않는 결함은 404가 아니라 여기서 빠진다. */
+  items: DefectClusterItem[]
+}
+
 export type DefectMergeResult = {
   targetDefectId: string
   mergedDefectIds: string[]

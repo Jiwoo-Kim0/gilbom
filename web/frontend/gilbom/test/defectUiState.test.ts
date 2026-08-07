@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   bboxForDefectMapFilter,
   clusterZoomPlan,
+  defectMapFeaturesEqual,
   isPointOutsideMapView,
   REVEAL_ZOOM,
   unclusterZoomStep,
@@ -500,4 +501,78 @@ test('저장을 막는 이유를 말로 돌려준다', () => {
     '수정 사유를 적어야 저장할 수 있습니다.',
   )
   assert.equal(defectEditBlockingHint(changed, '현장 확인'), null)
+})
+
+/*
+ * 같은 결과를 다시 읽었는지 판단하는 비교. 같으면 이전 배열을 그대로 들고 있어 마커를
+ * 다시 만들지 않는다 — 지도 깜빡임을 막는 자리다.
+ */
+function mapFeature(overrides: {
+  defectId?: string
+  defectType?: string
+  riskLevel?: string
+  workflowStatus?: string
+  coordinates?: [number, number]
+  latestConfidence?: number
+} = {}) {
+  return {
+    geometry: {
+      coordinates: overrides.coordinates ?? ([127.04, 37.5] as [number, number]),
+    },
+    properties: {
+      defectId: overrides.defectId ?? 'defect-1',
+      defectType: overrides.defectType ?? 'DAMAGED',
+      riskLevel: overrides.riskLevel ?? 'HIGH',
+      workflowStatus: overrides.workflowStatus ?? 'NEW',
+      latestConfidence: overrides.latestConfidence ?? 0.9,
+    },
+  }
+}
+
+test('내용이 같은 두 응답은 같다고 본다', () => {
+  // 객체가 달라도(매 조회마다 새로 만들어진다) 그릴 것이 같으면 같다.
+  assert.equal(
+    defectMapFeaturesEqual([mapFeature()], [mapFeature()]),
+    true,
+  )
+  // 마커에 드러나지 않는 값은 보지 않는다. 조금씩 흔들릴 때마다 다시 그릴 이유가 없다.
+  assert.equal(
+    defectMapFeaturesEqual(
+      [mapFeature()],
+      [mapFeature({ latestConfidence: 0.42 })],
+    ),
+    true,
+  )
+})
+
+test('마커 모양을 바꾸는 값이 다르면 다르다고 본다', () => {
+  assert.equal(
+    defectMapFeaturesEqual([mapFeature()], [mapFeature(), mapFeature()]),
+    false,
+  )
+  assert.equal(
+    defectMapFeaturesEqual(
+      [mapFeature()],
+      [mapFeature({ coordinates: [127.05, 37.5] })],
+    ),
+    false,
+  )
+  assert.equal(
+    defectMapFeaturesEqual(
+      [mapFeature()],
+      [mapFeature({ workflowStatus: 'RESOLVED' })],
+    ),
+    false,
+  )
+  assert.equal(
+    defectMapFeaturesEqual(
+      [mapFeature()],
+      [mapFeature({ defectType: 'MISSING' })],
+    ),
+    false,
+  )
+  assert.equal(
+    defectMapFeaturesEqual([mapFeature()], [mapFeature({ defectId: 'other' })]),
+    false,
+  )
 })
