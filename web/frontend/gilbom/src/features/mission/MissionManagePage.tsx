@@ -981,7 +981,7 @@ export function MissionManagePage() {
           </select>
         </label>
         <label className="admin-form-field" htmlFor="mission-filter-from">
-          시작 시각 From
+          시작
           <input
             id="mission-filter-from"
             type="datetime-local"
@@ -993,7 +993,7 @@ export function MissionManagePage() {
           />
         </label>
         <label className="admin-form-field" htmlFor="mission-filter-to">
-          시작 시각 To
+          종료
           <input
             id="mission-filter-to"
             type="datetime-local"
