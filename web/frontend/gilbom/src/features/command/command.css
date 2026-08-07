@@ -104,13 +104,6 @@
   font-weight: 800;
 }
 
-.command-foundation-note {
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-  color: var(--text-muted);
-  font-size: 13px;
-}
-
 .command-history-card {
   display: grid;
   gap: 18px;

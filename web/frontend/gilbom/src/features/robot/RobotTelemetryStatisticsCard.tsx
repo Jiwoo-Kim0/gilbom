@@ -189,18 +189,6 @@ export function RobotTelemetryStatisticsCard({
             <Activity size={19} aria-hidden="true" />
             로봇 Telemetry 통계
           </h3>
-          <p>
-            MQTT v2 측정 이력의 배터리·온도·속도·GPS 품질을 집계합니다.
-          </p>
-          <p
-            className={`robot-telemetry-statistics-live-status ${
-              liveMode ? 'is-live' : ''
-            }`}
-          >
-            {liveMode
-              ? '자동 갱신 중 · SSE 수신 후 최대 5초 이내 DB 통계를 다시 조회합니다.'
-              : '고정 기간 조회 중 · 자동 갱신이 일시 중지되었습니다.'}
-          </p>
         </div>
         <form
           className="robot-telemetry-statistics-filter"

@@ -17,6 +17,7 @@ import type { RobotDetail } from '../robot/robotTypes'
 import type {
   CommandDefinition,
 } from './commandPolicy'
+import { getCommandStatusPresentation } from './commandPresentation'
 import type { CommandResponse } from './commandTypes'
 
 type CommandConfirmModalProps = {
@@ -139,19 +140,19 @@ export function CommandConfirmModal({
             </dd>
           </div>
           <div>
-            <dt>현재 Mission</dt>
+            <dt>현재 임무</dt>
             <dd>
               {mission === null
                 ? getRobotStatusLabel(
                   robot.missionStatus,
-                  '진행 중인 Mission 없음',
+                  '진행 중인 임무 없음',
                 )
                 : `${mission.missionCode} · ${getRobotStatusLabel(mission.status)}`}
             </dd>
           </div>
           <div>
             <dt>명령</dt>
-            <dd>{definition.commandType}</dd>
+            <dd>{definition.label}</dd>
           </div>
         </dl>
 
@@ -207,7 +208,10 @@ export function CommandConfirmModal({
               <span>
                 명령이 접수되었습니다.
                 <strong>{createdCommand.commandId}</strong>
-                <small>현재 상태 {createdCommand.commandStatus}</small>
+                <small>
+                  현재 상태{' '}
+                  {getCommandStatusPresentation(createdCommand.commandStatus).label}
+                </small>
               </span>
             </div>
           ) : null}

@@ -139,7 +139,7 @@ async function executeCommand(
   if (execution.expectedStatus === 'EXPIRED') {
     await expect(detail).toContainText('실행 여부가 불명확')
     await expect(detail).toContainText(
-      '아직 Robot ACK 또는 최종 Result가 없습니다.',
+      '아직 로봇 수신 확인 또는 최종 결과가 없습니다.',
     )
     await expect(detail.locator('[data-result-status]')).toHaveCount(0)
   } else {
@@ -192,9 +192,9 @@ test('실패·거절·만료·중복·늦은 Result를 구분한다', async ({
     exact: true,
   })
   await expect(
-    publishFailedDetail.getByText('Broker 발행 실패', { exact: true }),
+    publishFailedDetail.getByText('메시지 발행 실패', { exact: true }),
   ).toBeVisible()
-  await expect(publishFailedDetail).toContainText('Broker 연결')
+  await expect(publishFailedDetail).toContainText('메시지 중계 서버 연결')
   await publishFailedDetail.getByRole('button', {
     name: '명령 상세 닫기',
   }).click()
@@ -225,7 +225,7 @@ test('실패·거절·만료·중복·늦은 Result를 구분한다', async ({
     label: '임무 종료',
     reason: 'E2E Result Timeout',
     expectedStatus: 'EXPIRED',
-    expectedStatusLabel: '응답 Timeout',
+    expectedStatusLabel: '응답 시간 초과',
   })
 
   await page.waitForTimeout(4_000)

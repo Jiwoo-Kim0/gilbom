@@ -62,7 +62,7 @@ export const COMMAND_DEFINITIONS: readonly CommandDefinition[] = [
   {
     commandType: 'COMPLETE_MISSION',
     label: '임무 완료',
-    impact: '로봇에 완료 명령을 보내고, 안전 정지 후 완료 Event가 수신되면 COMPLETED로 확정합니다.',
+    impact: '로봇에 완료 명령을 보내고, 안전하게 정지한 뒤 완료 이벤트가 수신되면 완료 상태로 확정합니다.',
     tone: 'default',
     requiresReason: false,
     requiresSafetyConfirmation: true,
@@ -71,7 +71,7 @@ export const COMMAND_DEFINITIONS: readonly CommandDefinition[] = [
   {
     commandType: 'CANCEL_MISSION',
     label: '임무 취소',
-    impact: '수행할 수 없는 현재 임무를 취소(CANCELLED)합니다.',
+    impact: '수행할 수 없는 현재 임무를 취소합니다.',
     tone: 'default',
     requiresReason: true,
     requiresSafetyConfirmation: false,
@@ -164,7 +164,7 @@ export function getCommandAvailability(
       }
       return state.hasMissionTarget
         ? enabled()
-        : disabled('시작할 Mission 정보를 불러오지 못했습니다.')
+        : disabled('시작할 임무 정보를 불러오지 못했습니다.')
     case 'PAUSE_MISSION':
       return state.missionStatus === 'RUNNING'
         ? enabled()
@@ -203,7 +203,7 @@ export function buildCommandRequest(
   switch (commandType) {
     case 'START_MISSION':
       if (mission === null || mission.status !== 'READY') {
-        throw new Error('시작할 READY Mission 정보가 없습니다.')
+        throw new Error('시작할 준비 상태 임무 정보가 없습니다.')
       }
       return {
         commandType,

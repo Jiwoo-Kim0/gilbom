@@ -300,7 +300,7 @@ export function MissionCommandActions({
     >
       <div className="mission-command-heading">
         <div>
-          <p className="eyebrow">MISSION CONTROL</p>
+          <p className="eyebrow">임무 제어</p>
           <h4 id="mission-command-title">임무 제어</h4>
         </div>
         {robot !== null ? (

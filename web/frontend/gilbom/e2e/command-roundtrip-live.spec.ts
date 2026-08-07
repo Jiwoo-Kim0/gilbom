@@ -152,8 +152,8 @@ test('긴급정지 복구를 포함한 일곱 명령이 정상 왕복한다', as
     await expect(
       detail.locator('[data-result-status="COMPLETED"]'),
     ).toBeVisible()
-    await expect(detail.getByText('Robot 수신 ACK')).toBeVisible()
-    await expect(detail.getByText('최종 Result')).toBeVisible()
+    await expect(detail.getByText('로봇 수신 확인')).toBeVisible()
+    await expect(detail.getByText('최종 결과')).toBeVisible()
     await detail.getByRole('button', {
       name: '명령 상세 닫기',
     }).click()

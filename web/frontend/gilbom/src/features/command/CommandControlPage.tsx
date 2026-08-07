@@ -396,9 +396,8 @@ export function CommandControlPage({
       ) : null}
       <div className="command-section-heading">
         <div>
-          <p className="eyebrow">CONTROL</p>
+          <p className="eyebrow">제어</p>
           <h3 id="command-section-title">명령 관리</h3>
-          <p>현재 로봇·Mission 상태에 허용되는 명령만 실행할 수 있습니다.</p>
         </div>
         <div className="command-page-actions">
           <span className={`command-access-badge${canExecute ? ' can-execute' : ''}`}>
@@ -423,7 +422,7 @@ export function CommandControlPage({
       ) : null}
       {missionError ? (
         <div className="page-alert" role="alert">
-          Mission 정보를 불러오지 못했습니다. {getApiErrorMessage(missionError)}
+          임무 정보를 불러오지 못했습니다. {getApiErrorMessage(missionError)}
         </div>
       ) : null}
       {immediateCommandError !== null ? (
@@ -443,7 +442,7 @@ export function CommandControlPage({
       <article className="content-card command-controls-card">
         <div className="command-controls-heading">
           <div>
-            <p className="eyebrow">REMOTE CONTROL</p>
+            <p className="eyebrow">원격 제어</p>
             <h3>로봇 제어</h3>
           </div>
           <div className="command-current-context">
@@ -505,11 +504,11 @@ export function CommandControlPage({
 
       <article className="content-card command-foundation-card">
         <div>
-          <p className="eyebrow">COMMAND API</p>
+          <p className="eyebrow">명령 연동</p>
           <h3>명령 데이터 연결</h3>
         </div>
         {loading ? (
-          <p aria-live="polite">명령 정본을 불러오는 중입니다.</p>
+          <p aria-live="polite">최신 명령 정보를 불러오는 중입니다.</p>
         ) : commands === null ? (
           <p>명령 데이터를 불러오지 못했습니다.</p>
         ) : (
@@ -528,14 +527,10 @@ export function CommandControlPage({
             </div>
             <div>
               <dt>실시간 연결</dt>
-              <dd>{streamStatus}</dd>
+              <dd>{getRobotStatusLabel(streamStatus)}</dd>
             </div>
           </dl>
         )}
-        <p className="command-foundation-note">
-          화면의 상태 검사는 조작 실수를 줄이기 위한 보조 정책이며 Backend가
-          권한·Robot 범위·최종 업무 상태를 다시 검증합니다.
-        </p>
       </article>
 
       <CommandHistoryPanel
