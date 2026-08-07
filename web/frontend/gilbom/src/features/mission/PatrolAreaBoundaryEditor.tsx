@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react'
 import { loadNaverMapsScript } from '../../lib/naverMaps'
+import { calculateCenter } from '../../shared/api/mapUtils'
 import { orderBoundaryPointsForPolygon } from './patrolAreaBoundary'
 import type { GeoJsonCoordinate } from './missionTypes'
 import './patrol-area-boundary-editor.css'
@@ -238,10 +239,14 @@ export function PatrolAreaBoundaryEditor({
           return
         }
         const { maps } = window.naver
+        const initialCenter = calculateCenter(
+          pointsRef.current,
+          DEFAULT_CENTER,
+        )
         const map = new maps.Map(mapElementRef.current, {
           center: new maps.LatLng(
-            DEFAULT_CENTER.latitude,
-            DEFAULT_CENTER.longitude,
+            initialCenter.latitude,
+            initialCenter.longitude,
           ),
           zoom: BOUNDARY_EDITOR_ZOOM,
           minZoom: BOUNDARY_EDITOR_MIN_ZOOM,

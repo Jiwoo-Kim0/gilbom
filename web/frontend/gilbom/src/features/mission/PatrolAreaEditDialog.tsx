@@ -401,13 +401,7 @@ export function PatrolAreaEditDialog({
                   </option>
                 ))}
               </select>
-              {area.lifecycleStatus !== 'INACTIVE' ? (
-                <small>
-                  {area.lifecycleStatus === 'ACTIVE'
-                    ? '활성화와 비활성화를 자유롭게 변경할 수 있습니다.'
-                    : '폐기된 구역입니다.'}
-                </small>
-              ) : null}
+              
             </label>
           </div>
 
