@@ -590,7 +590,7 @@ export function MissionManagePage() {
       || autonomousRouteId.length === 0
     ) {
       setFormError(new Error(
-        'Robot과 순찰 구역을 선택하고 내부 경로 설정을 확인해주세요.',
+        '로봇과 순찰 구역을 선택하고 내부 경로 설정을 확인해주세요.',
       ))
       return
     }
@@ -778,7 +778,7 @@ export function MissionManagePage() {
             id="mission-create-modal-description"
             className="mission-create-description"
           >
-            활성 Robot과 순찰 구역, 계획 시간을 설정합니다. 경로는 로봇이
+            활성 로봇과 순찰 구역, 계획 시간을 설정합니다. 경로는 로봇이
             구역 안에서 자율 결정하며 임무 코드는 서버에서 자동 생성됩니다.
           </p>
           {catalogError ? (
@@ -794,7 +794,7 @@ export function MissionManagePage() {
           <form className="mission-create-form" onSubmit={handleCreate}>
             <div className="mission-create-selection-fields">
               <label className="admin-form-field" htmlFor="mission-create-robot">
-                Robot
+                로봇
                 <select
                   id="mission-create-robot"
                   autoFocus
@@ -804,7 +804,7 @@ export function MissionManagePage() {
                   required
                 >
                   <option value="">
-                    {catalogLoading ? 'Robot 불러오는 중…' : 'Robot 선택'}
+                    {catalogLoading ? '로봇 불러오는 중…' : '로봇 선택'}
                   </option>
                   {activeRobots.map((robot) => (
                     <option key={robot.robotId} value={robot.robotId}>
@@ -813,7 +813,7 @@ export function MissionManagePage() {
                   ))}
                 </select>
                 <small>
-                  Online상태의 Mission이 부여되지 않은 로봇만 선택이 가능합니다.
+                  온라인 상태이며 임무가 부여되지 않은 로봇만 선택할 수 있습니다.
                 </small>
               </label>
               <label className="admin-form-field" htmlFor="mission-create-area">
@@ -906,7 +906,7 @@ export function MissionManagePage() {
 
       <form className="content-card mission-filter-grid" onSubmit={handleFilter}>
         <label className="admin-form-field" htmlFor="mission-filter-robot">
-          Robot
+          로봇
           <select
             id="mission-filter-robot"
             value={draftFilters.robotId}
@@ -915,7 +915,7 @@ export function MissionManagePage() {
               robotId: event.target.value,
             }))}
           >
-            <option value="">전체 Robot</option>
+            <option value="">전체 로봇</option>
             {robots.map((robot) => (
               <option key={robot.robotId} value={robot.robotId}>
                 {robot.robotName} ({robot.mqttId})
@@ -1068,7 +1068,7 @@ export function MissionManagePage() {
                 <thead>
                   <tr>
                     <th scope="col">임무</th>
-                    <th scope="col">Robot</th>
+                    <th scope="col">로봇</th>
                     <th scope="col">순찰 구역</th>
                     <th scope="col">상태</th>
                     <th scope="col">진행률</th>
@@ -1352,7 +1352,7 @@ export function MissionManagePage() {
 
               <dl className="mission-detail-grid">
                 <div>
-                  <dt><Bot size={14} aria-hidden="true" /> Robot</dt>
+                  <dt><Bot size={14} aria-hidden="true" /> 로봇</dt>
                   <dd>{selectedMission.robotName}</dd>
                 </div>
                 <div>
