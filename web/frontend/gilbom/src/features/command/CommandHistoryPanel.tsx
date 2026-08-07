@@ -16,6 +16,7 @@ import {
 } from 'react'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { lockBodyScroll } from '../../shared/dom/bodyScrollLock'
+import { getRobotStatusLabel } from '../robot/robotStatusPresentation'
 import type { RobotStreamStatus } from '../robot/robotTypes'
 import {
   getRobotCommand,
@@ -395,7 +396,7 @@ export function CommandHistoryPanel({
                           </div>
                           <div>
                             <dt>결과 Mode</dt>
-                            <dd>{result.resultingMode || '—'}</dd>
+                            <dd>{getRobotStatusLabel(result.resultingMode)}</dd>
                           </div>
                           <div>
                             <dt>상태 사유</dt>

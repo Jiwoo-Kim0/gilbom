@@ -35,7 +35,7 @@ export const COMMAND_DEFINITIONS: readonly CommandDefinition[] = [
   {
     commandType: 'START_MISSION',
     label: '임무 시작',
-    impact: '선택된 READY 임무를 로봇에 전달하고 순찰을 시작합니다.',
+    impact: '선택된 준비 상태 임무를 로봇에 전달하고 순찰을 시작합니다.',
     tone: 'default',
     requiresReason: false,
     requiresSafetyConfirmation: false,
@@ -80,7 +80,7 @@ export const COMMAND_DEFINITIONS: readonly CommandDefinition[] = [
   {
     commandType: 'EMERGENCY_STOP',
     label: '긴급정지',
-    impact: '로봇을 즉시 SAFE_STOP 상태로 전환합니다.',
+    impact: '로봇을 즉시 긴급 정지 상태로 전환합니다.',
     tone: 'danger',
     requiresReason: true,
     requiresSafetyConfirmation: false,
@@ -89,13 +89,18 @@ export const COMMAND_DEFINITIONS: readonly CommandDefinition[] = [
   {
     commandType: 'CLEAR_EMERGENCY_STOP',
     label: '긴급정지 해제',
-    impact: 'SAFE_STOP을 해제해 후속 임무 제어가 가능한 상태로 전환합니다.',
+    impact: '긴급 정지를 해제해 후속 임무 제어가 가능한 상태로 전환합니다.',
     tone: 'default',
     requiresReason: true,
     requiresSafetyConfirmation: true,
     safetyMessage: '정지 원인이 제거되었고 로봇 주변의 안전 조건을 확인했습니다.',
   },
 ] as const
+
+export const IMMEDIATE_COMMAND_REASONS: Partial<Record<CommandType, string>> = {
+  PAUSE_MISSION: '운영자 즉시 일시정지',
+  EMERGENCY_STOP: '운영자 즉시 긴급정지',
+}
 
 export const IN_FLIGHT_COMMAND_STATUSES: readonly CommandStatus[] = [
   'CREATED',
@@ -149,13 +154,13 @@ export function getCommandAvailability(
     return disabled('긴급정지를 해제한 뒤 실행할 수 있습니다.')
   }
   if (commandType === 'CLEAR_EMERGENCY_STOP') {
-    return disabled('로봇이 SAFE_STOP 상태가 아닙니다.')
+    return disabled('로봇이 긴급 정지 상태가 아닙니다.')
   }
 
   switch (commandType) {
     case 'START_MISSION':
       if (state.missionStatus !== 'READY') {
-        return disabled('READY 임무에서만 시작할 수 있습니다.')
+        return disabled('준비 상태 임무에서만 시작할 수 있습니다.')
       }
       return state.hasMissionTarget
         ? enabled()
@@ -163,15 +168,15 @@ export function getCommandAvailability(
     case 'PAUSE_MISSION':
       return state.missionStatus === 'RUNNING'
         ? enabled()
-        : disabled('RUNNING 임무에서만 일시정지할 수 있습니다.')
+        : disabled('진행 상태 임무에서만 일시정지할 수 있습니다.')
     case 'RESUME_MISSION':
       return state.missionStatus === 'PAUSED'
         ? enabled()
-        : disabled('PAUSED 임무에서만 재개할 수 있습니다.')
+        : disabled('정지 상태 임무에서만 재개할 수 있습니다.')
     case 'COMPLETE_MISSION':
       return state.missionStatus === 'RUNNING'
         ? enabled()
-        : disabled('RUNNING 임무만 완료할 수 있습니다. 일시정지 상태라면 먼저 재개해주세요.')
+        : disabled('진행 상태 임무만 완료할 수 있습니다. 정지 상태라면 먼저 재개해주세요.')
     case 'CANCEL_MISSION':
       return (
         state.missionStatus === 'READY'
@@ -179,14 +184,14 @@ export function getCommandAvailability(
         || state.missionStatus === 'PAUSED'
       )
         ? enabled()
-        : disabled('READY·RUNNING·PAUSED 임무만 취소할 수 있습니다.')
+        : disabled('준비·진행·정지 상태 임무만 취소할 수 있습니다.')
     case 'EMERGENCY_STOP':
       return (
         state.missionStatus === 'RUNNING'
         || state.missionStatus === 'PAUSED'
       )
         ? enabled()
-        : disabled('RUNNING 또는 PAUSED 임무에서만 긴급정지할 수 있습니다.')
+        : disabled('진행 또는 정지 상태 임무에서만 긴급정지할 수 있습니다.')
   }
 }
 

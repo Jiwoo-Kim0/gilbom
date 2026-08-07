@@ -12,6 +12,7 @@ import {
 } from 'react'
 import { lockBodyScroll } from '../../shared/dom/bodyScrollLock'
 import type { Mission } from '../mission/missionTypes'
+import { getRobotStatusLabel } from '../robot/robotStatusPresentation'
 import type { RobotDetail } from '../robot/robotTypes'
 import type {
   CommandDefinition,
@@ -132,14 +133,20 @@ export function CommandConfirmModal({
           </div>
           <div>
             <dt>로봇 상태</dt>
-            <dd>{robot.connectivityStatus} · {robot.robotMode ?? '모드 없음'}</dd>
+            <dd>
+              {getRobotStatusLabel(robot.connectivityStatus)} ·{' '}
+              {getRobotStatusLabel(robot.robotMode, '모드 없음')}
+            </dd>
           </div>
           <div>
             <dt>현재 Mission</dt>
             <dd>
               {mission === null
-                ? robot.missionStatus ?? '진행 중인 Mission 없음'
-                : `${mission.missionCode} · ${mission.status}`}
+                ? getRobotStatusLabel(
+                  robot.missionStatus,
+                  '진행 중인 Mission 없음',
+                )
+                : `${mission.missionCode} · ${getRobotStatusLabel(mission.status)}`}
             </dd>
           </div>
           <div>
