@@ -67,7 +67,7 @@ const PAGE_SIZE = 20
 const emptyFilters: MissionFilters = {
   robotId: '',
   patrolAreaId: '',
-  scope: 'ACTIVE',
+  scope: 'ALL',
   status: '',
   startedFrom: '',
   startedTo: '',
@@ -952,9 +952,9 @@ export function MissionManagePage() {
               status: '',
             }))}
           >
+            <option value="ALL">전체 임무</option>
             <option value="ACTIVE">진행 중·대기 임무</option>
             <option value="TERMINAL">종료된 임무</option>
-            <option value="ALL">전체 임무</option>
           </select>
         </label>
         <label className="admin-form-field" htmlFor="mission-filter-status">
