@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from 'react'
 import { loadNaverMapsScript } from '../../lib/naverMaps'
+import { getRobotStatusLabel } from '../robot/robotStatusPresentation'
 import type { RobotMapItem } from '../robot/robotTypes'
 import {
   calculateBoundaryAverageCenter,
@@ -516,7 +517,7 @@ export function PatrolAreaSelectionPreview({
                 `경도 ${robotPosition.longitude.toFixed(7)}`,
                 robotPosition.missionStatus === null
                   ? '임무 미수행'
-                  : `임무 ${robotPosition.missionStatus}`,
+                  : `임무 ${getRobotStatusLabel(robotPosition.missionStatus)}`,
               ].join(' · ')}
           </code>
         </div>
