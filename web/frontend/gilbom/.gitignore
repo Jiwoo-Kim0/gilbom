@@ -15,6 +15,12 @@ dist-ssr
 .env.*
 !.env.example
 
+# Playwright 산출물. 실패했을 때만 스크린샷·trace 가 쌓이고, Windows Playwright 가
+# WSL 공유로 만들면 root 소유라 지우기도 번거롭다 —
+# powershell.exe -NoProfile -Command "Remove-Item -Recurse -Force '\\wsl.localhost\...'"
+test-results/
+playwright-report/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
