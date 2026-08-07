@@ -203,11 +203,6 @@ export function RobotTelemetryCharts({
       <div className="robot-telemetry-charts-heading">
         <div>
           <h4>Telemetry 추이</h4>
-          <p>
-            {series.interval} 구간 평균과 경계값 · 총
-            {' '}
-            {series.points.length}개 지점
-          </p>
         </div>
       </div>
       <div className="robot-telemetry-charts-grid">

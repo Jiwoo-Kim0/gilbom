@@ -31,6 +31,7 @@ import type {
   RobotDetail,
   RobotStreamStatus,
 } from '../robot/robotTypes'
+import { getRobotStatusLabel } from '../robot/robotStatusPresentation'
 import {
   CommandCreateAttempt,
   createRobotCommand,
@@ -40,6 +41,7 @@ import { CommandConfirmModal } from './CommandConfirmModal'
 import { CommandHistoryPanel } from './CommandHistoryPanel'
 import {
   COMMAND_DEFINITIONS,
+  IMMEDIATE_COMMAND_REASONS,
   IN_FLIGHT_COMMAND_STATUSES,
   buildCommandRequest,
   getCommandAvailability,
@@ -149,6 +151,12 @@ export function CommandControlPage({
   const [createdCommand, setCreatedCommand] = useState<CommandResponse | null>(
     null,
   )
+  const [immediateCommandError, setImmediateCommandError] = useState<
+    string | null
+  >(null)
+  const [immediateCommandNotice, setImmediateCommandNotice] = useState<
+    string | null
+  >(null)
   const submitInFlightRef = useRef(false)
   const attemptRef = useRef<CommandCreateAttempt | null>(null)
   const canExecute = user?.permissions.includes(ROBOT_COMMAND_EXECUTE) ?? false
@@ -254,6 +262,39 @@ export function CommandControlPage({
     setSelectedCommand(definition.commandType)
     setSubmitError(null)
     setCreatedCommand(null)
+    setImmediateCommandError(null)
+    setImmediateCommandNotice(null)
+  }
+
+  function issueImmediateCommand(definition: CommandDefinition) {
+    const reason = IMMEDIATE_COMMAND_REASONS[definition.commandType]
+    if (reason === undefined) {
+      openConfirmModal(definition)
+      return
+    }
+
+    const availability = getCommandAvailability(
+      definition.commandType,
+      {
+        connectivityStatus: robot.connectivityStatus,
+        operationalStatus: robot.operationalStatus,
+        robotMode: robot.robotMode,
+        missionStatus: effectiveMissionStatus,
+        hasMissionTarget: currentMission !== null,
+        pendingCommandTypes,
+      },
+    )
+    if (!availability.enabled || !canExecute) {
+      return
+    }
+
+    attemptRef.current?.reset()
+    setSelectedCommand(null)
+    setSubmitError(null)
+    setCreatedCommand(null)
+    setImmediateCommandError(null)
+    setImmediateCommandNotice(null)
+    void submitCommand(definition.commandType, reason, true)
   }
 
   const closeConfirmModal = useCallback(() => {
@@ -266,10 +307,13 @@ export function CommandControlPage({
     setCreatedCommand(null)
   }, [])
 
-  async function submitCommand(reason: string) {
+  async function submitCommand(
+    commandType: CommandType,
+    reason: string,
+    immediate = false,
+  ) {
     if (
-      selectedCommand === null
-      || submitInFlightRef.current
+      submitInFlightRef.current
       || attemptRef.current === null
     ) {
       return
@@ -278,28 +322,50 @@ export function CommandControlPage({
     let input
     try {
       input = buildCommandRequest(
-        selectedCommand,
+        commandType,
         currentMission,
         reason,
       )
     } catch (nextError) {
-      setSubmitError(getApiErrorMessage(nextError))
+      const message = getApiErrorMessage(nextError)
+      if (immediate) {
+        setImmediateCommandError(message)
+      } else {
+        setSubmitError(message)
+      }
       return
     }
 
     submitInFlightRef.current = true
     setSubmitting(true)
-    setSubmitError(null)
+    if (immediate) {
+      setImmediateCommandError(null)
+      setImmediateCommandNotice(null)
+    } else {
+      setSubmitError(null)
+    }
     try {
       const command = await createRobotCommand(
         robot.robotId,
         input,
         attemptRef.current,
       )
-      setCreatedCommand(command)
+      if (immediate) {
+        const label = COMMAND_DEFINITIONS.find((definition) => (
+          definition.commandType === commandType
+        ))?.label ?? commandType
+        setImmediateCommandNotice(`${label} 명령을 즉시 발행했습니다.`)
+      } else {
+        setCreatedCommand(command)
+      }
       setCommands((current) => upsertCreatedCommand(current, command))
     } catch (nextError) {
-      setSubmitError(commandLoadErrorMessage(nextError))
+      const message = commandLoadErrorMessage(nextError)
+      if (immediate) {
+        setImmediateCommandError(message)
+      } else {
+        setSubmitError(message)
+      }
     } finally {
       submitInFlightRef.current = false
       setSubmitting(false)
@@ -330,9 +396,8 @@ export function CommandControlPage({
       ) : null}
       <div className="command-section-heading">
         <div>
-          <p className="eyebrow">CONTROL</p>
+          <p className="eyebrow">제어</p>
           <h3 id="command-section-title">명령 관리</h3>
-          <p>현재 로봇·Mission 상태에 허용되는 명령만 실행할 수 있습니다.</p>
         </div>
         <div className="command-page-actions">
           <span className={`command-access-badge${canExecute ? ' can-execute' : ''}`}>
@@ -357,21 +422,34 @@ export function CommandControlPage({
       ) : null}
       {missionError ? (
         <div className="page-alert" role="alert">
-          Mission 정보를 불러오지 못했습니다. {getApiErrorMessage(missionError)}
+          임무 정보를 불러오지 못했습니다. {getApiErrorMessage(missionError)}
+        </div>
+      ) : null}
+      {immediateCommandError !== null ? (
+        <div className="page-alert command-immediate-feedback" role="alert">
+          {immediateCommandError}
+        </div>
+      ) : null}
+      {immediateCommandNotice !== null ? (
+        <div
+          className="command-immediate-feedback success"
+          role="status"
+        >
+          {immediateCommandNotice}
         </div>
       ) : null}
 
       <article className="content-card command-controls-card">
         <div className="command-controls-heading">
           <div>
-            <p className="eyebrow">REMOTE CONTROL</p>
+            <p className="eyebrow">원격 제어</p>
             <h3>로봇 제어</h3>
           </div>
           <div className="command-current-context">
-            <span>Robot <strong>{robot.robotMode ?? '—'}</strong></span>
-            <span>Mission <strong>{effectiveMissionStatus ?? '—'}</strong></span>
+            <span>로봇 <strong>{getRobotStatusLabel(robot.robotMode)}</strong></span>
+            <span>임무 <strong>{getRobotStatusLabel(effectiveMissionStatus)}</strong></span>
             {currentMission !== null ? (
-              <span>Code <strong>{currentMission.missionCode}</strong></span>
+              <span>코드 <strong>{currentMission.missionCode}</strong></span>
             ) : null}
           </div>
         </div>
@@ -409,7 +487,7 @@ export function CommandControlPage({
                     type="button"
                     aria-describedby={helpId}
                     disabled={!availability.enabled || submitting}
-                    onClick={() => openConfirmModal(definition)}
+                    onClick={() => issueImmediateCommand(definition)}
                   >
                     <Icon size={18} aria-hidden="true" />
                     {definition.label}
@@ -426,11 +504,11 @@ export function CommandControlPage({
 
       <article className="content-card command-foundation-card">
         <div>
-          <p className="eyebrow">COMMAND API</p>
+          <p className="eyebrow">명령 연동</p>
           <h3>명령 데이터 연결</h3>
         </div>
         {loading ? (
-          <p aria-live="polite">명령 정본을 불러오는 중입니다.</p>
+          <p aria-live="polite">최신 명령 정보를 불러오는 중입니다.</p>
         ) : commands === null ? (
           <p>명령 데이터를 불러오지 못했습니다.</p>
         ) : (
@@ -449,14 +527,10 @@ export function CommandControlPage({
             </div>
             <div>
               <dt>실시간 연결</dt>
-              <dd>{streamStatus}</dd>
+              <dd>{getRobotStatusLabel(streamStatus)}</dd>
             </div>
           </dl>
         )}
-        <p className="command-foundation-note">
-          화면의 상태 검사는 조작 실수를 줄이기 위한 보조 정책이며 Backend가
-          권한·Robot 범위·최종 업무 상태를 다시 검증합니다.
-        </p>
       </article>
 
       <CommandHistoryPanel
@@ -476,7 +550,10 @@ export function CommandControlPage({
           submitError={submitError}
           createdCommand={createdCommand}
           onClose={closeConfirmModal}
-          onConfirm={(reason) => void submitCommand(reason)}
+          onConfirm={(reason) => void submitCommand(
+            selectedDefinition.commandType,
+            reason,
+          )}
         />
       ) : null}
     </section>

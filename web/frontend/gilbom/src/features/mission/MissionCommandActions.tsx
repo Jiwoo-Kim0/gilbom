@@ -27,6 +27,7 @@ import {
 import { CommandConfirmModal } from '../command/CommandConfirmModal'
 import {
   COMMAND_DEFINITIONS,
+  IMMEDIATE_COMMAND_REASONS,
   IN_FLIGHT_COMMAND_STATUSES,
   buildCommandRequest,
   getCommandAvailability,
@@ -38,6 +39,7 @@ import type {
 } from '../command/commandTypes'
 import '../command/command.css'
 import { getRobot } from '../robot/robotApi'
+import { getRobotStatusLabel } from '../robot/robotStatusPresentation'
 import type { RobotDetail } from '../robot/robotTypes'
 import type { Mission } from './missionTypes'
 
@@ -98,6 +100,12 @@ export function MissionCommandActions({
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [createdCommand, setCreatedCommand] = useState<CommandResponse | null>(null)
+  const [immediateCommandError, setImmediateCommandError] = useState<
+    string | null
+  >(null)
+  const [immediateCommandNotice, setImmediateCommandNotice] = useState<
+    string | null
+  >(null)
   const submitInFlightRef = useRef(false)
   const attemptRef = useRef(new CommandCreateAttempt())
   const canView = user?.permissions.includes(ROBOT_COMMAND_VIEW) ?? false
@@ -186,6 +194,29 @@ export function MissionCommandActions({
     setSelectedCommand(definition.commandType)
     setSubmitError(null)
     setCreatedCommand(null)
+    setImmediateCommandError(null)
+    setImmediateCommandNotice(null)
+  }
+
+  function issueImmediateCommand(definition: CommandDefinition) {
+    const reason = IMMEDIATE_COMMAND_REASONS[definition.commandType]
+    if (reason === undefined) {
+      openConfirmModal(definition)
+      return
+    }
+
+    const availability = availabilityFor(definition.commandType)
+    if (!canExecute || !availability.enabled || robot === null) {
+      return
+    }
+
+    attemptRef.current.reset()
+    setSelectedCommand(null)
+    setSubmitError(null)
+    setCreatedCommand(null)
+    setImmediateCommandError(null)
+    setImmediateCommandNotice(null)
+    void submitCommand(definition.commandType, reason, true)
   }
 
   const closeConfirmModal = useCallback(() => {
@@ -198,29 +229,50 @@ export function MissionCommandActions({
     setCreatedCommand(null)
   }, [])
 
-  async function submitCommand(reason: string) {
-    if (selectedCommand === null || submitInFlightRef.current) {
+  async function submitCommand(
+    commandType: CommandType,
+    reason: string,
+    immediate = false,
+  ) {
+    if (submitInFlightRef.current) {
       return
     }
 
     let input
     try {
-      input = buildCommandRequest(selectedCommand, mission, reason)
+      input = buildCommandRequest(commandType, mission, reason)
     } catch (error) {
-      setSubmitError(getApiErrorMessage(error))
+      const message = getApiErrorMessage(error)
+      if (immediate) {
+        setImmediateCommandError(message)
+      } else {
+        setSubmitError(message)
+      }
       return
     }
 
     submitInFlightRef.current = true
     setSubmitting(true)
-    setSubmitError(null)
+    if (immediate) {
+      setImmediateCommandError(null)
+      setImmediateCommandNotice(null)
+    } else {
+      setSubmitError(null)
+    }
     try {
       const command = await createRobotCommand(
         mission.robotId,
         input,
         attemptRef.current,
       )
-      setCreatedCommand(command)
+      if (immediate) {
+        const label = COMMAND_DEFINITIONS.find((definition) => (
+          definition.commandType === commandType
+        ))?.label ?? commandType
+        setImmediateCommandNotice(`${label} 명령을 즉시 발행했습니다.`)
+      } else {
+        setCreatedCommand(command)
+      }
       setPendingCommandTypes((current) => (
         current.includes(command.commandType)
           ? current
@@ -228,7 +280,12 @@ export function MissionCommandActions({
       ))
       onCommandCreated()
     } catch (error) {
-      setSubmitError(getApiErrorMessage(error))
+      const message = getApiErrorMessage(error)
+      if (immediate) {
+        setImmediateCommandError(message)
+      } else {
+        setSubmitError(message)
+      }
     } finally {
       submitInFlightRef.current = false
       setSubmitting(false)
@@ -243,12 +300,12 @@ export function MissionCommandActions({
     >
       <div className="mission-command-heading">
         <div>
-          <p className="eyebrow">MISSION CONTROL</p>
+          <p className="eyebrow">임무 제어</p>
           <h4 id="mission-command-title">임무 제어</h4>
         </div>
         {robot !== null ? (
           <span className="mission-command-connectivity">
-            {robot.connectivityStatus}
+            {getRobotStatusLabel(robot.connectivityStatus)}
           </span>
         ) : null}
       </div>
@@ -278,7 +335,7 @@ export function MissionCommandActions({
                   className="command-action-button"
                   type="button"
                   disabled={!availability.enabled || submitting}
-                  onClick={() => openConfirmModal(definition)}
+                  onClick={() => issueImmediateCommand(definition)}
                 >
                   <Icon size={17} aria-hidden="true" />
                   {definition.label}
@@ -295,6 +352,16 @@ export function MissionCommandActions({
           최근 명령 상태를 갱신하지 못했습니다. {getApiErrorMessage(loadError)}
         </p>
       ) : null}
+      {immediateCommandError !== null ? (
+        <div className="page-alert command-immediate-feedback" role="alert">
+          {immediateCommandError}
+        </div>
+      ) : null}
+      {immediateCommandNotice !== null ? (
+        <div className="command-immediate-feedback success" role="status">
+          {immediateCommandNotice}
+        </div>
+      ) : null}
 
       {selectedDefinition !== null && robot !== null ? (
         <CommandConfirmModal
@@ -306,7 +373,10 @@ export function MissionCommandActions({
           submitError={submitError}
           createdCommand={createdCommand}
           onClose={closeConfirmModal}
-          onConfirm={(reason) => void submitCommand(reason)}
+          onConfirm={(reason) => void submitCommand(
+            selectedDefinition.commandType,
+            reason,
+          )}
         />
       ) : null}
     </section>

@@ -29,6 +29,7 @@ type CommandExecution = {
   expectedStatus: 'COMPLETED' | 'FAILED' | 'REJECTED' | 'EXPIRED'
   expectedStatusLabel: string
   reason?: string
+  immediate?: boolean
   verifyIdempotentReplay?: boolean
 }
 
@@ -41,24 +42,28 @@ async function executeCommand(
     exact: true,
   })
   await expect(commandButton).toBeEnabled({ timeout: 15_000 })
+  const responsePromise = page.waitForResponse((response) => (
+    response.request().method() === 'POST'
+    && response.url().endsWith(`/api/v1/robots/${robotId}/commands`)
+  ))
   await commandButton.click()
 
   const confirmDialog = page.getByRole('dialog', {
     name: `${execution.label} 확인`,
   })
-  await expect(confirmDialog).toBeVisible()
-  if (execution.reason !== undefined) {
-    await confirmDialog.getByLabel('명령 사유').fill(execution.reason)
+  if (execution.immediate === true) {
+    await expect(confirmDialog).toHaveCount(0)
+  } else {
+    await expect(confirmDialog).toBeVisible()
+    if (execution.reason !== undefined) {
+      await confirmDialog.getByLabel('명령 사유').fill(execution.reason)
+    }
+    await confirmDialog.getByRole('button', {
+      name: `${execution.label} 실행`,
+      exact: true,
+    }).click()
   }
 
-  const responsePromise = page.waitForResponse((response) => (
-    response.request().method() === 'POST'
-    && response.url().endsWith(`/api/v1/robots/${robotId}/commands`)
-  ))
-  await confirmDialog.getByRole('button', {
-    name: `${execution.label} 실행`,
-    exact: true,
-  }).click()
   const response = await responsePromise
   expect(response.status()).toBe(201)
   const command = await response.json() as {
@@ -94,13 +99,20 @@ async function executeCommand(
     expect(replay.publishAttemptCount).toBe(1)
   }
 
-  await expect(
-    confirmDialog.locator('.command-created-result'),
-  ).toContainText(command.commandId)
-  await confirmDialog.getByRole('button', {
-    name: '닫기',
-    exact: true,
-  }).click()
+  if (execution.immediate === true) {
+    await expect(page.getByText(
+      `${execution.label} 명령을 즉시 발행했습니다.`,
+      { exact: true },
+    )).toBeVisible()
+  } else {
+    await expect(
+      confirmDialog.locator('.command-created-result'),
+    ).toContainText(command.commandId)
+    await confirmDialog.getByRole('button', {
+      name: '닫기',
+      exact: true,
+    }).click()
+  }
 
   const terminalRow = page.locator(
     `[data-command-id="${command.commandId}"]`
@@ -127,7 +139,7 @@ async function executeCommand(
   if (execution.expectedStatus === 'EXPIRED') {
     await expect(detail).toContainText('실행 여부가 불명확')
     await expect(detail).toContainText(
-      '아직 Robot ACK 또는 최종 Result가 없습니다.',
+      '아직 로봇 수신 확인 또는 최종 결과가 없습니다.',
     )
     await expect(detail.locator('[data-result-status]')).toHaveCount(0)
   } else {
@@ -180,9 +192,9 @@ test('실패·거절·만료·중복·늦은 Result를 구분한다', async ({
     exact: true,
   })
   await expect(
-    publishFailedDetail.getByText('Broker 발행 실패', { exact: true }),
+    publishFailedDetail.getByText('메시지 발행 실패', { exact: true }),
   ).toBeVisible()
-  await expect(publishFailedDetail).toContainText('Broker 연결')
+  await expect(publishFailedDetail).toContainText('메시지 중계 서버 연결')
   await publishFailedDetail.getByRole('button', {
     name: '명령 상세 닫기',
   }).click()
@@ -196,7 +208,7 @@ test('실패·거절·만료·중복·늦은 Result를 구분한다', async ({
   const failedCommandId = await executeCommand(page, {
     commandType: 'PAUSE_MISSION',
     label: '일시정지',
-    reason: 'E2E 강제 실패',
+    immediate: true,
     expectedStatus: 'FAILED',
     expectedStatusLabel: '실행 실패',
     verifyIdempotentReplay: true,
@@ -204,7 +216,7 @@ test('실패·거절·만료·중복·늦은 Result를 구분한다', async ({
   const rejectedCommandId = await executeCommand(page, {
     commandType: 'EMERGENCY_STOP',
     label: '긴급정지',
-    reason: 'E2E 안전 조건 거절',
+    immediate: true,
     expectedStatus: 'REJECTED',
     expectedStatusLabel: '실행 거절',
   })
@@ -213,7 +225,7 @@ test('실패·거절·만료·중복·늦은 Result를 구분한다', async ({
     label: '임무 종료',
     reason: 'E2E Result Timeout',
     expectedStatus: 'EXPIRED',
-    expectedStatusLabel: '응답 Timeout',
+    expectedStatusLabel: '응답 시간 초과',
   })
 
   await page.waitForTimeout(4_000)

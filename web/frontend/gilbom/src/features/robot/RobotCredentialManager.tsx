@@ -21,6 +21,7 @@ import {
   type IssuedMqttCredential,
 } from './robotCredentialApi'
 import { getRobots } from './robotApi'
+import { getRobotStatusLabel } from './robotStatusPresentation'
 import type { RobotListItem } from './robotTypes'
 import './robot-credential-manager.css'
 
@@ -203,13 +204,13 @@ export function RobotCredentialManager({
                         provisioning ? 'is-provisioning' : 'is-active',
                       ].join(' ')}
                     >
-                      {robot.operationalStatus}
+                      {getRobotStatusLabel(robot.operationalStatus)}
                     </span>
                     <small>
-                      {robot.connectivityStatus}
+                      {getRobotStatusLabel(robot.connectivityStatus)}
                       {robot.missionStatus === null
                         ? ' · 임무 미수행'
-                        : ` · 임무 ${robot.missionStatus}`}
+                        : ` · 임무 ${getRobotStatusLabel(robot.missionStatus)}`}
                     </small>
                   </div>
                   <button

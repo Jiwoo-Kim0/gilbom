@@ -16,6 +16,7 @@ import {
 } from 'react'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
 import { lockBodyScroll } from '../../shared/dom/bodyScrollLock'
+import { getRobotStatusLabel } from '../robot/robotStatusPresentation'
 import type { RobotStreamStatus } from '../robot/robotTypes'
 import {
   getRobotCommand,
@@ -183,9 +184,9 @@ export function CommandHistoryPanel({
       >
         <div className="command-history-heading">
           <div>
-            <p className="eyebrow">ACK &amp; RESULT</p>
+            <p className="eyebrow">수신 및 결과</p>
             <h3>명령 상태·결과</h3>
-            <p>최근 명령 20건의 전달, ACK, 최종 결과를 확인합니다.</p>
+            <p>최근 명령 20건의 전달, 수신 확인, 최종 결과를 확인합니다.</p>
           </div>
           <span
             className={`command-stream-status command-stream-${streamStatus}`}
@@ -262,7 +263,7 @@ export function CommandHistoryPanel({
             >
               <div className="command-detail-heading">
                 <div>
-                  <p className="eyebrow">COMMAND DETAIL</p>
+                  <p className="eyebrow">명령 상세</p>
                   <h3 id={titleId}>
                     {getCommandTypeLabel(displayedDetail.commandType)}
                   </h3>
@@ -309,15 +310,15 @@ export function CommandHistoryPanel({
                   <dd>{formatCommandDateTime(displayedDetail.issuedAt)}</dd>
                 </div>
                 <div className={displayedDetail.sentAt === null ? '' : 'is-complete'}>
-                  <dt>Broker 전송</dt>
+                  <dt>중계 서버 전송</dt>
                   <dd>{formatCommandDateTime(displayedDetail.sentAt)}</dd>
                 </div>
                 <div className={displayedDetail.acceptedAt === null ? '' : 'is-complete'}>
-                  <dt>Robot 수신 ACK</dt>
+                  <dt>로봇 수신 확인</dt>
                   <dd>{formatCommandDateTime(displayedDetail.acceptedAt)}</dd>
                 </div>
                 <div className={displayedDetail.completedAt === null ? '' : 'is-complete'}>
-                  <dt>최종 Result</dt>
+                  <dt>최종 결과</dt>
                   <dd>{formatCommandDateTime(displayedDetail.completedAt)}</dd>
                 </div>
               </dl>
@@ -335,7 +336,7 @@ export function CommandHistoryPanel({
                   <dd>{formatCommandDateTime(displayedDetail.expiresAt)}</dd>
                 </div>
                 <div>
-                  <dt>Publish 시도</dt>
+                  <dt>전송 시도</dt>
                   <dd>{displayedDetail.publishAttemptCount}회</dd>
                 </div>
                 <div>
@@ -346,19 +347,19 @@ export function CommandHistoryPanel({
 
               <div className="command-result-section">
                 <div className="command-result-heading">
-                  <h4>ACK·Result 이력</h4>
+                  <h4>수신·결과 이력</h4>
                   <span>{results.length}건</span>
                 </div>
 
                 {detailLoading ? (
-                  <p aria-live="polite">REST 정본을 갱신하는 중입니다.</p>
+                  <p aria-live="polite">최신 명령 정보를 불러오는 중입니다.</p>
                 ) : detailError !== null ? (
                   <div className="page-alert" role="alert">
                     {detailError}
                   </div>
                 ) : results.length === 0 ? (
                   <p className="command-history-empty">
-                    아직 Robot ACK 또는 최종 Result가 없습니다.
+                    아직 로봇 수신 확인 또는 최종 결과가 없습니다.
                   </p>
                 ) : (
                   <ol className="command-result-list">
@@ -372,7 +373,7 @@ export function CommandHistoryPanel({
                             resultTone(result)
                           }`}
                         >
-                          {result.resultStatus === 'ACCEPTED' ? 'ACK' : 'FINAL'}
+                          {result.resultStatus === 'ACCEPTED' ? '수신' : '최종'}
                         </span>
                         <span className="command-result-summary">
                           <strong>{getCommandResultLabel(result.resultStatus)}</strong>
@@ -382,20 +383,20 @@ export function CommandHistoryPanel({
                         </span>
                         <dl>
                           <div>
-                            <dt>Robot 수신</dt>
+                            <dt>로봇 수신</dt>
                             <dd>{formatCommandDateTime(result.robotReceivedAt)}</dd>
                           </div>
                           <div>
-                            <dt>Robot 완료</dt>
+                            <dt>로봇 완료</dt>
                             <dd>{formatCommandDateTime(result.robotCompletedAt)}</dd>
                           </div>
                           <div>
-                            <dt>Reason</dt>
+                            <dt>사유</dt>
                             <dd>{result.reasonCode || '—'}</dd>
                           </div>
                           <div>
-                            <dt>결과 Mode</dt>
-                            <dd>{result.resultingMode || '—'}</dd>
+                            <dt>결과 모드</dt>
+                            <dd>{getRobotStatusLabel(result.resultingMode)}</dd>
                           </div>
                           <div>
                             <dt>상태 사유</dt>

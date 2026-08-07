@@ -23,17 +23,6 @@
   font-size: 13px;
 }
 
-.robot-telemetry-statistics-heading .robot-telemetry-statistics-live-status {
-  margin-top: 8px;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.robot-telemetry-statistics-heading
-  .robot-telemetry-statistics-live-status.is-live {
-  color: var(--success, #2f855a);
-}
-
 .robot-telemetry-statistics-filter {
   display: flex;
   flex-wrap: wrap;
@@ -121,7 +110,6 @@
   color: var(--text);
 }
 
-.robot-telemetry-charts-heading p,
 .robot-telemetry-chart-heading p {
   margin: 4px 0 0;
   color: var(--text-muted);

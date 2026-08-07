@@ -41,7 +41,7 @@ test('ACK를 최종 성공과 구분하고 완료만 성공 종결로 표시한�
   const accepted = getCommandStatusPresentation('ACCEPTED')
   const completed = getCommandStatusPresentation('COMPLETED')
 
-  assert.equal(accepted.label, 'Robot 수신 ACK')
+  assert.equal(accepted.label, '로봇 수신 확인')
   assert.equal(accepted.tone, 'ack')
   assert.equal(accepted.terminal, false)
   assert.equal(completed.tone, 'success')
@@ -54,7 +54,7 @@ test('실패·거절·Timeout 상태를 서로 다른 의미로 분류한다', (
   assert.equal(getCommandStatusPresentation('EXPIRED').tone, 'expired')
   assert.match(
     getCommandStatusPresentation('EXPIRED').description,
-    /최종 Result/,
+    /최종 결과/,
   )
 })
 
@@ -65,7 +65,7 @@ test('Timeout과 발행 실패는 무조건 재시도하지 않도록 안내한�
   )
   assert.match(
     getCommandOperatorGuidance(commandWithStatus('PUBLISH_FAILED')) ?? '',
-    /Broker 연결/,
+    /메시지 중계 서버 연결/,
   )
   assert.equal(
     getCommandOperatorGuidance(commandWithStatus('COMPLETED')),
