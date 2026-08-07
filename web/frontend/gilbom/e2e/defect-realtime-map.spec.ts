@@ -252,6 +252,58 @@ test.describe('새 결함이 들어왔을 때 지도 이동', () => {
       .toBe(true)
   })
 
+  test('결과가 그대로면 지도가 깜빡이지 않는다', async ({ page }) => {
+    /*
+     * 실시간 알림이 오면 같은 조건으로 지도를 다시 읽는다. 대개 결과가 그대로인데,
+     * 그때마다 전면을 덮는 로딩과 마커 재생성이 일어나면 사용자에게는 깜빡임으로 읽힌다.
+     */
+    const { newDefect } = await openMapWithNewDefect(page, 100)
+    const before = await readMapCalls(page)
+
+    /*
+     * 전면 로딩은 순간이라 나중에 세면 놓친다. DOM이 바뀔 때마다 확인해서 **한 번이라도
+     * 떴는지**를 남긴다.
+     */
+    await page.evaluate(() => {
+      const flag = { seen: 0 }
+      ;(window as unknown as { coveringSeen: typeof flag }).coveringSeen = flag
+      new MutationObserver(() => {
+        if (document.querySelector('.defect-map-loading') !== null) {
+          flag.seen += 1
+        }
+      }).observe(document.body, { subtree: true, childList: true })
+    })
+
+    // 이미 있는 결함에 대한 알림을 세 번 보낸다(응답 내용은 그대로다).
+    for (let round = 0; round < 3; round += 1) {
+      await pushSseEvent(
+        page,
+        'defect.created',
+        createdEvent(
+          EXISTING.properties.defectId,
+          EXISTING.properties.incidentCode,
+        ),
+      )
+      await page.waitForTimeout(700)
+    }
+
+    const coveringSeen = await page.evaluate(() =>
+      (window as unknown as { coveringSeen: { seen: number } })
+        .coveringSeen.seen)
+    expect(coveringSeen, '갱신 중에 지도를 덮는 로딩이 떠서는 안 된다').toBe(0)
+
+    const after = await readMapCalls(page)
+    console.log(`같은 결과 3회 갱신: 마커 생성 ${before.markersCreated}`
+      + ` → ${after.markersCreated}, 화면 마커 ${after.markers.length}개`)
+    expect(after.markersCreated, '같은 결과면 마커를 다시 만들지 않는다')
+      .toBe(before.markersCreated)
+    expect(after.markers.length, '마커는 그대로 남아 있다')
+      .toBe(before.markers.length)
+    // 새 결함이 아니었으니 지도도 움직이지 않는다.
+    expect(after.center.length).toBe(before.center.length)
+    expect(newDefect.properties.defectId).not.toBe(EXISTING.properties.defectId)
+  })
+
   test('이미 보이는 자리에 생긴 결함이면 움직이지 않는다', async ({ page }) => {
     // 100m 북쪽 — 화면 가운데 근처라 그대로 보인다.
     const { newDefect, detect } = await openMapWithNewDefect(page, 100)

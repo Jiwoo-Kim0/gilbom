@@ -241,6 +241,46 @@ export function revealZoom(
   return Math.max(currentZoom, Math.min(focusZoom, maxZoom))
 }
 
+/**
+ * 두 GeoJSON 결과가 **화면에 같은 마커를 그리는가**.
+ *
+ * <p>실시간 알림이 오면 같은 조건으로 지도를 다시 읽는다. 대개 결과가 그대로인데, 응답
+ * 객체가 새것이라 마커를 전부 지우고 다시 만들었다 — 지도가 깜빡이는 원인이었다. 내용이
+ * 같으면 이전 배열을 그대로 들고 있어 다시 만들지 않는다.
+ *
+ * <p>비교는 **마커 모양을 정하는 값만** 본다. 좌표(위치), 유형(색), 심각도·상태(설명 글).
+ * 신뢰도처럼 마커에 드러나지 않는 값은 보지 않는다 — 그것까지 보면 값이 조금 흔들릴
+ * 때마다 다시 그린다.
+ */
+export function defectMapFeaturesEqual(
+  a: {
+    geometry: { coordinates: [number, number] }
+    properties: {
+      defectId: string
+      defectType: string
+      riskLevel: string
+      workflowStatus: string
+    }
+  }[],
+  b: typeof a,
+): boolean {
+  if (a === b) {
+    return true
+  }
+  if (a.length !== b.length) {
+    return false
+  }
+  return a.every((left, index) => {
+    const right = b[index]
+    return left.properties.defectId === right.properties.defectId
+      && left.properties.defectType === right.properties.defectType
+      && left.properties.riskLevel === right.properties.riskLevel
+      && left.properties.workflowStatus === right.properties.workflowStatus
+      && left.geometry.coordinates[0] === right.geometry.coordinates[0]
+      && left.geometry.coordinates[1] === right.geometry.coordinates[1]
+  })
+}
+
 export function defectMapFilterKey(filters: DefectFilters): string {
   return JSON.stringify({ ...filters, bbox: '' })
 }

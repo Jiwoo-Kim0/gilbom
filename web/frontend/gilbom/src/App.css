@@ -1577,6 +1577,24 @@
   font-size: 0.82rem;
 }
 
+/*
+ * 갱신 중 표시. 지도를 덮지 않는다 — 실시간 알림이 올 때마다 전면이 덮이면 깜빡임으로
+ * 읽힌다. 자리는 축척 바(왼쪽 아래)와 겹치지 않게 왼쪽 위로 잡았다.
+ */
+.defect-map-refreshing {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  margin: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
 .defect-map-loading {
   position: absolute;
   inset: 0;

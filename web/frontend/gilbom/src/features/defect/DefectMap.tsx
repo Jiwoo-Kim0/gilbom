@@ -13,6 +13,7 @@ import {
   REVEAL_ZOOM,
   revealZoom,
   clusterZoomPlan,
+  defectMapFeaturesEqual,
   defectMapFilterKey,
   defectTypeTone,
 } from './defectMapState'
@@ -652,11 +653,19 @@ export function DefectMap({
     getDefectMap({ ...filters, bbox })
       .then((response) => {
         if (!cancelled) {
-          setFeatureSnapshot({
+          setFeatureSnapshot((previous) => ({
             key: requestKey,
-            features: response.features,
+            /*
+             * 내용이 같으면 **이전 배열을 그대로 쓴다.** 참조가 유지되면 마커를 다시
+             * 만들지 않아 지도가 깜빡이지 않는다. 실시간 알림으로 같은 조건을 다시 읽는
+             * 일이 잦아서 이 차이가 크다.
+             */
+            features: previous !== null
+              && defectMapFeaturesEqual(previous.features, response.features)
+              ? previous.features
+              : response.features,
             error: null,
-          })
+          }))
         }
       })
       .catch((cause: unknown) => {
@@ -894,8 +903,17 @@ export function DefectMap({
               <span>{scale.label}</span>
             </div>
           )}
-          {(mapStatus === 'loading' || queryLoading) && (
+          {/*
+            전면을 덮는 것은 **보여줄 마커가 아직 없을 때만**이다. 갱신 중에 지도를 덮으면
+            실시간 알림이 올 때마다 화면이 깜빡인다 — 이미 그려둔 것을 그대로 두고 작은
+            표시만 띄운다.
+          */}
+          {(mapStatus === 'loading'
+            || (queryLoading && features.length === 0)) && (
             <p className="defect-map-loading">지도를 불러오는 중입니다…</p>
+          )}
+          {mapStatus === 'ready' && queryLoading && features.length > 0 && (
+            <p className="defect-map-refreshing" role="status">갱신 중…</p>
           )}
           {error !== null && (
             <p className="defect-map-loading" role="alert">
