@@ -6,6 +6,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -20,6 +21,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gilbom.common.error.BusinessException;
 import com.gilbom.common.error.ErrorCode;
+import com.gilbom.defect.DefectDtos.DefectClusterDetailsResponse;
+import com.gilbom.defect.DefectDtos.DefectClusterItemResponse;
 import com.gilbom.defect.DefectDtos.DefectDetailResponse;
 import com.gilbom.defect.DefectDtos.DefectHistoryItemResponse;
 import com.gilbom.defect.DefectDtos.DefectImageUrlResponse;
@@ -182,6 +185,102 @@ public class DefectQueryService {
                                 resultSet.getString("workflow_status"),
                                 resultSet.getBigDecimal("latest_confidence"))));
         return new DefectMapResponse(features);
+    }
+
+    // ----------------------------------------------------- cluster details
+
+    /**
+     * 지도 묶음 목록이 쓰는 값을 **결함 여러 건 몫 한 번에** 준다.
+     *
+     * <p>예전에는 화면이 결함마다 상세와 이미지 URL을 따로 불러 10건이면 20번이 한꺼번에
+     * 나갔다. 그중 하나만 401이어도 전역 처리가 로그인을 끊었다. 질의는 두 번(결함 행,
+     * 결함별 대표 이미지)으로 고정된다.
+     *
+     * <p>보이지 않는 결함은 404를 내지 않고 **결과에서 빠진다.** 여러 건을 한 번에 묻는
+     * 요청이라 한 건 때문에 전체가 실패하면 목록이 통째로 비고, 어느 id가 존재하는지
+     * 알려주는 탐색 통로가 되지도 않는다.
+     */
+    @Transactional(readOnly = true)
+    public DefectClusterDetailsResponse findClusterDetails(
+            UUID userId,
+            List<UUID> defectIds
+    ) {
+        List<UUID> requested = defectIds.stream().distinct().toList();
+        if (requested.isEmpty()) {
+            return new DefectClusterDetailsResponse(List.of());
+        }
+
+        MapSqlParameterSource parameters = new MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("defectIds", requested);
+
+        Map<UUID, UUID> imageIdByDefectId = findRepresentativeImageIds(parameters);
+
+        return new DefectClusterDetailsResponse(jdbcTemplate.query("""
+                SELECT
+                    d.defect_id,
+                    d.incident_code,
+                    d.location_label,
+                    d.zone_id
+                FROM defect.defect d
+                WHERE
+                """ + DefectScopeService.VISIBLE_DEFECT_PREDICATE
+                        + NOT_MERGED_AWAY + """
+                AND d.defect_id IN (:defectIds)
+                ORDER BY d.defect_id ASC
+                """,
+                parameters,
+                (resultSet, rowNumber) -> {
+                    UUID defectId = resultSet.getObject("defect_id", UUID.class);
+                    // 서명 실패는 그 줄의 사진만 비운다. 목록 전체를 503으로 만들지 않는다.
+                    DefectImageUrlIssuer.IssuedImageUrl issued =
+                            imageUrlIssuer.issue(imageIdByDefectId.get(defectId))
+                                    .orElse(null);
+                    return new DefectClusterItemResponse(
+                            defectId,
+                            resultSet.getString("incident_code"),
+                            resultSet.getString("location_label"),
+                            resultSet.getString("zone_id"),
+                            issued == null ? null : issued.url(),
+                            issued == null ? null : issued.expiresAt());
+                }));
+    }
+
+    /**
+     * 결함별 대표 관측의 이미지. 우선순위는 {@link #issueImageUrl}과 같아야 목록의
+     * 사진과 상세 카드의 사진이 어긋나지 않는다.
+     *
+     * <p>{@code DISTINCT ON}이 고른 맨 위 관측에 이미지가 없으면 그 결함은 사진이 없는
+     * 것으로 둔다 — 단건 발급이 404를 내는 것과 같은 판정이다.
+     */
+    private Map<UUID, UUID> findRepresentativeImageIds(
+            MapSqlParameterSource parameters
+    ) {
+        List<ClusterImage> rows = jdbcTemplate.query("""
+                SELECT DISTINCT ON (COALESCE(od.merged_into_defect_id, od.defect_id))
+                    COALESCE(od.merged_into_defect_id, od.defect_id) AS owner_defect_id,
+                    o.image_id
+                FROM defect.defect_observation o
+                JOIN defect.defect od
+                  ON od.defect_id = o.defect_id
+                WHERE COALESCE(od.merged_into_defect_id, od.defect_id) IN (:defectIds)
+                ORDER BY COALESCE(od.merged_into_defect_id, od.defect_id),
+                         o.is_representative DESC,
+                         o.confidence DESC,
+                         o.created_at DESC
+                """,
+                parameters,
+                (resultSet, rowNumber) -> new ClusterImage(
+                        resultSet.getObject("owner_defect_id", UUID.class),
+                        resultSet.getObject("image_id", UUID.class)));
+
+        Map<UUID, UUID> imageIds = new LinkedHashMap<>();
+        for (ClusterImage row : rows) {
+            if (row.imageId() != null) {
+                imageIds.put(row.defectId(), row.imageId());
+            }
+        }
+        return imageIds;
     }
 
     // --------------------------------------------------------------- list
@@ -632,6 +731,13 @@ public class DefectQueryService {
             throws SQLException {
         double value = resultSet.getDouble(column);
         return resultSet.wasNull() ? null : value;
+    }
+
+    /** 결함 하나의 대표 이미지. `image_id`는 업로드가 실패한 관측이면 null이다. */
+    private record ClusterImage(
+            UUID defectId,
+            UUID imageId
+    ) {
     }
 
     private record ImageCandidate(

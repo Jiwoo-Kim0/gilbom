@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { ImageOff, X } from 'lucide-react'
-import { getDefect, getDefectImageUrl } from './defectApi'
-import type { DefectMapFeature } from './defectTypes'
+import { getDefectClusterDetails } from './defectApi'
+import type { DefectClusterItem, DefectMapFeature } from './defectTypes'
 
 /**
- * 이 수 이하로 묶인 덩어리만 목록으로 편다. 더 많으면 목록이 지도를 가릴 뿐이고,
- * 결함 하나마다 상세·이미지를 두 번씩 조회하는 비용도 그만큼 늘어난다.
+ * 이 수 이하로 묶인 덩어리만 목록으로 편다. 더 많으면 목록이 지도를 가릴 뿐이다.
  * 그 위는 지금처럼 확대만 한다.
+ *
+ * <p>서버의 `cluster-details` 상한(50)보다 넉넉히 작다. 이 값을 조금 올려도 400이
+ * 나지는 않는다.
  */
 export const CLUSTER_LIST_MAX = 10
 
@@ -41,8 +43,9 @@ function formatCoordinates(feature: DefectMapFeature): string {
  * <p>줄을 누르면 목록 표에서 고른 것과 같다 — 오른쪽에 상세 카드가 뜨고 지도의 그 마커에
  * 선택 표시가 붙는다. 목록은 닫지 않는다. 형제 결함을 이어서 훑는 것이 이 목록의 쓸모다.
  *
- * <p>지도 GeoJSON에는 결함 코드까지만 담겨 있어 위치 이름과 사진은 결함마다 따로
- * 조회한다. {@link CLUSTER_LIST_MAX}건이 상한이라 최대 20번이고, 누른 순간에만 나간다.
+ * <p>지도 GeoJSON에는 결함 코드까지만 담겨 있어 위치 이름과 사진은 따로 조회한다.
+ * 결함마다 상세·이미지를 하나씩 부르면 10건짜리 묶음 하나에 스무 개가 한꺼번에 나갔고,
+ * 그중 하나만 401이어도 전역 처리가 로그인을 끊었다. **한 번의 묶음 조회로 받는다.**
  */
 export function DefectClusterList({
   features,
@@ -55,46 +58,48 @@ export function DefectClusterList({
    * 여기서 이전 묶음의 조회 결과를 지울 일이 없다.
    */
   const [entries, setEntries] = useState<Record<string, ClusterEntry>>({})
+  const defectIds = features.map((feature) => feature.properties.defectId)
   // 배열은 매 렌더 새 참조라 그대로 의존성에 넣으면 조회가 멈추지 않는다.
-  const defectIds = features
-    .map((feature) => feature.properties.defectId)
-    .join(',')
+  const defectKey = defectIds.join(',')
 
   useEffect(() => {
-    let cancelled = false
+    if (defectIds.length === 0) {
+      return
+    }
+    /*
+     * 목록을 닫거나 다른 묶음을 누르면 **요청 자체를 끊는다.** 결과만 버리면 서버 일은
+     * 그대로 남아, 여러 번 눌렀을 때 이전 요청들이 계속 살아 있다.
+     */
+    const controller = new AbortController()
 
-    const patch = (defectId: string, partial: ClusterEntry) => {
-      if (cancelled) return
-      setEntries((previous) => ({
-        ...previous,
-        [defectId]: { ...previous[defectId], ...partial },
-      }))
+    /**
+     * 조회가 끝나면 요청한 결함 **전부**에 값을 채운다. 응답에 없는 결함(그새 안 보이게
+     * 됐거나 병합된 것)까지 `null`로 못박아야 사진 자리표시가 영영 돌지 않는다.
+     */
+    const settle = (items: DefectClusterItem[]) => {
+      const byId = new Map(items.map((item) => [item.defectId, item]))
+      setEntries(Object.fromEntries(defectIds.map((defectId) => {
+        const item = byId.get(defectId)
+        return [defectId, {
+          location: item?.locationLabel ?? item?.zoneId ?? null,
+          imageUrl: item?.imageUrl ?? null,
+        } satisfies ClusterEntry]
+      })))
     }
 
-    for (const feature of features) {
-      const { defectId } = feature.properties
-      getDefect(defectId)
-        .then((detail) =>
-          patch(defectId, {
-            location: detail.defect.locationLabel
-              ?? detail.defect.zoneId
-              ?? null,
-          }),
-        )
-        .catch(() => patch(defectId, { location: null }))
-      getDefectImageUrl(defectId)
-        // 사진이 아직 연결되지 않은 결함은 정상이다(404). 오류도 "없음"으로 접는다 —
-        // 목록에서 실패를 따로 말해봐야 할 수 있는 일이 없다.
-        .then((image) => patch(defectId, { imageUrl: image.imageUrl }))
-        .catch(() => patch(defectId, { imageUrl: null }))
-    }
+    getDefectClusterDetails(defectIds, controller.signal)
+      .then((response) => settle(response.items))
+      // 목록에서 실패를 따로 말해봐야 할 수 있는 일이 없다. 사진·위치 없음으로 접는다.
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          settle([])
+        }
+      })
 
-    return () => {
-      cancelled = true
-    }
+    return () => controller.abort()
     // features는 같은 내용이어도 참조가 바뀐다. 구성원이 실제로 달라질 때만 다시 읽는다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defectIds])
+  }, [defectKey])
 
   return (
     <section className="defect-cluster-list" aria-label="묶인 결함 목록">

@@ -240,6 +240,36 @@ public final class DefectDtos {
         }
     }
 
+    /**
+     * 지도에서 묶음을 눌렀을 때 펴는 목록의 한 줄이다.
+     *
+     * <p>지도 GeoJSON에는 결함 코드까지만 담겨 있어, 예전에는 결함마다
+     * {@code GET /{defectId}}와 {@code GET /{defectId}/image-url}을 따로 불렀다.
+     * 10건이면 20번이라 한 번에 몰려 나갔다. 목록이 실제로 쓰는 값만 담아 한 번에 준다.
+     *
+     * <p>{@code locationLabel}과 {@code zoneId}를 따로 준다 — 어느 쪽을 먼저 쓸지는
+     * 화면이 정한다. {@code imageUrl}은 사진이 아직 연결되지 않았거나 저장소를 쓸 수
+     * 없으면 null이다. 목록의 사진 한 칸이 비는 것은 오류가 아니다.
+     */
+    public record DefectClusterItemResponse(
+            UUID defectId,
+            String incidentCode,
+            String locationLabel,
+            String zoneId,
+            String imageUrl,
+            Instant imageUrlExpiresAt
+    ) {
+    }
+
+    public record DefectClusterDetailsResponse(
+            List<DefectClusterItemResponse> items
+    ) {
+
+        public DefectClusterDetailsResponse {
+            items = List.copyOf(items);
+        }
+    }
+
     public record DefectMergeResponse(
             UUID targetDefectId,
             List<UUID> mergedDefectIds,

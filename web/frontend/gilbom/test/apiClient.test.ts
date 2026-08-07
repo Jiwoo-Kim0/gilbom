@@ -145,3 +145,34 @@ test('401 응답은 공통 세션 만료 listener에 알린다', async (context)
   )
   assert.equal(unauthorizedCount, 1)
 })
+
+test('취소한 요청은 네트워크 오류로 바뀌지 않는다', async (context) => {
+  const originalFetch = globalThis.fetch
+
+  context.after(() => {
+    globalThis.fetch = originalFetch
+    clearCsrfToken()
+  })
+
+  /*
+   * 목록을 닫으면 조회를 끊는다. 이것을 "서버에 연결할 수 없습니다"로 바꾸면 부르는
+   * 쪽이 실패로 다뤄 이미 사라진 화면에 오류를 쓴다. AbortError 그대로 올라와야
+   * `signal.aborted`로 구분할 수 있다.
+   */
+  globalThis.fetch = (_input, init) => new Promise((_resolve, reject) => {
+    init?.signal?.addEventListener('abort', () => {
+      reject(new DOMException('The operation was aborted.', 'AbortError'))
+    })
+  })
+
+  const controller = new AbortController()
+  const pending = apiFetch('/api/v1/defects/cluster-details?defectIds=a', {
+    signal: controller.signal,
+  })
+  controller.abort()
+
+  await assert.rejects(pending, (error: unknown) => (
+    !(error instanceof ApiError) && error instanceof Error
+    && error.name === 'AbortError'
+  ))
+})

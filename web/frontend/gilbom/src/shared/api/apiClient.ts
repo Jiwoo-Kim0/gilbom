@@ -125,6 +125,14 @@ function notifyUnauthorized(): void {
   }
 }
 
+/**
+ * `AbortController.abort()`가 낸 것인가. 브라우저는 `DOMException`, Node는 `Error`로
+ * 던지므로 이름으로 판정한다.
+ */
+export function isAbortError(cause: unknown): boolean {
+  return cause instanceof Error && cause.name === 'AbortError'
+}
+
 function parseRetryAfter(value: string | null): number | null {
   if (value === null) {
     return null
@@ -227,7 +235,15 @@ export async function apiFetch(
         credentials: 'include',
         cache: requestInit.cache ?? 'no-store',
       })
-    } catch {
+    } catch (cause) {
+      /*
+       * 스스로 끊은 요청은 오류가 아니다. 화면이 사라져서 취소한 것을 "서버에 연결할 수
+       * 없습니다"로 바꾸면 부르는 쪽이 그것을 실패로 다뤄 사라진 화면에 오류를 쓴다.
+       * AbortError는 그대로 올려 보내 호출부가 `signal.aborted`로 구분하게 한다.
+       */
+      if (isAbortError(cause)) {
+        throw cause
+      }
       throw new ApiError({
         status: 0,
         code: 'COMMON_NETWORK_ERROR',

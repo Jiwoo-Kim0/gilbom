@@ -249,6 +249,7 @@ Patrol Route 버전은 조회 전용이다. 이름·Geometry·운영 상태 변�
 |---|---|---|---|:---:|---|
 | GET | `/api/v1/defects/summary` | `DEFECT_STATUS_VIEW` | 배정 로봇 파생 집계 |  |  |
 | GET | `/api/v1/defects/map` | `DEFECT_STATUS_VIEW` | 배정 로봇 파생 결함 |  |  |
+| GET | `/api/v1/defects/cluster-details` | `DEFECT_STATUS_VIEW` | 배정 로봇 파생 결함 |  | 범위 밖 id는 404가 아니라 응답에서 제외 |
 | GET | `/api/v1/defects` | `DEFECT_STATUS_VIEW` | 배정 로봇 파생 결함 |  |  |
 | GET | `/api/v1/defects/{defectId}` | `DEFECT_STATUS_VIEW` | 연결 로봇 `VIEWER+` |  |  |
 | PATCH | `/api/v1/defects/{defectId}` | `DEFECT_STATUS_UPDATE` | 연결 로봇 `OPERATOR+` | O | O |
