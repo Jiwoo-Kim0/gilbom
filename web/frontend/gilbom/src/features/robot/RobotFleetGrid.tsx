@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router'
+import { getRobotStatusLabel } from './robotStatusPresentation'
 import type {
   RobotConnectivityStatus,
   RobotFleetItem,
@@ -164,8 +165,8 @@ export function RobotFleetGrid({
               </div>
 
               <div className="robot-fleet-context">
-                <span>모드 <strong>{robot.robotMode ?? '—'}</strong></span>
-                <span>임무 <strong>{robot.missionStatus ?? '—'}</strong></span>
+                <span>모드 <strong>{getRobotStatusLabel(robot.robotMode)}</strong></span>
+                <span>임무 <strong>{getRobotStatusLabel(robot.missionStatus)}</strong></span>
                 <span>장비 <strong>{healthStatusLabel[robot.overallHealthStatus]}</strong></span>
               </div>
               <Link

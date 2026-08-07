@@ -79,8 +79,8 @@ const statusPresentation: Record<
 > = {
   CREATED: { label: '생성됨', tone: 'neutral' },
   READY: { label: '준비', tone: 'ready' },
-  RUNNING: { label: '진행 중', tone: 'running' },
-  PAUSED: { label: '일시정지', tone: 'paused' },
+  RUNNING: { label: '진행', tone: 'running' },
+  PAUSED: { label: '정지', tone: 'paused' },
   COMPLETED: { label: '완료', tone: 'completed' },
   CANCELLED: { label: '취소', tone: 'cancelled' },
   FAILED: { label: '실패', tone: 'failed' },
@@ -731,12 +731,12 @@ export function MissionManagePage() {
         <article className="summary-card">
           <span>현재 페이지 진행 중</span>
           <strong>{missions === null ? '—' : pageRunningCount}</strong>
-          <small>RUNNING 상태</small>
+          <small>진행 상태</small>
         </article>
         <article className="summary-card">
           <span>확인 필요</span>
           <strong>{missions === null ? '—' : pageAttentionCount}</strong>
-          <small>PAUSED·FAILED 상태</small>
+          <small>정지·실패 상태</small>
         </article>
       </div>
 
