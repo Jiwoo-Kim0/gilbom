@@ -86,7 +86,7 @@ test('확인이 끝난 뒤의 401은 다시 확인한다', async () => {
   assert.equal(signedOut, 1)
 })
 
-test('세션 확인 자체가 실패하면 로그아웃 쪽으로 기운다', async () => {
+test('세션 확인 자체가 실패해도 증거 없이 로그아웃하지 않는다', async () => {
   let signedOut = 0
   const recover = createUnauthorizedRecovery(
     () => Promise.reject(new Error('세션 조회 실패')),
@@ -98,6 +98,35 @@ test('세션 확인 자체가 실패하면 로그아웃 쪽으로 기운다', as
   recover()
   await flush()
 
-  // 살아 있다고 말해줄 근거가 없는데 열어두면 끊긴 세션에서 계속 조작하게 된다.
+  assert.equal(
+    signedOut,
+    0,
+    '확인 요청 실패는 서버 세션이 삭제됐다는 증거가 아니다',
+  )
+})
+
+test('확인 실패 뒤 다음 401에서는 세션 상태를 다시 확인한다', async () => {
+  let probes = 0
+  let signedOut = 0
+  const recover = createUnauthorizedRecovery(
+    async () => {
+      probes += 1
+      if (probes === 1) {
+        throw new Error('일시적인 세션 조회 실패')
+      }
+      return false
+    },
+    () => {
+      signedOut += 1
+    },
+  )
+
+  recover()
+  await flush()
+  assert.equal(signedOut, 0)
+
+  recover()
+  await flush()
+  assert.equal(probes, 2)
   assert.equal(signedOut, 1)
 })
