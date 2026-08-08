@@ -300,13 +300,19 @@ class AuthenticationSessionServiceTest {
                         null,
                         0
                 )));
-        when(repository.deleteAllByUserId(USER_ID)).thenReturn(2);
+        when(repository.deleteAllByUserId(
+                USER_ID,
+                SessionDeletionReason.PASSWORD_CHANGE
+        )).thenReturn(2);
 
         int invalidated = service.invalidateAllUserSessions(USER_ID, request);
 
         assertThat(invalidated).isEqualTo(2);
         verify(session).invalidate();
-        verify(repository).deleteAllByUserId(USER_ID);
+        verify(repository).deleteAllByUserId(
+                USER_ID,
+                SessionDeletionReason.PASSWORD_CHANGE
+        );
     }
 
     @Test
@@ -314,9 +320,7 @@ class AuthenticationSessionServiceTest {
         service.expireCurrentClientSession(request);
 
         verify(session).invalidate();
-        verify(repository, never()).deleteBySessionId(
-                org.mockito.ArgumentMatchers.anyString()
-        );
+        verify(repository, never()).deleteBySessionId(any(), any());
         assertThat(SecurityContextHolder.getContext().getAuthentication())
                 .isNull();
     }
@@ -325,7 +329,10 @@ class AuthenticationSessionServiceTest {
     void logoutCommitsTheServerRowDeletionBeforeInvalidatingHttpSession() {
         service.revokeCurrentServerSession(request);
 
-        verify(repository).deleteBySessionId("old-session-id");
+        verify(repository).deleteBySessionId(
+                "old-session-id",
+                SessionDeletionReason.LOGOUT
+        );
         verify(session, never()).invalidate();
     }
 
@@ -342,7 +349,8 @@ class AuthenticationSessionServiceTest {
                 )));
         when(repository.deleteOtherByUserId(
                 "old-session-id",
-                USER_ID
+                USER_ID,
+                SessionDeletionReason.PASSWORD_CHANGE
         )).thenReturn(2);
 
         int invalidated =
@@ -351,7 +359,8 @@ class AuthenticationSessionServiceTest {
         assertThat(invalidated).isEqualTo(2);
         verify(repository).deleteOtherByUserId(
                 "old-session-id",
-                USER_ID
+                USER_ID,
+                SessionDeletionReason.PASSWORD_CHANGE
         );
     }
 
@@ -381,7 +390,10 @@ class AuthenticationSessionServiceTest {
         assertThat(result.failureCount()).isEqualTo(5);
         assertThat(result.remainingAttempts()).isZero();
         assertThat(result.sessionInvalidated()).isTrue();
-        verify(repository).deleteBySessionId("old-session-id");
+        verify(repository).deleteBySessionId(
+                "old-session-id",
+                SessionDeletionReason.CHALLENGE_FAILURE
+        );
         verify(session).invalidate();
     }
 }

@@ -34,9 +34,14 @@ public class AuthenticationSessionCleanupJob {
     )
     public void deleteExpiredSessions() {
         try {
-            repository.deleteExpiredSecuritySessions(
+            int deleted = repository.deleteExpiredSecuritySessions(
                     properties.getCleanupBatchSize(),
                     clock.instant()
+            );
+            LOGGER.info(
+                    "Authentication session cleanup completed: reason={}, deleted={}",
+                    SessionDeletionReason.EXPIRED_CLEANUP,
+                    deleted
             );
         } catch (DataAccessException ignored) {
             // DB 오류 원문에 연결 정보나 SQL이 포함될 수 있어 scheduled 로그에 남기지 않는다.

@@ -832,7 +832,17 @@ public class AdminRepository {
 
     public int revokeAllSessions(UUID userId) {
         Integer deleted = jdbcTemplate.queryForObject(
-                "SELECT auth.revoke_user_authorization_sessions(?)",
+                """
+                WITH deletion_context AS MATERIALIZED (
+                    SELECT set_config(
+                        'gilbom.session_delete_reason',
+                        'MFA_RESET',
+                        TRUE
+                    ) AS reason
+                )
+                SELECT auth.revoke_user_authorization_sessions(?)
+                FROM deletion_context
+                """,
                 Integer.class,
                 userId
         );

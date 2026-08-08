@@ -1,6 +1,6 @@
 \set ON_ERROR_STOP on
 
--- 빈 volume에서 PostGIS, Flyway V1~V43, 필수 account/MFA/session/RBAC/security schema를 검증한다.
+-- 빈 volume에서 PostGIS, Flyway V1~V44, 필수 account/MFA/session/RBAC/security schema를 검증한다.
 -- flyway_role과 application_role은 psql --set으로 전달하며 비밀번호는 받거나 출력하지 않는다.
 SELECT (
     :'flyway_role' <> :'application_role'
@@ -10,7 +10,7 @@ SELECT (
         WHERE extname = 'postgis'
     )
     AND (
-        SELECT COUNT(*) = 43
+        SELECT COUNT(*) = 44
                AND COUNT(*) FILTER (WHERE NOT success) = 0
                AND COUNT(*) FILTER (
                    WHERE version::INTEGER BETWEEN 1 AND 43

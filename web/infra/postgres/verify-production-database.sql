@@ -10,7 +10,7 @@ SELECT (
         WHERE extname = 'postgis'
     )
     AND (
-        SELECT COUNT(*) = 43
+        SELECT COUNT(*) = 44
                AND COUNT(*) FILTER (WHERE NOT success) = 0
                AND COUNT(*) FILTER (
                    WHERE version::INTEGER BETWEEN 1 AND 43

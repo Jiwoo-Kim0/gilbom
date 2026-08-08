@@ -224,7 +224,7 @@ gate 뒤에만 실행된다. Source 보안 명령은 action 단위로 나뉘어 
 로컬 재현 명령의 경계를 일치시킨다.
 
 기존 검증은 Backend 전체 Test, security acceptance, Frontend test/lint/build,
-full-SHA image build, 두 runtime image, 빈 DB V1~V43, PostGIS·RBAC·Session,
+full-SHA image build, 두 runtime image, 빈 DB V1~V44, PostGIS·RBAC·Session,
 CSRF·권한·append-only, integration, graceful shutdown, 보고서·LLM fallback,
 장애 복구, volume 영속성, image layer/history/log Secret, 필수 Trivy 순으로
 실행한다. 각 성공은 `.artifacts/ci-results/<gate>.status`에 `PASS`로 남고,
@@ -256,7 +256,7 @@ Trivy가 없거나 Critical/미승인 High/만료 예외가 있으면 `release/`
 script가 거부한다.
 
 `build-metadata.json`은 full commit SHA, image ID, Dockerfile hash와 base image,
-UTC 시작·종료 시각, Runtime version, 테스트 결과, V1~V43 migration 목록·hash,
+UTC 시작·종료 시각, Runtime version, 테스트 결과, V1~V44 migration 목록·hash,
 SBOM/취약점/image·source archive·Compose checksum, Jenkins Job/Build를 기록한다.
 `jq empty` 이후
 `SHA256SUMS`를 생성·즉시 재검증하고, 마지막 Artifact Secret gate까지 통과해야

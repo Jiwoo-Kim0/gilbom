@@ -301,7 +301,7 @@ docker compose up --build --detach
 docker compose logs backend
 ```
 
-Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V43이
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V44가
 순서대로 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증
