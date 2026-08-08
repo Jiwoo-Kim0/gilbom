@@ -112,7 +112,7 @@ IP 제한은 Nginx와 애플리케이션이 실제 클라이언트 IP를 식별�
 | `AUTH_RECOVERY_CODE_USED` | `SUCCESS` | 미인증 사용자 / 사용자 UUID |
 | `AUTH_PASSWORD_CHANGED` | `SUCCESS` | 인증 사용자 / 사용자 UUID |
 | `AUTH_PASSWORD_CHANGE_FAILED` | `FAILURE` | 인증 사용자 / 사용자 UUID |
-| `AUTH_SESSION_REVOKED` | `SUCCESS` | 인증 사용자 / 사용자 UUID |
+| `AUTH_SESSION_REVOKED` | `SUCCESS` | 인증 사용자 또는 권한 변경 DB Trigger의 SYSTEM / 사용자·역할·권한 UUID |
 | `AUTH_RATE_LIMITED` | `DENIED` | 시스템 / 알 수 있을 때만 사용자 UUID |
 | `AUTH_LOGOUT` | `SUCCESS` | 인증 사용자 / 세션 ID는 기록하지 않음 |
 
@@ -125,6 +125,14 @@ HTTP 감사 context에는 `requestId`, 신뢰된 proxy 처리 후의 원격 IP, 
 최대 500자 User-Agent만 허용한다. 요청 body, query string, Cookie, Authorization,
 CSRF, 이메일, 비밀번호, TOTP, 복구 코드와 세션 ID를 감사 event 객체가 받을 수 없게
 분리했다.
+
+권한 변경 DB Trigger가 실제 Session을 하나 이상 삭제하면 같은 transaction에서
+`AUTH_SESSION_REVOKED`를 추가한다. 이 행은 `actor_type=SYSTEM`이고 HTTP context가
+없으므로 `requestId`, IP, User-Agent는 `NULL`이다. `after_value`의 allowlist 필드
+`source`, `trigger`, `operation`, `deletedSessionCount`로 어떤 DB 경계가 발동했는지
+확인한다. Session ID와 Cookie는 기록하지 않으며 삭제 건수가 0이면 감사 행도 만들지
+않는다. 관리자 API 경로라면 같은 시각·대상의 `RBAC_*` 행에서 실제 요청자와
+`requestId`를 대조한다.
 
 ## 6. 감사 저장 실패 정책
 

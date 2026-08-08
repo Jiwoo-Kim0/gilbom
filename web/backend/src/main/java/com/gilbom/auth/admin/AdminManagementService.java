@@ -369,6 +369,9 @@ public class AdminManagementService {
 
         List<RobotAssignmentResponse> before =
                 repository.findRobotAssignments(userId);
+        if (sameRobotAssignments(before, request.assignments())) {
+            return before;
+        }
         repository.replaceRobotAssignments(
                 userId,
                 request.assignments(),
@@ -387,6 +390,42 @@ public class AdminManagementService {
                 request.reason()
         );
         return after;
+    }
+
+    /**
+     * 논리적으로 같은 배정을 다시 저장할 때 replace DML을 실행하면 DB의 권한 변경
+     * trigger가 정상 session까지 폐기한다. 생성 ID·로봇 표시명·생성 시각을 제외한
+     * 실제 입력 필드가 모두 같으면 무변경 요청으로 처리한다.
+     */
+    private static boolean sameRobotAssignments(
+            List<RobotAssignmentResponse> current,
+            List<RobotAssignmentItem> requested
+    ) {
+        if (current.size() != requested.size()) {
+            return false;
+        }
+        Map<UUID, RobotAssignmentResponse> currentByRobot =
+                new LinkedHashMap<>();
+        for (RobotAssignmentResponse assignment : current) {
+            currentByRobot.put(assignment.robotId(), assignment);
+        }
+        for (RobotAssignmentItem assignment : requested) {
+            RobotAssignmentResponse existing =
+                    currentByRobot.get(assignment.robotId());
+            if (existing == null
+                    || existing.assignmentType()
+                        != assignment.assignmentType()
+                    || !java.util.Objects.equals(
+                        existing.expiresAt(),
+                        assignment.expiresAt()
+                    )
+                    || !existing.reason().equals(
+                        assignment.reason().trim()
+                    )) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Transactional(readOnly = true)

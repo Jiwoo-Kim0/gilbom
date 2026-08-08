@@ -32,6 +32,10 @@ import com.gilbom.auth.admin.AdminDtos.ApprovalRequest;
 import com.gilbom.auth.admin.AdminDtos.OverrideEffect;
 import com.gilbom.auth.admin.AdminDtos.PermissionOverrideItem;
 import com.gilbom.auth.admin.AdminDtos.PermissionOverridesRequest;
+import com.gilbom.auth.admin.AdminDtos.RobotAssignmentItem;
+import com.gilbom.auth.admin.AdminDtos.RobotAssignmentResponse;
+import com.gilbom.auth.admin.AdminDtos.RobotAssignmentsRequest;
+import com.gilbom.auth.admin.AdminDtos.RobotAssignmentType;
 import com.gilbom.auth.admin.AdminDtos.UserResponse;
 import com.gilbom.auth.admin.AdminDtos.UserStatusRequest;
 import com.gilbom.auth.admin.AdminRepository.PermissionRef;
@@ -200,6 +204,61 @@ class AdminManagementServiceTest {
                 .isEqualTo(ErrorCode.AUTH_FORBIDDEN);
 
         verify(repository, never()).replacePermissionOverrides(
+                any(),
+                any(),
+                any(),
+                any()
+        );
+        verify(auditLogService, never()).appendRequired(any());
+    }
+
+    @Test
+    void identicalRobotAssignmentsDoNotReplaceOrRevokeSessions() {
+        UUID robotId = UUID.fromString(
+                "42000000-0000-4000-8000-000000000004"
+        );
+        Instant expiresAt = Instant.parse("2026-08-01T00:00:00Z");
+        RobotAssignmentItem item = new RobotAssignmentItem(
+                robotId,
+                RobotAssignmentType.OPERATOR,
+                expiresAt,
+                " 동일 배정 "
+        );
+        RobotAssignmentResponse existing = new RobotAssignmentResponse(
+                UUID.fromString(
+                        "42000000-0000-4000-8000-000000000005"
+                ),
+                robotId,
+                "로봇 1",
+                RobotAssignmentType.OPERATOR,
+                "동일 배정",
+                Instant.parse("2026-07-27T00:00:00Z"),
+                expiresAt
+        );
+        when(repository.findUserForUpdate(TARGET_ID))
+                .thenReturn(Optional.of(new UserState(
+                        TARGET_ID,
+                        "ACTIVE",
+                        true
+                )));
+        when(repository.countActiveRobots(List.of(robotId)))
+                .thenReturn(1);
+        when(repository.findRobotAssignments(TARGET_ID))
+                .thenReturn(List.of(existing));
+
+        List<RobotAssignmentResponse> result =
+                service.replaceRobotAssignments(
+                        TARGET_ID,
+                        new RobotAssignmentsRequest(
+                                List.of(item),
+                                "변경 없는 재저장"
+                        ),
+                        ACTOR_ID,
+                        CONTEXT
+                );
+
+        assertThat(result).containsExactly(existing);
+        verify(repository, never()).replaceRobotAssignments(
                 any(),
                 any(),
                 any(),

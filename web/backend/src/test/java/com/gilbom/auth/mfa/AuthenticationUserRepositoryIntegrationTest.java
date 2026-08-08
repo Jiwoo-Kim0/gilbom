@@ -277,6 +277,13 @@ class AuthenticationUserRepositoryIntegrationTest {
                 null
         );
         assertThat(sessionCount(userId)).isZero();
+        assertRevocationAudit(
+                "USER_PERMISSION_OVERRIDE",
+                "tr_user_permission_override_revoke_sessions",
+                "INSERT",
+                "USER",
+                userId
+        );
 
         createAuthenticatedSession(userId, uuid(302), uuid(402));
         jdbcTemplate.update("""
@@ -293,14 +300,35 @@ class AuthenticationUserRepositoryIntegrationTest {
                 "session invalidation by robot scope",
                 userId);
         assertThat(sessionCount(userId)).isZero();
+        assertRevocationAudit(
+                "USER_ROBOT_ASSIGNMENT",
+                "tr_user_robot_assignment_revoke_sessions",
+                "INSERT",
+                "USER",
+                userId
+        );
 
         createAuthenticatedSession(userId, uuid(303), uuid(403));
         assignRole(userId, secondRoleId, false);
         assertThat(sessionCount(userId)).isZero();
+        assertRevocationAudit(
+                "USER_ROLE",
+                "tr_user_role_revoke_sessions",
+                "INSERT",
+                "USER",
+                userId
+        );
 
         createAuthenticatedSession(userId, uuid(304), uuid(404));
         grantRolePermission(roleId, "REPORT_VIEW", userId);
         assertThat(sessionCount(userId)).isZero();
+        assertRevocationAudit(
+                "ROLE_PERMISSION",
+                "tr_role_permission_revoke_sessions",
+                "INSERT",
+                "ROLE",
+                roleId
+        );
 
         createAuthenticatedSession(userId, uuid(305), uuid(405));
         jdbcTemplate.update("""
@@ -310,8 +338,41 @@ class AuthenticationUserRepositoryIntegrationTest {
                 WHERE role_id = ?
                 """, roleId);
         assertThat(sessionCount(userId)).isZero();
+        assertRevocationAudit(
+                "ROLE_LIFECYCLE",
+                "tr_role_lifecycle_revoke_sessions",
+                "UPDATE",
+                "ROLE",
+                roleId
+        );
+
+        UUID reportViewPermissionId = permissionOrRoleId(
+                "auth.permission",
+                "permission_id",
+                "permission_code",
+                "REPORT_VIEW"
+        );
+        createAuthenticatedSession(userId, uuid(307), uuid(407));
+        jdbcTemplate.update("""
+                UPDATE auth.permission
+                SET permission_code = 'REPORT_VIEW_RENAMED',
+                    updated_at = statement_timestamp()
+                WHERE permission_id = ?
+                """, reportViewPermissionId);
+        assertThat(sessionCount(userId)).isZero();
+        assertRevocationAudit(
+                "PERMISSION_LIFECYCLE",
+                "tr_permission_revoke_sessions",
+                "UPDATE",
+                "PERMISSION",
+                reportViewPermissionId
+        );
 
         createAuthenticatedSession(userId, uuid(306), uuid(406));
+        int auditCountBeforeRollback = revocationAuditCount(
+                "USER_PERMISSION_OVERRIDE",
+                userId
+        );
         TransactionTemplate transaction = new TransactionTemplate(
                 new DataSourceTransactionManager(dataSource)
         );
@@ -327,6 +388,26 @@ class AuthenticationUserRepositoryIntegrationTest {
             throw new IllegalStateException("force rollback");
         })).isInstanceOf(IllegalStateException.class);
         assertThat(sessionCount(userId)).isEqualTo(1);
+        assertThat(revocationAuditCount(
+                "USER_PERMISSION_OVERRIDE",
+                userId
+        )).isEqualTo(auditCountBeforeRollback);
+
+        jdbcTemplate.update("""
+                UPDATE auth.admin_user
+                SET account_status = 'DISABLED',
+                    is_active = FALSE,
+                    updated_at = statement_timestamp()
+                WHERE user_id = ?
+                """, userId);
+        assertThat(sessionCount(userId)).isZero();
+        assertRevocationAudit(
+                "ACCOUNT_LIFECYCLE",
+                "tr_admin_user_lifecycle_revoke_sessions",
+                "UPDATE",
+                "USER",
+                userId
+        );
     }
 
     @Test
@@ -793,6 +874,63 @@ class AuthenticationUserRepositoryIntegrationTest {
                   ON security_state.session_primary_id = session.primary_id
                 WHERE security_state.user_id = ?
                 """, Integer.class, userId);
+        return count == null ? 0 : count;
+    }
+
+    private void assertRevocationAudit(
+            String source,
+            String trigger,
+            String operation,
+            String targetType,
+            UUID targetId
+    ) {
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT
+                    request_id,
+                    actor_user_id,
+                    actor_type,
+                    action_type,
+                    target_type,
+                    target_id,
+                    result,
+                    reason,
+                    after_value ->> 'source' AS source,
+                    after_value ->> 'trigger' AS trigger,
+                    after_value ->> 'operation' AS operation,
+                    (after_value ->> 'deletedSessionCount')::integer
+                        AS deleted_session_count
+                FROM audit.audit_log
+                WHERE action_type = 'AUTH_SESSION_REVOKED'
+                  AND after_value ->> 'source' = ?
+                  AND target_id = ?
+                ORDER BY audit_id DESC
+                LIMIT 1
+                """, source, targetId))
+                .containsEntry("request_id", null)
+                .containsEntry("actor_user_id", null)
+                .containsEntry("actor_type", "SYSTEM")
+                .containsEntry("action_type", "AUTH_SESSION_REVOKED")
+                .containsEntry("target_type", targetType)
+                .containsEntry("target_id", targetId)
+                .containsEntry("result", "SUCCESS")
+                .containsEntry(
+                        "reason",
+                        "AUTHORIZATION_CHANGE:" + source
+                )
+                .containsEntry("source", source)
+                .containsEntry("trigger", trigger)
+                .containsEntry("operation", operation)
+                .containsEntry("deleted_session_count", 1);
+    }
+
+    private int revocationAuditCount(String source, UUID targetId) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM audit.audit_log
+                WHERE action_type = 'AUTH_SESSION_REVOKED'
+                  AND after_value ->> 'source' = ?
+                  AND target_id = ?
+                """, Integer.class, source, targetId);
         return count == null ? 0 : count;
     }
 

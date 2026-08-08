@@ -109,7 +109,7 @@ action code는 `UPPER_SNAKE_CASE`로 고정하며 화면 문구로 재사용하�
 | `AUTH_MFA_RESET` | 사용자 또는 관리자가 MFA 초기화 |
 | `AUTH_RECOVERY_CODE_USED` | 복구 코드 사용 |
 | `AUTH_LOGOUT` | 사용자 로그아웃 |
-| `AUTH_SESSION_REVOKED` | 비밀번호·권한·계정 변경 또는 관리자 조치로 세션 폐기 |
+| `AUTH_SESSION_REVOKED` | 비밀번호·권한·계정 변경 또는 관리자 조치로 세션 폐기. DB Trigger 폐기는 `after_value`에 `source`, `trigger`, `operation`, `deletedSessionCount`를 기록 |
 | `AUTH_RATE_LIMITED` | 로그인 또는 MFA 시도 제한 적용 |
 | `AUTH_ACCESS_DENIED` | 인증된 요청이 기능 권한 검사에서 거부됨 |
 | `AUTH_CSRF_FAILED` | 상태 변경 요청이 CSRF 검증에서 거부됨 |
