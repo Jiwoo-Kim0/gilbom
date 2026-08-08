@@ -380,7 +380,7 @@ frontend_id="$(compose ps -q frontend)"
   || fail "a required smoke container is missing"
 
 [ "$(db_admin_query \
-  "SELECT (COUNT(*) = 42 AND bool_and(success))::int FROM flyway_history.flyway_schema_history;")" = 1 ] \
+  "SELECT (COUNT(*) = 43 AND bool_and(success))::int FROM flyway_history.flyway_schema_history;")" = 1 ] \
   || fail "Flyway did not complete successfully"
 [ "$(db_admin_query "SELECT COUNT(*) FROM report.anomaly_report;")" = 0 ] \
   || fail "the disposable PostgreSQL volume was not empty"

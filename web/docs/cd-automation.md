@@ -77,17 +77,17 @@ Job 설정에 반영되기 전이라 최초 upstream build가 parameter bootstra
 릴리스는 기존 `gilbom-deploy` 수동 승인 Job으로 배포하고, DB version이 반영된
 다음 무마이그레이션 릴리스부터 자동 CD가 다시 진행된다.
 
-현재 운영에 V42가 이미 반영됐다면 Release Manifest의
-`flyway.afterVersion == 42`를 확인한다. 아직 V41이면 V42 릴리스는 기존 수동
+현재 운영에 V43이 이미 반영됐다면 Release Manifest의
+`flyway.afterVersion == 43`을 확인한다. 아직 V42이면 V43 릴리스는 기존 수동
 승인 Job으로 한 번 반영해야 한다.
 
 ```sh
 release_sha="$(sudo cat /var/lib/gilbom/releases/current.sha)"
 sudo jq -e --arg sha "$release_sha" \
-  '.releaseSha == $sha and .flyway.afterVersion == 42' \
+  '.releaseSha == $sha and .flyway.afterVersion == 43' \
   "/var/lib/gilbom/releases/$release_sha/release-manifest.json" \
   >/dev/null \
-  && echo "Production Flyway V42: PASS"
+  && echo "Production Flyway V43: PASS"
 ```
 
 ## 재사용하는 root 보안 경계

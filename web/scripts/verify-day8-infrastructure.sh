@@ -200,8 +200,8 @@ assert_contains scripts/container-report-smoke.sh \
   'GILBOM_STORAGE_UPLOAD_URL=https://report-smoke.example.invalid/api/v1/images' \
   "container report smoke must satisfy the production image upload URL contract"
 assert_contains scripts/container-report-smoke.sh \
-  'SELECT (COUNT(*) = 42 AND bool_and(success))::int' \
-  "container report smoke must verify all Flyway V1 through V42 migrations"
+  'SELECT (COUNT(*) = 43 AND bool_and(success))::int' \
+  "container report smoke must verify all Flyway V1 through V43 migrations"
 assert_contains Jenkinsfile \
   'REPORT_SMOKE_FRONTEND_BIND_ADDRESS=0.0.0.0' \
   "Jenkins report smoke must publish the DinD Frontend port on its reachable interface"
@@ -326,8 +326,8 @@ assert_contains Jenkinsfile \
   ".artifacts/runtime/build-resources.txt" \
   "build-time resource evidence is not collected"
 assert_contains infra/postgres/verify-empty-database.sql \
-  'SELECT COUNT(*) = 42' \
-  "empty database gate must cover Flyway V1 through V42"
+  'SELECT COUNT(*) = 43' \
+  "empty database gate must cover Flyway V1 through V43"
 assert_contains infra/postgres/verify-production-database.sql \
   'Production PostGIS/Flyway/approved-system-seed/runtime-role contract: PASS' \
   "production database audit is missing"

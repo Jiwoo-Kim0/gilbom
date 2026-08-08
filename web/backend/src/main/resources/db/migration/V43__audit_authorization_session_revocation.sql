@@ -38,6 +38,16 @@ BEGIN
             USING ERRCODE = '22023';
     END IF;
 
+    -- PostgreSQL 운영 로그에서도 idle 만료와 DB trigger 폐기를 즉시 구분할 수
+    -- 있게 하되 Session ID나 요청 식별자는 남기지 않는다.
+    RAISE LOG 'session revoked by trigger: source=%, trigger=%, op=%, target_type=%, target_id=%, sessions=%',
+        revocation_source,
+        trigger_name,
+        trigger_operation,
+        target_type_code,
+        target_entity_id,
+        deleted_session_count;
+
     INSERT INTO audit.audit_log (
         request_id,
         actor_user_id,

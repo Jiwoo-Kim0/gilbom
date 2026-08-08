@@ -99,7 +99,7 @@ PIPELINES = {
                 "Actual TLS MQTT Broker E2E",
                 "sh scripts/run-mqtt-broker-e2e-ci.sh",
             ),
-            ("flyway-v1-v42", "Flyway V1-V42", "docker compose exec -T db psql"),
+            ("flyway-v1-v43", "Flyway V1-V43", "docker compose exec -T db psql"),
             (
                 "postgis-rbac-session",
                 "PostGIS/RBAC/Session",
