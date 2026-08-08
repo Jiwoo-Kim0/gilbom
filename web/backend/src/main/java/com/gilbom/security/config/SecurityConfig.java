@@ -4,6 +4,8 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.beans.factory.ObjectProvider;
@@ -39,6 +41,9 @@ import com.gilbom.security.web.SecurityErrorResponseWriter;
 @EnableConfigurationProperties(GilbomCorsProperties.class)
 public class SecurityConfig {
 
+    private static final Logger UNAUTHENTICATED_LOGGER =
+            LoggerFactory.getLogger(SecurityConfig.class);
+
     @Bean
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
@@ -66,12 +71,14 @@ public class SecurityConfig {
                         .securityContextRepository(securityContextRepository)
                         .requireExplicitSave(true))
                 .exceptionHandling(exceptions -> exceptions
-                        .authenticationEntryPoint((request, response, exception) ->
-                                errorWriter.write(
-                                        request,
-                                        response,
-                                        ErrorCode.AUTH_UNAUTHENTICATED
-                                ))
+                        .authenticationEntryPoint((request, response, exception) -> {
+                            logUnauthenticated(request);
+                            errorWriter.write(
+                                    request,
+                                    response,
+                                    ErrorCode.AUTH_UNAUTHENTICATED
+                            );
+                        })
                         .accessDeniedHandler((request, response, exception) -> {
                             if (exception instanceof CsrfException) {
                                 recordCsrfFailure(
@@ -137,6 +144,40 @@ public class SecurityConfig {
                 );
 
         return http.build();
+    }
+
+    /**
+     * "인증이 안 된 요청"으로 401을 내보내기 직전에 **왜 안 됐는지**를 남긴다.
+     *
+     * <p>여기가 사각지대였다. {@code AuthenticationSessionEnforcementFilter}는 세션이
+     * 아예 없으면 조용히 통과시키고, 그 뒤 이 entry point가 아무 흔적 없이 401을 냈다.
+     * 그래서 사용자가 로그인 화면으로 튕겨도 백엔드 로그에는 아무것도 남지 않았다.
+     *
+     * <p>세 값이면 원인이 갈린다.
+     * <ul>
+     *   <li>{@code sessionCookie=false} — 브라우저가 세션 쿠키를 아예 안 보냈다
+     *       (쿠키 유실·SameSite·Secure 문제)
+     *   <li>{@code sessionCookie=true, cookieValid=false} — 보냈는데 서버에 그 세션이
+     *       없다. idle 만료로 사라졌거나 지워진 것이다
+     *   <li>{@code liveSession=true} — 세션은 살아 있는데 인증 컨텍스트가 없다
+     * </ul>
+     *
+     * <p>세션 id는 남기지 않는다 — 그대로 탈취 통로가 된다. 요청 특정은 MDC의
+     * {@code requestId}로 한다.
+     */
+    private static void logUnauthenticated(
+            jakarta.servlet.http.HttpServletRequest request
+    ) {
+        UNAUTHENTICATED_LOGGER.warn(
+                "Unauthenticated request rejected:"
+                        + " method={}, path={}, sessionCookie={},"
+                        + " cookieValid={}, liveSession={}",
+                request.getMethod(),
+                request.getRequestURI(),
+                request.getRequestedSessionId() != null,
+                request.isRequestedSessionIdValid(),
+                request.getSession(false) != null
+        );
     }
 
     private static void recordCsrfFailure(
