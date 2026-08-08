@@ -153,7 +153,11 @@ export async function installFakeMap(
             panTimer = undefined
           }
           calls.zoom.push(next)
+          const changed = next !== zoom
           zoom = next
+          if (changed) {
+            fire('zoom_changed')
+          }
           settle()
         },
         /** 애니메이션으로 옮긴다. 실제 SDK처럼 곧바로 끝나지 않는다. */
@@ -176,7 +180,11 @@ export async function installFakeMap(
           calls.center.push(center)
           if (nextZoom !== undefined) {
             calls.zoom.push(nextZoom)
+            const changed = nextZoom !== zoom
             zoom = nextZoom
+            if (changed) {
+              fire('zoom_changed')
+            }
           }
           settle()
         },
@@ -190,14 +198,24 @@ export async function installFakeMap(
        * <p>이게 없으면 앱이 **뷰포트 bbox로 다시 조회하지 않는다.** 옮겨간 자리에 마커가
        * 실제로 올라오는지를 시험하려면 이 신호가 있어야 한다.
        */
-      function settle(): void {
-        for (const handler of calls.mapListeners.get('bounds_changed') ?? []) {
-          handler()
-        }
-        for (const handler of calls.mapListeners.get('idle') ?? []) {
+      function fire(type: string): void {
+        for (const handler of calls.mapListeners.get(type) ?? []) {
           handler()
         }
       }
+
+      function settle(): void {
+        fire('bounds_changed')
+        fire('idle')
+      }
+
+      /** 시험이 사용자의 확대·축소를 흉내낼 때 쓴다. */
+      Object.defineProperty(window, 'zoomMapBy', {
+        writable: true,
+        value: (delta: number) => {
+          fakeMap.setZoom(zoom + delta)
+        },
+      })
 
       Object.defineProperty(window, 'naver', {
         writable: true,
@@ -322,6 +340,14 @@ export function readMapView(page: Page): Promise<MapView> {
       zoom: instance.getZoom(),
     }
   })
+}
+
+/** 사용자가 확대·축소한 것처럼 배율을 옮긴다(`delta`가 음수면 축소다). */
+export function zoomMapBy(page: Page, delta: number): Promise<void> {
+  return page.evaluate((value: number) => {
+    (window as unknown as { zoomMapBy: (delta: number) => void })
+      .zoomMapBy(value)
+  }, delta)
 }
 
 /** 실시간 이벤트를 밀어 넣는다. 서버 `DefectSseEventResponse` 모양이어야 한다. */

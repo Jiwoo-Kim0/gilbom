@@ -358,6 +358,28 @@ export function DefectMap({
     : null
 
   /**
+   * 축소하면 지도 위에 펼쳐둔 것을 모두 닫는다(묶음 목록·상세 카드).
+   *
+   * <p>축소는 "넓게 보고 싶다"는 뜻이다. 그런데 카드가 지도의 절반을 덮고 있어 정작 넓힌
+   * 화면이 가려진다. 확대는 반대라 그대로 둔다 — 들여다보는 중이니 카드도 필요하다.
+   *
+   * <p>지도 설정 effect는 한 번만 돌기 때문에 그 안에서 이 함수를 직접 잡으면 낡은
+   * 클로저가 된다. ref로 최신 것을 본다.
+   */
+  const closeMapOverlaysRef = useRef<() => void>(() => {})
+  useEffect(() => {
+    closeMapOverlaysRef.current = () => {
+      setClusterList(null)
+      onSelect(null)
+    }
+  }, [onSelect])
+  /**
+   * 우리가 부른 축소는 세지 않는다. 지금은 첫 조회 결과에 맞추는 `fitBounds` 하나뿐이고,
+   * 그때 카드를 닫으면 조건을 바꿨을 뿐인데 보던 카드가 사라진다.
+   */
+  const skipZoomOutCloseRef = useRef(false)
+
+  /**
    * 좌표를 지도 가운데로 옮긴다. 배율은 건드리지 않는다 — 고른 결함을 보려는 것이지
    * 더 들여다보려는 것이 아니고, 확대까지 바뀌면 주변 결함이 화면에서 사라진다.
    */
@@ -606,6 +628,19 @@ export function DefectMap({
         refreshScale()
         maps.Event.addListener(map, 'bounds_changed', refreshScale)
 
+        // 축소했는지는 이전 배율과 견줘야 알 수 있다.
+        let lastZoom = map.getZoom()
+        maps.Event.addListener(map, 'zoom_changed', () => {
+          const nextZoom = map.getZoom()
+          const zoomedOut = nextZoom < lastZoom
+          lastZoom = nextZoom
+          const ours = skipZoomOutCloseRef.current
+          skipZoomOutCloseRef.current = false
+          if (zoomedOut && !ours) {
+            closeMapOverlaysRef.current()
+          }
+        })
+
         // 지도 이동이 멈출 때만 뷰포트를 갱신한다. 외부 시스템 콜백이라
         // effect 본문에서 동기로 setState 하는 것과는 다르다.
         let timer: number | undefined
@@ -701,6 +736,8 @@ export function DefectMap({
     const padding = 0.002
     // fitBounds가 동기로 idle을 발생시켜도 새 필터의 bbox를 받을 수 있게 먼저 기록한다.
     fittedFilterKeyRef.current = filterKey
+    // 이 호출로 배율이 내려가도 카드를 닫지 않는다(사용자가 축소한 것이 아니다).
+    skipZoomOutCloseRef.current = true
     mapRef.current.fitBounds(
       new maps.LatLngBounds(
         new maps.LatLng(
