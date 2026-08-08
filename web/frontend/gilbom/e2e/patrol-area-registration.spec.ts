@@ -172,9 +172,7 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
         this.overlayLayer.style.left = '0'
         this.element.appendChild(this.overlayLayer)
         previewState.mapOptions.push({ ...options })
-        if (previewState.dragMapBy === null) {
-          previewState.dragMapBy = (x, y) => this.dragBy(x, y)
-        }
+        previewState.dragMapBy = (x, y) => this.dragBy(x, y)
       }
 
       setCenter(position: FakeLatLng) {
@@ -549,7 +547,7 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
 
   await page.goto('/patrol-areas')
   await expect(
-    page.getByRole('heading', { level: 2, name: '순찰 구역 관리' }),
+    page.getByRole('heading', { level: 1, name: '순찰 구역 관리' }),
   ).toBeVisible()
   await page.getByRole('button', { name: '새 구역 등록' }).click()
 
@@ -897,6 +895,105 @@ test('전용 페이지에서 순찰 구역을 등록하고 Mission 생성에서 
     hasText: '시연 순찰 구역',
   })
   await expect(areaRowBeforeEdit).toContainText('활성화')
+  await expect(page.locator('.patrol-area-table').getByRole(
+    'columnheader',
+  )).toHaveText(['구역', '상태', '미션 사용', '최근 수정', '조회', '수정'])
+  const areaActionCells = areaRowBeforeEdit.locator('.patrol-area-action-cell')
+  await expect(areaActionCells).toHaveCount(2)
+  await expect(areaActionCells.nth(0).getByRole('button')).toHaveCount(1)
+  await expect(areaActionCells.nth(1).getByRole('button')).toHaveCount(1)
+  await areaActionCells.nth(0).getByRole('button', {
+    name: '시연 순찰 구역 조회',
+  }).click()
+
+  const viewDialog = page.getByRole('dialog', { name: '순찰 구역 조회' })
+  await expect(viewDialog).toBeVisible()
+  await expect(viewDialog).toContainText('시연 순찰 구역 조회 구역')
+  await expect.poll(() => page.evaluate(() => {
+    const state = (
+      window as typeof window & {
+        __patrolAreaPreviewState: {
+          mapOptions: Array<Record<string, boolean | number | undefined>>
+          centers: Array<[longitude: number, latitude: number]>
+        }
+      }
+    ).__patrolAreaPreviewState
+    return {
+      mapOptions: state.mapOptions.at(-1),
+      center: state.centers.at(-1)?.map((coordinate) => (
+        Number(coordinate.toFixed(7))
+      )),
+    }
+  })).toMatchObject({
+    mapOptions: {
+      draggable: true,
+      pinchZoom: true,
+      scrollWheel: true,
+      keyboardShortcuts: true,
+      disableDoubleClickZoom: false,
+      disableDoubleTapZoom: false,
+      disableTwoFingerTapZoom: false,
+      minZoom: 10,
+      maxZoom: 21,
+      zoomControl: true,
+    },
+    center: [128.4165, 36.1075],
+  })
+  const viewBoundaryPoints = viewDialog.getByTestId(
+    'patrol-area-preview-boundary-point',
+  )
+  await expect(viewBoundaryPoints).toHaveCount(4)
+  await expect(viewDialog.getByTestId(
+    'mission-area-preview-center',
+  )).toBeVisible()
+  const firstViewBoundaryPoint = viewBoundaryPoints.first()
+  await expect(firstViewBoundaryPoint).toHaveAttribute(
+    'data-longitude',
+    '128.416',
+  )
+  await expect(firstViewBoundaryPoint).toHaveAttribute(
+    'data-latitude',
+    '36.107',
+  )
+  await expect.poll(() => viewDialog.getByTestId(
+    'mission-area-preview-projected-overlay',
+  ).evaluate((element) => (
+    (element.parentElement as HTMLElement | null)?.dataset.fakeMapPane
+  ))).toBe('overlay')
+  await expect(viewDialog.getByTestId(
+    'patrol-area-preview-coordinate-tooltip',
+  )).toHaveCount(0)
+  await firstViewBoundaryPoint.hover()
+  const coordinateTooltip = viewDialog.getByTestId(
+    'patrol-area-preview-coordinate-tooltip',
+  )
+  await expect(coordinateTooltip).toContainText('위도 36.1070000')
+  await expect(coordinateTooltip).toContainText('경도 128.4160000')
+  await expect(coordinateTooltip.locator('path')).toHaveCount(0)
+  const pointXBeforeMapDrag = Number(
+    await firstViewBoundaryPoint.locator('circle').getAttribute('cx'),
+  )
+  await page.evaluate(() => {
+    const state = (
+      window as typeof window & {
+        __patrolAreaPreviewState: {
+          dragMapBy: ((x: number, y: number) => void) | null
+        }
+      }
+    ).__patrolAreaPreviewState
+    state.dragMapBy?.(10, 10)
+  })
+  await expect(coordinateTooltip).toHaveCount(0)
+  await expect.poll(async () => Number(
+    await firstViewBoundaryPoint.locator('circle').getAttribute('cx'),
+  )).toBe(pointXBeforeMapDrag + 10)
+  await firstViewBoundaryPoint.hover()
+  await expect(coordinateTooltip).toBeVisible()
+  await viewDialog.locator('.mission-area-view-guide').hover()
+  await expect(coordinateTooltip).toHaveCount(0)
+  await viewDialog.getByRole('button', { name: '닫기', exact: true }).click()
+  await expect(viewDialog).toBeHidden()
+
   await areaRowBeforeEdit.getByRole('button', {
     name: '시연 순찰 구역 수정',
   }).click()

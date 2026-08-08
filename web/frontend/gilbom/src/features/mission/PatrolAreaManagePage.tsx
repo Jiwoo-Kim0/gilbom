@@ -2,6 +2,7 @@ import {
   CheckCircle2,
   CircleAlert,
   ClipboardCheck,
+  Eye,
   MapPinned,
   Pencil,
   Plus,
@@ -37,6 +38,7 @@ import {
 } from './patrolAreaBoundary'
 import { PatrolAreaBoundaryEditor } from './PatrolAreaBoundaryEditor'
 import { PatrolAreaEditDialog } from './PatrolAreaEditDialog'
+import { PatrolAreaViewDialog } from './PatrolAreaViewDialog'
 import type {
   GeoJsonCoordinate,
   GeoJsonPolygon,
@@ -58,6 +60,7 @@ export function PatrolAreaManagePage() {
   const [error, setError] = useState<unknown>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [registrationOpen, setRegistrationOpen] = useState(false)
+  const [viewingArea, setViewingArea] = useState<PatrolArea | null>(null)
   const [editingArea, setEditingArea] = useState<PatrolArea | null>(null)
   const [areaCode, setAreaCode] = useState('')
   const [areaCodeAvailability, setAreaCodeAvailability] =
@@ -68,6 +71,7 @@ export function PatrolAreaManagePage() {
   const [formError, setFormError] = useState<unknown>(null)
   const [submitting, setSubmitting] = useState(false)
   const registrationTriggerRef = useRef<HTMLButtonElement>(null)
+  const viewTriggerRef = useRef<HTMLButtonElement | null>(null)
   const { user } = useAuthentication()
   const canManage = user?.permissions.includes(MISSION_MANAGE) ?? false
 
@@ -126,6 +130,11 @@ export function PatrolAreaManagePage() {
     }
     setRegistrationOpen(false)
     window.requestAnimationFrame(() => registrationTriggerRef.current?.focus())
+  }
+
+  function closeViewingArea() {
+    setViewingArea(null)
+    window.requestAnimationFrame(() => viewTriggerRef.current?.focus())
   }
 
   function resetRegistrationForm() {
@@ -485,6 +494,13 @@ export function PatrolAreaManagePage() {
         />
       ) : null}
 
+      {viewingArea ? (
+        <PatrolAreaViewDialog
+          area={viewingArea}
+          onClose={closeViewingArea}
+        />
+      ) : null}
+
       <div className="content-card patrol-area-list-card">
         <div className="table-heading">
           <div>
@@ -529,7 +545,8 @@ export function PatrolAreaManagePage() {
                   <th scope="col">상태</th>
                   <th scope="col">미션 사용</th>
                   <th scope="col">최근 수정</th>
-                  {canManage ? <th scope="col">관리</th> : null}
+                  <th scope="col">조회</th>
+                  <th scope="col">수정</th>
                 </tr>
               </thead>
               <tbody>
@@ -561,8 +578,23 @@ export function PatrolAreaManagePage() {
                       )}
                     </td>
                     <td>{formatDateTime(area.updatedAt)}</td>
-                    {canManage ? (
-                      <td>
+                    <td className="patrol-area-action-cell">
+                      <button
+                        className="patrol-area-view-button"
+                        type="button"
+                        aria-label={`${area.areaName} 조회`}
+                        onClick={(event) => {
+                          viewTriggerRef.current = event.currentTarget
+                          setNotice(null)
+                          setViewingArea(area)
+                        }}
+                      >
+                        <Eye size={15} aria-hidden="true" />
+                        조회
+                      </button>
+                    </td>
+                    <td className="patrol-area-action-cell">
+                      {canManage && area.lifecycleStatus !== 'ARCHIVED' ? (
                         <button
                           className="patrol-area-edit-button"
                           type="button"
@@ -573,10 +605,10 @@ export function PatrolAreaManagePage() {
                           }}
                         >
                           <Pencil size={15} aria-hidden="true" />
-                          {area.lifecycleStatus === 'ARCHIVED' ? '보기' : '수정'}
+                          수정
                         </button>
-                      </td>
-                    ) : null}
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>

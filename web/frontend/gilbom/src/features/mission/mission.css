@@ -174,6 +174,33 @@
   align-items: center;
 }
 
+.mission-area-view-content {
+  display: grid;
+  gap: 14px;
+  padding: 20px 24px;
+}
+
+.mission-area-view-guide {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.mission-area-view-guide svg {
+  flex: 0 0 auto;
+  color: var(--brand-strong);
+}
+
+.mission-area-view-actions {
+  display: flex;
+  padding: 0 24px 20px;
+  justify-content: flex-end;
+}
+
 .mission-area-edit-action-spacer {
   flex: 1;
 }
@@ -236,9 +263,14 @@
 }
 
 .patrol-area-table {
-  min-width: 720px;
+  min-width: 780px;
 }
 
+.patrol-area-action-cell {
+  text-align: center;
+}
+
+.patrol-area-view-button,
 .patrol-area-edit-button {
   display: inline-flex;
   min-height: 34px;
@@ -255,6 +287,12 @@
   font-size: 12px;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.patrol-area-view-button:hover,
+.patrol-area-edit-button:hover {
+  border-color: color-mix(in srgb, var(--brand) 48%, var(--line));
+  background: var(--brand-soft);
 }
 
 .patrol-area-status,
@@ -917,6 +955,14 @@
 
   .mission-area-edit-actions button {
     flex: 1;
+  }
+
+  .mission-area-view-content {
+    padding: 18px;
+  }
+
+  .mission-area-view-actions {
+    padding: 0 18px 18px;
   }
 
   .mission-create-selection-fields {
