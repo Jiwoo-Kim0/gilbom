@@ -49,7 +49,10 @@ function featuresAt(coordinates: [number, number][]) {
   }))
 }
 
-async function installFakeMap(page: Page): Promise<void> {
+async function installFakeMap(
+  page: Page,
+  startZoom = START_ZOOM,
+): Promise<void> {
   await page.addInitScript(
     ({ startZoom, unitScale, baseLat, baseLng }) => {
       Object.defineProperty(window, 'EventSource', {
@@ -168,7 +171,7 @@ async function installFakeMap(page: Page): Promise<void> {
       })
     },
     {
-      startZoom: START_ZOOM,
+      startZoom,
       unitScale: UNIT_SCALE,
       baseLat: BASE_LAT,
       baseLng: BASE_LNG,
@@ -567,20 +570,23 @@ test.describe('묶음 결함 목록', () => {
     await openCluster(page, 3)
 
     const list = page.getByRole('region', { name: '묶인 결함 목록' })
-    await expect(list).toContainText('이 위치의 결함 3건')
+    await expect(list).toContainText('화면의 결함 3건')
     const items = list.getByRole('listitem')
     await expect(items).toHaveCount(3)
 
-    // 결함 코드는 지도 GeoJSON에 있어 바로 보인다.
-    await expect(items.nth(0)).toContainText('INC-20260805-000001')
+    /*
+     * 줄 순서는 누른 자리에서 가까운 순이라 결함 번호와 일치하지 않는다. 코드로 집는다.
+     */
+    const item = (code: string) => items.filter({ hasText: code })
     // 위치 이름과 사진은 결함마다 따로 받는다.
-    await expect(items.nth(0)).toContainText('역삼역 3번 출구 앞 보도')
-    await expect(items.nth(0).locator('img')).toBeVisible()
+    await expect(item('INC-20260805-000001'))
+      .toContainText('역삼역 3번 출구 앞 보도')
+    await expect(item('INC-20260805-000001').locator('img')).toBeVisible()
     // 이름이 없는 결함은 구역 코드로 떨어진다.
-    await expect(items.nth(2)).toContainText('ZONE-GN-0007')
+    await expect(item('INC-20260805-000003')).toContainText('ZONE-GN-0007')
     // 사진이 없는 결함은 자리표시가 아니라 "없음"으로 끝나야 한다.
-    await expect(items.nth(1).getByLabel('사진 없음')).toBeVisible()
-    await expect(items.nth(1).locator('img')).toHaveCount(0)
+    await expect(item('INC-20260805-000002').getByLabel('사진 없음')).toBeVisible()
+    await expect(item('INC-20260805-000002').locator('img')).toHaveCount(0)
   })
 
   test('11건 이상이면 확대만 하고 목록은 열지 않는다', async ({ page }) => {
@@ -598,8 +604,11 @@ test.describe('묶음 결함 목록', () => {
     await openCluster(page, 3)
 
     const list = page.getByRole('region', { name: '묶인 결함 목록' })
-    const second = list.getByRole('listitem').nth(1)
-    await second.getByRole('button').click()
+    // 줄 순서는 누른 자리에서 가까운 순이라 코드로 집는다.
+    const chosen = list
+      .getByRole('listitem')
+      .filter({ hasText: 'INC-20260805-000002' })
+    await chosen.getByRole('button').click()
 
     // 목록 표에서 고른 것과 같다 — 지도 위 상세 카드가 열린다.
     const card = page.locator('.defect-card')
@@ -607,10 +616,38 @@ test.describe('묶음 결함 목록', () => {
     await expect(card).toContainText('INC-20260805-000002')
 
     // 고른 줄은 표시가 남는다. 지도 마커의 선택 표시와 짝이다.
-    await expect(second.locator('.defect-cluster-list-item'))
+    await expect(chosen.locator('.defect-cluster-list-item'))
       .toHaveClass(/is-selected/)
     // 목록은 닫지 않는다. 형제 결함을 이어서 훑는 것이 이 목록의 쓸모다.
     await expect(list).toBeVisible()
+  })
+
+  test('누른 묶음뿐 아니라 확대된 화면에 보이는 결함이 다 들어간다', async ({ page }) => {
+    /*
+     * 같은 자리에 둘(=한 묶음) + 4m 떨어진 하나. 최대 배율에서 시작하므로 눌러도 더
+     * 확대되지 않아 셋이 모두 화면에 남는다 — 목록에는 셋이 다 들어가야 한다.
+     * 예전에는 누른 묶음의 구성원(둘)만 담아 마커 셋에 목록 두 줄이 됐다.
+     */
+    await installFakeMap(page, 21)
+    await stubMap(page, featuresAt([pointAt(0, 0), pointAt(0, 0), pointAt(0, 4)]))
+    await page.goto('/defects?allStatus=1')
+    await expect(page.locator('.defect-map-canvas-wrap')).toBeVisible()
+    // 같은 자리의 둘이 한 묶음, 4m 떨어진 하나가 낱개다.
+    await expect
+      .poll(() => page.evaluate(() =>
+        (window as unknown as { mapCalls: { clickHandlers: unknown[] } })
+          .mapCalls.clickHandlers.length))
+      .toBe(2)
+    await page.evaluate(() =>
+      (window as unknown as { mapCalls: { clickHandlers: (() => void)[] } })
+        .mapCalls.clickHandlers[0]?.())
+
+    const list = page.getByRole('region', { name: '묶인 결함 목록' })
+    await expect(list).toContainText('화면의 결함 3건')
+    await expect(list.getByRole('listitem')).toHaveCount(3)
+    // 누른 자리에서 가까운 순이라 같은 자리의 둘이 앞에 온다.
+    await expect(list.getByRole('listitem').nth(2))
+      .toContainText('INC-20260805-000003')
   })
 
   test('목록과 상세 카드는 지도 모서리에 붙는다', async ({ page }) => {

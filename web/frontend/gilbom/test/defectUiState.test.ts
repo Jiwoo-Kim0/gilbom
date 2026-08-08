@@ -5,6 +5,8 @@ import {
   clusterZoomPlan,
   defectMapFeaturesEqual,
   isPointOutsideMapView,
+  featuresInView,
+  viewBoundsAt,
   REVEAL_ZOOM,
   unclusterZoomStep,
   revealZoom,
@@ -575,4 +577,80 @@ test('마커 모양을 바꾸는 값이 다르면 다르다고 본다', () => {
     defectMapFeaturesEqual([mapFeature()], [mapFeature({ defectId: 'other' })]),
     false,
   )
+})
+
+/*
+ * 묶음을 눌러 목록을 펼 때, 목록에는 **확대된 화면에 보이는 결함 전부**가 들어간다.
+ * 누른 묶음만 담으면 마커는 여덟 개인데 목록은 다섯 줄인 상태가 된다.
+ */
+const MAP_VIEWPORT = { widthPx: 800, heightPx: 500 }
+
+function featureAt(north: number, east: number, id = 'x') {
+  const point = offsetBy(north, east)
+  return {
+    geometry: {
+      coordinates: [point.longitude, point.latitude] as [number, number],
+    },
+    properties: { defectId: id },
+  }
+}
+
+test('확대 뒤 화면 범위는 중심과 배율로 계산한다', () => {
+  // 1px = 1m이면 800×500 화면은 동서 800m, 남북 500m를 담는다.
+  const view = viewBoundsAt(BASE, ONE_METER_PER_PIXEL, MAP_VIEWPORT)!
+  assert.ok(Math.abs((view.north - view.south) * 111_320 - 500) < 1)
+  const eastWest = (view.east - view.west) * 111_320
+    * Math.cos((BASE.latitude * Math.PI) / 180)
+  assert.ok(Math.abs(eastWest - 800) < 1)
+
+  // 배율이나 화면 크기를 못 재면 범위를 정하지 않는다(부르는 쪽이 대비책을 쓴다).
+  assert.equal(viewBoundsAt(BASE, 0, MAP_VIEWPORT), null)
+  assert.equal(
+    viewBoundsAt(BASE, ONE_METER_PER_PIXEL, { widthPx: 0, heightPx: 0 }),
+    null,
+  )
+})
+
+test('화면 안에 있는 결함만, 가운데에서 가까운 순으로 고른다', () => {
+  const view = viewBoundsAt(BASE, ONE_METER_PER_PIXEL, MAP_VIEWPORT)!
+  const features = [
+    featureAt(0, 300, 'far-east'),
+    featureAt(0, 0, 'center'),
+    featureAt(0, 5_000, 'outside'),
+    featureAt(0, 50, 'near-east'),
+  ]
+
+  const picked = featuresInView(features, view, BASE, 10)
+  assert.deepEqual(
+    picked.map((feature) => feature.properties.defectId),
+    ['center', 'near-east', 'far-east'],
+  )
+})
+
+test('가장자리에 반쯤 걸친 것은 보이지 않는 것으로 친다', () => {
+  /*
+   * 마커(44px)가 절반만 걸쳐 있으면 사용자에게는 안 보인다. `isPointOutsideMapView`와
+   * 같은 8% 여유를 쓴다 — 동서 800m의 8%는 64m이므로 가운데에서 336m까지가 "보임"이다.
+   */
+  const view = viewBoundsAt(BASE, ONE_METER_PER_PIXEL, MAP_VIEWPORT)!
+  const justInside = featuresInView([featureAt(0, 300)], view, BASE, 10)
+  const onEdge = featuresInView([featureAt(0, 360)], view, BASE, 10)
+  assert.equal(justInside.length, 1)
+  assert.equal(onEdge.length, 0)
+})
+
+test('상한을 넘으면 가운데에서 가까운 것부터 남긴다', () => {
+  const view = viewBoundsAt(BASE, ONE_METER_PER_PIXEL, MAP_VIEWPORT)!
+  const features = [
+    featureAt(0, 200, 'c'),
+    featureAt(0, 100, 'b'),
+    featureAt(0, 10, 'a'),
+  ]
+
+  assert.deepEqual(
+    featuresInView(features, view, BASE, 2)
+      .map((feature) => feature.properties.defectId),
+    ['a', 'b'],
+  )
+  assert.equal(featuresInView(features, view, BASE, 0).length, 0)
 })

@@ -13,6 +13,16 @@ import type { DefectClusterItem, DefectMapFeature } from './defectTypes'
 export const CLUSTER_LIST_MAX = 10
 
 /**
+ * 목록에 담는 줄 수의 상한.
+ *
+ * <p>목록은 누른 묶음이 아니라 **확대된 화면에 보이는 결함 전부**를 담는다(`DefectMap`의
+ * 묶음 클릭 처리 참고). 조밀한 동네에서는 그 수가 크게 늘 수 있어 서버
+ * `cluster-details` 상한(50) 아래로 자른다. 자를 때는 가운데(누른 자리)에서 가까운 것부터
+ * 남긴다.
+ */
+export const CLUSTER_LIST_VISIBLE_MAX = 30
+
+/**
  * `undefined`는 아직 조회 중, `null`은 없음이다. 둘을 구분해야 사진이 없는 결함에
  * 자리표시가 영영 도는 것을 막는다.
  */
@@ -104,7 +114,8 @@ export function DefectClusterList({
   return (
     <section className="defect-cluster-list" aria-label="묶인 결함 목록">
       <header className="defect-cluster-list-header">
-        <h3>이 위치의 결함 {features.length}건</h3>
+        {/* 담긴 것이 "누른 묶음"이 아니라 "지금 화면"이라 말도 그렇게 바꿨다. */}
+        <h3>화면의 결함 {features.length}건</h3>
         <button
           type="button"
           className="defect-card-close"

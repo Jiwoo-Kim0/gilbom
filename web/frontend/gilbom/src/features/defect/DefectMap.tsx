@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import { loadNaverMapsScript } from '../../lib/naverMaps'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
-import { CLUSTER_LIST_MAX, DefectClusterList } from './DefectClusterList'
+import {
+  CLUSTER_LIST_MAX,
+  CLUSTER_LIST_VISIBLE_MAX,
+  DefectClusterList,
+} from './DefectClusterList'
 import { DefectDetailCard } from './DefectDetailCard'
 import type { DefectCardPosition } from './defectCardDrag'
 import { getDefectMap } from './defectApi'
@@ -14,6 +18,8 @@ import {
   revealZoom,
   clusterZoomPlan,
   defectMapFeaturesEqual,
+  featuresInView,
+  viewBoundsAt,
   defectMapFilterKey,
   defectTypeTone,
 } from './defectMapState'
@@ -827,31 +833,55 @@ export function DefectMap({
          * 지나치게 확대돼 나머지 구성원이 화면 밖으로 나간다.
          */
         const element = mapElementRef.current
+        const viewport = {
+          widthPx: element?.clientWidth ?? 0,
+          heightPx: element?.clientHeight ?? 0,
+        }
+        // 1px이 몇 m인지는 지도에서 직접 잰다(축척 바와 같은 방법).
+        const metersPerPixel = metersPerPixelOf(map, viewport.widthPx)
         const plan = clusterZoomPlan(
           cluster.features.map((member) => {
             const [longitude, latitude] = member.geometry.coordinates
             return { latitude, longitude }
           }),
-          // 1px이 몇 m인지는 지도에서 직접 잰다(축척 바와 같은 방법).
-          metersPerPixelOf(map, element?.clientWidth ?? 0),
-          {
-            widthPx: element?.clientWidth ?? 0,
-            heightPx: element?.clientHeight ?? 0,
-          },
+          metersPerPixel,
+          viewport,
         )
+        const currentZoom = map.getZoom()
+        const nextZoom = Math.min(currentZoom + plan.step, MAX_MAP_ZOOM)
         map.setCenter(new maps.LatLng(plan.center.latitude, plan.center.longitude))
-        map.setZoom(Math.min(map.getZoom() + plan.step, MAX_MAP_ZOOM))
+        map.setZoom(nextZoom)
 
         /*
-         * 셀 만한 수면 그 자리에서 구성원 목록까지 편다. 확대만 하면 "이 동네에 몇
-         * 건"까지만 알 수 있고 코드를 보려면 마커를 하나씩 눌러야 한다. 그보다 많으면
-         * 목록이 지도를 가리기만 하므로 확대에서 멈춘다.
+         * 셀 만한 수면 그 자리에서 목록까지 편다. 확대만 하면 "이 동네에 몇 건"까지만 알 수
+         * 있고 코드를 보려면 마커를 하나씩 눌러야 한다. 그보다 많으면 목록이 지도를
+         * 가리기만 하므로 확대에서 멈춘다.
          */
-        setClusterList(
-          cluster.features.length <= CLUSTER_LIST_MAX
-            ? { filterKey: filterKeyRef.current, features: cluster.features }
-            : null,
+        if (cluster.features.length > CLUSTER_LIST_MAX) {
+          setClusterList(null)
+          return
+        }
+
+        /*
+         * 목록에는 누른 묶음뿐 아니라 **확대된 화면에 함께 보이는 결함 전부**를 담는다.
+         * 구성원만 담으면 마커는 여덟 개인데 목록은 다섯 줄인 상태가 되어, 목록을 훑어
+         * 지도를 읽을 수 없다. 상한을 넘으면 가운데(누른 자리)에서 가까운 것부터 남는다.
+         *
+         * 확대 뒤의 범위는 우리가 계산한다 — `setZoom` 직후의 `getBounds()`는 아직 이전
+         * 값일 수 있다. 배율·화면 크기를 못 재면 원래대로 구성원만 담는다.
+         */
+        const view = viewBoundsAt(
+          plan.center,
+          metersPerPixel / 2 ** (nextZoom - currentZoom),
+          viewport,
         )
+        const visible = view === null
+          ? cluster.features
+          : featuresInView(features, view, plan.center, CLUSTER_LIST_VISIBLE_MAX)
+        setClusterList({
+          filterKey: filterKeyRef.current,
+          features: visible.length > 0 ? visible : cluster.features,
+        })
       })
       return marker
     })

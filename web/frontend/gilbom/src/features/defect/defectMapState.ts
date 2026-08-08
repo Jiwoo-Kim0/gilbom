@@ -220,6 +220,82 @@ export function isPointOutsideMapView(
 }
 
 /**
+ * 확대·이동한 **뒤에** 화면이 담을 범위.
+ *
+ * <p>지도 SDK에 물어보지 않고 계산하는 이유는, `setZoom` 직후의 `getBounds()`가 아직
+ * 이전 값일 수 있어서다. 중심과 "그 배율에서 1px이 몇 m인가"만 있으면 우리가 정할 수 있다.
+ *
+ * <p>범위를 못 정하면(배율·화면 크기를 못 잼) `null`이다. 부르는 쪽이 그때의 대비책을
+ * 정한다 — 화면 기준으로 고를 수 없으면 원래 알던 것만 쓰는 식이다.
+ */
+export function viewBoundsAt(
+  center: { latitude: number; longitude: number },
+  metersPerPixel: number,
+  viewport: { widthPx: number; heightPx: number },
+): MapViewBounds | null {
+  if (
+    !(metersPerPixel > 0)
+    || !(viewport.widthPx > 0)
+    || !(viewport.heightPx > 0)
+  ) {
+    return null
+  }
+  const latitudeSpan = (metersPerPixel * viewport.heightPx) / 2 / 111_320
+  const longitudeSpan = (metersPerPixel * viewport.widthPx) / 2
+    / (111_320 * Math.cos((center.latitude * Math.PI) / 180))
+  return {
+    south: center.latitude - latitudeSpan,
+    north: center.latitude + latitudeSpan,
+    west: center.longitude - longitudeSpan,
+    east: center.longitude + longitudeSpan,
+  }
+}
+
+/** 두 좌표 사이의 대략적인 거리(m). 화면 한 장 안의 정렬용이라 평면으로 본다. */
+function roughDistanceMeters(
+  from: { latitude: number; longitude: number },
+  to: { latitude: number; longitude: number },
+): number {
+  const northSouth = (to.latitude - from.latitude) * 111_320
+  const eastWest = (to.longitude - from.longitude) * 111_320
+    * Math.cos((from.latitude * Math.PI) / 180)
+  return Math.hypot(northSouth, eastWest)
+}
+
+/**
+ * 그 범위 안에 보이는 결함을, **가운데에서 가까운 순서로** 고른다.
+ *
+ * <p>묶음을 눌러 목록을 펼 때 쓴다. 누른 묶음의 구성원만 담으면 확대된 화면에 함께 보이는
+ * 이웃 결함이 목록에 없어, 마커는 여덟 개인데 목록은 다섯 줄인 상태가 된다. **화면에
+ * 보이는 것과 목록이 같아야** 목록을 훑어 지도를 읽을 수 있다.
+ *
+ * <p>가장자리 판정은 {@link isPointOutsideMapView}와 같다 — 반쯤 잘린 마커는 보이지 않는
+ * 것으로 친다. 가운데가 누른 묶음의 자리이므로, 잘라내야 할 때 구성원이 먼저 남는다.
+ */
+export function featuresInView<
+  T extends { geometry: { coordinates: [number, number] } },
+>(
+  features: readonly T[],
+  view: MapViewBounds,
+  center: { latitude: number; longitude: number },
+  limit: number,
+): T[] {
+  return features
+    .map((feature) => {
+      const [longitude, latitude] = feature.geometry.coordinates
+      return { feature, point: { latitude, longitude } }
+    })
+    .filter(({ point }) => !isPointOutsideMapView(point, view))
+    .sort(
+      (left, right) =>
+        roughDistanceMeters(center, left.point)
+        - roughDistanceMeters(center, right.point),
+    )
+    .slice(0, Math.max(limit, 0))
+    .map(({ feature }) => feature)
+}
+
+/**
  * 새 결함으로 옮겨갈 때 맞출 배율.
  *
  * <p>17이면 1px이 약 1.2m라 블록 하나가 구분된다 — "어디에 생겼는지"를 알아볼 수 있는
