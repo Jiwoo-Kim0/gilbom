@@ -159,7 +159,10 @@ public class AuthenticationSessionEnforcementFilter
 
         if (reason.destroysSession) {
             try {
-                repository.deleteBySessionId(session.getId());
+                repository.deleteBySessionId(
+                        session.getId(),
+                        SessionDeletionReason.ENFORCEMENT_REJECT
+                );
             } catch (DataAccessException ignored) {
                 // 응답은 고정하고 DB 예외 세부정보를 로그나 본문에 노출하지 않는다.
             }

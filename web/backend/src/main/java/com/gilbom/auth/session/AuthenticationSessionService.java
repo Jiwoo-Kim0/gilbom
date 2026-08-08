@@ -272,7 +272,10 @@ public class AuthenticationSessionService {
         ).orElseThrow(AuthenticationSessionService::unauthenticated);
         boolean invalidated = failureCount >= maximumFailures;
         if (invalidated) {
-            repository.deleteBySessionId(session.getId());
+            repository.deleteBySessionId(
+                    session.getId(),
+                    SessionDeletionReason.CHALLENGE_FAILURE
+            );
             invalidateQuietly(session);
             SecurityContextHolder.clearContext();
         }
@@ -293,17 +296,26 @@ public class AuthenticationSessionService {
         // Spring Session 행 삭제와 HttpSession.invalidate()를 같은 DB 트랜잭션에서
         // 실행하면 JDBC 세션 저장소의 별도 삭제가 현재 잠금을 기다릴 수 있다.
         // 여기서는 서버 행 삭제만 커밋하고 클라이언트 세션 만료는 호출자가 뒤이어 한다.
-        repository.deleteBySessionId(session.getId());
+        repository.deleteBySessionId(
+                session.getId(),
+                SessionDeletionReason.LOGOUT
+        );
     }
 
     @Transactional
     public int invalidateSession(String sessionId) {
-        return repository.deleteBySessionId(sessionId);
+        return repository.deleteBySessionId(
+                sessionId,
+                SessionDeletionReason.APPLICATION_REQUEST
+        );
     }
 
     @Transactional
     public int invalidateAllUserSessions(UUID userId) {
-        return repository.deleteAllByUserId(userId);
+        return repository.deleteAllByUserId(
+                userId,
+                SessionDeletionReason.PASSWORD_CHANGE
+        );
     }
 
     /**
@@ -318,7 +330,8 @@ public class AuthenticationSessionService {
         requireUsableState(currentSession, userId);
         return repository.deleteOtherByUserId(
                 currentSession.getId(),
-                userId
+                userId,
+                SessionDeletionReason.PASSWORD_CHANGE
         );
     }
 
@@ -336,7 +349,10 @@ public class AuthenticationSessionService {
                 SecurityContextHolder.clearContext();
             }
         }
-        return repository.deleteAllByUserId(userId);
+        return repository.deleteAllByUserId(
+                userId,
+                SessionDeletionReason.PASSWORD_CHANGE
+        );
     }
 
     /**

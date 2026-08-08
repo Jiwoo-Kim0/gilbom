@@ -84,7 +84,10 @@ class AuthenticationSessionEnforcementFilterTest {
         assertThat(response.getStatus()).isEqualTo(401);
         assertThat(response.getHeader("Cache-Control")).isEqualTo("no-store");
         assertThat(chain.getRequest()).isNull();
-        verify(repository).deleteBySessionId(session.getId());
+        verify(repository).deleteBySessionId(
+                session.getId(),
+                SessionDeletionReason.ENFORCEMENT_REJECT
+        );
     }
 
     @Test
@@ -151,7 +154,10 @@ class AuthenticationSessionEnforcementFilterTest {
 
         assertThat(response.getStatus()).isEqualTo(401);
         assertThat(chain.getRequest()).isNull();
-        verify(repository, never()).deleteBySessionId(session.getId());
+        verify(repository, never()).deleteBySessionId(
+                session.getId(),
+                SessionDeletionReason.ENFORCEMENT_REJECT
+        );
         // 다음 요청이 컨텍스트를 제대로 싣고 오면 그대로 이어갈 수 있어야 한다.
         assertThat(request.getSession(false)).isNotNull();
     }
@@ -172,7 +178,10 @@ class AuthenticationSessionEnforcementFilterTest {
 
         assertThat(response.getStatus()).isEqualTo(401);
         assertThat(chain.getRequest()).isNull();
-        verify(repository).deleteBySessionId(session.getId());
+        verify(repository).deleteBySessionId(
+                session.getId(),
+                SessionDeletionReason.ENFORCEMENT_REJECT
+        );
     }
 
     @Test
@@ -193,7 +202,10 @@ class AuthenticationSessionEnforcementFilterTest {
 
         filter.doFilter(request, response, chain);
 
-        verify(repository).deleteBySessionId(session.getId());
+        verify(repository).deleteBySessionId(
+                session.getId(),
+                SessionDeletionReason.ENFORCEMENT_REJECT
+        );
     }
 
     @Test

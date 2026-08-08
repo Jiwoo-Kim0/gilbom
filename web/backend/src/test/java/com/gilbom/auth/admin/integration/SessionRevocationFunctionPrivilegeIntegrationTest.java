@@ -154,6 +154,20 @@ class SessionRevocationFunctionPrivilegeIntegrationTest {
         assertThat(countSessions(sessionPrimaryId))
                 .as("권한이 바뀌면 그 사용자의 session은 남지 않는다")
                 .isZero();
+        assertThat(ownerJdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM audit.audit_log
+                WHERE action_type = 'AUTH_SESSION_DELETED'
+                  AND target_type = 'USER'
+                  AND target_id = ?
+                  AND reason = 'AUTHORIZATION_CHANGE'
+                  AND after_value ->> 'deletionReason' =
+                      'AUTHORIZATION_CHANGE'
+                """,
+                Integer.class,
+                userId
+        )).isOne();
     }
 
     /**

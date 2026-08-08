@@ -137,7 +137,11 @@ public class SessionSecurityStateRepository {
             int idleTimeoutSeconds
     ) {
         lockUser(userId);
-        deleteOtherUserSessions(sessionId, userId);
+        deleteOtherUserSessions(
+                sessionId,
+                userId,
+                SessionDeletionReason.CONCURRENT_LOGIN
+        );
 
         int stateUpdated = jdbcTemplate.update(
                 """
@@ -214,40 +218,74 @@ public class SessionSecurityStateRepository {
         return failureCounts.stream().findFirst();
     }
 
-    public int deleteBySessionId(String sessionId) {
+    public int deleteBySessionId(
+            String sessionId,
+            SessionDeletionReason reason
+    ) {
         return jdbcTemplate.update(
                 """
+                WITH deletion_context AS MATERIALIZED (
+                    SELECT set_config(
+                        'gilbom.session_delete_reason',
+                        ?,
+                        TRUE
+                    ) AS reason
+                )
                 DELETE FROM session_store.spring_session
+                USING deletion_context
                 WHERE session_id = ?
                 """,
+                reason.name(),
                 sessionId
         );
     }
 
-    public int deleteAllByUserId(UUID userId) {
+    public int deleteAllByUserId(
+            UUID userId,
+            SessionDeletionReason reason
+    ) {
         return jdbcTemplate.update(
                 """
+                WITH deletion_context AS MATERIALIZED (
+                    SELECT set_config(
+                        'gilbom.session_delete_reason',
+                        ?,
+                        TRUE
+                    ) AS reason
+                )
                 DELETE FROM session_store.spring_session session
-                USING session_store.session_security_state security_state
+                USING session_store.session_security_state security_state,
+                      deletion_context
                 WHERE security_state.session_primary_id = session.primary_id
                   AND security_state.user_id = ?
                 """,
+                reason.name(),
                 userId
         );
     }
 
     public int deleteOtherByUserId(
             String currentSessionId,
-            UUID userId
+            UUID userId,
+            SessionDeletionReason reason
     ) {
         return jdbcTemplate.update(
                 """
+                WITH deletion_context AS MATERIALIZED (
+                    SELECT set_config(
+                        'gilbom.session_delete_reason',
+                        ?,
+                        TRUE
+                    ) AS reason
+                )
                 DELETE FROM session_store.spring_session session
-                USING session_store.session_security_state security_state
+                USING session_store.session_security_state security_state,
+                      deletion_context
                 WHERE security_state.session_primary_id = session.primary_id
                   AND security_state.user_id = ?
                   AND session.session_id <> ?
                 """,
+                reason.name(),
                 userId,
                 currentSessionId
         );
@@ -256,11 +294,23 @@ public class SessionSecurityStateRepository {
     public int deleteExpiredSecuritySessions(int batchSize, Instant now) {
         return jdbcTemplate.update(
                 """
-                WITH expired AS (
+                WITH deletion_context AS MATERIALIZED (
+                    SELECT set_config(
+                        'gilbom.session_delete_reason',
+                        'EXPIRED_CLEANUP',
+                        TRUE
+                    ) AS reason
+                ),
+                expired AS (
                     SELECT security_state.session_primary_id
                     FROM session_store.session_security_state security_state
                     WHERE security_state.absolute_expiry_time <= ?
-                       OR security_state.authentication_challenge_expires_at <= ?
+                       OR (
+                           security_state.authentication_state <>
+                               'AUTHENTICATED'
+                           AND security_state
+                               .authentication_challenge_expires_at <= ?
+                       )
                     ORDER BY COALESCE(
                         security_state.authentication_challenge_expires_at,
                         security_state.absolute_expiry_time
@@ -269,7 +319,7 @@ public class SessionSecurityStateRepository {
                     FOR UPDATE SKIP LOCKED
                 )
                 DELETE FROM session_store.spring_session session
-                USING expired
+                USING expired, deletion_context
                 WHERE session.primary_id = expired.session_primary_id
                 """,
                 now.toEpochMilli(),
@@ -293,16 +343,26 @@ public class SessionSecurityStateRepository {
 
     private int deleteOtherUserSessions(
             String currentSessionId,
-            UUID userId
+            UUID userId,
+            SessionDeletionReason reason
     ) {
         return jdbcTemplate.update(
                 """
+                WITH deletion_context AS MATERIALIZED (
+                    SELECT set_config(
+                        'gilbom.session_delete_reason',
+                        ?,
+                        TRUE
+                    ) AS reason
+                )
                 DELETE FROM session_store.spring_session session
-                USING session_store.session_security_state security_state
+                USING session_store.session_security_state security_state,
+                      deletion_context
                 WHERE security_state.session_primary_id = session.primary_id
                   AND security_state.user_id = ?
                   AND session.session_id <> ?
                 """,
+                reason.name(),
                 userId,
                 currentSessionId
         );
