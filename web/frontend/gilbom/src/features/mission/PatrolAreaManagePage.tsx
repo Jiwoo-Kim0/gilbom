@@ -545,8 +545,12 @@ export function PatrolAreaManagePage() {
                   <th scope="col">상태</th>
                   <th scope="col">미션 사용</th>
                   <th scope="col">최근 수정</th>
-                  <th scope="col">조회</th>
-                  <th scope="col">수정</th>
+                  <th className="patrol-area-action-heading" scope="col">
+                    조회
+                  </th>
+                  <th className="patrol-area-action-heading" scope="col">
+                    수정
+                  </th>
                 </tr>
               </thead>
               <tbody>
