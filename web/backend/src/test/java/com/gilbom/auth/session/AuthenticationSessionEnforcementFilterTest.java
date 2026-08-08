@@ -2,6 +2,7 @@ package com.gilbom.auth.session;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -124,6 +125,75 @@ class AuthenticationSessionEnforcementFilterTest {
 
         assertThat(response.getStatus()).isEqualTo(401);
         assertThat(chain.getRequest()).isNull();
+    }
+
+    /**
+     * 인증 컨텍스트가 실리지 않은 요청 하나가 **세션을 파괴하지 않는다.**
+     *
+     * <p>이 갈래는 예전에도 401이었지만 세션 행까지 지웠다. 그러면 그 한 건이 곧바로
+     * 전면 로그아웃이 된다 — 사용자가 지도 묶음을 눌렀을 때 로그인 화면으로 튕기던
+     * 증상이 이 모양이었다. 요청을 거부하는 것으로 데이터는 이미 지켜진다.
+     */
+    @Test
+    void missingSecurityContextIsRejectedWithoutDestroyingTheSession()
+            throws Exception {
+        when(repository.findBySessionId(session.getId()))
+                .thenReturn(Optional.of(new SessionSecurityState(
+                        USER_ID,
+                        AuthenticationState.AUTHENTICATED,
+                        NOW.plusSeconds(3600),
+                        null,
+                        null,
+                        0
+                )));
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(chain.getRequest()).isNull();
+        verify(repository, never()).deleteBySessionId(session.getId());
+        // 다음 요청이 컨텍스트를 제대로 싣고 오면 그대로 이어갈 수 있어야 한다.
+        assertThat(request.getSession(false)).isNotNull();
+    }
+
+    /**
+     * 반대로 **정말 수상한** 경우는 그대로 파괴한다. 다른 곳에서 로그인해 밀렸거나
+     * 로그아웃된 세션이다.
+     */
+    @Test
+    void missingSecurityStateStillDestroysTheSession() throws Exception {
+        when(repository.findBySessionId(session.getId()))
+                .thenReturn(Optional.empty());
+        SecurityContextHolder.getContext().setAuthentication(
+                authenticatedUser(USER_ID)
+        );
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(chain.getRequest()).isNull();
+        verify(repository).deleteBySessionId(session.getId());
+    }
+
+    @Test
+    void mismatchedPrincipalDestroysTheSession() throws Exception {
+        when(repository.findBySessionId(session.getId()))
+                .thenReturn(Optional.of(new SessionSecurityState(
+                        USER_ID,
+                        AuthenticationState.AUTHENTICATED,
+                        NOW.plusSeconds(3600),
+                        null,
+                        null,
+                        0
+                )));
+        SecurityContextHolder.getContext().setAuthentication(
+                authenticatedUser(UUID.fromString(
+                        "19000000-0000-4000-8000-000000000002"))
+        );
+
+        filter.doFilter(request, response, chain);
+
+        verify(repository).deleteBySessionId(session.getId());
     }
 
     @Test
