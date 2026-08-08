@@ -219,6 +219,32 @@ api_body="$(
 [ "$api_body" = '{"status":"UP"}' ] \
   || fail "HTTPS API reverse proxy failed"
 
+signed_image_url='https://127.0.0.1:8443/api/v1/images/7c1e0000-0000-4000-8000-000000000051/content?token=tls-runtime-check'
+signed_image_body="$(
+  docker exec "$FRONTEND_CONTAINER" \
+    wget \
+      --quiet \
+      --no-check-certificate \
+      --header='Cookie: __Host-GILBOM_SESSION=administrator-session' \
+      --output-document=- \
+      "$signed_image_url"
+)"
+[ -z "$signed_image_body" ] \
+  || fail "HTTPS signed image proxy forwarded the administrator session Cookie"
+signed_image_headers="$(
+  docker exec "$FRONTEND_CONTAINER" \
+    wget \
+      --server-response \
+      --spider \
+      --no-check-certificate \
+      --header='Cookie: __Host-GILBOM_SESSION=administrator-session' \
+      "$signed_image_url" 2>&1
+)"
+if printf '%s\n' "$signed_image_headers" \
+    | grep -Eiq 'Set-Cookie:'; then
+  fail "HTTPS signed image proxy exposed a Backend Set-Cookie response"
+fi
+
 docker exec "$FRONTEND_CONTAINER" /bin/sh -ec '
   nginx -T 2>&1 | grep -Fq "listen 8443 ssl;"
   nginx -T 2>&1 | grep -Fq "ssl_protocols TLSv1.2 TLSv1.3;"

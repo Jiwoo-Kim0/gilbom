@@ -174,6 +174,29 @@ api_body="$(docker exec "$FRONTEND_CONTAINER" \
 [ "$api_body" = '{"status":"UP"}' ] \
   || fail "/api proxy response body changed"
 
+signed_image_url='http://127.0.0.1:8080/api/v1/images/7c1e0000-0000-4000-8000-000000000051/content?token=runtime-check'
+signed_image_body="$(docker exec "$FRONTEND_CONTAINER" \
+  wget \
+    --quiet \
+    --header='Cookie: __Host-GILBOM_SESSION=administrator-session' \
+    --output-document=- \
+    "$signed_image_url")"
+[ -z "$signed_image_body" ] \
+  || fail "signed image proxy forwarded the administrator session Cookie"
+signed_image_headers="$(docker exec "$FRONTEND_CONTAINER" \
+  wget \
+    --server-response \
+    --spider \
+    --header='Cookie: __Host-GILBOM_SESSION=administrator-session' \
+    "$signed_image_url" 2>&1)"
+printf '%s\n' "$signed_image_headers" \
+  | grep -Eiq 'X-Mock-Upstream:[[:space:]]*backend' \
+  || fail "signed image request was not proxied to Backend"
+if printf '%s\n' "$signed_image_headers" \
+    | grep -Eiq 'Set-Cookie:'; then
+  fail "signed image proxy exposed a Backend Set-Cookie response"
+fi
+
 sse_headers="$(docker exec "$FRONTEND_CONTAINER" \
   wget --server-response --spider \
   http://127.0.0.1:8080/api/v1/stream/runtime-check 2>&1)"
