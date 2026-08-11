@@ -21,6 +21,7 @@ public class LlmProperties {
     private Duration connectTimeout = Duration.ofSeconds(3);
     private Duration readTimeout = Duration.ofSeconds(30);
     private int maxOutputTokens = 1_500;
+    private int maxRequestBytes = 96 * 1024;
     private int dailyRequestLimit;
     private BigDecimal dailyBudget = BigDecimal.ZERO;
     private int maxConcurrentRequests = 5;
@@ -94,6 +95,14 @@ public class LlmProperties {
 
     public void setMaxOutputTokens(int maxOutputTokens) {
         this.maxOutputTokens = maxOutputTokens;
+    }
+
+    public int getMaxRequestBytes() {
+        return maxRequestBytes;
+    }
+
+    public void setMaxRequestBytes(int maxRequestBytes) {
+        this.maxRequestBytes = maxRequestBytes;
     }
 
     public int getDailyRequestLimit() {
@@ -207,6 +216,7 @@ public class LlmProperties {
                 + ", connectTimeout=" + connectTimeout
                 + ", readTimeout=" + readTimeout
                 + ", maxOutputTokens=" + maxOutputTokens
+                + ", maxRequestBytes=" + maxRequestBytes
                 + ", dailyRequestLimit=" + dailyRequestLimit
                 + ", dailyBudget=" + dailyBudget
                 + ", maxConcurrentRequests="

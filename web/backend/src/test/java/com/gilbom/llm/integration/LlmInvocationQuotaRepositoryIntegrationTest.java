@@ -186,6 +186,7 @@ class LlmInvocationQuotaRepositoryIntegrationTest {
                 new BigDecimal("27.750000"),
                 new LlmUsage(500, 300, 800),
                 null,
+                null,
                 NOW.plusSeconds(2));
 
         java.util.Map<String, Object> stored =
@@ -196,7 +197,8 @@ class LlmInvocationQuotaRepositoryIntegrationTest {
                             input_tokens,
                             output_tokens,
                             total_tokens,
-                            failure_code
+                            failure_code,
+                            provider_http_status
                         FROM request_control.llm_invocation_usage
                         WHERE attempt_id = ?
                         """,
@@ -209,7 +211,8 @@ class LlmInvocationQuotaRepositoryIntegrationTest {
                 .containsEntry("input_tokens", 500)
                 .containsEntry("output_tokens", 300)
                 .containsEntry("total_tokens", 800)
-                .containsEntry("failure_code", null);
+                .containsEntry("failure_code", null)
+                .containsEntry("provider_http_status", null);
         assertThat(columnNames())
                 .doesNotContain(
                         "prompt",
@@ -217,6 +220,42 @@ class LlmInvocationQuotaRepositoryIntegrationTest {
                         "request_body",
                         "image_bytes",
                         "authorization");
+    }
+
+    @Test
+    void storesOnlySafeProviderStatusForRejectedRequest() {
+        Reservation reservation = reserve(
+                UUID.randomUUID(),
+                5,
+                "300",
+                "221.25")
+                .reservation();
+
+        repository.complete(
+                reservation,
+                "FAILED",
+                reservation.reservedCredits(),
+                null,
+                "PROVIDER_4XX",
+                413,
+                NOW.plusSeconds(1));
+
+        java.util.Map<String, Object> stored =
+                jdbcTemplate.queryForMap("""
+                SELECT
+                    attempt_status,
+                    failure_code,
+                    provider_http_status
+                FROM request_control.llm_invocation_usage
+                WHERE attempt_id = ?
+                """,
+                reservation.attemptId());
+        assertThat(stored)
+                .containsEntry("attempt_status", "FAILED")
+                .containsEntry("failure_code", "PROVIDER_4XX");
+        assertThat(((Number) stored.get(
+                "provider_http_status")).intValue())
+                .isEqualTo(413);
     }
 
     private ReservationResult reserve(

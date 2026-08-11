@@ -78,6 +78,7 @@ class LlmPolicyGateTest {
         properties.setModel("gpt-5.5-pro");
         properties.setConnectTimeout(Duration.ofSeconds(11));
         properties.setMaxOutputTokens(1_501);
+        properties.setMaxRequestBytes(1024);
         properties.setMaxConcurrentRequests(21);
 
         assertThat(gate.evaluate(properties).violations())
@@ -86,6 +87,8 @@ class LlmPolicyGateTest {
                         LlmPolicyViolation.TIMEOUT_INVALID,
                         LlmPolicyViolation
                                 .MAX_OUTPUT_TOKENS_INVALID,
+                        LlmPolicyViolation
+                                .MAX_REQUEST_BYTES_INVALID,
                         LlmPolicyViolation
                                 .MAX_CONCURRENT_REQUESTS_INVALID);
     }

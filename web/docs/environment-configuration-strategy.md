@@ -221,6 +221,7 @@ storage key와 SHA-256만 저장하며 presigned URL은 저장하지 않는다.
 | `GILBOM_LLM_CONNECT_TIMEOUT` |  | 기본 `3s`, 최대 `10s` |
 | `GILBOM_LLM_READ_TIMEOUT` |  | 기본 `30s`, 최대 `60s` |
 | `GILBOM_LLM_MAX_OUTPUT_TOKENS` |  | `1..1500`, 보고서별 출력 상한 |
+| `GILBOM_LLM_MAX_REQUEST_BYTES` |  | 기본 `98,304` bytes, 최종 Provider JSON body 상한 (`32KiB..1MiB`) |
 | `GILBOM_LLM_DAILY_REQUEST_LIMIT` |  | 양수인 환경별 요청 상한 |
 | `GILBOM_LLM_DAILY_BUDGET` |  | 양수인 일별 크레딧 승인 예산 |
 | `GILBOM_LLM_MAX_CONCURRENT_REQUESTS` |  | 기본 `5`, 인스턴스별 `1..20` 동시 외부 호출 상한 |
@@ -240,6 +241,9 @@ API Key 원문, `Authorization` 헤더, Prompt와 응답 원문은 로그하지 
 `DefectReportImageService`가 사용자 접근 범위 안에서 선택한 비식별화 완료 JPEG
 한 장을 메모리에서 Base64로 변환한다. 어느 하나라도 `false`이거나 조회 결과가
 빈 목록이면 텍스트 LLM 생성은 유지하고 이미지 전송만 생략한다.
+Base64를 포함한 최종 JSON body가 요청 상한을 넘으면 이미지 증거만 생략하고 텍스트
+요청은 유지한다. Provider가 `413`을 반환한 경우에도 이미지 없는 요청으로 정확히 한 번
+재시도하며, 응답 원문은 로그나 DB에 저장하지 않는다.
 
 ### 5.7 로그·관리 endpoint
 

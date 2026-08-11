@@ -14,6 +14,8 @@ public class LlmPolicyGate {
     public static final String GMS_BASE_URL =
             "https://gms.ssafy.io/gmsapi/api.openai.com/v1";
     public static final int MAXIMUM_OUTPUT_TOKENS = 1_500;
+    public static final int MINIMUM_REQUEST_BYTES = 32 * 1024;
+    public static final int MAXIMUM_REQUEST_BYTES = 1024 * 1024;
     public static final Set<String> ALLOWED_REPORT_MODELS =
             Set.of("gpt-5.4-mini", "gpt-5.4");
     public static final Set<String> ALLOWED_PROMPT_VERSIONS =
@@ -100,6 +102,14 @@ public class LlmPolicyGate {
             violations.add(
                     LlmPolicyViolation
                             .MAX_OUTPUT_TOKENS_INVALID);
+        }
+        if (properties.getMaxRequestBytes()
+                        < MINIMUM_REQUEST_BYTES
+                || properties.getMaxRequestBytes()
+                        > MAXIMUM_REQUEST_BYTES) {
+            violations.add(
+                    LlmPolicyViolation
+                            .MAX_REQUEST_BYTES_INVALID);
         }
         if (properties.getMaxConcurrentRequests() < 1
                 || properties.getMaxConcurrentRequests() > 20) {

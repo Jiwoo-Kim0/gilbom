@@ -83,7 +83,8 @@ class ReportLlmGenerationPipelineTest {
         verify(quota).completeFailure(
                 any(Reservation.class),
                 any(LlmUsage.class),
-                eq("RESPONSE_INVALID"));
+                eq("RESPONSE_INVALID"),
+                eq(null));
     }
 
     @Test
@@ -112,7 +113,8 @@ class ReportLlmGenerationPipelineTest {
         verify(quota).completeFailure(
                 any(Reservation.class),
                 eq(null),
-                eq("PROVIDER_5XX"));
+                eq("PROVIDER_5XX"),
+                eq(null));
     }
 
     @Test
@@ -133,6 +135,53 @@ class ReportLlmGenerationPipelineTest {
                                 .LLM_UNAVAILABLE);
         assertThat(outcome.externalAttempts()).isEqualTo(1);
         assertThat(client.requests()).hasSize(1);
+    }
+
+    @Test
+    void retriesPayloadRejectedImageOnceWithoutImages() {
+        LlmTransportException rejected =
+                new LlmTransportException(
+                        LlmTransportException.FailureKind
+                                .PROVIDER_4XX,
+                        413);
+        SequenceClient client = new SequenceClient(
+                rejected,
+                response(ReportLlmTestFixtures.validResultJson()));
+        LlmInvocationQuotaService quota = allowedQuota(2);
+        ReportLlmRequestFactory requestFactory =
+                mock(ReportLlmRequestFactory.class);
+        when(requestFactory.create(eq(USER_ID), any()))
+                .thenReturn(new LlmGenerationRequest(
+                        new ReportLlmInputPreparer(objectMapper)
+                                .prepare(
+                                        ReportLlmTestFixtures.input())
+                                .promptInput(),
+                        List.of(new com.gilbom.llm.LlmImageContent(
+                                UUID.randomUUID(),
+                                "INC-IMAGE-413",
+                                jpegBytes(),
+                                "image/jpeg",
+                                640,
+                                480))));
+
+        ReportGenerationOutcome outcome = pipeline(
+                client,
+                quota,
+                limiter(5),
+                noRetry(),
+                requestFactory)
+                .generate(request());
+
+        assertThat(outcome.fallbackUsed()).isFalse();
+        assertThat(outcome.externalAttempts()).isEqualTo(2);
+        assertThat(client.requests()).hasSize(2);
+        assertThat(client.requests().get(0).images()).hasSize(1);
+        assertThat(client.requests().get(1).images()).isEmpty();
+        verify(quota).completeFailure(
+                any(Reservation.class),
+                eq(null),
+                eq("PROVIDER_4XX"),
+                eq(413));
     }
 
     @Test
@@ -223,15 +272,30 @@ class ReportLlmGenerationPipelineTest {
             LlmRetryPolicy retryPolicy
     ) {
         LlmProperties properties = properties();
+        return pipeline(
+                client,
+                quota,
+                limiter,
+                retryPolicy,
+                new ReportLlmRequestFactory(
+                        Optional.empty(),
+                        properties,
+                        client));
+    }
+
+    private ReportLlmGenerationPipeline pipeline(
+            LlmClient client,
+            LlmInvocationQuotaService quota,
+            LlmConcurrencyLimiter limiter,
+            LlmRetryPolicy retryPolicy,
+            ReportLlmRequestFactory requestFactory
+    ) {
         ReportLlmInputPreparer preparer =
                 new ReportLlmInputPreparer(objectMapper);
         return new ReportLlmGenerationPipeline(
                 client,
                 preparer,
-                new ReportLlmRequestFactory(
-                        Optional.empty(),
-                        properties,
-                        client),
+                requestFactory,
                 new ReportLlmResultValidator(
                         objectMapper,
                         new GeneratedReportTextGuard(
@@ -302,6 +366,16 @@ class ReportLlmGenerationPipelineTest {
                 "gpt-5.4-mini",
                 "report-v1",
                 new LlmUsage(500, 300, 800));
+    }
+
+    private static byte[] jpegBytes() {
+        return new byte[] {
+                (byte) 0xff,
+                (byte) 0xd8,
+                1,
+                (byte) 0xff,
+                (byte) 0xd9
+        };
     }
 
     private static final class SequenceClient

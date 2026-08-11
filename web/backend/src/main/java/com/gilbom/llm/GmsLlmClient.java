@@ -11,6 +11,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
@@ -27,6 +29,9 @@ import com.gilbom.common.error.ErrorCode;
 
 public final class GmsLlmClient implements LlmClient {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(
+            GmsLlmClient.class);
+
     private static final int MAXIMUM_INPUT_JSON_CHARACTERS =
             LlmOutboundInputGuard.MAXIMUM_JSON_BYTES;
     private static final int MAXIMUM_OUTPUT_CHARACTERS =
@@ -41,6 +46,7 @@ public final class GmsLlmClient implements LlmClient {
     private final String apiKey;
     private final String model;
     private final int maxOutputTokens;
+    private final int maxRequestBytes;
     private final String promptVersion;
     private final String systemPrompt;
     private final boolean imageInputAllowed;
@@ -69,6 +75,7 @@ public final class GmsLlmClient implements LlmClient {
         apiKey = properties.apiKeyForAuthorization();
         model = properties.getModel().trim();
         maxOutputTokens = properties.getMaxOutputTokens();
+        maxRequestBytes = properties.getMaxRequestBytes();
         promptVersion =
                 properties.getPromptVersion().trim();
         imageInputAllowed = properties.isImageInputAllowed();
@@ -99,7 +106,32 @@ public final class GmsLlmClient implements LlmClient {
         List<LlmImageContent> images = imageInputAllowed
                 ? request.images()
                 : List.of();
-        String inputJson = serializeInput(request, images);
+        SerializedGmsRequest serialized = serializeRequest(
+                request,
+                images);
+        if (serialized.body().length > maxRequestBytes
+                && !images.isEmpty()) {
+            LOGGER.warn(
+                    "LLM image evidence omitted before provider call: "
+                            + "reason=REQUEST_TOO_LARGE, requestBytes={}, "
+                            + "maximumBytes={}, imageCount={}",
+                    serialized.body().length,
+                    maxRequestBytes,
+                    images.size());
+            images = List.of();
+            serialized = serializeRequest(request, images);
+        }
+        if (serialized.body().length > maxRequestBytes) {
+            throw new LlmTransportException(
+                    LlmTransportException.FailureKind
+                            .REQUEST_TOO_LARGE);
+        }
+        return execute(serialized);
+    }
+
+    private LlmGenerationResponse execute(
+            SerializedGmsRequest request
+    ) {
         GmsChatResponse response;
         try {
             response = restClient.post()
@@ -109,42 +141,33 @@ public final class GmsLlmClient implements LlmClient {
                     .header(
                             HttpHeaders.AUTHORIZATION,
                             "Bearer " + apiKey)
-                    .body(new GmsChatRequest(
-                            model,
-                            List.of(
-                                    new GmsMessage(
-                                            "system",
-                                            systemPrompt),
-                                    new GmsMessage(
-                                            "user",
-                                            userContent(
-                                                    inputJson,
-                                                    images))),
-                            maxOutputTokens,
-                            false,
-                            new GmsResponseFormat(
-                                    "json_schema",
-                                    new GmsJsonSchema(
-                                            REPORT_SCHEMA_NAME,
-                                            true,
-                                            reportOutputSchema))))
+                    .body(request.body())
                     .retrieve()
                     .body(GmsChatResponse.class);
         } catch (RestClientResponseException exception) {
             int status = exception.getStatusCode().value();
+            LlmTransportException.FailureKind failureKind;
             if (status == 429) {
-                throw new LlmTransportException(
-                        LlmTransportException.FailureKind
-                                .RATE_LIMITED);
+                failureKind = LlmTransportException.FailureKind
+                        .RATE_LIMITED;
+            } else if (status >= 500) {
+                failureKind = LlmTransportException.FailureKind
+                        .PROVIDER_5XX;
+            } else {
+                failureKind = LlmTransportException.FailureKind
+                        .PROVIDER_4XX;
             }
-            if (status >= 500) {
-                throw new LlmTransportException(
-                        LlmTransportException.FailureKind
-                                .PROVIDER_5XX);
-            }
+            LOGGER.warn(
+                    "LLM provider request rejected: failureKind={}, "
+                            + "providerStatus={}, requestBytes={}, "
+                            + "imageCount={}",
+                    failureKind,
+                    status,
+                    request.body().length,
+                    request.imageCount());
             throw new LlmTransportException(
-                    LlmTransportException.FailureKind
-                            .PROVIDER_4XX);
+                    failureKind,
+                    status);
         } catch (ResourceAccessException exception) {
             throw new LlmTransportException(
                     LlmTransportException.FailureKind
@@ -157,6 +180,39 @@ public final class GmsLlmClient implements LlmClient {
                             .CLIENT_FAILURE);
         }
         return validated(response);
+    }
+
+    private SerializedGmsRequest serializeRequest(
+            LlmGenerationRequest request,
+            List<LlmImageContent> images
+    ) {
+        String inputJson = serializeInput(request, images);
+        GmsChatRequest providerRequest = new GmsChatRequest(
+                model,
+                List.of(
+                        new GmsMessage(
+                                "system",
+                                systemPrompt),
+                        new GmsMessage(
+                                "user",
+                                userContent(inputJson, images))),
+                maxOutputTokens,
+                false,
+                new GmsResponseFormat(
+                        "json_schema",
+                        new GmsJsonSchema(
+                                REPORT_SCHEMA_NAME,
+                                true,
+                                reportOutputSchema)));
+        try {
+            return new SerializedGmsRequest(
+                    objectMapper.writeValueAsBytes(providerRequest),
+                    images.size());
+        } catch (JsonProcessingException exception) {
+            throw new LlmTransportException(
+                    LlmTransportException.FailureKind
+                            .CLIENT_FAILURE);
+        }
     }
 
     private String serializeInput(
@@ -338,6 +394,7 @@ public final class GmsLlmClient implements LlmClient {
         return "GmsLlmClient{"
                 + "model='" + model + '\''
                 + ", maxOutputTokens=" + maxOutputTokens
+                + ", maxRequestBytes=" + maxRequestBytes
                 + ", promptVersion='" + promptVersion + '\''
                 + ", imageInputAllowed=" + imageInputAllowed
                 + ", apiKey='[REDACTED]'}";
@@ -363,6 +420,19 @@ public final class GmsLlmClient implements LlmClient {
                     + ", store=" + store
                     + ", responseFormat=" + responseFormat
                     + '}';
+        }
+    }
+
+    private record SerializedGmsRequest(
+            byte[] body,
+            int imageCount
+    ) {
+
+        @Override
+        public String toString() {
+            return "SerializedGmsRequest{body=[REDACTED], "
+                    + "requestBytes=" + body.length
+                    + ", imageCount=" + imageCount + '}';
         }
     }
 

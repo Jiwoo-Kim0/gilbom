@@ -20,6 +20,7 @@ SECURITY_CONFIG=backend/src/main/java/com/gilbom/security/config/SecurityConfig.
 REPORT_MIGRATION=backend/src/main/resources/db/migration/V30__harden_report_domain_invariants.sql
 LLM_QUOTA_MIGRATION=backend/src/main/resources/db/migration/V33__add_llm_invocation_quota_ledger.sql
 REPORT_FALLBACK_MIGRATION=backend/src/main/resources/db/migration/V34__persist_report_generation_fallback.sql
+LLM_TRANSPORT_STATUS_MIGRATION=backend/src/main/resources/db/migration/V45__record_llm_transport_status.sql
 CANONICAL_FINGERPRINT=backend/src/main/java/com/gilbom/common/idempotency/CanonicalRequestFingerprint.java
 IDEMPOTENCY_STORE=backend/src/main/java/com/gilbom/common/idempotency/IdempotencyRequestStore.java
 IDEMPOTENCY_CLEANUP_JOB=backend/src/main/java/com/gilbom/common/idempotency/IdempotencyRequestCleanupJob.java
@@ -451,6 +452,18 @@ assert_contains "$REPORT_FALLBACK_MIGRATION" \
 assert_contains "$GMS_LLM_CLIENT" \
     "Base64.getEncoder().encodeToString" \
     "in-memory image Base64 conversion"
+assert_contains "$GMS_LLM_CLIENT" \
+    "writeValueAsBytes(providerRequest)" \
+    "final serialized LLM request byte cap"
+assert_contains "$REPORT_LLM_PIPELINE" \
+    "exception.imagePayloadRejected()" \
+    "image payload rejection text-only retry"
+assert_contains "$LLM_TRANSPORT_STATUS_MIGRATION" \
+    "provider_http_status" \
+    "safe provider HTTP status persistence"
+assert_contains "$LLM_TRANSPORT_STATUS_MIGRATION" \
+    "LLM_REQUEST_TOO_LARGE" \
+    "request-size fallback persistence"
 assert_contains "$GMS_LLM_CLIENT" \
     '"json_schema"' \
     "provider Structured Outputs response format"

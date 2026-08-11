@@ -128,7 +128,7 @@ class GmsLlmClientTest {
 
     @Test
     void sendsApprovedImageBytesAsAnInMemoryDataUrl() {
-        byte[] jpeg = jpegBytes(7);
+        byte[] jpeg = jpegBytes(51_826, 7);
         String encoded = Base64.getEncoder()
                 .encodeToString(jpeg);
         RestClient.Builder builder = RestClient.builder()
@@ -183,6 +183,54 @@ class GmsLlmClientTest {
                 List.of(new LlmImageContent(
                         defectId,
                         "INC-IMAGE-001",
+                        jpeg,
+                        "image/jpeg",
+                        640,
+                        480))));
+
+        server.verify();
+    }
+
+    @Test
+    void omitsImageWhenFinalSerializedRequestExceedsTheCap() {
+        byte[] jpeg = jpegBytes(77_391, 7);
+        String encoded = Base64.getEncoder()
+                .encodeToString(jpeg);
+        RestClient.Builder builder = RestClient.builder()
+                .baseUrl(LlmPolicyGate.GMS_BASE_URL + "/");
+        MockRestServiceServer server =
+                MockRestServiceServer.bindTo(builder).build();
+        LlmProperties properties =
+                LlmPolicyGateTest.approvedProperties();
+        properties.setApiKey(API_KEY);
+        properties.setImageInputEnabled(true);
+        properties.setImageDeidentificationApproved(true);
+        GmsLlmClient client = client(builder, properties);
+        server.expect(once(), requestTo(
+                        LlmPolicyGate.GMS_BASE_URL
+                                + "/chat/completions"))
+                .andExpect(content().string(not(containsString(
+                        encoded))))
+                .andExpect(request -> {
+                    com.fasterxml.jackson.databind.JsonNode root =
+                            new ObjectMapper().readTree(
+                                    ((org.springframework.mock.http.client
+                                            .MockClientHttpRequest) request)
+                                            .getBodyAsString());
+                    com.fasterxml.jackson.databind.JsonNode content =
+                            root.at("/messages/1/content");
+                    assertThat(content.isTextual()).isTrue();
+                    assertThat(new ObjectMapper()
+                            .readTree(content.asText())
+                            .has("imageEvidence")).isFalse();
+                })
+                .andRespond(validResponse());
+
+        client.generate(new LlmGenerationRequest(
+                Map.of("period", "2026-07"),
+                List.of(new LlmImageContent(
+                        UUID.randomUUID(),
+                        "INC-IMAGE-LARGE",
                         jpeg,
                         "image/jpeg",
                         640,
@@ -309,6 +357,8 @@ class GmsLlmClientTest {
                                             LlmTransportException
                                                     .FailureKind
                                                     .PROVIDER_4XX);
+                            assertThat(exception.providerHttpStatus())
+                                    .isEqualTo(400);
                             assertThat(exception.getMessage())
                                     .doesNotContain(
                                             "provider-sensitive-client-error");
@@ -575,5 +625,15 @@ class GmsLlmClientTest {
                 (byte) 0xff,
                 (byte) 0xd9
         };
+    }
+
+    private static byte[] jpegBytes(int size, int marker) {
+        byte[] bytes = new byte[size];
+        bytes[0] = (byte) 0xff;
+        bytes[1] = (byte) 0xd8;
+        bytes[2] = (byte) marker;
+        bytes[size - 2] = (byte) 0xff;
+        bytes[size - 1] = (byte) 0xd9;
+        return bytes;
     }
 }

@@ -194,6 +194,7 @@ GILBOM_LLM_API_KEY_SECRET_FILE=$llm_key_file
 GILBOM_LLM_CONNECT_TIMEOUT=3s
 GILBOM_LLM_READ_TIMEOUT=${GILBOM_LLM_READ_TIMEOUT:-30s}
 GILBOM_LLM_MAX_OUTPUT_TOKENS=${GILBOM_LLM_MAX_OUTPUT_TOKENS:-600}
+GILBOM_LLM_MAX_REQUEST_BYTES=${GILBOM_LLM_MAX_REQUEST_BYTES:-98304}
 GILBOM_LLM_DAILY_REQUEST_LIMIT=1
 GILBOM_LLM_DAILY_BUDGET=$llm_budget
 GILBOM_LLM_MAX_CONCURRENT_REQUESTS=1
@@ -380,7 +381,7 @@ frontend_id="$(compose ps -q frontend)"
   || fail "a required smoke container is missing"
 
 [ "$(db_admin_query \
-  "SELECT (COUNT(*) = 44 AND bool_and(success))::int FROM flyway_history.flyway_schema_history;")" = 1 ] \
+  "SELECT (COUNT(*) = 45 AND bool_and(success))::int FROM flyway_history.flyway_schema_history;")" = 1 ] \
   || fail "Flyway did not complete successfully"
 [ "$(db_admin_query "SELECT COUNT(*) FROM report.anomaly_report;")" = 0 ] \
   || fail "the disposable PostgreSQL volume was not empty"

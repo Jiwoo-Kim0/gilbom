@@ -33,6 +33,7 @@
 | Prompt 버전 | 운영 `report-v3`, 롤백 호환 `report-v1`, `report-v2` |
 | 최대 출력 | 1,500 tokens |
 | 최대 입력 | 보수적 비용 예약 기준 8,000 tokens |
+| 최종 요청 body | 기본 98,304 bytes, 허용 범위 32KiB~1MiB |
 | 동시 호출 | 인스턴스당 기본 5, 허용 범위 1~20 |
 | Redirect | 허용하지 않음 |
 | Provider 저장 요청 | `store=false` |
@@ -61,6 +62,7 @@ Base URL 검사는 HTTPS scheme, 정확한 host·443 port·path를 모두 비교
 | 전체 정책 승인 | `POLICY_NOT_APPROVED` |
 | Connect `1ms..10s`, Read `1ms..60s` | `TIMEOUT_INVALID` |
 | 최대 출력 `1..1500` | `MAX_OUTPUT_TOKENS_INVALID` |
+| 최종 요청 body `32KiB..1MiB` | `MAX_REQUEST_BYTES_INVALID` |
 | 동시 호출 상한 `1..20` | `MAX_CONCURRENT_REQUESTS_INVALID` |
 
 위반 내용에는 API Key를 넣지 않는다. 설정 실패는 외부 호출 차단 사유이지 애플리케이션 시작 실패 사유가 아니다.
@@ -106,7 +108,10 @@ Base URL 검사는 HTTPS scheme, 정확한 host·443 port·path를 모두 비교
    `response_format.type=json_schema`, `strict=true`로 전달한다. `429`, `5xx`,
    network timeout만 100ms 기반 backoff와 jitter 후 최대 한 번 재시도한다.
    재시도도 별도 quota·credit 사용량으로 센다.
-6. `4xx`와 JSON·Schema 오류는 재시도하지 않는다.
+6. 최종 직렬화된 JSON body가 설정 상한을 넘으면 이미지와 이미지 메타데이터를
+   제거하고 텍스트 요청만 전송한다. 이미지 요청에 대한 `413`은 안전한 HTTP status만
+   ledger에 기록한 뒤 이미지 없는 요청으로 정확히 한 번 재시도한다. 그 외 `4xx`와
+   JSON·Schema 오류는 재시도하지 않는다.
 7. 응답은 최대 100,000자, 정확한 필드 집합, JSON 타입·enum·개수, 원본 통계·기간·
    결함 identity 일치, 자연어에 포함된 결함 ID·사건 코드의 원본 일치와
    HTML·script·실행 command 금지를 모두 통과해야 한다.
@@ -139,6 +144,11 @@ Base64와 원본 bytes는 보고서, 버전, 멱등 저장소, 감사·애플리
 않는다. 서비스가 없거나 빈 목록을 반환하거나 이미지 gate가 닫혀 있으면 외부 요청은
 기존 문자열 content를 사용해 텍스트만으로 생성한다.
 
+Base64 확장까지 포함한 최종 JSON body가 `GILBOM_LLM_MAX_REQUEST_BYTES`를 넘으면
+이미지는 Provider에 보내지 않고 텍스트 생성은 유지한다. 사전 계산으로 잡지 못한
+Provider `413`도 같은 방식으로 이미지 없는 요청을 한 번만 재시도한다. 텍스트 전용
+요청도 상한을 넘거나 `413`이면 `LLM_REQUEST_TOO_LARGE` 템플릿 fallback으로 종료한다.
+
 ## 7. 비밀정보·로그 규칙
 
 - API Key getter를 공개하지 않고 `toString()`은 항상 `[REDACTED]`로 표시한다.
@@ -150,7 +160,7 @@ Base64와 원본 bytes는 보고서, 버전, 멱등 저장소, 감사·애플리
 - 관측 정보가 필요할 때는 모델 식별자, Prompt 버전, token usage, 성공 여부 같은 비본문 메타데이터만 사용한다.
 - 이미지 관측 정보는 전송 장수와 성공 여부만 기록할 수 있다. bytes, Base64, data URL, `defectId`와 `incidentCode`의 조합을 로그에 남기지 않는다.
 - `request_control.llm_invocation_usage`에는 UTC 날짜, 사용자 UUID, provider·model,
-  token·credit, 성공 여부와 고정 실패 코드만 기록한다. Prompt, 응답, 이미지,
+  token·credit, 성공 여부, 고정 실패 코드와 선택적인 HTTP status만 기록한다. Prompt, 응답, 이미지,
   Authorization, URL과 내부 예외 메시지를 표현하는 column 자체가 없다.
 
 ## 8. 비용·Rate Limit
@@ -176,6 +186,8 @@ race를 막는다. 애플리케이션 한도와 별개로 GMS·인프라 hard ca
 - LLM 비활성 시 템플릿 생성이 가능하고 기존 보고서 회귀 테스트가 모두 통과한다.
 - 이미지 비식별화 미승인·서비스 부재·빈 목록은 이미지 전송 없이 텍스트 생성으로 이어진다.
 - 승인된 JPEG는 한 장만 Base64 data URL로 전달되고 Presigned URL·저장소 경로는 요청에 없다.
+- 직렬화 후 요청 상한을 넘는 이미지는 전송하지 않으며, 이미지 요청 `413`은 텍스트로
+  한 번만 재시도하고 안전한 HTTP status만 저장한다.
 - credential·개인정보·URL·임의 필드와 128KiB 초과 입력은 외부 Client 호출 전에
   거부된다.
 - 알 수 없는 결과 필드, 변조 통계, 미등록 결함 ID, 기간·모델·Prompt 불일치와

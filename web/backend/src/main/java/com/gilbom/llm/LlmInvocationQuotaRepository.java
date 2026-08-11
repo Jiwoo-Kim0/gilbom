@@ -114,6 +114,7 @@ public class LlmInvocationQuotaRepository {
             BigDecimal accountedCredits,
             LlmUsage usage,
             String failureCode,
+            Integer providerHttpStatus,
             Instant completedAt
     ) {
         int updated = jdbcTemplate.update("""
@@ -124,6 +125,7 @@ public class LlmInvocationQuotaRepository {
                     output_tokens = ?,
                     total_tokens = ?,
                     failure_code = ?,
+                    provider_http_status = ?,
                     completed_at = ?
                 WHERE attempt_id = ?
                   AND attempt_status = 'STARTED'
@@ -134,6 +136,7 @@ public class LlmInvocationQuotaRepository {
                 usage == null ? null : usage.outputTokens(),
                 usage == null ? null : usage.totalTokens(),
                 failureCode,
+                providerHttpStatus,
                 utc(completedAt),
                 reservation.attemptId());
         if (updated != 1) {

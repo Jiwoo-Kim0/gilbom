@@ -154,6 +154,8 @@ gilbom:
     connect-timeout: ${GILBOM_LLM_CONNECT_TIMEOUT:3s}
     read-timeout: ${GILBOM_LLM_READ_TIMEOUT:30s}
     max-output-tokens: ${GILBOM_LLM_MAX_OUTPUT_TOKENS:1500}
+    # GMS gateway에 보내는 최종 JSON(Base64 이미지 포함)의 보수적 상한이다.
+    max-request-bytes: ${GILBOM_LLM_MAX_REQUEST_BYTES:98304}
     daily-request-limit: ${GILBOM_LLM_DAILY_REQUEST_LIMIT:0}
     daily-budget: ${GILBOM_LLM_DAILY_BUDGET:0}
     max-concurrent-requests: ${GILBOM_LLM_MAX_CONCURRENT_REQUESTS:5}

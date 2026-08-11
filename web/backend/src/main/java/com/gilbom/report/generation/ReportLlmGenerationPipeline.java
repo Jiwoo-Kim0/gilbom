@@ -131,13 +131,22 @@ public class ReportLlmGenerationPipeline {
                     if (!completeFailure(
                             reservation,
                             null,
-                            exception.failureKind().name())) {
+                            exception.failureKind().name(),
+                            exception.providerHttpStatus())) {
                         return fallback(
                                 request,
                                 prepared,
                                 ReportGenerationFallbackReason
                                         .QUOTA_GUARD_UNAVAILABLE,
                                 externalAttempts);
+                    }
+                    if (attemptIndex == 0
+                            && exception.imagePayloadRejected()
+                            && !llmRequest.images().isEmpty()) {
+                        llmRequest = new LlmGenerationRequest(
+                                llmRequest.input());
+                        ignored.close();
+                        continue;
                     }
                     if (retryPolicy.shouldRetry(
                             attemptIndex,
@@ -150,8 +159,11 @@ public class ReportLlmGenerationPipeline {
                     return fallback(
                             request,
                             prepared,
-                            ReportGenerationFallbackReason
-                                    .LLM_UNAVAILABLE,
+                            requestTooLarge(exception)
+                                    ? ReportGenerationFallbackReason
+                                            .LLM_REQUEST_TOO_LARGE
+                                    : ReportGenerationFallbackReason
+                                            .LLM_UNAVAILABLE,
                             externalAttempts);
                 } catch (BusinessException exception) {
                     String code = exception.errorCode()
@@ -161,7 +173,8 @@ public class ReportLlmGenerationPipeline {
                     completeFailure(
                             reservation,
                             null,
-                            code);
+                            code,
+                            null);
                     return fallback(
                             request,
                             prepared,
@@ -176,7 +189,8 @@ public class ReportLlmGenerationPipeline {
                     completeFailure(
                             reservation,
                             null,
-                            "CLIENT_FAILURE");
+                            "CLIENT_FAILURE",
+                            null);
                     return fallback(
                             request,
                             prepared,
@@ -194,7 +208,8 @@ public class ReportLlmGenerationPipeline {
                     completeFailure(
                             reservation,
                             response.usage(),
-                            "RESPONSE_INVALID");
+                            "RESPONSE_INVALID",
+                            null);
                     return fallback(
                             request,
                             prepared,
@@ -235,17 +250,28 @@ public class ReportLlmGenerationPipeline {
     private boolean completeFailure(
             Reservation reservation,
             com.gilbom.llm.LlmUsage usage,
-            String safeCode
+            String safeCode,
+            Integer providerHttpStatus
     ) {
         try {
             quotaService.completeFailure(
                     reservation,
                     usage,
-                    safeCode);
+                    safeCode,
+                    providerHttpStatus);
             return true;
         } catch (RuntimeException exception) {
             return false;
         }
+    }
+
+    private static boolean requestTooLarge(
+            LlmTransportException exception
+    ) {
+        return exception.failureKind()
+                        == LlmTransportException.FailureKind
+                                .REQUEST_TOO_LARGE
+                || exception.imagePayloadRejected();
     }
 
     private ReportGenerationOutcome fallback(

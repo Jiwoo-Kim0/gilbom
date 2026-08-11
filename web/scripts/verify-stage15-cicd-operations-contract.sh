@@ -76,8 +76,8 @@ assert_contains scripts/generate-cicd-notification.py \
   '"console": console_url' \
   "authenticated Jenkins console link is missing"
 assert_contains scripts/generate-cicd-notification.py \
-  '("flyway-v1-v44", "Flyway V1-V44"' \
-  "Mattermost CI diagnosis does not match the current Flyway V1-V44 gate"
+  '("flyway-v1-v45", "Flyway V1-V45"' \
+  "Mattermost CI diagnosis does not match the current Flyway V1-V45 gate"
 if grep -Fq 'flyway-v1-v35' scripts/generate-cicd-notification.py; then
   fail "Mattermost CI diagnosis still contains the obsolete Flyway V1-V35 gate"
 fi

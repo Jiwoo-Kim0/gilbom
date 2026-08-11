@@ -62,13 +62,15 @@ public class LlmInvocationQuotaService {
                 accounted,
                 hasKnownUsage(usage) ? usage : null,
                 null,
+                null,
                 clock.instant());
     }
 
     public void completeFailure(
             Reservation reservation,
             LlmUsage usage,
-            String safeFailureCode
+            String safeFailureCode,
+            Integer providerHttpStatus
     ) {
         // 정책상 실패와 재시도도 예산에 포함하므로 예약액을 반환하지 않는다.
         repository.complete(
@@ -77,6 +79,7 @@ public class LlmInvocationQuotaService {
                 reservation.reservedCredits(),
                 hasKnownUsage(usage) ? usage : null,
                 safeFailureCode,
+                providerHttpStatus,
                 clock.instant());
     }
 
