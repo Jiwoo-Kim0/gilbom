@@ -41,6 +41,7 @@ REPORT_REALTIME_EVENT=backend/src/main/java/com/gilbom/report/realtime/ReportRea
 REPORT_REALTIME_LISTENER=backend/src/main/java/com/gilbom/report/realtime/ReportRealtimeEventListener.java
 LLM_IMAGE_CONTENT=backend/src/main/java/com/gilbom/llm/LlmImageContent.java
 GMS_LLM_CLIENT=backend/src/main/java/com/gilbom/llm/GmsLlmClient.java
+LLM_JPEG_REQUEST_FITTER=backend/src/main/java/com/gilbom/llm/LlmJpegRequestFitter.java
 DEFECT_REPORT_IMAGE_SERVICE=backend/src/main/java/com/gilbom/defect/DefectReportImageService.java
 REPORT_LLM_REQUEST_FACTORY=backend/src/main/java/com/gilbom/report/generation/ReportLlmRequestFactory.java
 REPORT_LLM_INPUT=backend/src/main/java/com/gilbom/report/generation/ReportLlmInput.java
@@ -455,6 +456,12 @@ assert_contains "$GMS_LLM_CLIENT" \
 assert_contains "$GMS_LLM_CLIENT" \
     "writeValueAsBytes(providerRequest)" \
     "final serialized LLM request byte cap"
+assert_contains "$GMS_LLM_CLIENT" \
+    "fitSingleImage" \
+    "oversized LLM image fitting before omission"
+assert_contains "$LLM_JPEG_REQUEST_FITTER" \
+    "MemoryCacheImageOutputStream" \
+    "memory-only bounded JPEG recompression"
 assert_contains "$REPORT_LLM_PIPELINE" \
     "exception.imagePayloadRejected()" \
     "image payload rejection text-only retry"

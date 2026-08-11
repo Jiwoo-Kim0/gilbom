@@ -13,10 +13,16 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+
+import javax.imageio.ImageIO;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
@@ -231,6 +237,77 @@ class GmsLlmClientTest {
                 List.of(new LlmImageContent(
                         UUID.randomUUID(),
                         "INC-IMAGE-LARGE",
+                        jpeg,
+                        "image/jpeg",
+                        640,
+                        480))));
+
+        server.verify();
+    }
+
+    @Test
+    void fitsDecodableOversizedJpegWithinTheFinalRequestCap()
+            throws IOException {
+        byte[] jpeg = noisyJpeg(640, 480);
+        String originalEncoded = Base64.getEncoder()
+                .encodeToString(jpeg);
+        RestClient.Builder builder = RestClient.builder()
+                .baseUrl(LlmPolicyGate.GMS_BASE_URL + "/");
+        MockRestServiceServer server =
+                MockRestServiceServer.bindTo(builder).build();
+        LlmProperties properties =
+                LlmPolicyGateTest.approvedProperties();
+        properties.setApiKey(API_KEY);
+        properties.setImageInputEnabled(true);
+        properties.setImageDeidentificationApproved(true);
+        GmsLlmClient client = client(builder, properties);
+        server.expect(once(), requestTo(
+                        LlmPolicyGate.GMS_BASE_URL
+                                + "/chat/completions"))
+                .andExpect(content().string(not(containsString(
+                        originalEncoded))))
+                .andExpect(request -> {
+                    String body = ((org.springframework.mock.http.client
+                            .MockClientHttpRequest) request)
+                            .getBodyAsString();
+                    assertThat(body.getBytes(StandardCharsets.UTF_8))
+                            .hasSizeLessThanOrEqualTo(
+                                    properties.getMaxRequestBytes());
+                    com.fasterxml.jackson.databind.JsonNode root =
+                            new ObjectMapper().readTree(body);
+                    com.fasterxml.jackson.databind.JsonNode content =
+                            root.at("/messages/1/content");
+                    assertThat(content.isArray()).isTrue();
+                    String dataUrl = content.get(1)
+                            .at("/image_url/url")
+                            .asText();
+                    assertThat(dataUrl)
+                            .startsWith("data:image/jpeg;base64,");
+                    byte[] fitted = Base64.getDecoder().decode(
+                            dataUrl.substring(dataUrl.indexOf(',') + 1));
+                    assertThat(fitted.length).isLessThan(jpeg.length);
+                    BufferedImage decoded = ImageIO.read(
+                            new java.io.ByteArrayInputStream(fitted));
+                    assertThat(decoded).isNotNull();
+                    assertThat(decoded.getWidth()).isBetween(1, 640);
+                    assertThat(decoded.getHeight()).isBetween(1, 480);
+                    com.fasterxml.jackson.databind.JsonNode input =
+                            new ObjectMapper().readTree(
+                                    content.get(0).get("text").asText());
+                    assertThat(input.at(
+                            "/imageEvidence/0/width").asInt())
+                            .isEqualTo(decoded.getWidth());
+                    assertThat(input.at(
+                            "/imageEvidence/0/height").asInt())
+                            .isEqualTo(decoded.getHeight());
+                })
+                .andRespond(validResponse());
+
+        client.generate(new LlmGenerationRequest(
+                Map.of("period", "2026-07"),
+                List.of(new LlmImageContent(
+                        UUID.randomUUID(),
+                        "INC-IMAGE-FITTED",
                         jpeg,
                         "image/jpeg",
                         640,
@@ -635,5 +712,30 @@ class GmsLlmClientTest {
         bytes[size - 2] = (byte) 0xff;
         bytes[size - 1] = (byte) 0xd9;
         return bytes;
+    }
+
+    private static byte[] noisyJpeg(
+            int width,
+            int height
+    ) throws IOException {
+        BufferedImage image = new BufferedImage(
+                width,
+                height,
+                BufferedImage.TYPE_INT_RGB);
+        int state = 0x13579bdf;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                state ^= state << 13;
+                state ^= state >>> 17;
+                state ^= state << 5;
+                image.setRGB(x, y, state & 0x00ffffff);
+            }
+        }
+        try (ByteArrayOutputStream output =
+                new ByteArrayOutputStream()) {
+            assertThat(ImageIO.write(image, "jpg", output))
+                    .isTrue();
+            return output.toByteArray();
+        }
     }
 }

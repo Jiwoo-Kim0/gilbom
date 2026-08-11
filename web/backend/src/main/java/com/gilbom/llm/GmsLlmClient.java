@@ -40,6 +40,7 @@ public final class GmsLlmClient implements LlmClient {
             "/llm/report-structured-output.schema.json";
     private static final String REPORT_SCHEMA_NAME =
             "gilbom_report_v1";
+    private static final int JPEG_SIZE_SAFETY_MARGIN = 256;
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
@@ -52,6 +53,7 @@ public final class GmsLlmClient implements LlmClient {
     private final boolean imageInputAllowed;
     private final LlmOutboundInputGuard outboundInputGuard;
     private final JsonNode reportOutputSchema;
+    private final LlmJpegRequestFitter jpegRequestFitter;
 
     GmsLlmClient(
             RestClient restClient,
@@ -83,6 +85,7 @@ public final class GmsLlmClient implements LlmClient {
                 new LlmOutboundInputGuard(objectMapper);
         reportOutputSchema = loadReportOutputSchema(
                 objectMapper);
+        jpegRequestFitter = new LlmJpegRequestFitter();
         systemPrompt = promptCatalog.systemPrompt(
                 promptVersion)
                 + "\nThe response fields promptVersion and "
@@ -111,6 +114,26 @@ public final class GmsLlmClient implements LlmClient {
                 images);
         if (serialized.body().length > maxRequestBytes
                 && !images.isEmpty()) {
+            SerializedGmsRequest original = serialized;
+            images = fitSingleImage(request, images, serialized)
+                    .orElse(images);
+            serialized = serializeRequest(request, images);
+            if (serialized.body().length <= maxRequestBytes
+                    && serialized.body().length
+                            < original.body().length) {
+                LOGGER.warn(
+                        "LLM image evidence fitted before provider call: "
+                                + "reason=REQUEST_TOO_LARGE, requestBytes={}, "
+                                + "fittedRequestBytes={}, maximumBytes={}, "
+                                + "imageCount={}",
+                        original.body().length,
+                        serialized.body().length,
+                        maxRequestBytes,
+                        images.size());
+            }
+        }
+        if (serialized.body().length > maxRequestBytes
+                && !images.isEmpty()) {
             LOGGER.warn(
                     "LLM image evidence omitted before provider call: "
                             + "reason=REQUEST_TOO_LARGE, requestBytes={}, "
@@ -127,6 +150,32 @@ public final class GmsLlmClient implements LlmClient {
                             .REQUEST_TOO_LARGE);
         }
         return execute(serialized);
+    }
+
+    private java.util.Optional<List<LlmImageContent>> fitSingleImage(
+            LlmGenerationRequest request,
+            List<LlmImageContent> images,
+            SerializedGmsRequest original
+    ) {
+        if (images.size() != 1) {
+            return java.util.Optional.empty();
+        }
+        LlmImageContent image = images.getFirst();
+        int encodedLength = Base64.getEncoder()
+                .encodeToString(image.bytes())
+                .length();
+        int fixedRequestBytes = original.body().length
+                - encodedLength;
+        int availableBase64Bytes = maxRequestBytes
+                - fixedRequestBytes;
+        int maximumJpegBytes = Math.max(
+                0,
+                (availableBase64Bytes / 4) * 3
+                        - JPEG_SIZE_SAFETY_MARGIN);
+        return jpegRequestFitter.fit(image, maximumJpegBytes)
+                .map(List::of)
+                .filter(fitted -> serializeRequest(request, fitted)
+                        .body().length <= maxRequestBytes);
     }
 
     private LlmGenerationResponse execute(
