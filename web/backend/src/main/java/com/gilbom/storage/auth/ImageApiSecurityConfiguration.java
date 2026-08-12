@@ -8,6 +8,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.authentication.session.NullAuthenticatedSessionStrategy;
 import org.springframework.security.web.context.NullSecurityContextRepository;
 
 import com.gilbom.common.error.ErrorCode;
@@ -48,7 +49,11 @@ public class ImageApiSecurityConfiguration {
                 // 로봇 클라이언트와 <img> 요청은 브라우저 폼이 아니므로 CSRF 대상이 아니다.
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session
-                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                        // 서명·API Key 인증은 로그인 성공이 아니므로 기존 관리자
+                        // 세션 ID를 회전시키는 후처리를 실행하지 않는다.
+                        .sessionAuthenticationStrategy(
+                                new NullAuthenticatedSessionStrategy()))
                 // 이 체인의 인증은 요청마다 자격증명에서 새로 만든다. 세션에 저장하지 않는다.
                 .securityContext(context -> context
                         .securityContextRepository(

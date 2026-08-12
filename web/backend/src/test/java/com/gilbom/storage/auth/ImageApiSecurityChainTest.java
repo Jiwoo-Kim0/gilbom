@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -14,7 +15,14 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -175,9 +183,63 @@ class ImageApiSecurityChainTest {
     }
 
     @Test
+    void signedImageAuthenticationDoesNotRotateAnExistingLoginSession()
+            throws Exception {
+        when(imageBytesReader.read(IMAGE_ID)).thenReturn(new ImageBytes(
+                IMAGE_ID, new byte[] {1, 2, 3}, "image/jpeg", 64, 48));
+        String url = imageUrlSigner.issue(IMAGE_ID).url();
+        MockHttpSession loginSession = authenticatedLoginSession();
+        String originalSessionId = loginSession.getId();
+        Object originalLoginContext = loginSession.getAttribute(
+                HttpSessionSecurityContextRepository
+                        .SPRING_SECURITY_CONTEXT_KEY);
+
+        mockMvc.perform(get(url).session(loginSession))
+                .andExpect(status().isOk())
+                .andExpect(result -> {
+                    if (!originalSessionId.equals(loginSession.getId())) {
+                        throw new AssertionError(
+                                "이미지 인증이 기존 로그인 세션 ID를 회전했습니다");
+                    }
+                })
+                .andExpect(result -> {
+                    Object storedLoginContext = loginSession.getAttribute(
+                            HttpSessionSecurityContextRepository
+                                    .SPRING_SECURITY_CONTEXT_KEY);
+                    if (storedLoginContext != originalLoginContext) {
+                        throw new AssertionError(
+                                "이미지 인증이 기존 로그인 인증정보를 덮어썼습니다");
+                    }
+                })
+                .andExpect(result -> {
+                    if (result.getResponse().getHeader(
+                            HttpHeaders.SET_COOKIE) != null) {
+                        throw new AssertionError(
+                                "이미지 응답이 로그인 세션 쿠키를 변경했습니다");
+                    }
+                });
+    }
+
+    @Test
     void leavesNonImagePathsToTheAdministratorChain() throws Exception {
         // 이미지 체인이 경로를 넘겨받지 않았음을 확인한다. 헬스는 관리자 체인이 공개한다.
         mockMvc.perform(get("/api/health")).andExpect(status().isOk());
+    }
+
+    private static MockHttpSession authenticatedLoginSession() {
+        MockHttpSession session = new MockHttpSession();
+        SecurityContext context = SecurityContextHolder.createEmptyContext();
+        context.setAuthentication(
+                UsernamePasswordAuthenticationToken.authenticated(
+                        UUID.fromString(
+                                "17000000-0000-4000-8000-000000000001"),
+                        null,
+                        List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
+        session.setAttribute(
+                HttpSessionSecurityContextRepository
+                        .SPRING_SECURITY_CONTEXT_KEY,
+                context);
+        return session;
     }
 
     private static String sha256Hex(String value) {
