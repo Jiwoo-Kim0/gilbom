@@ -3,8 +3,10 @@ package com.gilbom.defect.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.util.Optional;
+import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +38,7 @@ import com.gilbom.defect.DefectDtos.DefectStatusUpdateRequest;
 import com.gilbom.defect.DefectDtos.DefectUpdateRequest;
 import com.gilbom.defect.DefectFilter;
 import com.gilbom.defect.DefectImageUrlIssuer;
+import com.gilbom.defect.DefectImageUrlIssuer.IssuedImageUrl;
 import com.gilbom.defect.DefectQueryService;
 import com.gilbom.defect.DefectRepository;
 import com.gilbom.robot.application.RobotScopeService;
@@ -276,6 +279,65 @@ class DefectQueryScopeIntegrationTest {
                 ADMIN_USER_ID, VISIBLE_DEFECT_ID);
         assertThat(detail.mergedDefectIds())
                 .containsExactly(MERGED_AWAY_DEFECT_ID);
+    }
+
+    @Test
+    void usesTheLatestCapturedImageAsTheDefaultWithoutDeletingOlderImages() {
+        UUID olderEventId = observationEventId(
+                VISIBLE_DEFECT_ID,
+                ASSIGNED_ROBOT_ID,
+                1L);
+        UUID latestEventId = observationEventId(
+                MERGED_AWAY_DEFECT_ID,
+                ASSIGNED_ROBOT_ID,
+                2L);
+        UUID olderImageId = UUID.fromString(
+                "17000000-0000-4000-8000-000000000101");
+        UUID latestImageId = UUID.fromString(
+                "17000000-0000-4000-8000-000000000102");
+        Instant olderCapturedAt = Instant.parse("2026-07-29T01:00:00Z");
+        Instant latestCapturedAt = Instant.parse("2026-07-29T02:00:00Z");
+
+        attachImage(
+                olderEventId,
+                olderImageId,
+                olderCapturedAt,
+                Instant.parse("2026-07-29T04:00:00Z"));
+        attachImage(
+                latestEventId,
+                latestImageId,
+                latestCapturedAt,
+                Instant.parse("2026-07-29T03:00:00Z"));
+
+        var defaultImage = queryService.issueImageUrl(
+                ADMIN_USER_ID,
+                VISIBLE_DEFECT_ID,
+                null);
+        assertThat(defaultImage.eventId()).isEqualTo(latestEventId);
+        assertThat(defaultImage.imageId()).isEqualTo(latestImageId);
+
+        var selectedOlderImage = queryService.issueImageUrl(
+                ADMIN_USER_ID,
+                VISIBLE_DEFECT_ID,
+                olderEventId);
+        assertThat(selectedOlderImage.imageId()).isEqualTo(olderImageId);
+
+        assertThat(queryService.findClusterDetails(
+                ADMIN_USER_ID,
+                List.of(VISIBLE_DEFECT_ID)).items())
+                .singleElement()
+                .satisfies(item -> assertThat(item.imageUrl())
+                        .endsWith(latestImageId.toString()));
+
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*)
+                        FROM storage.robot_image
+                        WHERE image_id IN (?, ?)
+                        """,
+                Integer.class,
+                olderImageId,
+                latestImageId))
+                .isEqualTo(2);
     }
 
     @Test
@@ -600,8 +662,7 @@ class DefectQueryScopeIntegrationTest {
             long seq,
             boolean representative
     ) {
-        UUID eventId = UUID.nameUUIDFromBytes(
-                (defectId + "|" + robotId + "|" + seq).getBytes());
+        UUID eventId = observationEventId(defectId, robotId, seq);
         createRobotEvent(eventId, robotId, seq);
         jdbcTemplate.update("""
                 INSERT INTO defect.defect_observation (
@@ -630,6 +691,61 @@ class DefectQueryScopeIntegrationTest {
                 robotId,
                 defectId,
                 representative);
+    }
+
+    private void attachImage(
+            UUID eventId,
+            UUID imageId,
+            Instant capturedAt,
+            Instant observationCreatedAt
+    ) {
+        jdbcTemplate.update("""
+                INSERT INTO storage.robot_image (
+                    image_id,
+                    robot_id,
+                    event_id,
+                    bucket_name,
+                    object_key,
+                    byte_size,
+                    sha256_hex,
+                    image_width,
+                    image_height,
+                    captured_at,
+                    uploaded_at
+                ) VALUES (
+                    ?, ?, ?, 'defect-query-test', ?, 1,
+                    REPEAT('a', 64), 640, 480, ?, ?
+                )
+                ON CONFLICT (image_id) DO NOTHING
+                """,
+                imageId,
+                ASSIGNED_ROBOT_ID,
+                eventId,
+                imageId + ".jpg",
+                Timestamp.from(capturedAt),
+                Timestamp.from(capturedAt.plusSeconds(1)));
+        jdbcTemplate.update("""
+                UPDATE defect.defect_observation
+                SET image_id = ?,
+                    evidence_captured_at = ?,
+                    image_width = 640,
+                    image_height = 480,
+                    created_at = ?
+                WHERE event_id = ?
+                """,
+                imageId,
+                Timestamp.from(capturedAt),
+                Timestamp.from(observationCreatedAt),
+                eventId);
+    }
+
+    private static UUID observationEventId(
+            UUID defectId,
+            UUID robotId,
+            long seq
+    ) {
+        return UUID.nameUUIDFromBytes(
+                (defectId + "|" + robotId + "|" + seq).getBytes());
     }
 
     private void assignRobot(
@@ -703,7 +819,11 @@ class DefectQueryScopeIntegrationTest {
          */
         @Bean
         DefectImageUrlIssuer defectImageUrlIssuer() {
-            return imageId -> Optional.empty();
+            return imageId -> imageId == null
+                    ? Optional.empty()
+                    : Optional.of(new IssuedImageUrl(
+                            "https://images.invalid/" + imageId,
+                            Instant.parse("2099-01-01T00:00:00Z")));
         }
     }
 }

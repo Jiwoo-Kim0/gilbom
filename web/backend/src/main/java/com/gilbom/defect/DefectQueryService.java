@@ -247,11 +247,12 @@ public class DefectQueryService {
     }
 
     /**
-     * 결함별 대표 관측의 이미지. 우선순위는 {@link #issueImageUrl}과 같아야 목록의
+     * 결함별 최신 촬영 이미지. 우선순위는 {@link #issueImageUrl}과 같아야 목록의
      * 사진과 상세 카드의 사진이 어긋나지 않는다.
      *
-     * <p>{@code DISTINCT ON}이 고른 맨 위 관측에 이미지가 없으면 그 결함은 사진이 없는
-     * 것으로 둔다 — 단건 발급이 404를 내는 것과 같은 판정이다.
+     * <p>관측 사실과 과거 이미지는 그대로 보존하되, 화면의 기본 사진만 실제 촬영 시각
+     * 기준 최신 이미지로 고른다. 이미지 업로드가 실패한 최신 관측 때문에 이전에 정상
+     * 저장된 사진까지 숨지 않도록 image_id가 있는 관측만 후보로 삼는다.
      */
     private Map<UUID, UUID> findRepresentativeImageIds(
             MapSqlParameterSource parameters
@@ -264,10 +265,11 @@ public class DefectQueryService {
                 JOIN defect.defect od
                   ON od.defect_id = o.defect_id
                 WHERE COALESCE(od.merged_into_defect_id, od.defect_id) IN (:defectIds)
+                  AND o.image_id IS NOT NULL
                 ORDER BY COALESCE(od.merged_into_defect_id, od.defect_id),
-                         o.is_representative DESC,
-                         o.confidence DESC,
-                         o.created_at DESC
+                         COALESCE(o.evidence_captured_at, o.created_at) DESC,
+                         o.created_at DESC,
+                         o.event_id DESC
                 """,
                 parameters,
                 (resultSet, rowNumber) -> new ClusterImage(
@@ -535,9 +537,10 @@ public class DefectQueryService {
                 WHERE
                 """ + observationScope()
                         + observationPredicate + """
-                ORDER BY o.is_representative DESC,
-                         o.confidence DESC,
-                         o.created_at DESC
+                  AND o.image_id IS NOT NULL
+                ORDER BY COALESCE(o.evidence_captured_at, o.created_at) DESC,
+                         o.created_at DESC,
+                         o.event_id DESC
                 LIMIT 1
                 """,
                 parameters,
@@ -548,8 +551,8 @@ public class DefectQueryService {
                         resultSet.getObject("image_height", Integer.class),
                         readBoundingBox(resultSet.getString("bbox_norm"))));
 
-        if (candidates.isEmpty() || candidates.getFirst().imageId() == null) {
-            // 관측이 없거나 업로드 실패로 image_id가 null인 경우(계약 11.3 핀 우선 원칙)다.
+        if (candidates.isEmpty()) {
+            // 관측 사진이 하나도 없거나 지정한 관측의 업로드가 실패한 경우다.
             throw new BusinessException(ErrorCode.IMAGE_NOT_FOUND);
         }
         ImageCandidate candidate = candidates.getFirst();
