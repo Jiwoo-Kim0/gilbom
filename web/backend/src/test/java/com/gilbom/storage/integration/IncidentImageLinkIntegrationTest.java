@@ -249,6 +249,42 @@ class IncidentImageLinkIntegrationTest {
     }
 
     @Test
+    void mergesRepeatedMissingIncidentsWithoutConfidence() {
+        UUID firstEventId = UUID.fromString(
+                "24000000-0000-4000-8000-000000000110");
+        UUID secondEventId = UUID.fromString(
+                "24000000-0000-4000-8000-000000000111");
+
+        IncidentIngestionResult first = ingest(
+                missingIncident(firstEventId, 1, null));
+        IncidentIngestionResult second = ingest(
+                missingIncident(secondEventId, 2, null));
+
+        assertThat(second.observationInserted()).isTrue();
+        assertThat(second.defectId()).isEqualTo(first.defectId());
+        assertThat(jdbcTemplate.queryForMap("""
+                        SELECT
+                            observation_count,
+                            latest_confidence,
+                            review_required
+                        FROM defect.defect
+                        WHERE defect_id = ?
+                        """,
+                first.defectId()))
+                .containsEntry("observation_count", 2)
+                .containsEntry("latest_confidence", null)
+                .containsEntry("review_required", true);
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*)
+                        FROM defect.defect_observation
+                        WHERE defect_id = ?
+                        """,
+                Integer.class,
+                first.defectId()))
+                .isEqualTo(2);
+    }
+
+    @Test
     void rejectsAnIncidentWhoseEventIdDiffersFromTheUploadedImage() {
         UUID uploadEventId = UUID.fromString(
                 "24000000-0000-4000-8000-000000000102");

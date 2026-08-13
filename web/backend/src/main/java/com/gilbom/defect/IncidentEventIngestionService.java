@@ -619,11 +619,15 @@ public class IncidentEventIngestionService
                 UPDATE defect.defect
                 SET observation_count = observation_count + 1,
                     latest_confidence = CASE
-                        WHEN ? >= last_seen_at AND ? IS NOT NULL THEN ?
+                        WHEN ? >= last_seen_at
+                             AND CAST(? AS NUMERIC) IS NOT NULL
+                            THEN CAST(? AS NUMERIC)
                         ELSE latest_confidence
                     END,
                     last_seen_at = GREATEST(last_seen_at, ?),
-                    review_required = review_required OR ? IS NULL OR ? < 0.7,
+                    review_required = review_required
+                        OR CAST(? AS NUMERIC) IS NULL
+                        OR CAST(? AS NUMERIC) < 0.7,
                     updated_at = NOW()
                 WHERE defect_id = ?
                 """,
