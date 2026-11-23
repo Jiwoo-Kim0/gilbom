@@ -1,0 +1,239 @@
+"""주행 상태 정의 — FSM 상태 열거형, 주행 명령 데이터 타입, 전이 테이블(코드판).
+
+이 패키지(driving/)는 순수 계산만 한다: I/O·time.sleep·시계 접근 금지.
+전이 테이블의 mermaid 다이어그램판은 README.md에 있다 — 수정 시 둘을 함께 고칠 것.
+"""
+
+from dataclasses import dataclass
+from enum import Enum, unique
+from typing import Tuple
+
+
+@unique
+class DriveState(Enum):
+    """FSM 상태 (임베디드 명세서의 상태 정의와 1:1)."""
+
+    IDLE = "IDLE"            # 대기 — 시작 요청·수동 폴백 대기
+    PAUSED = "PAUSED"        # 원격 일시정지 — 수동 재개/취소 대기
+    CRUISE = "CRUISE"        # 인도 중심선 추종 (코스트맵 방향 선택, 없으면 비례 조향)
+    TRACE = "TRACE"          # 점자블록 추종 — 검사 카메라로 상시 탐지 (미션 본체)
+    INSPECT = "INSPECT"      # 파손 후보 확정: 정차 → 정밀 판정 → 추종 재개(정차 쿨다운)
+    TURN = "TURN"            # 좌/우회전 — 감속 + 깊은 조향 (yaw 있으면 실측, 없으면 시간)
+    AVOID = "AVOID"          # 장애물: 정지 없이 좌/우 회피 선회 (IMU 불필요)
+    ESCAPE = "ESCAPE"        # 차도 이탈 선회 — 차도가 코리도에 들어옴 → 인도 쪽으로 선회
+    SLOPE = "SLOPE"          # 경사 보정 주행 — 오르막 증속·내리막 감속 (IMU 게이트)
+    DEAD_END = "DEAD_END"    # 막다른 길 재정향 — 후진→유리한 쪽 선회, 시각 판정.
+                             # 몇 번 반복해도 안 풀리면 U턴(yaw 목표각)으로 승격
+    ESTOP = "ESTOP"          # 비상 정지 — 수동 해제만 허용
+
+
+@unique
+class AvoidPhase(Enum):
+    """AVOID 하위 국면 — 회피 선회의 진행 단계.
+
+    상태 전이가 아니다: DriveState는 내내 AVOID로 유지되고 on_event도 발화하지 않는다.
+    **IMU를 요구하지 않는다** — 국면 종료 판정이 전부 시각(장애물 소멸·중심 재정렬)
+    + 시간이다. 종전에는 yaw 기반이라 IMU 게이트 뒤였고, IMU 배선이 해제된 상태에서
+    모든 장애물이 HOLD(정지 대기)로 떨어졌다 (0803 실외 '자꾸 정지만 함'의 직접 원인).
+    """
+
+    HOLD = "HOLD"        # 정지 대기 — **비껴갈 방향 자체가 없을 때**(코스트맵 전 슬롯 ∞)
+                         # 와 경사발만. recheck_sec마다 재확인 → 막다른 길 승격 후보
+    SWERVE = "SWERVE"    # 벗어나기 — 경로 이득 큰 쪽으로 조향, 장애물이 진행 경로에서
+                         # 빠질 때까지. CRUISE에서 장애물을 보면 여기로 바로 들어온다
+    PASS = "PASS"        # 통과 — 조향 중립 직진 (전방 카메라는 옆을 못 보므로 시간 판정)
+    RETURN = "RETURN"    # 복귀 — 반대 조향으로 인도 중심 오차가 좁혀질 때까지
+
+
+@unique
+class DeadEndPhase(Enum):
+    """DEAD_END 재정향 하위 국면 — AvoidPhase와 같은 원리(상태 전이 아님).
+
+    **후진 먼저**, 그 다음 유리한 쪽으로 선회 전진을 교대한다.
+
+    종전에는 '좌조향 전진 호 ↔ 정렬 후진'으로 yaw를 180°까지 누적하는 K턴이었고,
+    완료 판정이 yaw 단독이었다. 0804 실내에서 그 판정이 부호 하나로 무너져
+    (yaw_sign 오설정 → 좌회전 누적이 음수 → 목표 +165°에 도달 불가) 매번
+    timeout 30초를 채웠다. AvoidPhase·TurnPhase가 이미 겪고 시각 판정으로
+    옮겨간 것과 같은 실패다 — 그래서 완료 기준을 '목표 각도'가 아니라
+    **'갈 수 있는 경로가 다시 생겼는가'(시각)** 로 바꿨다. yaw는 무한 회전을
+    막는 상한으로만 남는다.
+
+    후진이 먼저인 이유: 벽에 코가 닿은 상태에서는 조향을 아무리 꺾어도 호를
+    그릴 공간이 없다. 종전 구조는 그 상태에서 전진 호부터 시도해 헛바퀴를 돌았다.
+    """
+
+    REVERSE = "REVERSE"      # 조향 정렬 + 후진 — 선회할 공간부터 확보 (후방은 카메라 사각).
+                             # **진입 시 한 번**과 U턴의 정렬 다리에만 쓴다. 실패한 호 뒤의
+                             # 후진은 아래 RETRACE 다.
+    TURN_ARC = "TURN_ARC"    # 유리한 쪽으로 깊은 조향 전진 — 새 경로를 찾는 국면
+    RETRACE = "RETRACE"      # **되짚기 후진** — 실패한 전진 호를 같은 조향각 그대로 되감아
+                             # 원점으로 돌아간다. 차량 기구학상 같은 조향각·같은 스로틀로
+                             # 후진하면 회전중심이 같아 그 호를 되짚는다(오도메트리 없이
+                             # 원점 복귀를 근사하는 유일한 수단이다 — 경계 소실의 되짚기
+                             # 후진이 같은 원리를 쓴다).
+                             # 종전에는 실패한 호 뒤에도 REVERSE(조향 0 직진 후진)를 했다:
+                             # 호로 나간 만큼 횡방향으로 어긋난 자리에서 뒤로만 빠지므로
+                             # **반대쪽 시도가 원점이 아닌 곳에서 시작**했고, 그래서 좌·우를
+                             # 다 해 봐도 같은 벽을 다른 각도에서 만나기만 했다.
+                             # (0806 실기: "첫 조향에 실패하면 정렬하지 않고 그대로 후진해서
+                             #  원점에 오고, 첫 방향의 반대방향으로 쭉 조향해서 가야 한다")
+    STRAIGHTEN = "STRAIGHTEN"  # 바퀴 중앙 정렬 — 탈출 직후 **추종을 시작하기 전에**
+                             # 조향을 중앙으로 되돌린다. 조향 슬루율 제한 때문에 -40°에서
+                             # 한 번에 안 돌아오는데, 그 사이 CRUISE가 스로틀 100%로
+                             # 전진하면 방금 피한 쪽으로 호를 그리며 다시 들어간다
+                             # (0804 실측: 꼬리 0.6초 × 0.32m/s ≈ 19cm를 30° 꺾인 채 주행,
+                             #  '재정향 완료 → 0.3초 뒤 다시 AVOID'의 원인).
+    UTURN = "UTURN"          # 회차 — 후진↔선회를 몇 번 반복해도 안 풀릴 때의 마지막 수단.
+                             # 여기서만 완료 기준이 yaw 목표각이다(방향을 되돌리는 것이
+                             # 목적이므로 '경로가 보인다'로는 끝낼 수 없다). yaw_sign이
+                             # 정정된 뒤에야 성립하는 판정이다 (0804).
+                             # ※ 0806부터 **'정지 + 수동 대기'의 대체재**이기도 하다:
+                             #   후진 복구 상한(전 방향 막힘)·재정향 상한·경계 소실 유예
+                             #   만료가 전부 IDLE 이었는데, 이제 여기로 승격된다
+                             #   ("완전 정지 해야하는 경우에는 그냥 u턴으로 180도 돌려버리고
+                             #    계속 진행해야 한다"). 무한 배회는 U턴 탈출 횟수 상한
+                             #   (dead_end.uturn_escape_limit)이 막는다.
+
+
+@dataclass(frozen=True)
+class DriveCommand:
+    """step()이 내놓는 주행 명령. 실행(장치 쓰기)은 main 루프 한 곳만 담당한다.
+
+    throttle_pct: +전진 / -후진 / 0 정지 (%).
+    steering_offset_deg: 조향 중심 기준 오프셋(도). 음수=좌, 양수=우.
+        소프트 리밋 클램프는 hardware 계층이 강제한다.
+    brake: True면 무동력 정지 대신 숏브레이크 유지(경사 밀림 방지).
+    """
+
+    throttle_pct: float
+    steering_offset_deg: float
+    brake: bool = False
+
+
+STOP_COMMAND = DriveCommand(throttle_pct=0.0, steering_offset_deg=0.0)
+BRAKE_COMMAND = DriveCommand(throttle_pct=0.0, steering_offset_deg=0.0, brake=True)
+
+
+@dataclass(frozen=True)
+class Transition:
+    """전이 테이블 한 줄. implemented=False는 골격만 있는 TODO 전이."""
+
+    source: DriveState
+    target: DriveState
+    trigger: str
+    implemented: bool
+
+
+# 전이 테이블 (코드판). 공통 가드 전이는 대표 source(CRUISE)로 한 행씩 적고,
+# 실제 적용 범위는 trigger 문구의 '(모든 상태 공통)'/'(이동 상태 공통)'이 명시한다
+# — 이동·검사 상태의 범위가 GUARDED_STATES다. (INSPECT는 정지 상태지만 임무 중이므로
+#   인지 두절·경계 소실 시 IDLE 폴백 가드를 똑같이 받는다)
+GUARDED_STATES: Tuple[DriveState, ...] = (
+    DriveState.CRUISE, DriveState.TRACE, DriveState.INSPECT, DriveState.TURN,
+    DriveState.AVOID, DriveState.SLOPE, DriveState.DEAD_END,
+)
+
+# 차도 이탈 선회(ESCAPE)를 유발할 수 있는 상태 — 움직이거나 임무 중인 상태 전부.
+# ESCAPE 자신은 빠져 있다: 들어 있으면 매 틱 재진입해 entered_at이 리셋되고
+# timeout_sec(선회로 못 벗어나면 ESTOP)이 영원히 걸리지 않는다.
+# ESCAPE는 GUARDED_STATES에도 없다 — 차도를 벗어나는 중에는 인도 경계가 실제로 안
+# 보이는 것이 정상이므로(그래서 벗어나는 것이다) 경계 소실 IDLE 폴백을 걸면 선회가
+# 시작하자마자 끊긴다. ESCAPE의 실패 출구는 자신의 timeout_sec → ESTOP이다.
+ESCAPE_SOURCE_STATES: Tuple[DriveState, ...] = GUARDED_STATES
+
+# 원격 일시정지(PAUSED)를 받을 수 있는 상태 — 이동·임무 상태 전부 + IDLE.
+# ESTOP은 래치라 어떤 입력도 받지 않고, **ESCAPE는 일부러 빠져 있다**: 차도를
+# 벗어나는 중에 브레이크를 걸면 로봇이 차도 위에 선 채로 멈춘다. 선회를 끝내고
+# CRUISE로 돌아온 뒤에 일시정지하는 것이 맞다. 선회 중 즉시 세워야 하는 상황의
+# 출구는 ESTOP이다 — 그쪽은 가드 1이라 상태와 무관하게 항상 먹는다.
+# 원격 취소(→IDLE)는 이 목록을 쓰지 않는다: 취소는 임무를 끝내는 것이라
+# ESCAPE 중에도 즉시 받는다.
+PAUSABLE_STATES: Tuple[DriveState, ...] = GUARDED_STATES + (DriveState.IDLE,)
+
+TRANSITION_TABLE: Tuple[Transition, ...] = (
+    # --- 공통 가드 (모든 비ESTOP 상태 → ESTOP/ESCAPE, 이동 상태 → IDLE) ---
+    Transition(DriveState.CRUISE, DriveState.ESTOP,
+               "코리도가 차도로 덮임(roadway_critical) / 수동 ESTOP 요청 (모든 상태 공통)",
+               True),
+    Transition(DriveState.CRUISE, DriveState.ESCAPE,
+               "차도·횡단보도가 코리도에 진입(roadway_encroachment_risk) → **정지가 아니라** "
+               "인도 쪽으로 선회 이탈 (이동·임무 상태 공통)", True),
+    Transition(DriveState.ESCAPE, DriveState.CRUISE,
+               "차도가 코리도에서 빠진 뒤 clear_sec 유지 → 인도 추종 복귀", True),
+    Transition(DriveState.ESCAPE, DriveState.ESTOP,
+               "선회 timeout_sec 초과(선회로 벗어나지 못함 — 인지 두절로 눈이 먼 채여도 "
+               "같은 상한이 계속 간다) → 정지 + 수동 대기", True),
+    Transition(DriveState.CRUISE, DriveState.DEAD_END,
+               "인도 경계 소실·인지 두절이 유예창 + 되짚기 후진까지 다한 뒤 **U턴 승격** "
+               "(이동 상태 공통. 유예 중에는 복구 주행 — 저속 + 소실 시점 조향 유지). "
+               "종전에는 여기가 곧바로 IDLE 이었다 — 0806 실기 '완전 정지해야 하는 경우엔 "
+               "U턴으로 계속 진행'", True),
+    Transition(DriveState.CRUISE, DriveState.IDLE,
+               "경계 소실 뒤 U턴 탈출도 창 안에서 uturn_escape_limit 회 실패 → 정지 + "
+               "수동 폴백 대기 (이동 상태 공통). 카메라 자체가 죽었으면 U턴 없이 바로 여기다", True),
+    # --- 원격 미션 제어 (통신 계층) ---
+    # 대표 source는 CRUISE지만 실제 범위는 PAUSABLE_STATES다 — ESCAPE·ESTOP은 빠진다.
+    Transition(DriveState.CRUISE, DriveState.PAUSED,
+               "원격 일시정지 요청(임무 이동 상태 공통) → 브레이크", True),
+    Transition(DriveState.IDLE, DriveState.PAUSED,
+               "활성 임무의 원격 일시정지(경계 소실 폴백 포함)", True),
+    Transition(DriveState.PAUSED, DriveState.CRUISE, "원격 재개 요청 + 인도 확인", True),
+    Transition(DriveState.PAUSED, DriveState.IDLE, "원격 임무 취소", True),
+    Transition(DriveState.CRUISE, DriveState.IDLE,
+               "원격 임무 취소 (IDLE 외 모든 상태 공통)", True),
+    # --- 정상 흐름 ---
+    Transition(DriveState.IDLE, DriveState.CRUISE, "시작 요청 + 인도 확인", True),
+    Transition(DriveState.CRUISE, DriveState.AVOID,
+               "진행 경로를 막는 장애물 인식 → **정지 없이** 경로 이득 큰 쪽으로 회피 선회 "
+               "(IMU 불필요)", True),
+    Transition(DriveState.CRUISE, DriveState.AVOID,
+               "코스트맵 전 방향 통행 불가(∞) → 정지 후 재확인 (비껴갈 방향이 없다)", True),
+    Transition(DriveState.AVOID, DriveState.CRUISE, "재확인 대기 후 장애물 소멸 → 직진 복귀", True),
+    Transition(DriveState.AVOID, DriveState.CRUISE,
+               "회피 선회(벗어나기→통과→중심 재정렬 복귀) 완료 / 국면 타임아웃", True),
+    Transition(DriveState.AVOID, DriveState.TRACE,
+               "회피 완료 시점에 점자블록이 아직 확정 상태 → 순찰이 아니라 **추종으로 직접 "
+               "복귀**(추종 세션 시각 보존). 블록 최우선을 회피가 끊지 않게 하는 자리다 "
+               "— 0806 실기 '블록 발견 후 장애물 조향으로 비틀려 버림'", True),
+    Transition(DriveState.CRUISE, DriveState.TRACE,
+               "점자블록 발견 확정(confirm_sec 디바운스) → 블록 추종 + 검사 카메라 "
+               "상시 탐지(감속 없음). 근접도·정렬 조건 없음 (직전 추종이 타임아웃으로 "
+               "끝났을 때만 재추종 쿨다운에 막힌다)", True),
+    Transition(DriveState.TRACE, DriveState.CRUISE,
+               "블록 소실 확정 → 순찰 복귀 (쿨다운 없음 — 다시 보이면 다시 간다)", True),
+    Transition(DriveState.TRACE, DriveState.CRUISE,
+               "추종 세션 타임아웃 → 순찰 복귀 + 재추종 쿨다운 (저속 추종 고착 방지 — "
+               "추종을 막는 유일한 경우)", True),
+    Transition(DriveState.TRACE, DriveState.INSPECT,
+               "탐지 모델이 파손 후보 보고 + 정차 쿨다운 밖 → 정차 후 정밀 판정 "
+               "(쿨다운 안의 보고는 무시하고 추종을 계속한다)", True),
+    Transition(DriveState.INSPECT, DriveState.TRACE,
+               "판정 완료 통지 / 타임아웃 + 블록 발견 유지 → **블록 추종 재개** + 정차 "
+               "쿨다운 (유도선 하나에 파손이 여럿일 수 있다)", True),
+    Transition(DriveState.INSPECT, DriveState.CRUISE,
+               "판정 완료 통지 / 타임아웃 + 블록 소실 → 순찰 복귀 + 정차 쿨다운", True),
+    Transition(DriveState.CRUISE, DriveState.SLOPE,
+               "|pitch| ≥ 진입 임계 (IMU 게이트) → 경사 보정 주행(오르막 증속·내리막 감속)", True),
+    Transition(DriveState.SLOPE, DriveState.CRUISE, "|pitch| < 해제 임계 / IMU 소실(게이트 닫힘)", True),
+    Transition(DriveState.SLOPE, DriveState.AVOID,
+               "경사 중 장애물 인식 / 전 방향 통행 불가 → 즉시 정지(브레이크)", True),
+    Transition(DriveState.CRUISE, DriveState.TURN,
+               "조향 수요 포화 지속(cruise 상한 초과 confirm_sec) → 감속 회전 (IMU 불필요)", True),
+    Transition(DriveState.TURN, DriveState.CRUISE,
+               "회전 완료(최소 진행 + 재정렬 — 진행은 yaw 있으면 실측, 없으면 시간) / "
+               "yaw 상한·타임아웃", True),
+    Transition(DriveState.TURN, DriveState.AVOID, "회전 중 장애물 인식 → 회피 선회", True),
+    Transition(DriveState.AVOID, DriveState.DEAD_END,
+               "재확인 후에도 전 방향 통행 불가 유지(막다른 길) → **후진으로 공간 확보 후** "
+               "유리한 쪽 선회 호 / 회피가 창 안에 thrash_limit 회 반복(진행 없음) → "
+               "선회 호부터. **IMU 불필요** — 완료가 시각이라 센서 없이도 성립한다", True),
+    Transition(DriveState.DEAD_END, DriveState.CRUISE,
+               "선회 호를 다 돈 뒤 새 경로 확보(시각 _path_seen) → 바퀴 정렬(STRAIGHTEN) "
+               "완료·상한 → 인도 추종 복귀. yaw 목표각은 U턴 국면 안에만 있고 그것도 "
+               "정렬을 거쳐 나간다 — 'IMU 소실로 해제'되는 전이가 아니다", True),
+    Transition(DriveState.DEAD_END, DriveState.IDLE,
+               "회차 타임아웃·회전 상한이 **U턴 중에** 걸림(물리적으로 갇힘) 또는 U턴 탈출 "
+               "횟수 상한 초과 → 정지 + 수동 대기. U턴 전이면 상한은 U턴 승격이다", True),
+    Transition(DriveState.ESTOP, DriveState.IDLE, "수동 해제 요청 (해제만 허용)", True),
+)

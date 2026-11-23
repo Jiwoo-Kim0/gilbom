@@ -20,6 +20,29 @@
   --nb-gold: #b8863b;
   --nb-gold-soft: #f5dfa0;
   --nb-ink: #1a1a1a;
+  /*
+   * 결함 유형 색. 지도 마커·클러스터와 필터 드롭다운의 점이 같은 값을 써야 "지도의
+   * 빨간 핀 = 파손"이 성립한다. 한 곳에서 바꾸면 셋이 함께 바뀐다.
+   */
+  --defect-damaged: #d64545;
+  --defect-missing: #2878c8;
+  --defect-installation-invalid: #c47a16;
+  --defect-unknown-anomaly: #7656b1;
+  --defect-mixed: #4b5563;
+  /*
+   * 로봇 상태 색. 온라인이 `--brand-strong`(어두운 금색), 오프라인이 `--text-muted`
+   * (회갈색)이라 둘이 거의 같아 보였다. 상태는 한눈에 갈려야 하므로 색 축을 나눴다.
+   *
+   * 점·마커에는 진한 값을, 배지에는 `-soft` 배경 + `-strong` 글자를 쓴다(작은 점은
+   * 채도가, 글자는 명암이 필요하다).
+   */
+  --robot-online: #55b83a;
+  --robot-online-strong: #2f7d20;
+  --robot-online-soft: #e8f6e2;
+  --robot-total: #2563eb;
+  --robot-warning: #e5322a;
+  --robot-warning-strong: #ad211a;
+  --robot-warning-soft: #fde8e6;
 }
 
 * {

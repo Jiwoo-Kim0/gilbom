@@ -45,6 +45,11 @@ function report(status: ReportStatus): ReportDetail {
       createdBy: AUTHOR_ID,
       createdAt: '2026-07-02T00:00:00Z',
       content: '본문',
+      evidenceSnapshot: {
+        defectIds: [],
+        missionIds: [],
+        patrolAreaIds: [],
+      },
       statistics: {
         aggregate: {
           missionCount: 0,
@@ -103,6 +108,17 @@ test('IN_REVIEW는 자기 승인을 막고 승인 권한자의 반려를 허용�
   )
   assert.equal(reviewerPolicy.canApprove, true)
   assert.equal(reviewerPolicy.canReject, true)
+})
+
+test('IN_REVIEW라도 REPORT_APPROVE 권한이 없으면 승인·반려를 제공하지 않는다', () => {
+  const policy = getReportActionPolicy(
+    report('IN_REVIEW'),
+    REVIEWER_ID,
+    ['REPORT_VIEW', 'REPORT_UPDATE'],
+  )
+
+  assert.equal(policy.canApprove, false)
+  assert.equal(policy.canReject, false)
 })
 
 test('APPROVED와 권한 없는 사용자는 모든 변경 동작이 읽기 전용이다', () => {

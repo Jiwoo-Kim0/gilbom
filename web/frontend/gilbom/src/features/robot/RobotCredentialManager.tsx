@@ -1,6 +1,5 @@
 import {
   KeyRound,
-  RefreshCw,
   ShieldCheck,
   X,
 } from 'lucide-react'
@@ -22,6 +21,7 @@ import {
   type IssuedMqttCredential,
 } from './robotCredentialApi'
 import { getRobots } from './robotApi'
+import { getRobotStatusLabel } from './robotStatusPresentation'
 import type { RobotListItem } from './robotTypes'
 import './robot-credential-manager.css'
 
@@ -164,15 +164,6 @@ export function RobotCredentialManager({
               회전합니다. 임무를 생성할 때마다 바꾸지 않습니다.
             </p>
           </div>
-          <button
-            className="secondary-button button-with-icon"
-            type="button"
-            onClick={() => void loadRobots()}
-            disabled={loading}
-          >
-            <RefreshCw size={16} aria-hidden="true" />
-            {loading ? '갱신 중…' : '상태 갱신'}
-          </button>
         </div>
 
         {listError ? (
@@ -205,33 +196,35 @@ export function RobotCredentialManager({
                     <span>{robot.mqttId} · {robot.serialNumber}</span>
                   </div>
                 </div>
-                <div className="robot-credential-item-state">
-                  <span
-                    className={[
-                      'robot-credential-status',
-                      provisioning ? 'is-provisioning' : 'is-active',
-                    ].join(' ')}
+                <div className="robot-credential-item-controls">
+                  <div className="robot-credential-item-state">
+                    <span
+                      className={[
+                        'robot-credential-status',
+                        provisioning ? 'is-provisioning' : 'is-active',
+                      ].join(' ')}
+                    >
+                      {getRobotStatusLabel(robot.operationalStatus)}
+                    </span>
+                    <small>
+                      {getRobotStatusLabel(robot.connectivityStatus)}
+                      {robot.missionStatus === null
+                        ? ' · 임무 미수행'
+                        : ` · 임무 ${getRobotStatusLabel(robot.missionStatus)}`}
+                    </small>
+                  </div>
+                  <button
+                    className={provisioning
+                      ? 'primary-button'
+                      : 'secondary-button'}
+                    type="button"
+                    onClick={() => openCredentialModal(robot)}
+                    disabled={submitting}
                   >
-                    {robot.operationalStatus}
-                  </span>
-                  <small>
-                    {robot.connectivityStatus}
-                    {robot.missionStatus === null
-                      ? ' · 임무 미수행'
-                      : ` · 임무 ${robot.missionStatus}`}
-                  </small>
+                    <KeyRound size={16} aria-hidden="true" />
+                    {provisioning ? '최초 발급·활성화' : 'Credential 회전'}
+                  </button>
                 </div>
-                <button
-                  className={provisioning
-                    ? 'primary-button'
-                    : 'secondary-button'}
-                  type="button"
-                  onClick={() => openCredentialModal(robot)}
-                  disabled={submitting}
-                >
-                  <KeyRound size={16} aria-hidden="true" />
-                  {provisioning ? '최초 발급·활성화' : 'Credential 회전'}
-                </button>
               </article>
             )
           })}
@@ -334,6 +327,14 @@ export function RobotCredentialManager({
                 </div>
                 <dl className="robot-credential-result">
                   <div>
+                    <dt>Robot UUID</dt>
+                    <dd>{issuedCredential.robotId}</dd>
+                  </div>
+                  <div>
+                    <dt>MQTT ID</dt>
+                    <dd>{issuedCredential.mqttId}</dd>
+                  </div>
+                  <div>
                     <dt>Broker</dt>
                     <dd>{issuedCredential.mqtt.brokerUri}</dd>
                   </div>
@@ -349,9 +350,18 @@ export function RobotCredentialManager({
                     <dt>1회 비밀번호</dt>
                     <dd>{issuedCredential.mqtt.password}</dd>
                   </div>
+                  <div>
+                    <dt>이미지 업로드 URL</dt>
+                    <dd>{issuedCredential.imageUpload.url}</dd>
+                  </div>
+                  <div>
+                    <dt>1회 이미지 API Key</dt>
+                    <dd>{issuedCredential.imageUpload.apiKey}</dd>
+                  </div>
                 </dl>
                 <p className="robot-credential-warning">
-                  창을 닫기 전에 승인된 경로로 Jetson에 연결 정보를 주입하세요.
+                  창을 닫기 전에 Robot UUID, MQTT 연결 정보와 이미지 업로드 정보를
+                  승인된 경로로 Jetson에 주입하세요. 두 Secret은 다시 표시되지 않습니다.
                 </p>
                 <div className="robot-credential-actions">
                   <button

@@ -60,7 +60,7 @@ export function LoginPage() {
     <section className="auth-card" aria-labelledby="login-title">
       <AuthCardHeader
         eyebrow="WELCOME BACK"
-        title="관리자 로그인"
+        title="로그인"
         description="등록된 이메일과 비밀번호로 1단계 인증을 진행합니다."
       />
 

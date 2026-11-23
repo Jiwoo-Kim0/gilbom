@@ -2,14 +2,19 @@ import {
   CheckCircle2,
   CircleAlert,
   ClipboardCheck,
+  Eye,
   MapPinned,
+  Pencil,
   Plus,
-  RefreshCw,
+  RotateCcw,
+  Undo2,
+  X,
 } from 'lucide-react'
 import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from 'react'
@@ -17,6 +22,7 @@ import {
   ApiError,
   getApiErrorMessage,
 } from '../../shared/api/apiClient'
+import { lockBodyScroll } from '../../shared/dom/bodyScrollLock'
 import { useAuthentication } from '../auth/authenticationContext'
 import { MISSION_MANAGE } from '../auth/permissions'
 import {
@@ -26,18 +32,18 @@ import {
 } from './missionApi'
 import {
   createPolygonBoundary,
-  createSquareBoundary,
   hasBoundarySelfIntersections,
   orderBoundaryPointsForPolygon,
   polygonHasArea,
 } from './patrolAreaBoundary'
 import { PatrolAreaBoundaryEditor } from './PatrolAreaBoundaryEditor'
+import { PatrolAreaEditDialog } from './PatrolAreaEditDialog'
+import { PatrolAreaViewDialog } from './PatrolAreaViewDialog'
 import type {
   GeoJsonCoordinate,
   GeoJsonPolygon,
   PatrolArea,
   PatrolAreaCodeAvailability,
-  PatrolAreaBoundary,
 } from './missionTypes'
 import './mission.css'
 
@@ -48,33 +54,24 @@ function formatDateTime(value: string): string {
   }).format(new Date(value))
 }
 
-function boundaryPointCount(boundary: PatrolAreaBoundary): number {
-  if (boundary.type === 'Polygon') {
-    return Math.max(boundary.coordinates[0]?.length - 1, 0)
-  }
-  return boundary.coordinates.reduce((count, polygon) => (
-    count + Math.max(polygon[0]?.length - 1, 0)
-  ), 0)
-}
-
 export function PatrolAreaManagePage() {
   const [areas, setAreas] = useState<PatrolArea[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<unknown>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [registrationOpen, setRegistrationOpen] = useState(false)
+  const [viewingArea, setViewingArea] = useState<PatrolArea | null>(null)
+  const [editingArea, setEditingArea] = useState<PatrolArea | null>(null)
   const [areaCode, setAreaCode] = useState('')
   const [areaCodeAvailability, setAreaCodeAvailability] =
     useState<PatrolAreaCodeAvailability | null>(null)
   const [checkingAreaCode, setCheckingAreaCode] = useState(false)
   const [areaName, setAreaName] = useState('')
-  const [centerLatitude, setCenterLatitude] = useState('')
-  const [centerLongitude, setCenterLongitude] = useState('')
-  const [widthMeters, setWidthMeters] = useState('50')
-  const [boundaryMode, setBoundaryMode] = useState<'map' | 'square'>('map')
   const [boundaryPoints, setBoundaryPoints] = useState<GeoJsonCoordinate[]>([])
   const [formError, setFormError] = useState<unknown>(null)
   const [submitting, setSubmitting] = useState(false)
+  const registrationTriggerRef = useRef<HTMLButtonElement>(null)
+  const viewTriggerRef = useRef<HTMLButtonElement | null>(null)
   const { user } = useAuthentication()
   const canManage = user?.permissions.includes(MISSION_MANAGE) ?? false
 
@@ -103,21 +100,69 @@ export function PatrolAreaManagePage() {
     return () => window.clearTimeout(timer)
   }, [loadAreas])
 
+  useEffect(() => {
+    if (!registrationOpen) {
+      return undefined
+    }
+
+    const releaseBodyScroll = lockBodyScroll()
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !submitting) {
+        setRegistrationOpen(false)
+        window.requestAnimationFrame(() => registrationTriggerRef.current?.focus())
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      releaseBodyScroll()
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [registrationOpen, submitting])
+
   function openRegistration() {
     setFormError(null)
     setRegistrationOpen(true)
+  }
+
+  function closeRegistration() {
+    if (submitting) {
+      return
+    }
+    setRegistrationOpen(false)
+    window.requestAnimationFrame(() => registrationTriggerRef.current?.focus())
+  }
+
+  function closeViewingArea() {
+    setViewingArea(null)
+    window.requestAnimationFrame(() => viewTriggerRef.current?.focus())
   }
 
   function resetRegistrationForm() {
     setAreaCode('')
     setAreaCodeAvailability(null)
     setAreaName('')
-    setCenterLatitude('')
-    setCenterLongitude('')
-    setWidthMeters('50')
-    setBoundaryMode('map')
     setBoundaryPoints([])
     setFormError(null)
+  }
+
+  function handleAreaSaved(savedArea: PatrolArea) {
+    setAreas((currentAreas) => currentAreas.map((area) => (
+      area.patrolAreaId === savedArea.patrolAreaId ? savedArea : area
+    )))
+    setEditingArea(null)
+    setNotice(
+      `${savedArea.areaName} (${savedArea.areaCode}) 구역 정보를 변경했습니다.`,
+    )
+  }
+
+  function lifecycleStatusText(area: PatrolArea): string {
+    if (area.lifecycleStatus === 'ACTIVE') {
+      return '활성화'
+    }
+    if (area.lifecycleStatus === 'INACTIVE') {
+      return '비활성화'
+    }
+    return '구역 폐기'
   }
 
   async function handleAreaCodeAvailabilityCheck() {
@@ -165,55 +210,31 @@ export function PatrolAreaManagePage() {
       return
     }
 
-    let boundary: GeoJsonPolygon
-    if (boundaryMode === 'map') {
-      if (boundaryPoints.length < 3) {
-        setFormError(new Error(
-          '지도에서 순찰 구역 경계점을 3개 이상 지정해주세요.',
-        ))
-        return
-      }
-      const uniquePointCount = new Set(
-        boundaryPoints.map(([longitude, latitude]) => (
-          `${longitude}:${latitude}`
-        )),
-      ).size
-      const orderedPoints = orderBoundaryPointsForPolygon(boundaryPoints)
-      if (uniquePointCount < 3 || !polygonHasArea(orderedPoints)) {
-        setFormError(new Error(
-          '서로 다른 위치의 경계점으로 면적이 있는 구역을 만들어주세요.',
-        ))
-        return
-      }
-      if (hasBoundarySelfIntersections(orderedPoints)) {
-        setFormError(new Error(
-          '경계점 연결에서 교차를 제거하지 못했습니다. 점 위치를 조정해주세요.',
-        ))
-        return
-      }
-      boundary = createPolygonBoundary(orderedPoints)
-    } else {
-      const latitude = Number(centerLatitude)
-      const longitude = Number(centerLongitude)
-      const width = Number(widthMeters)
-      if (!Number.isFinite(latitude) || latitude < -85 || latitude > 85) {
-        setFormError(new Error('중심 위도는 -85 이상 85 이하로 입력해주세요.'))
-        return
-      }
-      if (
-        !Number.isFinite(longitude)
-        || longitude < -180
-        || longitude > 180
-      ) {
-        setFormError(new Error('중심 경도는 -180 이상 180 이하로 입력해주세요.'))
-        return
-      }
-      if (!Number.isFinite(width) || width < 5 || width > 5000) {
-        setFormError(new Error('구역 가로폭은 5m 이상 5,000m 이하로 입력해주세요.'))
-        return
-      }
-      boundary = createSquareBoundary(latitude, longitude, width)
+    if (boundaryPoints.length < 3) {
+      setFormError(new Error(
+        '지도에서 순찰 구역 경계점을 3개 이상 지정해주세요.',
+      ))
+      return
     }
+    const uniquePointCount = new Set(
+      boundaryPoints.map(([longitude, latitude]) => (
+        `${longitude}:${latitude}`
+      )),
+    ).size
+    const orderedPoints = orderBoundaryPointsForPolygon(boundaryPoints)
+    if (uniquePointCount < 3 || !polygonHasArea(orderedPoints)) {
+      setFormError(new Error(
+        '서로 다른 위치의 경계점으로 면적이 있는 구역을 만들어주세요.',
+      ))
+      return
+    }
+    if (hasBoundarySelfIntersections(orderedPoints)) {
+      setFormError(new Error(
+        '경계점 연결에서 교차를 제거하지 못했습니다. 점 위치를 조정해주세요.',
+      ))
+      return
+    }
+    const boundary: GeoJsonPolygon = createPolygonBoundary(orderedPoints)
 
     if (boundary.coordinates[0].some(([longitude, latitude]) => (
       longitude < -180
@@ -222,7 +243,7 @@ export function PatrolAreaManagePage() {
       || latitude > 90
     ))) {
       setFormError(new Error(
-        '생성되는 구역 경계가 GPS 좌표 범위를 벗어납니다. 중심 좌표나 가로폭을 조정해주세요.',
+        '생성되는 구역 경계가 GPS 좌표 범위를 벗어납니다. 경계점을 조정해주세요.',
       ))
       return
     }
@@ -240,8 +261,9 @@ export function PatrolAreaManagePage() {
       await loadAreas()
       resetRegistrationForm()
       setRegistrationOpen(false)
+      window.requestAnimationFrame(() => registrationTriggerRef.current?.focus())
       setNotice(
-        `${created.areaName} (${created.areaCode}) 구역을 ACTIVE로 등록했습니다. `
+        `${created.areaName} (${created.areaCode}) 구역을 활성화 상태로 등록했습니다. `
         + '이제 순찰 임무 관리에서 선택할 수 있습니다.',
       )
     } catch (nextError) {
@@ -269,38 +291,7 @@ export function PatrolAreaManagePage() {
   const areaCodeConflict = matchingAreaCodeAvailability?.available === false
 
   return (
-    <section className="page-stack" aria-labelledby="patrol-area-page-title">
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">PATROL AREA</p>
-          <h2 id="patrol-area-page-title">순찰 구역 관리</h2>
-          <p>
-            지도에서 관할 경계를 등록하고 임무에 사용할 활성 구역을 관리합니다.
-          </p>
-        </div>
-        <div className="mission-page-actions">
-          <button
-            className="secondary-button button-with-icon"
-            type="button"
-            onClick={() => void loadAreas()}
-            disabled={loading}
-          >
-            <RefreshCw size={17} aria-hidden="true" />
-            새로고침
-          </button>
-          {canManage ? (
-            <button
-              className="primary-button button-with-icon"
-              type="button"
-              onClick={openRegistration}
-            >
-              <Plus size={17} aria-hidden="true" />
-              새 구역 등록
-            </button>
-          ) : null}
-        </div>
-      </div>
-
+    <section className="page-stack" aria-label="순찰 구역 관리">
       <div className="summary-grid" aria-label="순찰 구역 현황">
         <article className="summary-card">
           <span>등록된 전체 구역</span>
@@ -310,14 +301,14 @@ export function PatrolAreaManagePage() {
         <article className="summary-card">
           <span>미션 선택 가능</span>
           <strong>{loading && areas.length === 0 ? '—' : activeAreaCount}</strong>
-          <small>ACTIVE 구역</small>
+          <small>활성화 구역</small>
         </article>
         <article className="summary-card">
           <span>미션 선택 제외</span>
           <strong>
             {loading && areas.length === 0 ? '—' : areas.length - activeAreaCount}
           </strong>
-          <small>INACTIVE · ARCHIVED 구역</small>
+          <small>비활성화 · 구역 폐기</small>
         </article>
       </div>
 
@@ -333,19 +324,38 @@ export function PatrolAreaManagePage() {
       ) : null}
 
       {canManage ? (
-        <details
-          className="content-card mission-create-card mission-area-create-card"
-          open={registrationOpen}
-          onToggle={(event) => setRegistrationOpen(event.currentTarget.open)}
+        registrationOpen ? (
+        <div
+          className="mission-area-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeRegistration()
+            }
+          }}
         >
-          <summary>
-            <MapPinned size={17} aria-hidden="true" />
-            순찰 구역 등록
-          </summary>
-          <p className="mission-create-description">
-            지도에서 실제 순찰 경계를 지정합니다. 지도를 사용할 수 없으면 중심
-            GPS 좌표와 가로폭으로 사각형 구역을 만들 수 있습니다.
-          </p>
+          <section
+            className="mission-area-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="patrol-area-registration-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="mission-area-modal-heading">
+              <div>
+                <p className="eyebrow">PATROL AREA REGISTRATION</p>
+                <h3 id="patrol-area-registration-title">순찰 구역 등록</h3>
+              </div>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="등록 창 닫기"
+                onClick={closeRegistration}
+                disabled={submitting}
+              >
+                <X size={18} aria-hidden="true" />
+              </button>
+            </div>
           {formError ? (
             <div className="page-alert" role="alert">
               등록하지 못했습니다. {getApiErrorMessage(formError)}
@@ -355,12 +365,14 @@ export function PatrolAreaManagePage() {
             className="mission-create-form mission-area-create-form"
             onSubmit={handleCreateArea}
           >
-            <div className="admin-form-field mission-area-code-check">
+            <div className="mission-area-form-fields">
+              <div className="admin-form-field mission-area-code-check">
               <label htmlFor="patrol-area-code">구역 코드</label>
               <div className="input-action-row">
                 <input
                   id="patrol-area-code"
                   type="text"
+                  autoFocus
                   maxLength={50}
                   value={areaCode}
                   onChange={(event) => {
@@ -368,7 +380,9 @@ export function PatrolAreaManagePage() {
                     setAreaCodeAvailability(null)
                   }}
                   aria-invalid={areaCodeConflict}
-                  aria-describedby="patrol-area-code-status"
+                  aria-describedby={matchingAreaCodeAvailability
+                    ? 'patrol-area-code-status'
+                    : undefined}
                   placeholder="A-01"
                   disabled={submitting}
                   required
@@ -401,141 +415,70 @@ export function PatrolAreaManagePage() {
                     ? '사용 가능한 구역 코드입니다.'
                     : '이미 등록된 구역 코드입니다.'}
                 </p>
-              ) : (
-                <small id="patrol-area-code-status">
-                  형식 제한은 없으며 Incident의 zone_id에 그대로 사용됩니다.
-                </small>
-              )}
+              ) : null}
+              </div>
+              <label className="admin-form-field" htmlFor="patrol-area-name">
+                구역 이름
+                <input
+                  id="patrol-area-name"
+                  type="text"
+                  maxLength={100}
+                  value={areaName}
+                  onChange={(event) => setAreaName(event.target.value)}
+                  placeholder="시연 순찰 구역"
+                  disabled={submitting}
+                  required
+                />
+              </label>
             </div>
-            <label className="admin-form-field" htmlFor="patrol-area-name">
-              구역 이름
-              <input
-                id="patrol-area-name"
-                type="text"
-                maxLength={100}
-                value={areaName}
-                onChange={(event) => setAreaName(event.target.value)}
-                placeholder="시연 순찰 구역"
-                disabled={submitting}
-                required
-              />
-            </label>
-            <div
-              className="mission-area-boundary-mode"
-              role="group"
-              aria-label="순찰 구역 경계 입력 방식"
-            >
-              <button
-                type="button"
-                className={boundaryMode === 'map' ? 'is-active' : ''}
-                aria-pressed={boundaryMode === 'map'}
-                onClick={() => {
-                  setBoundaryMode('map')
-                  setFormError(null)
-                }}
-                disabled={submitting}
-              >
-                지도에서 경계 지정
-              </button>
-              <button
-                type="button"
-                className={boundaryMode === 'square' ? 'is-active' : ''}
-                aria-pressed={boundaryMode === 'square'}
-                onClick={() => {
-                  setBoundaryMode('square')
-                  setFormError(null)
-                }}
-                disabled={submitting}
-              >
-                중심 좌표 직접 입력
-              </button>
-            </div>
-            {boundaryMode === 'map' && registrationOpen ? (
+            {registrationOpen ? (
               <div className="mission-area-boundary-field">
                 <PatrolAreaBoundaryEditor
                   points={boundaryPoints}
                   disabled={submitting}
                   onChange={setBoundaryPoints}
-                  onRequestFallback={() => setBoundaryMode('square')}
+                  actions={(
+                    <div className="mission-area-editor-toolbar">
+                      <button
+                        className="secondary-button button-with-icon"
+                        type="button"
+                        onClick={() => setBoundaryPoints(
+                          (points) => points.slice(0, -1),
+                        )}
+                        disabled={submitting || boundaryPoints.length === 0}
+                      >
+                        <Undo2 size={15} aria-hidden="true" />
+                        마지막 점 취소
+                      </button>
+                      <button
+                        className="secondary-button button-with-icon"
+                        type="button"
+                        onClick={() => setBoundaryPoints([])}
+                        disabled={submitting || boundaryPoints.length === 0}
+                      >
+                        <RotateCcw size={15} aria-hidden="true" />
+                        전체 초기화
+                      </button>
+                      <button
+                        className="primary-button mission-create-submit"
+                        type="submit"
+                        disabled={
+                          submitting
+                          || matchingAreaCodeAvailability?.available !== true
+                        }
+                      >
+                        <MapPinned size={17} aria-hidden="true" />
+                        {submitting ? '등록 중…' : '순찰 구역 등록'}
+                      </button>
+                    </div>
+                  )}
                 />
               </div>
-            ) : boundaryMode === 'square' ? (
-              <>
-                <label
-                  className="admin-form-field"
-                  htmlFor="patrol-area-latitude"
-                >
-                  중심 위도
-                  <input
-                    id="patrol-area-latitude"
-                    type="number"
-                    min="-85"
-                    max="85"
-                    step="any"
-                    value={centerLatitude}
-                    onChange={(event) => setCenterLatitude(event.target.value)}
-                    placeholder="36.1070"
-                    disabled={submitting}
-                    required
-                  />
-                </label>
-                <label
-                  className="admin-form-field"
-                  htmlFor="patrol-area-longitude"
-                >
-                  중심 경도
-                  <input
-                    id="patrol-area-longitude"
-                    type="number"
-                    min="-180"
-                    max="180"
-                    step="any"
-                    value={centerLongitude}
-                    onChange={(event) => setCenterLongitude(event.target.value)}
-                    placeholder="128.4160"
-                    disabled={submitting}
-                    required
-                  />
-                </label>
-                <label
-                  className="admin-form-field"
-                  htmlFor="patrol-area-width"
-                >
-                  구역 가로폭(m)
-                  <input
-                    id="patrol-area-width"
-                    type="number"
-                    min="5"
-                    max="5000"
-                    step="1"
-                    value={widthMeters}
-                    onChange={(event) => setWidthMeters(event.target.value)}
-                    disabled={submitting}
-                    required
-                  />
-                  <small>
-                    중심 좌표를 기준으로 동일한 가로·세로 길이의 구역을 만듭니다.
-                  </small>
-                </label>
-              </>
             ) : null}
-            <div className="mission-area-create-summary" role="note">
-              <strong>ACTIVE로 즉시 등록</strong>
-              <span>AUTONOMOUS_DEFAULT 경로가 자동 생성됩니다.</span>
-            </div>
-            <button
-              className="primary-button mission-create-submit"
-              type="submit"
-              disabled={
-                submitting
-                || matchingAreaCodeAvailability?.available !== true
-              }
-            >
-              <MapPinned size={17} aria-hidden="true" />
-              {submitting ? '등록 중…' : '순찰 구역 등록'}
-            </button>
           </form>
-        </details>
+          </section>
+        </div>
+        ) : null
       ) : (
         <div className="mission-view-only" role="note">
           조회 전용 권한입니다. 순찰 구역 등록은{' '}
@@ -543,13 +486,41 @@ export function PatrolAreaManagePage() {
         </div>
       )}
 
+      {editingArea ? (
+        <PatrolAreaEditDialog
+          area={editingArea}
+          onClose={() => setEditingArea(null)}
+          onSaved={handleAreaSaved}
+        />
+      ) : null}
+
+      {viewingArea ? (
+        <PatrolAreaViewDialog
+          area={viewingArea}
+          onClose={closeViewingArea}
+        />
+      ) : null}
+
       <div className="content-card patrol-area-list-card">
         <div className="table-heading">
           <div>
             <h3>등록 구역 목록</h3>
-            <p>ACTIVE 구역만 순찰 임무 생성 화면의 선택 목록에 표시됩니다.</p>
+            <p>활성화 구역만 순찰 임무 생성 화면의 선택 목록에 표시됩니다.</p>
           </div>
-          <span className="status-badge">{areas.length}건</span>
+          <div className="table-heading-actions">
+            <span className="status-badge">{areas.length}건</span>
+            {canManage ? (
+              <button
+                ref={registrationTriggerRef}
+                className="primary-button button-with-icon"
+                type="button"
+                onClick={openRegistration}
+              >
+                <Plus size={17} aria-hidden="true" />
+                새 구역 등록
+              </button>
+            ) : null}
+          </div>
         </div>
 
         {loading && areas.length === 0 ? (
@@ -572,9 +543,10 @@ export function PatrolAreaManagePage() {
                 <tr>
                   <th scope="col">구역</th>
                   <th scope="col">상태</th>
-                  <th scope="col">경계점</th>
                   <th scope="col">미션 사용</th>
                   <th scope="col">최근 수정</th>
+                  <th scope="col">조회</th>
+                  <th scope="col">수정</th>
                 </tr>
               </thead>
               <tbody>
@@ -590,10 +562,9 @@ export function PatrolAreaManagePage() {
                           area.lifecycleStatus.toLowerCase()
                         }`}
                       >
-                        {area.lifecycleStatus}
+                        {lifecycleStatusText(area)}
                       </span>
                     </td>
-                    <td>{boundaryPointCount(area.boundary)}개</td>
                     <td>
                       {area.lifecycleStatus === 'ACTIVE' ? (
                         <span className="patrol-area-mission-eligible">
@@ -607,6 +578,37 @@ export function PatrolAreaManagePage() {
                       )}
                     </td>
                     <td>{formatDateTime(area.updatedAt)}</td>
+                    <td className="patrol-area-action-cell">
+                      <button
+                        className="patrol-area-view-button"
+                        type="button"
+                        aria-label={`${area.areaName} 조회`}
+                        onClick={(event) => {
+                          viewTriggerRef.current = event.currentTarget
+                          setNotice(null)
+                          setViewingArea(area)
+                        }}
+                      >
+                        <Eye size={15} aria-hidden="true" />
+                        조회
+                      </button>
+                    </td>
+                    <td className="patrol-area-action-cell">
+                      {canManage && area.lifecycleStatus !== 'ARCHIVED' ? (
+                        <button
+                          className="patrol-area-edit-button"
+                          type="button"
+                          aria-label={`${area.areaName} 수정`}
+                          onClick={() => {
+                            setNotice(null)
+                            setEditingArea(area)
+                          }}
+                        >
+                          <Pencil size={15} aria-hidden="true" />
+                          수정
+                        </button>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>

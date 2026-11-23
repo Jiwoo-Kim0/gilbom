@@ -1,8 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from 'react'
 import { useNavigate } from 'react-router'
-import { X } from 'lucide-react'
+import { GripHorizontal, X } from 'lucide-react'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
+import { BoundingBoxOverlay } from './DefectBoundingBox'
+import {
+  cardPositionClasses,
+  cardPositionFromDrag,
+  cardPositionFromKey,
+} from './defectCardDrag'
+import type {
+  DefectCardDragGeometry,
+  DefectCardPosition,
+} from './defectCardDrag'
 import { DefectEditModal } from './DefectEditModal'
+import { DefectPhotoViewer } from './DefectPhotoViewer'
+import { DefectSelectMenu } from './DefectSelectMenu'
 import {
   createReport,
   ReportCreateAttempt,
@@ -21,7 +37,7 @@ import {
   getDefectObservations,
 } from './defectApi'
 import {
-  ALLOWED_TRANSITIONS,
+  allowedTransitions,
   DEFECT_TYPE_LABELS,
   isTerminal,
   RESOLUTIONS,
@@ -119,46 +135,6 @@ function changedFields(
     }))
 }
 
-/**
- * AI가 검출한 영역을 사진 위에 그린다.
- *
- * <p>`bboxNorm`은 [xMin, yMin, xMax, yMax] 정규 좌표(0~1)다. viewBox를 `0 0 1 1`로
- * 두면 그 값을 그대로 rect 좌표로 쓸 수 있어 이미지 크기·종횡비 계산이 필요 없다.
- * SVG는 figure를 꽉 채우고 figure 높이는 이미지가 정하므로 항상 정확히 겹친다.
- *
- * <p>모양은 `App.css`의 클래스로만 준다. Nginx CSP가 `style-src 'self'`라
- * style 속성을 쓰면 차단된다.
- */
-function BoundingBoxOverlay({ bboxNorm }: { bboxNorm: number[] | null }) {
-  if (bboxNorm === null || bboxNorm.length !== 4) {
-    return null
-  }
-  const [xMin, yMin, xMax, yMax] = bboxNorm
-  const width = xMax - xMin
-  const height = yMax - yMin
-  // 서버가 순서를 검증하지만, 뒤집힌 값이 오면 그리지 않는다.
-  if (!(width > 0) || !(height > 0)) {
-    return null
-  }
-  return (
-    <svg
-      className="defect-bbox"
-      viewBox="0 0 1 1"
-      preserveAspectRatio="none"
-      aria-hidden="true"
-    >
-      <rect
-        x={xMin}
-        y={yMin}
-        width={width}
-        height={height}
-        // 상자 선 두께가 이미지 비율에 따라 찌그러지지 않게 한다.
-        vectorEffect="non-scaling-stroke"
-      />
-    </svg>
-  )
-}
-
 interface DefectDetailCardProps {
   defectId: string
   onClose: () => void
@@ -166,6 +142,19 @@ interface DefectDetailCardProps {
   onChanged: () => void
   /** 병합된 결함에서 대표 결함으로 이동할 때 쓴다. */
   onSelectDefect: (defectId: string) => void
+  /**
+   * 끌어 옮긴 자리. `null`이면 기본 자리(오른쪽 위)다.
+   *
+   * <p>이 값을 카드 자기 state로 두지 않는 이유는, 다른 결함을 고르면 상위가 `key`로
+   * 카드를 새로 마운트하기 때문이다. 옆으로 밀어둔 카드가 결함을 바꿀 때마다 제자리로
+   * 튀어오르면 밀어둔 뜻이 없다.
+   */
+  position?: DefectCardPosition | null
+  /**
+   * 끌기를 허용하고 새 자리를 알린다. 넘기지 않으면 **끌 수 없다** — 손잡이도 그리지
+   * 않는다. 지도 위에 얹힌 카드에서만 뜻이 있는 동작이다.
+   */
+  onMove?: (position: DefectCardPosition) => void
 }
 
 export function DefectDetailCard({
@@ -173,6 +162,8 @@ export function DefectDetailCard({
   onClose,
   onChanged,
   onSelectDefect,
+  position = null,
+  onMove,
 }: DefectDetailCardProps) {
   const navigate = useNavigate()
   const { user } = useAuthentication()
@@ -180,9 +171,19 @@ export function DefectDetailCard({
   const canUpdate = hasPermission(permissions, DEFECT_STATUS_UPDATE)
   const canCreateReport = hasPermission(permissions, REPORT_CREATE)
 
+  const cardRef = useRef<HTMLElement | null>(null)
+  /** 끌기 시작 시점의 좌표·크기. 끌는 동안 다시 재지 않는다. */
+  const dragRef = useRef<{
+    pointerId: number
+    startX: number
+    startY: number
+    geometry: DefectCardDragGeometry
+  } | null>(null)
+
   const [detail, setDetail] = useState<DefectDetail | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [image, setImage] = useState<ImageState>({ kind: 'loading' })
+  const [photoOpen, setPhotoOpen] = useState(false)
 
   const [tab, setTab] = useState<CardTab>('info')
   const [observations, setObservations] = useState<
@@ -287,8 +288,26 @@ export function DefectDetailCard({
 
   const defect = detail?.defect ?? null
   const allowed: WorkflowStatus[] = defect
-    ? ALLOWED_TRANSITIONS[defect.workflowStatus]
+    ? allowedTransitions(defect.workflowStatus)
     : []
+  /*
+   * 고르개에 넘길 목록. 맨 앞의 빈 값은 예전 `<option value="">선택하세요</option>`
+   * 자리다 — 골랐다가 무르는 길을 없애지 않는다.
+   */
+  const statusOptions = [
+    { value: '', label: '선택하세요' },
+    ...allowed.map((status) => ({
+      value: status,
+      label: WORKFLOW_STATUS_LABELS[status],
+    })),
+  ]
+  const resolutionOptions = [
+    { value: '', label: '선택하세요' },
+    ...RESOLUTIONS.map((value) => ({
+      value,
+      label: RESOLUTION_LABELS[value],
+    })),
+  ]
   // 수정을 막는 사유. null이면 수정할 수 있다. 서버 requireChangeable와 같은 규칙이라
   // 여기서 걸러내면 저장 눌러서 409를 받는 일이 없다.
   const mergedInto = detail?.mergedIntoDefectId ?? null
@@ -298,7 +317,9 @@ export function DefectDetailCard({
       return '병합된 결함은 대표 결함에서 수정해야 합니다.'
     }
     if (isTerminal(defect.workflowStatus)) {
-      return '종결된 결함은 수정할 수 없습니다.'
+      // 상태 전이는 열려 있으므로 되살린 뒤 고칠 수 있다. 막다른 길처럼 보이지 않게
+      // 다음 행동을 함께 알려준다.
+      return '종결된 결함은 처리 상태를 먼저 바꿔야 수정할 수 있습니다.'
     }
     return null
   })()
@@ -337,9 +358,139 @@ export function DefectDetailCard({
       .finally(() => setSubmitting(false))
   }
 
+  /**
+   * 지금 그려진 카드와 그것을 담은 지도 영역의 크기. **끌기를 시작할 때와 방향키를
+   * 누른 순간에만** 잰다 — 움직이는 동안 다시 재면 자기 위치 변화가 다음 계산에
+   * 섞여 카드가 손끝에서 미끄러진다.
+   */
+  const measureDrag = useCallback((): DefectCardDragGeometry | null => {
+    const card = cardRef.current
+    // 카드는 `.defect-map-canvas-wrap`(position: relative) 안에 절대 배치된다.
+    const container = card?.offsetParent
+    if (card == null || !(container instanceof HTMLElement)) {
+      return null
+    }
+    const cardRect = card.getBoundingClientRect()
+    const containerRect = container.getBoundingClientRect()
+    return {
+      originLeft: cardRect.left - containerRect.left,
+      originTop: cardRect.top - containerRect.top,
+      containerWidth: containerRect.width,
+      containerHeight: containerRect.height,
+      cardWidth: cardRect.width,
+      cardHeight: cardRect.height,
+    }
+  }, [])
+
+  const startDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    // 왼쪽 버튼·터치·펜만. 가운데 버튼 끌기는 브라우저의 자동 스크롤이다.
+    if (onMove === undefined || event.button !== 0) {
+      return
+    }
+    /*
+     * 헤더 안의 조작 요소(닫기 버튼)에서 시작한 것은 끌기가 아니다. 손잡이는 예외로
+     * 둔다 — 그것으로 끄는 것이 가장 자연스러운 동작이다.
+     */
+    const target = event.target as HTMLElement
+    const interactive = target.closest(
+      'button:not(.defect-card-grip), a, input, select, textarea',
+    )
+    if (interactive !== null) {
+      return
+    }
+    const geometry = measureDrag()
+    if (geometry === null) {
+      return
+    }
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      geometry,
+    }
+    // 포인터를 잡아두면 카드 밖으로 빠르게 끌어도 move가 계속 들어온다.
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const continueDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    const drag = dragRef.current
+    if (
+      drag === null
+      || drag.pointerId !== event.pointerId
+      || onMove === undefined
+    ) {
+      return
+    }
+    onMove(
+      cardPositionFromDrag(
+        drag.geometry,
+        event.clientX - drag.startX,
+        event.clientY - drag.startY,
+      ),
+    )
+  }
+
+  const endDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    if (dragRef.current?.pointerId !== event.pointerId) {
+      return
+    }
+    dragRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
+
+  /** 방향키로도 옮긴다. 끌기는 포인터가 있는 사람만 쓸 수 있다. */
+  const moveByKey = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (onMove === undefined) {
+      return
+    }
+    const geometry = measureDrag()
+    if (geometry === null) {
+      return
+    }
+    // 아직 끌어본 적이 없으면 기본 자리를 백분율로 환산해 그 자리에서 출발한다.
+    const current = position ?? {
+      x: Math.round((geometry.originLeft / geometry.containerWidth) * 100),
+      y: Math.round((geometry.originTop / geometry.containerHeight) * 100),
+    }
+    const next = cardPositionFromKey(current, event.key, geometry)
+    if (next === null) {
+      return
+    }
+    // 방향키의 기본 동작은 페이지 스크롤이다. 카드를 옮길 때는 막는다.
+    event.preventDefault()
+    onMove(next)
+  }
+
+  const draggable = onMove !== undefined
+
   return (
-    <aside className="defect-card" aria-label="결함 상세">
-      <header className="defect-card-header">
+    <aside
+      className={`defect-card ${cardPositionClasses(position)}`.trimEnd()}
+      aria-label="결함 상세"
+      ref={cardRef}
+    >
+      <header
+        className={`defect-card-header${
+          draggable ? ' defect-card-header-draggable' : ''
+        }`}
+        onPointerDown={draggable ? startDrag : undefined}
+        onPointerMove={draggable ? continueDrag : undefined}
+        onPointerUp={draggable ? endDrag : undefined}
+        onPointerCancel={draggable ? endDrag : undefined}
+      >
+        {draggable && (
+          <button
+            type="button"
+            className="defect-card-grip"
+            aria-label="카드 위치 옮기기 — 끌거나 방향키를 누르세요"
+            title="끌어서 옮기기"
+            onKeyDown={moveByKey}
+          >
+            <GripHorizontal size={14} aria-hidden="true" />
+          </button>
+        )}
         <div>
           <p className="eyebrow">{defect?.incidentCode ?? '결함'}</p>
           <h3>
@@ -371,10 +522,21 @@ export function DefectDetailCard({
             {image.kind === 'none' && <p>연결된 이미지가 없습니다.</p>}
             {image.kind === 'error' && <p role="alert">{image.message}</p>}
             {image.kind === 'ready' && (
-              <figure className="defect-card-figure">
-                <img src={image.image.imageUrl} alt="결함 증거 이미지" />
-                <BoundingBoxOverlay bboxNorm={image.image.bboxNorm} />
-              </figure>
+              /*
+               * 카드 안 사진은 340px 폭이라 파손 부위를 눈으로 가리기 어렵다. 눌러서
+               * 크게 보는 창을 연다. button으로 감싸 키보드로도 열 수 있게 한다.
+               */
+              <button
+                type="button"
+                className="defect-card-photo-button"
+                aria-label="증거 사진 크게 보기"
+                onClick={() => setPhotoOpen(true)}
+              >
+                <figure className="defect-card-figure">
+                  <img src={image.image.imageUrl} alt="결함 증거 이미지" />
+                  <BoundingBoxOverlay bboxNorm={image.image.bboxNorm} />
+                </figure>
+              </button>
             )}
           </div>
           {image.kind === 'ready' && image.image.bboxNorm !== null && (
@@ -588,49 +750,44 @@ export function DefectDetailCard({
           </dl>
 
           <div className="defect-card-actions">
-            {allowed.length === 0 ? (
-              <p className="defect-card-terminal">
-                종결된 결함이라 상태를 더 바꿀 수 없습니다.
-              </p>
-            ) : (
+            {canUpdate && (
               <>
-                <label className="defect-card-field">
+                {/*
+                  카드는 스스로 스크롤하고 이 줄은 카드 바닥 쪽이라, 목록이 아래로
+                  펼쳐지면 잘린다. `DefectSelectMenu`가 자리를 재서 위로 뒤집는다.
+                */}
+                <div className="defect-card-field">
                   <span>처리 상태 변경</span>
-                  <select
+                  <DefectSelectMenu
+                    label="처리 상태 변경"
+                    variant="block"
+                    placeholder="선택하세요"
+                    options={statusOptions}
                     value={nextStatus}
                     disabled={!canUpdate || submitting}
-                    onChange={(event) => {
-                      setNextStatus(event.target.value as WorkflowStatus | '')
+                    onChange={(value) => {
+                      setNextStatus(value as WorkflowStatus | '')
+                      // 상태가 바뀌면 앞서 고른 처리 결과는 짝이 맞지 않는다.
                       setResolution('')
                     }}
-                  >
-                    <option value="">선택하세요</option>
-                    {allowed.map((status) => (
-                      <option key={status} value={status}>
-                        {WORKFLOW_STATUS_LABELS[status]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                  />
+                </div>
 
                 {resolutionRequired && (
-                  <label className="defect-card-field">
+                  <div className="defect-card-field">
                     <span>처리 결과</span>
-                    <select
+                    <DefectSelectMenu
+                      label="처리 결과"
+                      variant="block"
+                      placeholder="선택하세요"
+                      options={resolutionOptions}
                       value={resolution}
                       disabled={submitting}
-                      onChange={(event) =>
-                        setResolution(event.target.value as Resolution | '')
+                      onChange={(value) =>
+                        setResolution(value as Resolution | '')
                       }
-                    >
-                      <option value="">선택하세요</option>
-                      {RESOLUTIONS.map((value) => (
-                        <option key={value} value={value}>
-                          {RESOLUTION_LABELS[value]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                    />
+                  </div>
                 )}
 
                 {nextStatus !== '' && (
@@ -723,7 +880,7 @@ export function DefectDetailCard({
                       })
                   }}
                 >
-                  {generating ? '보고서 생성 중…' : '리포트 생성'}
+                  {generating ? '보고서 생성 중…' : '보고서 생성'}
                 </button>
                 {generating && (
                   <p className="defect-card-coord">
@@ -733,6 +890,15 @@ export function DefectDetailCard({
               </>
             )}
           </div>
+
+          {photoOpen && image.kind === 'ready' && (
+            <DefectPhotoViewer
+              imageUrl={image.image.imageUrl}
+              bboxNorm={image.image.bboxNorm}
+              incidentCode={defect.incidentCode}
+              onClose={() => setPhotoOpen(false)}
+            />
+          )}
 
           {editing && (
             <DefectEditModal

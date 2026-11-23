@@ -1,6 +1,9 @@
 __pycache__/
 *.py[cod]
 
+# EC2 host-specific runtime configuration is copied out-of-band.
+.envEC2
+
 # MQTT 통신 테스트 패키지 — .env·connection-secret.md 에 브로커 비밀번호가 들어 있다.
 # 전달받은 그대로 두고 커밋하지 않는다 (패키지 README 11항).
 gilbom-mqtt-external-test/
@@ -24,7 +27,10 @@ embedded/scripts/orincar.env
 embedded/**/.env
 test/통신테스트/.env
 # 로봇 런타임 데이터 — Outbox(sqlite)·증거 이미지 (embedded/var/)
-embedded/var/
+embedded/var/*
+!embedded/var/evidence/
+embedded/var/evidence/*
+!embedded/var/evidence/README.md
 embedded/**/*.sqlite3
 # 카메라 녹화물 — 용량 크고 현장 영상이다
 embedded/DataRecorder/recordings/

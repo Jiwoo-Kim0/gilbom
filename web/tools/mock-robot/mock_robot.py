@@ -143,6 +143,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--normal-detection-step",
+        type=int,
+        default=1,
+        help=(
+            "Count this many deduplicated installed Braille blocks after each "
+            "GPS position change while PATROLLING; zero disables the count."
+        ),
+    )
+    parser.add_argument(
         "--speed-mps",
         type=float,
         default=0.8,
@@ -250,6 +259,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("--position-step-m must be zero or greater")
     if args.position_update_interval < 0.0:
         parser.error("--position-update-interval must be zero or greater")
+    if args.normal_detection_step < 0:
+        parser.error("--normal-detection-step must be zero or greater")
     if args.speed_mps < 0.0:
         parser.error("--speed-mps must be zero or greater")
     if args.jetson_temp_step_c < 0.0:
@@ -370,6 +381,8 @@ class MockRobot:
         self.mission_state: str | None = None
         self.mission_started_at: datetime | None = None
         self.zone_id: str | None = None
+        self.mission_incident_count = 0
+        self.normal_detection_count = 0
         if args.initial_mission_id is not None:
             self.mission_id = args.initial_mission_id
             self.mission_state = args.initial_mission_state
@@ -395,6 +408,7 @@ class MockRobot:
         self.jetson_temp_direction = 1
         self.safety_event_index = 0
         self.battery_event_index = 0
+        self.incident_event_index = 0
 
         self.presence_topic = topic(self.mqtt_id, "presence")
         self.state_topic = topic(self.mqtt_id, "state")
@@ -528,7 +542,7 @@ class MockRobot:
                 mission = {
                     "state": self.mission_state,
                     "elapsed_sec": elapsed,
-                    "incident_count": 0,
+                    "incident_count": self.mission_incident_count,
                 }
 
             position = {
@@ -637,6 +651,8 @@ class MockRobot:
                     self.args.longitude + longitude_step * self.position_step_count,
                     7,
                 )
+                if self.mission_state == "RUNNING":
+                    self.normal_detection_count += self.args.normal_detection_step
                 self.next_position_update_at = (
                     current_monotonic + self.args.position_update_interval
                 )
@@ -737,6 +753,26 @@ class MockRobot:
     def incident_event_payload(self) -> dict[str, Any]:
         with self.state_lock:
             mission_id = self.mission_id
+            latitude = self.latitude
+            longitude = self.longitude
+            incident_index = self.incident_event_index
+            self.incident_event_index += 1
+        incident_cycle = (
+            {
+                "asset_type": "BRAILLE_BLOCK",
+                "block_type": "LINEAR",
+                "defect_type": "DAMAGED",
+                "confidence": 0.91,
+                "attributes": {"damage_ratio": 0.35},
+            },
+            {
+                "asset_type": "BRAILLE_BLOCK",
+                "block_type": "UNKNOWN",
+                "defect_type": "MISSING",
+                "confidence": 0.88,
+                "attributes": {},
+            },
+        )
         occurred_at = format_instant()
         payload = self.event_envelope(
             "BRAILLE_BLOCK_INCIDENT_DETECTED",
@@ -746,17 +782,11 @@ class MockRobot:
         payload.update({
             "location": {
                 "valid": not self.args.gps_invalid,
-                "lat": None if self.args.gps_invalid else self.latitude,
-                "lon": None if self.args.gps_invalid else self.longitude,
+                "lat": None if self.args.gps_invalid else latitude,
+                "lon": None if self.args.gps_invalid else longitude,
                 "zone_id": None,
             },
-            "incident": {
-                "asset_type": "BRAILLE_BLOCK",
-                "block_type": "LINEAR",
-                "defect_type": "DAMAGED",
-                "confidence": 0.91,
-                "attributes": {"damage_ratio": 0.35},
-            },
+            "incident": incident_cycle[incident_index % len(incident_cycle)],
             "evidence": {
                 "image_id": None,
                 "captured_at": occurred_at,
@@ -770,6 +800,16 @@ class MockRobot:
             },
         })
         return payload
+
+    def record_published_incident(self, payload: dict[str, Any]) -> None:
+        mission_id = payload.get("mission_id")
+        with self.state_lock:
+            if (
+                isinstance(mission_id, str)
+                and mission_id == self.mission_id
+                and self.mission_state == "RUNNING"
+            ):
+                self.mission_incident_count += 1
 
     def current_result_state(self) -> dict[str, str]:
         with self.state_lock:
@@ -806,6 +846,8 @@ class MockRobot:
         *,
         duration_sec: int | None = None,
         completion_reason: str | None = None,
+        incident_count: int | None = None,
+        normal_detection_count: int | None = None,
     ) -> dict[str, Any]:
         occurred_at = utc_now()
         event: dict[str, Any] = {
@@ -822,10 +864,24 @@ class MockRobot:
             "mission_id": mission_id,
         }
         if completion_reason is not None:
+            if incident_count is None or normal_detection_count is None:
+                with self.state_lock:
+                    current_incident_count = self.mission_incident_count
+                    current_normal_detection_count = self.normal_detection_count
+                incident_count = (
+                    current_incident_count
+                    if incident_count is None
+                    else incident_count
+                )
+                normal_detection_count = (
+                    current_normal_detection_count
+                    if normal_detection_count is None
+                    else normal_detection_count
+                )
             event["result"] = {
                 "duration_sec": max(0, duration_sec or 0),
-                "incident_count": 0,
-                "normal_detection_count": 0,
+                "incident_count": max(0, incident_count),
+                "normal_detection_count": max(0, normal_detection_count),
                 "completion_reason": completion_reason,
             }
         return event
@@ -837,12 +893,16 @@ class MockRobot:
         *,
         duration_sec: int | None = None,
         completion_reason: str | None = None,
+        incident_count: int | None = None,
+        normal_detection_count: int | None = None,
     ) -> None:
         event = self.mission_event(
             event_type,
             mission_id,
             duration_sec=duration_sec,
             completion_reason=completion_reason,
+            incident_count=incident_count,
+            normal_detection_count=normal_detection_count,
         )
         self.publish_json(
             self.mission_event_topic,
@@ -1042,6 +1102,16 @@ class MockRobot:
             mission_id_before = self.mission_id
             mission_state_before = self.mission_state
             mission_started_at_before = self.mission_started_at
+            incident_count_before = (
+                self.mission_incident_count
+                if mission_id_before is not None
+                else 0
+            )
+            normal_detection_count_before = (
+                self.normal_detection_count
+                if mission_id_before is not None
+                else 0
+            )
 
         overridden = self.command_outcomes.get(command_type)
         if overridden is None:
@@ -1056,11 +1126,16 @@ class MockRobot:
             with self.state_lock:
                 mission_id_after = self.mission_id
                 mission_state_after = self.mission_state
-            mission_id = (
-                mission_id_before
-                if command_type in ("COMPLETE_MISSION", "CANCEL_MISSION")
-                else mission_id_after
-            )
+            if command_type == "CANCEL_MISSION":
+                mission_id = mission_id_before or command.get(
+                    "parameters", {}
+                ).get("mission_id")
+            else:
+                mission_id = (
+                    mission_id_before
+                    if command_type == "COMPLETE_MISSION"
+                    else mission_id_after
+                )
             event_type = {
                 "START_MISSION": "MISSION_STARTED",
                 "PAUSE_MISSION": "MISSION_PAUSED",
@@ -1102,6 +1177,10 @@ class MockRobot:
                         if terminal
                         else None
                     ),
+                    incident_count=(incident_count_before if terminal else None),
+                    normal_detection_count=(
+                        normal_detection_count_before if terminal else None
+                    ),
                 )
             self.publish_json(
                 self.state_topic,
@@ -1142,6 +1221,8 @@ class MockRobot:
                 self.mission_state = "RUNNING"
                 self.mission_started_at = utc_now()
                 self.zone_id = zone_id
+                self.mission_incident_count = 0
+                self.normal_detection_count = 0
                 self.mode = "PATROLLING"
                 self.state_reason = "NONE"
                 self.next_position_update_at = (
@@ -1185,8 +1266,17 @@ class MockRobot:
                 return "COMPLETED", "OK"
 
             if command_type == "CANCEL_MISSION":
-                if self.mission_id is None:
-                    return "FAILED", "NO_ACTIVE_MISSION"
+                mission_id = parameters.get("mission_id")
+                reason = parameters.get("reason")
+                if (
+                    not isinstance(mission_id, str)
+                    or not mission_id.strip()
+                    or not isinstance(reason, str)
+                    or not reason.strip()
+                ):
+                    return "REJECTED", "INVALID_PARAMETERS"
+                if self.mission_id is not None and self.mission_id != mission_id:
+                    return "REJECTED", "ALREADY_IN_STATE"
                 self.mission_id = None
                 self.mission_state = None
                 self.mission_started_at = None
@@ -1340,9 +1430,15 @@ class MockRobot:
         while not self.stop_event.wait(interval):
             if not self.connected_event.is_set():
                 continue
+            if name == "incident-event":
+                with self.state_lock:
+                    if self.mission_state != "RUNNING":
+                        continue
             payload = payload_factory()
             result = self.publish_json(mqtt_topic, payload, qos=qos, retain=retain)
             if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                if name == "incident-event":
+                    self.record_published_incident(payload)
                 print(
                     f"Periodic publish name={name} topic={mqtt_topic} "
                     f"seq={payload.get('seq')}"
@@ -1374,12 +1470,16 @@ class MockRobot:
             self.mission_state = "COMPLETED"
             self.mode = "READY"
             self.state_reason = "NONE"
+            incident_count = self.mission_incident_count
+            normal_detection_count = self.normal_detection_count
 
         self.publish_mission_event(
             "MISSION_COMPLETED",
             mission_id,
             duration_sec=mission["elapsed_sec"],
             completion_reason="MOCK_PLANNED_DURATION_REACHED",
+            incident_count=incident_count,
+            normal_detection_count=normal_detection_count,
         )
         self.publish_json(
             self.state_topic,

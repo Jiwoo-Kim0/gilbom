@@ -17,6 +17,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -38,6 +39,7 @@ import com.gilbom.robot.event.RobotEventIngestionResult;
 import com.gilbom.robot.event.RobotEventIngestionService;
 import com.gilbom.robot.mission.MissionEventIngestionService;
 import com.gilbom.robot.mission.MissionProgressService;
+import com.gilbom.robot.mission.MissionQueryService;
 import com.gilbom.robot.mqtt.replay.MqttReplayProtectionService;
 import com.gilbom.robot.telemetry.TelemetryIngestionService;
 
@@ -77,6 +79,7 @@ class RobotEventMissionDefectIntegrationTest {
     private static MissionEventIngestionService missionIngestionService;
     private static IncidentEventIngestionService incidentIngestionService;
     private static TelemetryIngestionService telemetryIngestionService;
+    private static MissionQueryService missionQueryService;
 
     @BeforeAll
     static void migrate() {
@@ -118,6 +121,9 @@ class RobotEventMissionDefectIntegrationTest {
                 noOpPublisher,
                 new MissionProgressService(jdbcTemplate),
                 replayProtectionService);
+        missionQueryService = new MissionQueryService(
+                new NamedParameterJdbcTemplate(jdbcTemplate),
+                objectMapper);
     }
 
     @BeforeEach
@@ -249,6 +255,56 @@ class RobotEventMissionDefectIntegrationTest {
                 .containsEntry(
                         "transition_reason",
                         "PRECHECK_FAILED");
+    }
+
+    @Test
+    void cancelsReadyMissionFromRobotEventAndStoresTerminalReason() {
+        jdbcTemplate.update("""
+                UPDATE robot.mission
+                SET status = 'READY',
+                    updated_at = ?
+                WHERE mission_id = ?
+                """,
+                java.sql.Timestamp.from(BASE_TIME.minusSeconds(1)),
+                MISSION_ID);
+        MissionEventPayload cancelled = missionEvent(
+                UUID.fromString(
+                        "23000000-0000-4000-8000-000000000105"),
+                1,
+                MissionEventPayload.EventType.MISSION_CANCELLED,
+                new MissionEventPayload.Result(
+                        0,
+                        0,
+                        0,
+                        "operator cancellation"));
+
+        RobotEventIngestionResult stored =
+                missionIngestionService.ingest(
+                        cancelled,
+                        "{\"event_type\":\"MISSION_CANCELLED\"}",
+                        BASE_TIME.plusSeconds(2));
+
+        Map<String, Object> mission = jdbcTemplate.queryForMap("""
+                SELECT status, ended_at, completion_reason
+                FROM robot.mission
+                WHERE mission_id = ?
+                """,
+                MISSION_ID);
+        Map<String, Object> history = jdbcTemplate.queryForMap("""
+                SELECT before_status, after_status, transition_reason
+                FROM robot.mission_status_history
+                WHERE mission_id = ?
+                """,
+                MISSION_ID);
+        assertThat(stored.inserted()).isTrue();
+        assertThat(mission.get("status")).isEqualTo("CANCELLED");
+        assertThat(mission.get("ended_at")).isNotNull();
+        assertThat(mission.get("completion_reason"))
+                .isEqualTo("operator cancellation");
+        assertThat(history.get("before_status")).isEqualTo("READY");
+        assertThat(history.get("after_status")).isEqualTo("CANCELLED");
+        assertThat(history.get("transition_reason"))
+                .isEqualTo("operator cancellation");
     }
 
     @Test
@@ -624,6 +680,48 @@ class RobotEventMissionDefectIntegrationTest {
                 """,
                 String.class,
                 first.defectId())).isEqualTo("DAMAGE_RATIO_V1");
+    }
+
+    @Test
+    void findsDefectThroughItsMissionEventWithoutChangingDefectState() {
+        jdbcTemplate.update("""
+                INSERT INTO auth.user_robot_assignment (
+                    user_robot_assignment_id,
+                    user_id,
+                    robot_id,
+                    assignment_type,
+                    reason,
+                    assigned_by
+                ) VALUES (?, ?, ?, 'VIEWER', 'mission defect query test', ?)
+                """,
+                UUID.fromString(
+                        "23000000-0000-4000-8000-000000000304"),
+                ADMIN_ID,
+                ROBOT_ID,
+                ADMIN_ID);
+        IncidentIngestionResult incident = incidentIngestionService.ingest(
+                incidentEvent(
+                        UUID.fromString(
+                                "23000000-0000-4000-8000-000000000303"),
+                        1,
+                        127.027600,
+                        37.497900,
+                        0.91),
+                "{\"event_type\":\"BRAILLE_BLOCK_INCIDENT_DETECTED\"}",
+                BASE_TIME.plusSeconds(2));
+
+        var result = missionQueryService.findDefects(ADMIN_ID, MISSION_ID);
+
+        assertThat(result.missionId()).isEqualTo(MISSION_ID);
+        assertThat(result.defects()).singleElement().satisfies(defect -> {
+            assertThat(defect.defectId()).isEqualTo(incident.defectId());
+            assertThat(defect.longitude()).isEqualTo(127.027600);
+            assertThat(defect.latitude()).isEqualTo(37.497900);
+            assertThat(defect.latestConfidence())
+                    .isEqualByComparingTo("0.910");
+        });
+        assertThat(count("defect.defect")).isOne();
+        assertThat(count("defect.defect_observation")).isOne();
     }
 
     @Test

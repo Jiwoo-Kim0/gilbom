@@ -1,5 +1,9 @@
 package com.gilbom.llm;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.time.DateTimeException;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -27,6 +31,10 @@ public final class GmsLlmClient implements LlmClient {
             LlmOutboundInputGuard.MAXIMUM_JSON_BYTES;
     private static final int MAXIMUM_OUTPUT_CHARACTERS =
             100_000;
+    private static final String REPORT_SCHEMA_RESOURCE =
+            "/llm/report-structured-output.schema.json";
+    private static final String REPORT_SCHEMA_NAME =
+            "gilbom_report_v1";
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
@@ -37,6 +45,7 @@ public final class GmsLlmClient implements LlmClient {
     private final String systemPrompt;
     private final boolean imageInputAllowed;
     private final LlmOutboundInputGuard outboundInputGuard;
+    private final JsonNode reportOutputSchema;
 
     GmsLlmClient(
             RestClient restClient,
@@ -65,6 +74,8 @@ public final class GmsLlmClient implements LlmClient {
         imageInputAllowed = properties.isImageInputAllowed();
         outboundInputGuard =
                 new LlmOutboundInputGuard(objectMapper);
+        reportOutputSchema = loadReportOutputSchema(
+                objectMapper);
         systemPrompt = promptCatalog.systemPrompt(
                 promptVersion)
                 + "\nThe response fields promptVersion and "
@@ -111,7 +122,12 @@ public final class GmsLlmClient implements LlmClient {
                                                     images))),
                             maxOutputTokens,
                             false,
-                            Map.of("type", "json_object")))
+                            new GmsResponseFormat(
+                                    "json_schema",
+                                    new GmsJsonSchema(
+                                            REPORT_SCHEMA_NAME,
+                                            true,
+                                            reportOutputSchema))))
                     .retrieve()
                     .body(GmsChatResponse.class);
         } catch (RestClientResponseException exception) {
@@ -212,7 +228,7 @@ public final class GmsLlmClient implements LlmClient {
             GmsChatResponse response
     ) {
         if (response == null
-                || !model.equals(response.model())
+                || !isExpectedProviderModel(response.model())
                 || response.choices() == null
                 || response.choices().size() != 1
                 || response.choices().getFirst() == null
@@ -236,6 +252,52 @@ public final class GmsLlmClient implements LlmClient {
                 model,
                 promptVersion,
                 usage(response.usage()));
+    }
+
+    private boolean isExpectedProviderModel(
+            String providerModel
+    ) {
+        if (model.equals(providerModel)) {
+            return true;
+        }
+        if (providerModel == null) {
+            return false;
+        }
+        String datedSnapshotPrefix = model + "-";
+        if (!providerModel.startsWith(
+                datedSnapshotPrefix)) {
+            return false;
+        }
+        try {
+            LocalDate.parse(providerModel.substring(
+                    datedSnapshotPrefix.length()));
+            return true;
+        } catch (DateTimeException exception) {
+            return false;
+        }
+    }
+
+    private static JsonNode loadReportOutputSchema(
+            ObjectMapper objectMapper
+    ) {
+        try (InputStream input = GmsLlmClient.class
+                .getResourceAsStream(
+                        REPORT_SCHEMA_RESOURCE)) {
+            if (input == null) {
+                throw new IllegalStateException(
+                        "LLM report output schema is missing");
+            }
+            JsonNode schema = objectMapper.readTree(input);
+            if (schema == null || !schema.isObject()) {
+                throw new IllegalStateException(
+                        "LLM report output schema is invalid");
+            }
+            return schema;
+        } catch (IOException exception) {
+            throw new IllegalStateException(
+                    "LLM report output schema cannot be read",
+                    exception);
+        }
     }
 
     private void validateJsonObject(String content) {
@@ -288,7 +350,7 @@ public final class GmsLlmClient implements LlmClient {
             int maxCompletionTokens,
             boolean store,
             @JsonProperty("response_format")
-            Map<String, String> responseFormat
+            GmsResponseFormat responseFormat
     ) {
 
         @Override
@@ -301,6 +363,33 @@ public final class GmsLlmClient implements LlmClient {
                     + ", store=" + store
                     + ", responseFormat=" + responseFormat
                     + '}';
+        }
+    }
+
+    private record GmsResponseFormat(
+            String type,
+            @JsonProperty("json_schema")
+            GmsJsonSchema jsonSchema
+    ) {
+
+        @Override
+        public String toString() {
+            return "GmsResponseFormat{type='" + type
+                    + "', jsonSchema=" + jsonSchema + '}';
+        }
+    }
+
+    private record GmsJsonSchema(
+            String name,
+            boolean strict,
+            JsonNode schema
+    ) {
+
+        @Override
+        public String toString() {
+            return "GmsJsonSchema{name='" + name
+                    + "', strict=" + strict
+                    + ", schema=[REDACTED]}";
         }
     }
 

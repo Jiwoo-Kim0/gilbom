@@ -41,9 +41,10 @@ inhibit_rules:
 receivers:
   - name: mattermost-warning
     slack_configs:
-      - channel: "#gilbom-alerts"
+      # Mattermost는 채널 이름을 앞의 # 없이 받는다. 실제로 전송되는 것을 확인한 값이다.
+      - channel: "d101_alertmanager"
         send_resolved: true
-        title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+        title: '[{{ .Status | toUpper }} · {{ .CommonLabels.severity | toUpper }}] {{ .CommonLabels.alertname }}'
         text: >-
           {{ range .Alerts }}{{ .Annotations.summary }}
           {{ if .Annotations.description }}{{ .Annotations.description }}
@@ -51,9 +52,12 @@ receivers:
 
   - name: mattermost-critical
     slack_configs:
-      - channel: "#gilbom-alerts"
+      # Mattermost는 채널 이름을 앞의 # 없이 받는다. 실제로 전송되는 것을 확인한 값이다.
+      - channel: "d101_alertmanager"
         send_resolved: true
-        title: '[CRITICAL] {{ .CommonLabels.alertname }}'
+        # 제목에 상태를 넣지 않으면 해소 메시지가 발생 메시지와 글자까지 같아진다.
+        # 색만 초록으로 바뀌어서 알아채기 어렵다.
+        title: '[{{ .Status | toUpper }} · {{ .CommonLabels.severity | toUpper }}] {{ .CommonLabels.alertname }}'
         text: >-
           {{ range .Alerts }}{{ .Annotations.summary }}
           {{ if .Annotations.description }}{{ .Annotations.description }}

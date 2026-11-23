@@ -103,10 +103,18 @@
   background: #c0392b;
 }
 
-.robot-filter-bar {
+/*
+ * 한 줄짜리 검색 줄이라 카드 기본 여백(`clamp(22px, 3vw, 32px)`)이 과하다 — 위아래
+ * 32px씩 붙어 줄 높이가 108px이었다.
+ *
+ * `.robot-filter-bar` 하나로는 못 이긴다. `.content-card`와 특이도가 같고, robot.css는
+ * App.css가 `@import`로 먼저 들여오므로 나중에 오는 App.css 쪽이 적용된다. 클래스를
+ * 둘 붙여 특이도를 올린다.
+ */
+.content-card.robot-filter-bar {
   display: flex;
   gap: 18px;
-  padding: 18px 20px;
+  padding: 12px 20px;
   align-items: center;
   justify-content: space-between;
 }
@@ -170,21 +178,29 @@
 
 .robot-map-legend {
   display: flex;
-  gap: 10px;
+  /* 테두리가 없으니 항목 사이는 이 간격만으로 갈린다. 점·라벨 간격(8px)보다 넉넉해야
+     "점 라벨"이 한 덩어리로 읽힌다. */
+  gap: 20px;
   flex-wrap: wrap;
+  align-items: center;
 }
 
+/*
+ * 테두리 없는 점 + 글자다. 알약 모양으로 두면 눌러서 거를 수 있는 필터 칩처럼 보여
+ * 범례로 읽히지 않는다(결함 지도 범례도 같은 이유로 걷어냈다).
+ */
 .robot-legend-item {
   display: flex;
   gap: 8px;
-  height: 38px;
-  padding: 0 14px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
   align-items: center;
-  color: var(--text);
+  color: var(--text-muted);
   font-size: 13px;
   font-weight: 700;
+  white-space: nowrap;
+}
+
+.robot-legend-item-warning {
+  margin-left: auto;
 }
 
 .robot-status-dot {
@@ -195,16 +211,16 @@
   background: var(--text-muted);
 }
 
+.robot-legend-item-total .robot-status-dot {
+  background: var(--robot-total);
+}
+
 .robot-legend-item-online .robot-status-dot {
-  background: var(--brand-strong);
+  background: var(--robot-online);
 }
 
 .robot-legend-item-warning .robot-status-dot {
-  background: #c0392b;
-}
-
-.robot-legend-item-charging .robot-status-dot {
-  background: var(--nb-gold);
+  background: var(--robot-warning);
 }
 
 .robot-legend-item-offline .robot-status-dot {
@@ -216,8 +232,10 @@
   border-radius: 14px;
 }
 
+/* 결함 지도와 같은 이유로 stacking context를 만든다(App.css의 같은 규칙 주석 참고). */
 .robot-map-canvas-wrap {
   position: relative;
+  isolation: isolate;
   min-height: 420px;
   border-radius: 14px;
   overflow: hidden;
@@ -227,53 +245,6 @@
   width: 100%;
   height: 100%;
   min-height: 420px;
-}
-
-.robot-map-overlay {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  z-index: 1;
-  display: grid;
-  min-width: 170px;
-  gap: 8px;
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(6px);
-  box-shadow: var(--shadow);
-}
-
-.robot-map-overlay-live {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.robot-map-overlay-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--nb-gold);
-}
-
-.robot-map-overlay-stat {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-  color: var(--text-muted);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.robot-map-overlay-stat strong {
-  color: var(--text);
-  font-size: 15px;
 }
 
 .robot-map-loading {
@@ -290,33 +261,57 @@
 }
 
 .robot-map-marker {
-  display: grid;
-  width: 28px;
-  height: 28px;
+  position: relative;
+  display: block;
+  width: 44px;
+  height: 44px;
+}
+
+.robot-map-marker-car {
+  display: block;
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  filter: drop-shadow(0 3px 5px rgb(15 23 42 / 35%));
+}
+
+.robot-map-marker-status {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 10px;
+  height: 10px;
   border: 2px solid #fff;
   border-radius: 50%;
-  place-items: center;
-  color: #fff;
-  background: var(--brand-strong);
-  box-shadow: 0 2px 6px rgba(23, 34, 28, 0.35);
+  background: var(--robot-online);
+  box-shadow: 0 1px 3px rgb(15 23 42 / 30%);
 }
 
-.robot-map-marker-warning {
-  background: #c0392b;
+.robot-map-marker-warning .robot-map-marker-status {
+  background: var(--robot-warning);
 }
 
-.robot-map-marker-charging {
-  background: var(--nb-gold);
-}
-
-.robot-map-marker-offline {
+.robot-map-marker-offline .robot-map-marker-status {
   background: var(--text-muted);
 }
 
-.robot-map-marker-arrow {
-  display: block;
-  font-size: 14px;
-  line-height: 1;
+.robot-map-marker-offline .robot-map-marker-car {
+  filter: grayscale(1) drop-shadow(0 3px 5px rgb(15 23 42 / 25%));
+  opacity: 0.7;
+}
+
+.robot-map-marker-heading-1 { transform: rotate(45deg); }
+.robot-map-marker-heading-2 { transform: rotate(90deg); }
+.robot-map-marker-heading-3 { transform: rotate(135deg); }
+.robot-map-marker-heading-4 { transform: rotate(180deg); }
+.robot-map-marker-heading-5 { transform: rotate(225deg); }
+.robot-map-marker-heading-6 { transform: rotate(270deg); }
+.robot-map-marker-heading-7 { transform: rotate(315deg); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .robot-map-marker-car {
+    transition: transform 180ms ease;
+  }
 }
 
 .robot-fleet-section {
@@ -336,6 +331,12 @@
   justify-content: space-between;
 }
 
+.robot-fleet-heading-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
 .robot-fleet-refreshing {
   color: var(--text-muted);
   font-size: 12px;
@@ -344,7 +345,7 @@
 
 .robot-fleet-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -412,19 +413,21 @@
   letter-spacing: 0.04em;
 }
 
+.robot-status-badges {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .robot-status-badge-online {
-  color: var(--brand-strong);
-  background: var(--brand-soft);
+  color: var(--robot-online-strong);
+  background: var(--robot-online-soft);
 }
 
 .robot-status-badge-warning {
-  color: #c0392b;
-  background: #fbe4e1;
-}
-
-.robot-status-badge-charging {
-  color: var(--nb-ink);
-  background: var(--nb-gold-soft);
+  color: var(--robot-warning-strong);
+  background: var(--robot-warning-soft);
 }
 
 .robot-status-badge-offline {
@@ -455,6 +458,15 @@
   font-weight: 800;
 }
 
+.robot-fleet-metric strong > svg {
+  display: block;
+  width: 1rem;
+  height: 1rem;
+  min-width: 1rem;
+  flex: 0 0 1rem;
+  overflow: visible;
+}
+
 .robot-battery-progress {
   appearance: none;
   width: 100%;
@@ -477,11 +489,6 @@
 .robot-battery-progress::-moz-progress-bar {
   border-radius: inherit;
   background: var(--brand-strong);
-}
-
-.robot-fleet-card-warning .robot-battery-progress::-webkit-progress-value,
-.robot-fleet-card-warning .robot-battery-progress::-moz-progress-bar {
-  background: #c0392b;
 }
 
 .robot-fleet-context {

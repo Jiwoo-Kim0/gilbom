@@ -40,6 +40,7 @@ sudoers_temp="$(mktemp)"
   printf 'ubuntu ALL=(root) NOPASSWD: %s\n' "$TARGET"
   printf 'ubuntu ALL=(root) NOPASSWD: %s --aws-security-groups /tmp/gilbom-security-groups.json\n' \
     "$TARGET"
+  printf 'ubuntu ALL=(root) NOPASSWD: %s --skip-aws-security-groups\n' "$TARGET"
 } > "$sudoers_temp"
 chmod 0440 "$sudoers_temp"
 visudo -cf "$sudoers_temp" >/dev/null \

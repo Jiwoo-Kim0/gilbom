@@ -30,6 +30,7 @@ printf '%s\n' "$release_sha" | grep -Eq '^[0-9a-f]{40}$' \
 incoming="$INCOMING_ROOT/$release_sha"
 destination="$ARTIFACT_ROOT/$release_sha"
 lock="$ARTIFACT_ROOT/.promote-$release_sha.lock"
+source_archive="gilbom-web-$release_sha.tar.zst"
 
 expected_files='
 sbom/backend.sbom.json
@@ -41,8 +42,12 @@ images.tar.zst
 images.tar.zst.sigstore.json
 images.tar.zst.sha256
 build-metadata.json
+compose.prod.yaml
 SHA256SUMS
+SHA256SUMS.sigstore.json
 '
+expected_files="$expected_files
+$source_archive"
 manifest_files='
 ./sbom/backend.sbom.json
 ./sbom/frontend.sbom.json
@@ -53,7 +58,10 @@ manifest_files='
 ./images.tar.zst.sigstore.json
 ./images.tar.zst.sha256
 ./build-metadata.json
+./compose.prod.yaml
 '
+manifest_files="$manifest_files
+./$source_archive"
 
 validate_release_directory() {
   directory="$1"
@@ -70,8 +78,8 @@ validate_release_directory() {
     find "$directory" -mindepth 1 \
       ! -type f ! -type d -print -quit
   )" ] || fail "release directory contains an unsupported entry type"
-  [ "$(find "$directory" -type f | wc -l)" -eq 10 ] \
-    || fail "release directory must contain exactly ten files"
+  [ "$(find "$directory" -type f | wc -l)" -eq 13 ] \
+    || fail "release directory must contain exactly thirteen files"
   [ "$(find "$directory" -mindepth 1 -type d | wc -l)" -eq 2 ] \
     || fail "release directory must contain exactly two subdirectories"
 
@@ -102,13 +110,15 @@ validate_release_directory() {
       ./images.tar.zst|\
       ./images.tar.zst.sigstore.json|\
       ./images.tar.zst.sha256|\
-      ./build-metadata.json) ;;
+      ./build-metadata.json|\
+      ./compose.prod.yaml|\
+      "./$source_archive") ;;
       *) fail "SHA256SUMS contains an unsafe or unexpected path" ;;
     esac
     manifest_count=$((manifest_count + 1))
   done < "$directory/SHA256SUMS"
-  [ "$manifest_count" -eq 9 ] \
-    || fail "SHA256SUMS must contain exactly nine entries"
+  [ "$manifest_count" -eq 11 ] \
+    || fail "SHA256SUMS must contain exactly eleven entries"
   for relative_path in $manifest_files
   do
     [ "$(
@@ -132,11 +142,6 @@ validate_release_directory() {
   ' "$directory/images.tar.zst.sha256" \
     || fail "images.tar.zst.sha256 is malformed or unsafe"
 
-  (
-    cd "$directory"
-    sha256sum -c SHA256SUMS
-    sha256sum -c images.tar.zst.sha256
-  ) || fail "artifact SHA-256 verification failed"
   [ -f "$COSIGN_BIN" ] && [ ! -L "$COSIGN_BIN" ] \
     || fail "pinned Cosign verifier is missing or symlinked"
   [ -f "$COSIGN_PUBLIC_KEY" ] \
@@ -146,6 +151,17 @@ validate_release_directory() {
   "$COSIGN_BIN" version \
     | grep -Fq "GitVersion:    $COSIGN_VERSION" \
     || fail "Cosign verifier version differs from $COSIGN_VERSION"
+  "$COSIGN_BIN" verify-blob \
+    --insecure-ignore-tlog \
+    --key "$COSIGN_PUBLIC_KEY" \
+    --bundle "$directory/SHA256SUMS.sigstore.json" \
+    "$directory/SHA256SUMS" >/dev/null \
+    || fail "complete release manifest signature is invalid"
+  (
+    cd "$directory"
+    sha256sum -c SHA256SUMS
+    sha256sum -c images.tar.zst.sha256
+  ) || fail "artifact SHA-256 verification failed"
   "$COSIGN_BIN" verify-blob \
     --insecure-ignore-tlog \
     --key "$COSIGN_PUBLIC_KEY" \

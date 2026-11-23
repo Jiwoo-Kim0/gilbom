@@ -43,6 +43,40 @@ groups:
             EC2가 통째로 사라지면 로컬 backup도 함께 사라진다. 암호화 번들을
             SFTP로 내려받고 record-offhost-export를 실행한다.
 
+      # 위 알람은 시계열이 있어야 발화한다. 한 번도 반출한 적 없는 종류는 시계열
+      # 자체가 없어 "7일 넘게 반출하지 않았다"에 걸리지 않는다. 반출을 한 번도 안 한
+      # 쪽이 더 위험한데 조용하다. 실제로 postgres와 totp가 그 상태였다.
+      - alert: BackupOffhostRecordMissing
+        expr: >-
+          absent(gilbom_backup_offhost_exported_seconds{backup="postgres"})
+          or absent(gilbom_backup_offhost_exported_seconds{backup="volumes"})
+          or absent(gilbom_backup_offhost_exported_seconds{backup="totp"})
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.backup }} backup을 host 밖으로 반출한 기록이 없다"
+          description: >-
+            반출한 적이 없거나 기록을 남기지 않았다. 어느 쪽이든 EC2가 사라지면
+            그 backup은 함께 사라진다. totp는 keyring이라 잃으면 MFA 암호문이
+            복구 불가다.
+
+      # 알람이 떠도 전달되지 않으면 아무 일도 없는 것과 같다. 실제로 webhook secret
+      # 권한 때문에 한 번도 전달되지 않은 채로 정상처럼 보인 적이 있다.
+      # 이 알람 자체도 같은 경로로 나가므로 채널에 못 올 수 있다. 그때는
+      # Prometheus 알람 화면과 운영 대시보드에 남는 것이 유일한 신호다.
+      - alert: AlertDeliveryFailing
+        expr: sum(increase(alertmanager_notifications_failed_total[15m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 알람 전달 자체가 실패하고 있다
+          description: >-
+            Alertmanager가 통지를 보내지 못하고 있다. webhook secret 파일 권한,
+            URL 유효성, egress 경로 순으로 확인한다.
+            docker logs로 "Notify for alerts failed"를 찾으면 원인이 그대로 나온다.
+
       - alert: TlsCertificateExpiringSoon
         expr: >-
           probe_ssl_earliest_cert_expiry - time() < 14 * 24 * 3600

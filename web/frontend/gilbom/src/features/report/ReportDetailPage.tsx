@@ -4,7 +4,6 @@ import {
   CheckCircle2,
   Download,
   FilePenLine,
-  RefreshCw,
   Send,
   Trash2,
   XCircle,
@@ -28,6 +27,7 @@ import {
   getApiErrorMessage,
 } from '../../shared/api/apiClient'
 import { useAuthentication } from '../auth/authenticationContext'
+import { DEFECT_STATUS_VIEW } from '../auth/permissions'
 import {
   approveReport,
   deleteReport,
@@ -39,11 +39,15 @@ import {
 } from './reportApi'
 import {
   actorLabel,
+  formatReportContentIdentifiers,
   formatReportDateTime,
+  formatReportDisplayTitle,
   formatReportPeriod,
 } from './reportFormat'
 import { getReportActionPolicy } from './reportPolicy'
+import { ReportEvidenceGallery } from './ReportEvidenceGallery'
 import { ReportStatusBadge } from './ReportStatusBadge'
+import { SafeReportDocument } from './SafeReportDocument'
 import { SafeReportText } from './SafeReportText'
 import {
   useReportRealtime,
@@ -95,6 +99,8 @@ export function ReportDetailPage() {
     ),
     [detail, user],
   )
+  const canViewDefectEvidence =
+    user?.permissions.includes(DEFECT_STATUS_VIEW) ?? false
 
   const load = useCallback(async (preserveSelectedVersion = false) => {
     const requestSequence = requestSequenceRef.current + 1
@@ -303,6 +309,13 @@ export function ReportDetailPage() {
 
   const version = selectedVersion ?? detail.currentVersion
   const isCurrentVersion = version.versionNo === detail.currentVersionNo
+  const displayTitle = formatReportDisplayTitle(
+    version.title,
+    version.content,
+    detail.reportCode,
+    version.versionNo,
+    typeof detail.filterCriteria.defectId === 'string',
+  )
 
   return (
     <section className="page-stack" aria-labelledby="report-detail-title">
@@ -316,28 +329,7 @@ export function ReportDetailPage() {
             <ReportStatusBadge status={detail.reportStatus} />
             <span>{detail.reportCode}</span>
           </div>
-          <h2 id="report-detail-title">{detail.title}</h2>
-          <p>{detail.summary ?? '등록된 요약이 없습니다.'}</p>
-        </div>
-        <div className="report-heading-actions">
-          <button
-            className="secondary-button button-with-icon"
-            type="button"
-            disabled={loading || actionBusy}
-            onClick={() => void load(true)}
-          >
-            <RefreshCw size={17} aria-hidden="true" />
-            새로고침
-          </button>
-          {policy.canEdit ? (
-            <Link
-              className="primary-button button-with-icon"
-              to={`/reports/${encodeURIComponent(reportId)}/edit`}
-            >
-              <FilePenLine size={17} aria-hidden="true" />
-              {detail.reportStatus === 'REJECTED' ? '수정·재작성' : '수정'}
-            </Link>
-          ) : null}
+          <h2 id="report-detail-title">{displayTitle}</h2>
         </div>
       </div>
 
@@ -405,25 +397,22 @@ export function ReportDetailPage() {
                   버전을 불러오는 중입니다.
                 </div>
               ) : (
-                <SafeReportText text={version.content} />
+                <>
+                  <ReportEvidenceGallery
+                    key={[
+                      version.versionNo,
+                      ...version.evidenceSnapshot.defectIds,
+                    ].join(':')}
+                    defectIds={version.evidenceSnapshot.defectIds}
+                    canView={canViewDefectEvidence}
+                  />
+                  <SafeReportDocument
+                    text={formatReportContentIdentifiers(version.content)}
+                    documentTitle={version.title}
+                    hiddenSectionTitles={['통계']}
+                  />
+                </>
               )}
-            </div>
-          </article>
-
-          <article className="content-card report-statistics-card">
-            <div className="report-section-heading">
-              <div>
-                <p className="eyebrow">STATISTICS SNAPSHOT</p>
-                <h3>버전 통계</h3>
-              </div>
-              <span>저장 시점 불변 snapshot</span>
-            </div>
-            <div className="report-metric-grid">
-              <div><span>임무</span><strong>{version.statistics.aggregate.missionCount}</strong></div>
-              <div><span>완료율</span><strong>{version.statistics.aggregate.completionRatePercent}%</strong></div>
-              <div><span>Incident</span><strong>{version.statistics.aggregate.incidentEventCount}</strong></div>
-              <div><span>결함</span><strong>{version.statistics.aggregate.defectCount}</strong></div>
-              <div><span>관측</span><strong>{version.statistics.aggregate.observationCount}</strong></div>
             </div>
           </article>
 
@@ -504,19 +493,14 @@ export function ReportDetailPage() {
                   검토 요청
                 </button>
               ) : null}
-              {policy.canApprove ? (
-                <button
-                  className="primary-button button-with-icon"
-                  type="button"
-                  disabled={actionBusy}
-                  onClick={() => {
-                    setDecisionMode('approve')
-                    setDecisionReason('')
-                  }}
+              {policy.canEdit ? (
+                <Link
+                  className="secondary-button button-with-icon"
+                  to={`/reports/${encodeURIComponent(reportId)}/edit`}
                 >
-                  <CheckCircle2 size={17} aria-hidden="true" />
-                  승인
-                </button>
+                  <FilePenLine size={17} aria-hidden="true" />
+                  {detail.reportStatus === 'REJECTED' ? '수정·재작성' : '수정'}
+                </Link>
               ) : null}
               {policy.canReject ? (
                 <button
@@ -530,6 +514,20 @@ export function ReportDetailPage() {
                 >
                   <XCircle size={17} aria-hidden="true" />
                   반려
+                </button>
+              ) : null}
+              {policy.canApprove ? (
+                <button
+                  className="primary-button button-with-icon"
+                  type="button"
+                  disabled={actionBusy}
+                  onClick={() => {
+                    setDecisionMode('approve')
+                    setDecisionReason('')
+                  }}
+                >
+                  <CheckCircle2 size={17} aria-hidden="true" />
+                  승인
                 </button>
               ) : null}
               {policy.canDelete ? (

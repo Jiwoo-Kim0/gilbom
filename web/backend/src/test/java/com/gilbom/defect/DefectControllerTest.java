@@ -39,6 +39,8 @@ import com.gilbom.common.error.ErrorCode;
 import com.gilbom.common.web.GlobalExceptionHandler;
 import com.gilbom.common.web.RequestBodySizeLimitFilter;
 import com.gilbom.common.web.RequestIdFilter;
+import com.gilbom.defect.DefectDtos.DefectClusterDetailsResponse;
+import com.gilbom.defect.DefectDtos.DefectClusterItemResponse;
 import com.gilbom.defect.DefectDtos.DefectExportAcceptedResponse;
 import com.gilbom.defect.DefectDtos.DefectListItemResponse;
 import com.gilbom.defect.DefectDtos.DefectMapFeature;
@@ -157,6 +159,89 @@ class DefectControllerTest {
                         is("DAMAGED")));
     }
 
+    /**
+     * 묶음 목록을 결함마다 두 번씩 부르던 것을 한 번으로 모은 지점이다. 10건짜리 묶음
+     * 하나에 스무 개가 한꺼번에 나갔고, 그중 하나만 401이어도 화면이 로그인으로 튕겼다.
+     */
+    @Test
+    void returnsClusterDetailsForManyDefectsInOneCall() throws Exception {
+        UUID other = UUID.fromString("2b9a2f4e-1c4d-4a5b-9c8d-7e6f5a4b3c2e");
+        when(queryService.findClusterDetails(
+                eq(USER_ID), eq(List.of(DEFECT_ID, other))))
+                .thenReturn(new DefectClusterDetailsResponse(List.of(
+                        new DefectClusterItemResponse(
+                                DEFECT_ID,
+                                "INC-20260723-000031",
+                                "역삼역 3번 출구 앞 보도",
+                                "G-01",
+                                "/api/v1/images/abc/content?sig=x",
+                                Instant.parse("2026-08-07T00:10:00Z")),
+                        // 사진이 아직 연결되지 않은 결함은 정상이다. 그 줄만 빈다.
+                        new DefectClusterItemResponse(
+                                other,
+                                "INC-20260723-000032",
+                                null,
+                                "G-02",
+                                null,
+                                null))));
+
+        mockMvc.perform(get("/api/v1/defects/cluster-details")
+                        .param("defectIds", DEFECT_ID + "," + other)
+                        .with(user(USER_ID.toString())
+                                .authorities(DEFECT_STATUS_VIEW)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(2)))
+                .andExpect(jsonPath("$.items[0].incidentCode",
+                        is("INC-20260723-000031")))
+                .andExpect(jsonPath("$.items[0].locationLabel",
+                        is("역삼역 3번 출구 앞 보도")))
+                .andExpect(jsonPath("$.items[1].locationLabel").doesNotExist())
+                .andExpect(jsonPath("$.items[1].zoneId", is("G-02")))
+                .andExpect(jsonPath("$.items[1].imageUrl").doesNotExist());
+    }
+
+    @Test
+    void rejectsClusterDetailsWithoutDefectIds() throws Exception {
+        mockMvc.perform(get("/api/v1/defects/cluster-details")
+                        .with(user(USER_ID.toString())
+                                .authorities(DEFECT_STATUS_VIEW)))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(queryService);
+    }
+
+    /**
+     * 상한이 없으면 이 하나의 요청이 만드는 일이 열려 있다. 화면 상한(10)보다 넉넉하되
+     * 무제한은 아니다.
+     */
+    @Test
+    void rejectsClusterDetailsBeyondTheBatchLimit() throws Exception {
+        String tooMany = java.util.stream.Stream
+                .generate(UUID::randomUUID)
+                .limit(51)
+                .map(UUID::toString)
+                .collect(java.util.stream.Collectors.joining(","));
+
+        mockMvc.perform(get("/api/v1/defects/cluster-details")
+                        .param("defectIds", tooMany)
+                        .with(user(USER_ID.toString())
+                                .authorities(DEFECT_STATUS_VIEW)))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(queryService);
+    }
+
+    @Test
+    void requiresDefectStatusViewPermissionForClusterDetails() throws Exception {
+        mockMvc.perform(get("/api/v1/defects/cluster-details")
+                        .param("defectIds", DEFECT_ID.toString())
+                        .with(user(USER_ID.toString())))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is("AUTH_FORBIDDEN")));
+
+        verifyNoInteractions(queryService);
+    }
+
     @Test
     void rejectsUnauthenticatedListRequest() throws Exception {
         mockMvc.perform(get("/api/v1/defects"))
@@ -222,13 +307,17 @@ class DefectControllerTest {
         verifyNoInteractions(commandService);
     }
 
+    /**
+     * 전이 판정은 service가 하고 controller는 409로 옮기기만 한다. 지금 규칙에서
+     * 실제로 막히는 요청(NEW로 되돌리기)을 본문에 담아 이야기를 맞춰둔다.
+     */
     @Test
     void mapsDisallowedTransitionToConflict() throws Exception {
         when(commandService.changeStatus(
                 eq(USER_ID), eq(DEFECT_ID), any(), any()))
                 .thenThrow(new BusinessException(
                         ErrorCode.DEFECT_STATE_CONFLICT,
-                        "허용되지 않는 상태 전이입니다."));
+                        "신규 상태로는 되돌릴 수 없습니다."));
 
         mockMvc.perform(patch("/api/v1/defects/{defectId}/status", DEFECT_ID)
                         .with(user(USER_ID.toString())
@@ -236,9 +325,8 @@ class DefectControllerTest {
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"workflowStatus":"RESOLVED",
-                                 "resolution":"REPAIRED",
-                                 "reason":"현장 보수 완료 확인"}
+                                {"workflowStatus":"NEW",
+                                 "reason":"오탐 판정을 되돌린다"}
                                 """))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code", is("DEFECT_STATE_CONFLICT")));

@@ -7,6 +7,17 @@
   gap: 16px;
 }
 
+.command-mission-map-card .mission-map {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.command-mission-map-card .mission-map-canvas,
+.command-mission-map-card .mission-map-fallback {
+  height: 572px;
+}
+
 .command-section-heading {
   display: flex;
   gap: 20px;
@@ -91,13 +102,6 @@
   color: var(--text);
   font-size: 20px;
   font-weight: 800;
-}
-
-.command-foundation-note {
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-  color: var(--text-muted);
-  font-size: 13px;
 }
 
 .command-history-card {
@@ -640,6 +644,20 @@
   font-weight: 700;
 }
 
+.command-immediate-feedback {
+  margin: 0;
+}
+
+.command-immediate-feedback.success {
+  padding: 12px 14px;
+  border: 1px solid #b9dfc5;
+  border-radius: 10px;
+  color: #1f6b38;
+  background: #effaf2;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .command-button-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -980,6 +998,11 @@
 }
 
 @media (max-width: 720px) {
+  .command-mission-map-card .mission-map-canvas,
+  .command-mission-map-card .mission-map-fallback {
+    height: 442px;
+  }
+
   .command-section-heading {
     align-items: flex-start;
     flex-direction: column;

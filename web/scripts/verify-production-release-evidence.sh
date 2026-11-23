@@ -41,6 +41,15 @@ jq -e \
       == $preflight[0].artifact.signature.publicKeySha256
     and .artifact.signature.bundleSha256
       == $preflight[0].artifact.signature.bundleSha256
+    and .artifact.signature.manifestBundleSha256
+      == $preflight[0].artifact.signature.manifestBundleSha256
+    and .source.archive == $preflight[0].source.archive
+    and .source.sha256 == $preflight[0].source.sha256
+    and .source.activeTreeMarker == "/opt/gilbom/deploy/.release-source.sha"
+    and .compose.path == "compose.prod.yaml"
+    and .compose.path == $preflight[0].compose.path
+    and .compose.sha256 == $preflight[0].compose.sha256
+    and .composeSha256 == .compose.sha256
     and .approval.approvedBy == $approval[0].approvedBy
     and .approval.approvedAtUtc == $approval[0].approvedAtUtc
     and .approval.preflightSha256 == $approval[0].preflightSha256

@@ -8,7 +8,8 @@
 }
 
 .patrol-boundary-editor-heading,
-.patrol-boundary-editor-heading > div,
+.patrol-boundary-editor-title-row,
+.patrol-boundary-editor-heading-tools,
 .patrol-boundary-editor-actions,
 .patrol-boundary-editor-actions > div {
   display: flex;
@@ -21,14 +22,24 @@
   justify-content: space-between;
 }
 
-.patrol-boundary-editor-heading > div {
-  align-items: flex-start;
+.patrol-boundary-editor-heading-primary {
+  display: grid;
+  gap: 4px;
 }
 
-.patrol-boundary-editor-heading svg {
+.patrol-boundary-editor-title-row {
+  align-items: center;
+}
+
+.patrol-boundary-editor-title-row > svg {
   flex: 0 0 auto;
-  margin-top: 2px;
   color: var(--brand-strong);
+}
+
+.patrol-boundary-editor-heading-tools {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-left: auto;
 }
 
 .patrol-boundary-editor-heading strong {
@@ -44,8 +55,9 @@
   font-size: 12px;
 }
 
-.patrol-boundary-editor-heading > span {
-  flex: 0 0 auto;
+.patrol-boundary-point-count {
+  display: block;
+  padding-left: 2px;
   color: var(--brand-strong);
   font-size: 12px;
   font-weight: 800;
@@ -60,6 +72,25 @@
   background: var(--surface);
 }
 
+.patrol-boundary-editor-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 220px);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.patrol-boundary-point-panel {
+  display: grid;
+  min-width: 0;
+  max-height: 360px;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  align-content: start;
+  background: var(--surface);
+}
+
 .patrol-boundary-map {
   width: 100%;
   height: 360px;
@@ -69,9 +100,7 @@
   position: absolute;
   z-index: 10;
   inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
+  overflow: visible;
   pointer-events: none;
 }
 
@@ -138,7 +167,9 @@
   margin: 0;
 }
 
-.patrol-boundary-editor-actions > span {
+.patrol-boundary-editor-actions > span,
+.patrol-boundary-editor-status {
+  margin: 0;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
@@ -150,26 +181,40 @@
 
 .patrol-boundary-point-list {
   display: grid;
-  max-height: 188px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-height: 310px;
   gap: 6px;
   margin: 0;
   padding: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
+  align-content: start;
   list-style: none;
 }
 
 .patrol-boundary-point-list li {
-  display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) 32px;
-  gap: 8px;
-  align-items: center;
-  padding: 7px 8px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--surface);
+  display: contents;
 }
 
-.patrol-boundary-point-list li > span {
+.patrol-boundary-point-list button {
+  display: grid;
+  grid-template-columns: 24px 16px;
+  grid-template-rows: 30px;
+  column-gap: 10px;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.patrol-boundary-point-list button > span {
   display: grid;
   width: 24px;
   height: 24px;
@@ -181,29 +226,12 @@
   font-weight: 800;
 }
 
-.patrol-boundary-point-list code {
-  overflow: hidden;
-  color: var(--text-muted);
-  font-family: inherit;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.patrol-boundary-point-list button {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border: 0;
-  border-radius: 8px;
-  place-items: center;
-  color: var(--text-muted);
-  background: transparent;
-  cursor: pointer;
+.patrol-boundary-point-list button > svg {
+  justify-self: center;
 }
 
 .patrol-boundary-point-list button:hover:not(:disabled) {
+  border-color: #fecaca;
   color: #b91c1c;
   background: #fee2e2;
 }
@@ -220,6 +248,11 @@
     flex-direction: column;
   }
 
+  .patrol-boundary-editor-heading-tools {
+    width: 100%;
+    margin-left: 0;
+  }
+
   .patrol-boundary-editor-actions > div {
     flex-wrap: wrap;
   }
@@ -228,5 +261,13 @@
   .patrol-boundary-map {
     min-height: 300px;
     height: 300px;
+  }
+
+  .patrol-boundary-editor-body {
+    grid-template-columns: 1fr;
+  }
+
+  .patrol-boundary-point-panel {
+    max-height: none;
   }
 }

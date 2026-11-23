@@ -22,12 +22,14 @@ PROJECT_DIR="${GILBOM_TEST_PROJECT_DIR:-/workspace}"
 release_sha=2222222222222222222222222222222222222222
 current_sha=1111111111111111111111111111111111111111
 artifact_dir="/opt/gilbom/artifacts/$release_sha"
+source_archive_name="gilbom-web-$release_sha.tar.zst"
+source_fixture="/var/tmp/gilbom-source-fixture-$release_sha"
 release_record_dir="/var/lib/gilbom/releases/$release_sha"
 fake_bin=/opt/gilbom/fixture-bin
 fake_image_save=/opt/gilbom/fixture-image-save
 
 rm -rf -- \
-  /opt/gilbom /var/lib/gilbom/releases
+  /opt/gilbom /var/lib/gilbom/releases "$source_fixture"
 install -d -o root -g root -m 0700 \
   /opt/gilbom/artifacts \
   /opt/gilbom/backups \
@@ -73,11 +75,31 @@ chmod 0600 \
 printf 'archive-fixture\n' > "$artifact_dir/images.tar.zst"
 printf '{"fixture":"cosign-bundle"}\n' \
   > "$artifact_dir/images.tar.zst.sigstore.json"
+printf 'services: {}\n# signed release %s\n' "$release_sha" \
+  > "$artifact_dir/compose.prod.yaml"
+install -d "$source_fixture/infra/scripts"
+chmod 0775 "$source_fixture/infra"
+cp -- "$artifact_dir/compose.prod.yaml" "$source_fixture/compose.prod.yaml"
+printf 'services: {}\n# monitoring source fixture\n' \
+  > "$source_fixture/compose.monitoring.yaml"
+printf '#!/bin/sh\nprintf "day10 fixture\\n"\n' \
+  > "$source_fixture/infra/scripts/install-day10-host.sh"
+printf '#!/bin/sh\nprintf "Backup bundle: /opt/gilbom/backups/fixture-bundle\\n"\n' \
+  > "$source_fixture/infra/scripts/backup-volumes.sh"
+chmod 0755 "$source_fixture/infra/scripts/"*.sh
+tar -cf "$artifact_dir/$source_archive_name" \
+  -C "$source_fixture" .
 printf '%s\n' 'fixture-cosign-public-key' \
   > /etc/gilbom/cosign-release.pub
 chmod 0444 /etc/gilbom/cosign-release.pub
 cosign_public_key_sha256="$(
   sha256sum /etc/gilbom/cosign-release.pub | awk '{print $1}'
+)"
+compose_sha256="$(
+  sha256sum "$artifact_dir/compose.prod.yaml" | awk '{print $1}'
+)"
+source_archive_sha256="$(
+  sha256sum "$artifact_dir/$source_archive_name" | awk '{print $1}'
 )"
 printf '{}\n' > "$artifact_dir/sbom/backend.sbom.json"
 printf '{}\n' > "$artifact_dir/sbom/frontend.sbom.json"
@@ -104,6 +126,9 @@ jq -n \
   --arg backend_id "$backend_id" \
   --arg frontend_id "$frontend_id" \
   --arg cosign_public_key_sha256 "$cosign_public_key_sha256" \
+  --arg compose_sha256 "$compose_sha256" \
+  --arg source_archive_name "$source_archive_name" \
+  --arg source_archive_sha256 "$source_archive_sha256" \
   '
     {
       schemaVersion: 1,
@@ -126,6 +151,14 @@ jq -n \
             publicKeySha256: $cosign_public_key_sha256,
             bundle: {path: "images.tar.zst.sigstore.json"}
           }
+        },
+        source: {
+          path: $source_archive_name,
+          sha256: $source_archive_sha256
+        },
+        compose: {
+          path: "compose.prod.yaml",
+          sha256: $compose_sha256
         }
       },
       flyway: {
@@ -152,6 +185,8 @@ jq -n \
     | LC_ALL=C sort \
     | xargs sha256sum > SHA256SUMS
 )
+printf '{"fixture":"manifest-cosign-bundle"}\n' \
+  > "$artifact_dir/SHA256SUMS.sigstore.json"
 chown -R root:root /opt/gilbom /var/lib/gilbom/releases
 # Artifact upload root is intentionally root:<upload-group>:0710. The
 # immutable per-SHA destination remains entirely root:root and read-only.
@@ -300,8 +335,11 @@ sh "$PROJECT_DIR/infra/scripts/gilbom-deploy-preflight.sh" \
 jq -e \
   --arg release_sha "$release_sha" \
   --arg current_sha "$current_sha" \
+  --arg source_archive_sha256 "$source_archive_sha256" \
   '
     .releaseSha == $release_sha
+    and .source.archive == ("gilbom-web-" + $release_sha + ".tar.zst")
+    and .source.sha256 == $source_archive_sha256
     and .production.currentSha == $current_sha
     and .production.rollbackTargetSha == $current_sha
     and .flyway.currentVersion == 35
@@ -380,6 +418,19 @@ grep -Fq "Production deploy boundary: PASS ($release_sha)" \
   || fail "successful deployment did not update current.sha"
 [ "$(cat /var/lib/gilbom/releases/previous.sha)" = "$current_sha" ] \
   || fail "successful deployment did not retain the rollback target"
+cmp -s "$artifact_dir/compose.prod.yaml" /opt/gilbom/deploy/compose.prod.yaml \
+  || fail "successful deployment did not install signed release Compose"
+[ "$(cat /opt/gilbom/deploy/.release-source.sha)" = "$release_sha" ] \
+  || fail "successful deployment did not activate the release source tree"
+[ -x /opt/gilbom/deploy/infra/scripts/install-day10-host.sh ] \
+  || fail "successful deployment did not install the Day 10 host script"
+[ "$(stat -c '%a' /opt/gilbom/deploy/infra)" = 755 ] \
+  || fail "Git archive directory mode was not normalized to 0755"
+grep -Fxq 'RUNTIME=value' /opt/gilbom/deploy/runtime.env \
+  || fail "source tree activation did not preserve runtime.env"
+grep -Fq 'services: {}' \
+  "$release_record_dir/previous-compose.prod.yaml" \
+  || fail "successful deployment did not preserve the prior Compose snapshot"
 jq -e \
   --arg release_sha "$release_sha" \
   '
@@ -399,6 +450,14 @@ jq -e \
     and .health.frontend == "PASS"
     and .health.frontendToBackend == "PASS"
     and .health.mqtt == "PASS"
+    and .source.archive == ("gilbom-web-" + $release_sha + ".tar.zst")
+    and (.source.sha256 | test("^[0-9a-f]{64}$"))
+    and .compose.path == "compose.prod.yaml"
+    and .compose.sha256 == .composeSha256
+    and (
+      .artifact.signature.manifestBundleSha256
+      | test("^[0-9a-f]{64}$")
+    )
   ' "$release_record_dir/release-manifest.json" >/dev/null \
   || fail "release manifest does not contain approval and health evidence"
 

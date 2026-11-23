@@ -8,13 +8,16 @@ import type {
   MissionCreateInput,
   MissionFilters,
   MissionListResponse,
+  MissionDefectMapResponse,
   MissionMapResponse,
   MissionUpdateInput,
   MissionStatusHistoryResponse,
   PatrolArea,
   PatrolAreaCodeAvailability,
   PatrolAreaCreateInput,
+  PatrolAreaLifecycleStatus,
   PatrolAreaListResponse,
+  PatrolAreaUpdateInput,
   PatrolRouteListResponse,
   RobotListResponse,
 } from './missionTypes.ts'
@@ -77,6 +80,14 @@ export function getMissionMap(
   )
 }
 
+export function getMissionDefects(
+  missionId: string,
+): Promise<MissionDefectMapResponse> {
+  return apiJson(
+    `${MISSION_BASE_PATH}/${encodeURIComponent(missionId)}/defects`,
+  )
+}
+
 export function createMission(input: MissionCreateInput): Promise<Mission> {
   return apiJson(MISSION_BASE_PATH, {
     method: 'POST',
@@ -123,6 +134,32 @@ export function createPatrolArea(
     method: 'POST',
     body: jsonBody(input),
   })
+}
+
+export function updatePatrolArea(
+  patrolAreaId: string,
+  input: PatrolAreaUpdateInput,
+): Promise<PatrolArea> {
+  return apiJson(
+    `/api/v1/patrol-areas/${encodeURIComponent(patrolAreaId)}`,
+    {
+      method: 'PATCH',
+      body: jsonBody(input),
+    },
+  )
+}
+
+export function changePatrolAreaStatus(
+  patrolAreaId: string,
+  lifecycleStatus: PatrolAreaLifecycleStatus,
+): Promise<PatrolArea> {
+  return apiJson(
+    `/api/v1/patrol-areas/${encodeURIComponent(patrolAreaId)}/status`,
+    {
+      method: 'PATCH',
+      body: jsonBody({ lifecycleStatus }),
+    },
+  )
 }
 
 export function getPatrolRoutes(

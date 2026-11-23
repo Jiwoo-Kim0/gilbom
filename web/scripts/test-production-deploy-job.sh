@@ -37,8 +37,17 @@ jq -n \
           status: "PASS",
           cosignVersion: "v3.1.2",
           publicKeySha256: $digest,
-          bundleSha256: $digest
+          bundleSha256: $digest,
+          manifestBundleSha256: $digest
         }
+      },
+      source: {
+        archive: ("gilbom-web-" + $release_sha + ".tar.zst"),
+        sha256: $digest
+      },
+      compose: {
+        path: "compose.prod.yaml",
+        sha256: $digest
       },
       images: {
         backend: {
@@ -86,7 +95,10 @@ for label in \
   'Archive SHA-256:' \
   'Cosign Signature:' \
   'Cosign Public Key SHA-256:' \
-  'Cosign Bundle SHA-256:' \
+  'Cosign Image Bundle SHA-256:' \
+  'Cosign Manifest Bundle SHA-256:' \
+  'Source Archive SHA-256:' \
+  'Compose SHA-256:' \
   'Critical:' \
   'High:' \
   '적용 예정 Flyway Migration:' \
@@ -134,8 +146,19 @@ jq -n \
           status: "PASS",
           cosignVersion: "v3.1.2",
           publicKeySha256: $digest,
-          bundleSha256: $digest
+          bundleSha256: $digest,
+          manifestBundleSha256: $digest
         }
+      },
+      source: {
+        archive: ("gilbom-web-" + $release_sha + ".tar.zst"),
+        sha256: $digest,
+        activeTreeMarker: "/opt/gilbom/deploy/.release-source.sha"
+      },
+      composeSha256: $digest,
+      compose: {
+        path: "compose.prod.yaml",
+        sha256: $digest
       },
       images: {
         backend: {id: $backend_id},

@@ -16,6 +16,9 @@ services:
     restart: "no"
     environment:
       INITIAL_ADMIN_BOOTSTRAP_ENABLED: "true"
+      # 운영 gate는 true로 유지하되 fallback smoke와 명시적 GMS canary가
+      # 각 시나리오에 맞는 값을 선택할 수 있게 한다.
+      GILBOM_LLM_ENABLED: ${GILBOM_LLM_ENABLED:-false}
     labels:
       com.gilbom.validation-scope: container-report-smoke
 

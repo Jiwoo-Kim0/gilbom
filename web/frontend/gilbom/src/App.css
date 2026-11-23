@@ -23,20 +23,39 @@
 }
 
 .app-shell {
+  /*
+   * 고정된 상단 바 높이. 스크롤로 가려지면 안 되는 요소(`scroll-margin-top`)가 이 값을
+   * 참조하므로 한 곳에서만 정한다.
+   */
+  --topbar-height: 96px;
   display: grid;
   grid-template-columns: 256px minmax(0, 1fr);
   min-height: 100vh;
+  transition: grid-template-columns 180ms ease;
+}
+
+.app-shell.is-sidebar-collapsed {
+  grid-template-columns: 76px minmax(0, 1fr);
+}
+
+.nb-sidebar-layer {
+  position: sticky;
+  z-index: 40;
+  top: 0;
+  height: 100vh;
+  isolation: isolate;
 }
 
 .nb-sidebar {
-  position: sticky;
-  top: 0;
+  position: relative;
+  z-index: 2;
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
   padding: 24px 18px 20px;
   border-right: 1px solid var(--line);
   background: var(--surface);
+  transition: padding 180ms ease;
 }
 
 .nb-brand {
@@ -125,72 +144,160 @@
   background: var(--surface-muted);
 }
 
-.nb-footer {
-  margin-top: auto;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-}
-
-.nb-profile {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.nb-avatar {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  object-fit: cover;
-}
-
-.nb-avatar-fallback {
+.nb-sidebar-toggle {
+  position: absolute;
+  z-index: 1;
+  top: 44%;
+  right: -22px;
   display: grid;
-  color: #fff;
-  background: var(--nb-ink);
+  width: 32px;
+  height: 52px;
+  padding: 0 0 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 0 9px 9px 0;
   place-items: center;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.nb-profile-text {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.nb-profile-text strong {
-  overflow: hidden;
-  color: var(--text);
-  font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.nb-profile-text small {
   color: var(--text-muted);
-  font-size: 12px;
+  background: var(--surface);
+  box-shadow: 0 5px 16px rgba(17, 37, 28, 0.12);
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.nb-sidebar-toggle:hover {
+  color: var(--text);
+  background: var(--nb-gold-soft);
+  box-shadow: 0 7px 20px rgba(17, 37, 28, 0.16);
+}
+
+.nb-sidebar-toggle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.nb-sidebar.is-collapsed {
+  padding-inline: 12px;
+}
+
+.nb-sidebar.is-collapsed .nb-brand {
+  justify-content: center;
+}
+
+.nb-sidebar.is-collapsed .nb-brand-text,
+.nb-sidebar.is-collapsed .nb-nav-label {
+  display: none;
+}
+
+.nb-sidebar.is-collapsed .nb-nav-item {
+  gap: 0;
+  padding-inline: 11px;
+  justify-content: center;
 }
 
 .app-frame {
+  --app-content-gutter: 40px;
   min-width: 0;
 }
 
+/*
+ * 스크롤해도 붙어 있는다. 어느 페이지를 보고 있는지와 로그인한 사람이 늘 보여야 하고,
+ * 긴 목록에서 위로 되돌아가지 않고도 계정 메뉴로 갈 수 있어야 한다.
+ *
+ * <p>배경은 **불투명**이어야 한다. 반투명(90%) + `backdrop-filter`로 두었더니 뒤로
+ * 지나가는 지도 내용(`© NAVER Corp.` 저작권 표시 등)이 그대로 비쳐 글자와 겹쳐 읽혔다.
+ * 10%만 통과해도 대비가 큰 글자는 보이고, blur는 그걸 흐리게 만들 뿐 감추지 못한다.
+ */
 .topbar {
+  position: sticky;
+  z-index: 50;
+  top: 0;
   display: flex;
-  min-height: 96px;
-  padding: 20px clamp(24px, 4vw, 56px);
+  min-height: var(--topbar-height);
+  padding: 20px var(--app-content-gutter);
   border-bottom: 1px solid var(--line);
   align-items: center;
   justify-content: space-between;
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(16px);
+  background: var(--surface);
 }
 
 .topbar h1 {
   margin: 2px 0 0;
   font-size: clamp(22px, 2.2vw, 30px);
   letter-spacing: -0.04em;
+}
+
+.topbar-heading {
+  min-width: 0;
+}
+
+.topbar-title-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.topbar-info {
+  display: inline-grid;
+  position: relative;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  color: var(--text-muted);
+  cursor: help;
+}
+
+.topbar-info:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.topbar-tooltip {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 10px);
+  left: -80px;
+  width: max-content;
+  max-width: min(430px, calc(100vw - 48px));
+  padding: 9px 12px;
+  border-radius: 9px;
+  color: #fff;
+  background: #252a28;
+  box-shadow: 0 8px 24px rgba(17, 37, 28, 0.2);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: normal;
+  line-height: 1.5;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    visibility 140ms ease;
+  visibility: hidden;
+  white-space: normal;
+}
+
+.topbar-tooltip::before {
+  position: absolute;
+  bottom: 100%;
+  left: 86px;
+  width: 8px;
+  height: 8px;
+  background: #252a28;
+  content: '';
+  transform: translate(-50%, 50%) rotate(45deg);
+}
+
+.topbar-info:hover .topbar-tooltip,
+.topbar-info:focus-visible .topbar-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
 }
 
 .eyebrow {
@@ -223,9 +330,9 @@
 }
 
 .main-content {
-  width: min(1180px, 100%);
-  margin: 0 auto;
-  padding: clamp(28px, 4vw, 56px);
+  width: 100%;
+  margin: 0;
+  padding: 40px var(--app-content-gutter) 56px;
 }
 
 .page-stack {
@@ -390,97 +497,282 @@
     repeating-linear-gradient(45deg, #dce9e0 0 1px, transparent 1px 22px);
 }
 
-.defect-layout {
-  display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
-  gap: 18px;
-  align-items: start;
+/*
+ * 검색 + 조건 한 줄. 조건이 지도 오른쪽 260px 사이드바이던 시절에는 지도가 그만큼
+ * 상시로 좁았다. 위로 올리면서 지도가 가로 폭을 전부 쓴다.
+ *
+ * <p>`wrap`이라 좁은 화면에서는 조건 줄이 검색창 아래로 자연히 내려간다. 미디어 쿼리로
+ * 따로 접지 않는다.
+ */
+.defect-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
 }
 
-.defect-filter {
-  display: grid;
-  gap: 22px;
-  padding: 20px;
+/* 결함 코드 한 줄(`INC-20260805-000001`)이 들어갈 만큼만. 남는 폭은 조건이 쓴다. */
+.defect-search-bar {
+  display: flex;
+  gap: 10px;
+  width: 262px;
+  max-width: 100%;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  align-items: center;
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+.defect-search-bar input {
+  width: 100%;
+  height: 44px;
+  padding: 0;
+  border: none;
+  color: var(--text);
+  background: none;
+  font-size: 15px;
+}
+
+.defect-search-bar input:focus {
+  outline: none;
+}
+
+/* 테두리는 감싼 알약이 이미 갖고 있어 입력에 또 그리면 이중선이 된다. */
+.defect-search-bar:focus-within {
+  border-color: var(--focus);
+}
+
+/* 검색창은 왼쪽, 이 둘은 오른쪽 끝. 사이는 비워둔다. */
+.defect-filter-bar {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.defect-filter-open-button {
+  display: flex;
+  gap: 7px;
+  height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  align-items: center;
+  color: var(--text);
+  background: var(--surface);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.defect-filter-open-button:hover:not(:disabled),
+.defect-filter-open-button.is-open {
+  border-color: var(--nb-gold);
+}
+
+/* 조건이 걸려 있다는 표시. 조건이 전부 모달 안에 있어 이것 말고는 단서가 없다. */
+.defect-filter-open-button.is-active {
+  border-color: var(--nb-gold);
+  color: var(--brand-strong);
+  background: var(--brand-soft);
+}
+
+.defect-filter-open-button:disabled {
+  color: var(--text-muted);
+  background: var(--surface-muted);
+}
+
+.defect-filter-open-count {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--nb-ink);
+  background: var(--nb-gold-soft);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .defect-filter-group {
   display: grid;
   gap: 10px;
-  margin: 0;
-  padding: 0;
-  border: none;
 }
 
-.defect-filter-group legend {
-  padding: 0;
-  color: var(--text-muted);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.defect-filter-date-options {
-  display: grid;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.defect-filter-date-option {
+/*
+ * 라벨 줄. 드롭다운의 `.defect-filter-dropdown-label`과 같은 모양이어야 조건 네 칸의
+ * 간격이 같아 보인다.
+ *
+ * `<fieldset>`/`<legend>`로 짰다가 이 규칙으로 옮겼다. legend는 grid 항목이 아니라
+ * 부모의 `gap`이 걸리지 않아, 시작 날짜만 라벨과 입력이 붙어 보였다.
+ */
+.defect-filter-group-heading {
   display: flex;
-  height: 42px;
-  padding: 0 14px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  align-items: center;
+  gap: 8px;
+  align-items: baseline;
   justify-content: space-between;
-  color: var(--text);
-  background: #fff;
-  font-weight: 600;
-}
-
-.defect-filter-date-option.is-selected {
-  border-color: var(--nb-gold);
-  color: var(--nb-ink);
-  background: var(--nb-gold-soft);
-}
-
-.defect-filter-date-custom {
-  display: grid;
-  gap: 7px;
-  margin-top: 12px;
   color: var(--text-muted);
   font-size: 13px;
   font-weight: 700;
 }
 
-.defect-filter-date-custom input {
+.defect-filter-group small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* range 입력은 UA가 위아래 2px 여백을 붙인다. 그만큼 간격이 벌어져 조건 네 칸이
+   1~2px씩 어긋나 보인다. */
+.defect-filter-group input[type="range"] {
+  margin: 0;
+}
+
+.defect-filter-date-input {
+  width: 100%;
   height: 42px;
   padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
   color: var(--text);
-  background: #fff;
+  background: var(--surface);
+  font-size: 14px;
 }
 
-.defect-filter-checkbox {
+/* 날짜를 지우는 길이 date 입력만으로는 없다. 전체 기간으로 되돌리는 통로다. */
+.defect-filter-clear-date {
+  padding: 0;
+  border: none;
+  color: var(--brand-strong);
+  background: none;
+  font-size: 12px;
+  font-weight: 750;
+  text-decoration: underline;
+}
+
+/*
+ * 선택지를 가로로 흘려 누르는 칸을 넓힌다. 체크박스·라디오의 네모/동그라미는 숨기되
+ * 포커스는 살려둔다(`opacity: 0`, 크기 0) — 고른 것은 칸 색으로 보인다.
+ *
+ * <p>필터의 다중 선택(`.defect-filter-*`)과 결함 수정의 단일 선택(`.defect-choice*`)이
+ * 같은 모양이어야 해서 규칙을 한 곳에 둔다. 이름을 나눈 것은 쓰이는 자리를 코드에서
+ * 읽히게 하려는 것뿐이다.
+ */
+.defect-filter-options,
+.defect-choice-group {
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.defect-filter-checkbox,
+.defect-choice {
+  display: flex;
+  gap: 7px;
+  padding: 9px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
   align-items: center;
   color: var(--text);
-  font-size: 14px;
+  background: var(--surface);
+  font-size: 13px;
   font-weight: 600;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease,
+    background-color 120ms ease;
 }
 
-.defect-filter-checkbox + .defect-filter-checkbox {
-  margin-top: 10px;
-}
-
-.defect-filter-checkbox input {
-  width: 16px;
-  height: 16px;
+.defect-filter-checkbox input,
+.defect-choice input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
   accent-color: var(--brand);
 }
 
-.defect-status-dot {
+/*
+ * 고른 칸. 테두리를 두껍게 하는 대신 `inset` 그림자로 한 겹 더 그린다 — `border-width`를
+ * 키우면 칸 크기가 달라져 알약 줄이 덜컥인다. 색이 옅은 심각도(낮음)에서도 고른 것이
+ * 보이게 하는 것이 목적이다.
+ */
+.defect-filter-checkbox:has(input:checked),
+.defect-choice:has(input:checked) {
+  border-color: var(--nb-gold);
+  color: var(--brand-strong);
+  background: var(--brand-soft);
+  box-shadow: inset 0 0 0 1px currentcolor;
+}
+
+.defect-filter-checkbox:hover:not(:has(input:disabled)),
+.defect-choice:hover:not(:has(input:disabled)) {
+  border-color: var(--nb-gold);
+}
+
+.defect-filter-checkbox:focus-within,
+.defect-choice:focus-within {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.defect-choice:has(input:disabled) {
+  color: var(--text-muted);
+  background: var(--surface-muted);
+}
+
+/*
+ * 고른 심각도는 목록 표의 배지(`.defect-risk-*`)와 같은 색을 입는다. 같은 값이 화면마다
+ * 다른 색이면 눈이 짝을 못 짓는다.
+ */
+.defect-choice-risk-low:has(input:checked) {
+  border-color: #d1d5db;
+  color: #4b5563;
+  background: #f3f4f6;
+}
+
+.defect-choice-risk-medium:has(input:checked) {
+  border-color: #f4c56a;
+  color: #87570d;
+  background: #fff6df;
+}
+
+.defect-choice-risk-high:has(input:checked) {
+  border-color: #f0b483;
+  color: #9a4f16;
+  background: #fff1e6;
+}
+
+.defect-choice-risk-critical:has(input:checked) {
+  border-color: #efb0b0;
+  color: #a23636;
+  background: #fff0f0;
+}
+
+/* 선택지 사이에 끼면 그것도 고르는 칸으로 보인다. 줄 끝으로 밀어 성격을 갈라둔다. */
+.defect-filter-options-clear {
+  margin-left: auto;
+  padding: 9px 4px;
+  border: none;
+  color: var(--text-muted);
+  background: none;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+/*
+ * 결함 유형 점. 지도 마커와 같은 변수를 써서 "지도의 빨간 핀 = 파손"을 필터에서도
+ * 읽을 수 있게 한다.
+ *
+ * <p>예전에는 이 자리에 처리 상태 점(`.defect-status-dot`)이 있었다. 마커 색이 처리
+ * 상태 3단계였기 때문이다. 마커가 유형 색으로 바뀌면서 상태 점은 아무것과도 짝이
+ * 맞지 않게 되어 걷어냈다. 지도 범례용이던 `.defect-legend-item-*`도 범례가 사라져
+ * 함께 지웠다.
+ */
+.defect-type-dot {
   display: inline-block;
   width: 10px;
   height: 10px;
@@ -488,58 +780,106 @@
   background: var(--text-muted);
 }
 
-.defect-status-dot-progress,
-.defect-legend-item-progress .defect-status-dot {
-  background: var(--nb-gold);
+.defect-type-dot-damaged {
+  background: var(--defect-damaged);
 }
 
-.defect-status-dot-received,
-.defect-legend-item-received .defect-status-dot {
-  background: var(--text-muted);
+.defect-type-dot-missing {
+  background: var(--defect-missing);
 }
 
-.defect-status-dot-done,
-.defect-legend-item-done .defect-status-dot {
-  background: var(--brand-strong);
+.defect-type-dot-installation-invalid {
+  background: var(--defect-installation-invalid);
 }
 
+.defect-type-dot-unknown-anomaly {
+  background: var(--defect-unknown-anomaly);
+}
+
+/* 툴바 맨 오른쪽. 되돌리는 버튼이라 "필터"보다 눈에 덜 띄어야 한다 — 테두리 없이 글자만. */
 .defect-filter-reset {
-  width: 100%;
+  display: inline-flex;
+  gap: 6px;
+  height: 40px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 999px;
+  align-items: center;
+  color: var(--text-muted);
+  background: none;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.defect-filter-reset:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-muted);
+}
+
+.defect-filter-reset:disabled {
+  opacity: 0.5;
 }
 
 .defect-map-card {
   display: grid;
+  /* 범례와 지도 사이 간격. 범례가 없던 시기에 지워졌던 값이다. */
   gap: 16px;
   padding: 20px;
+  /*
+   * 목록에서 결함을 고르면 이 카드로 스크롤한다. 상단 바가 고정이라 그 높이만큼 더
+   * 띄워야 카드가 바 밑에 숨지 않는다.
+   */
+  scroll-margin-top: calc(var(--topbar-height) + 16px);
 }
 
+/*
+ * 마커 색 범례. 오늘 마커 기준이 처리 상태에서 결함 유형으로 바뀌면서 예전 상태 범례가
+ * 사라졌고, 색을 설명하는 것이 화면에 하나도 없었다. 점 색은 필터 드롭다운과 같은
+ * `--defect-*` 변수를 쓴다.
+ */
 .defect-map-legend {
   display: flex;
-  gap: 10px;
+  /* 테두리가 없으니 항목 사이는 이 간격만으로 갈린다. 점·라벨 간격(8px)보다 넉넉해야
+     "점 라벨"이 한 덩어리로 읽힌다. */
+  gap: 20px;
   flex-wrap: wrap;
 }
 
+/*
+ * 테두리 없는 글자 + 점이다. 알약 모양으로 두면 눌러서 거를 수 있는 필터 칩처럼 보여
+ * 범례로 읽히지 않는다(실제로는 색 설명일 뿐이다).
+ */
 .defect-legend-item {
   display: flex;
   gap: 8px;
-  height: 38px;
-  padding: 0 14px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
   align-items: center;
-  color: var(--text);
+  color: var(--text-muted);
   font-size: 13px;
   font-weight: 700;
+  white-space: nowrap;
+}
+
+/* 여러 유형이 묶인 클러스터 색과 같아야 한다. */
+.defect-legend-item-mixed .defect-type-dot {
+  background: var(--defect-mixed);
 }
 
 .defect-map-placeholder {
-  min-height: 420px;
+  min-height: clamp(520px, 62vh, 700px);
   border-radius: 14px;
 }
 
+/*
+ * `isolation: isolate`로 stacking context를 만든다. Naver SDK가 컨트롤·저작권 표시에
+ * 큰 z-index(1000대)를 쓰는데, 이걸 두지 않으면 그 값이 상단 바(z-index 50)와 같은 층에서
+ * 경쟁해 **지도 요소가 고정된 상단 바 위에 그려진다.** `overflow: hidden`은 상자 밖으로
+ * 나가는 것만 자르고, 스크롤로 상자가 상단 바와 겹치는 구간은 막아주지 못한다.
+ */
 .defect-map-canvas-wrap {
   position: relative;
-  min-height: 420px;
+  isolation: isolate;
+  height: clamp(520px, 62vh, 700px);
   border-radius: 14px;
   overflow: hidden;
 }
@@ -547,7 +887,6 @@
 .defect-map-canvas {
   width: 100%;
   height: 100%;
-  min-height: 420px;
 }
 
 /*
@@ -572,16 +911,20 @@
   transform: rotate(-45deg);
 }
 
-.defect-marker-received {
-  background: #6f6a5e;
+.defect-marker-damaged {
+  background: var(--defect-damaged);
 }
 
-.defect-marker-progress {
-  background: #b8863b;
+.defect-marker-missing {
+  background: var(--defect-missing);
 }
 
-.defect-marker-done {
-  background: #7a5c0c;
+.defect-marker-installation-invalid {
+  background: var(--defect-installation-invalid);
+}
+
+.defect-marker-unknown-anomaly {
+  background: var(--defect-unknown-anomaly);
 }
 
 .defect-marker.is-selected {
@@ -591,11 +934,29 @@
 }
 
 /* 마커를 클릭하면 지도 위에 뜨는 결함 카드 */
+/*
+ * 지도 위 상세 카드.
+ *
+ * <p>**지도 안에서 가장 위 층이다.** z-index를 주지 않았을 때는 묶음 목록(6)이 이겨서,
+ * 목록에서 결함을 고르면 방금 연 카드가 그 목록 **뒤로** 깔렸다. 카드는 고른 결과이자
+ * 지금 보려는 것이므로 항상 앞에 있어야 한다.
+ *
+ * <p>지도 안 층 순서: 축척 5 → 묶음 목록 6 → 이 카드 8.
+ * (`.defect-map-canvas-wrap`이 `isolation: isolate`라 바깥 층과 섞이지 않는다.)
+ */
 .defect-card {
   position: absolute;
-  top: 16px;
-  right: 16px;
+  /*
+   * 지도 **오른쪽 위 모서리에 붙인다.** 16px씩 띄워두면 지도의 둥근 모서리와 카드의 둥근
+   * 모서리가 나란히 보여 상자가 두 겹으로 겹친 것처럼 읽혔다. 붙이면 반지름이 둘 다
+   * 14px이라 두 곡선이 정확히 포개져 한 겹이 된다.
+   *
+   * <p>아래는 그대로 띄운다 — 카드가 지도 아래 끝까지 닿으면 축척 바를 가린다.
+   */
+  top: 0;
+  right: 0;
   bottom: 16px;
+  z-index: 8;
   display: flex;
   width: min(340px, calc(100% - 32px));
   flex-direction: column;
@@ -608,11 +969,174 @@
   overflow-y: auto;
 }
 
+/*
+ * 둥근 상자 안의 스크롤바.
+ *
+ * <p>트랙이 위아래 끝까지 닿으면 **네모난 스크롤바가 모서리의 둥근 부분을 덮어** 상자가
+ * 각져 보인다. 트랙을 모서리 반지름만큼 띄워 둥근 자리를 비운다. 상자마다 반지름이
+ * 달라서 값을 변수로 받는다.
+ *
+ * <p>`::-webkit-scrollbar-*`만 쓴다. 같은 요소에 `scrollbar-width`·`scrollbar-color`를
+ * 함께 주면 Chrome이 표준 쪽을 택해 이 규칙을 통째로 무시하고, 표준 속성에는 트랙을
+ * 띄우는 방법이 없다. Firefox는 기본 스크롤바를 그대로 쓴다(거기서는 모서리가 조금 덮인다).
+ */
+.defect-card {
+  --defect-scrollbar-inset: 14px;
+}
+
+.defect-modal {
+  --defect-scrollbar-inset: 12px;
+}
+
+.defect-edit-modal,
+.defect-filter-modal {
+  --defect-scrollbar-inset: 20px;
+}
+
+.defect-card::-webkit-scrollbar,
+.defect-modal::-webkit-scrollbar,
+.defect-filter-modal::-webkit-scrollbar {
+  width: 12px;
+}
+
+.defect-card::-webkit-scrollbar-track,
+.defect-modal::-webkit-scrollbar-track,
+.defect-filter-modal::-webkit-scrollbar-track {
+  margin: var(--defect-scrollbar-inset) 0;
+  background: transparent;
+}
+
+/*
+ * 손잡이는 투명 테두리 + `background-clip: content-box`로 얇게 만든다. `width`를 줄이면
+ * 손잡이만 얇아지는 것이 아니라 누를 수 있는 자리까지 좁아진다.
+ */
+.defect-card::-webkit-scrollbar-thumb,
+.defect-modal::-webkit-scrollbar-thumb,
+.defect-filter-modal::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-color: var(--line);
+  background-clip: content-box;
+}
+
+.defect-card::-webkit-scrollbar-thumb:hover,
+.defect-modal::-webkit-scrollbar-thumb:hover,
+.defect-filter-modal::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-muted);
+}
+
+/*
+ * 끌어 옮긴 카드. 위치를 **클래스로** 정하는 이유는 CSP다 — `style-src 'self'`가 inline
+ * style을 막아 계산된 px을 넣을 수 없다(`defectCardDrag.ts` 주석 참고).
+ *
+ * <p>10%p 자리와 1%p 자리를 각각 변수에 담아 `calc()`로 합친다. 축마다 11 + 10개면
+ * 0~100%를 1%p 간격으로 덮는다. 곱하지 않으므로 규칙이 42개로 끝난다.
+ */
+.defect-card {
+  --defect-card-x: 0%;
+  --defect-card-xf: 0%;
+  --defect-card-y: 0%;
+  --defect-card-yf: 0%;
+}
+
+.defect-card.is-dragged {
+  top: calc(var(--defect-card-y) + var(--defect-card-yf));
+  right: auto;
+  bottom: auto;
+  left: calc(var(--defect-card-x) + var(--defect-card-xf));
+  /*
+   * 아래로 끌면 남은 공간만큼 줄어든다. `bottom`을 놓아버린 자리에 이것을 두지 않으면
+   * 카드가 지도 밖으로 자라 `overflow: hidden`에 잘린다(내용이 사라진다).
+   */
+  max-height: calc(
+    100% - var(--defect-card-y) - var(--defect-card-yf) - 16px
+  );
+}
+
+.dc-x-0 { --defect-card-x: 0%; }
+.dc-x-1 { --defect-card-x: 10%; }
+.dc-x-2 { --defect-card-x: 20%; }
+.dc-x-3 { --defect-card-x: 30%; }
+.dc-x-4 { --defect-card-x: 40%; }
+.dc-x-5 { --defect-card-x: 50%; }
+.dc-x-6 { --defect-card-x: 60%; }
+.dc-x-7 { --defect-card-x: 70%; }
+.dc-x-8 { --defect-card-x: 80%; }
+.dc-x-9 { --defect-card-x: 90%; }
+.dc-x-10 { --defect-card-x: 100%; }
+
+.dc-xf-0 { --defect-card-xf: 0%; }
+.dc-xf-1 { --defect-card-xf: 1%; }
+.dc-xf-2 { --defect-card-xf: 2%; }
+.dc-xf-3 { --defect-card-xf: 3%; }
+.dc-xf-4 { --defect-card-xf: 4%; }
+.dc-xf-5 { --defect-card-xf: 5%; }
+.dc-xf-6 { --defect-card-xf: 6%; }
+.dc-xf-7 { --defect-card-xf: 7%; }
+.dc-xf-8 { --defect-card-xf: 8%; }
+.dc-xf-9 { --defect-card-xf: 9%; }
+
+.dc-y-0 { --defect-card-y: 0%; }
+.dc-y-1 { --defect-card-y: 10%; }
+.dc-y-2 { --defect-card-y: 20%; }
+.dc-y-3 { --defect-card-y: 30%; }
+.dc-y-4 { --defect-card-y: 40%; }
+.dc-y-5 { --defect-card-y: 50%; }
+.dc-y-6 { --defect-card-y: 60%; }
+.dc-y-7 { --defect-card-y: 70%; }
+.dc-y-8 { --defect-card-y: 80%; }
+.dc-y-9 { --defect-card-y: 90%; }
+.dc-y-10 { --defect-card-y: 100%; }
+
+.dc-yf-0 { --defect-card-yf: 0%; }
+.dc-yf-1 { --defect-card-yf: 1%; }
+.dc-yf-2 { --defect-card-yf: 2%; }
+.dc-yf-3 { --defect-card-yf: 3%; }
+.dc-yf-4 { --defect-card-yf: 4%; }
+.dc-yf-5 { --defect-card-yf: 5%; }
+.dc-yf-6 { --defect-card-yf: 6%; }
+.dc-yf-7 { --defect-card-yf: 7%; }
+.dc-yf-8 { --defect-card-yf: 8%; }
+.dc-yf-9 { --defect-card-yf: 9%; }
+
 .defect-card-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
+}
+
+/*
+ * 카드를 끄는 손잡이 줄. `touch-action: none`이 없으면 손가락 끌기가 브라우저 스크롤로
+ * 먹혀 pointermove가 끊긴다.
+ */
+.defect-card-header-draggable {
+  cursor: grab;
+  touch-action: none;
+}
+
+.defect-card-header-draggable:active {
+  cursor: grabbing;
+}
+
+/* 옮길 수 있다는 표시 겸 키보드 통로. 방향키로 2%p씩 옮긴다. */
+.defect-card-grip {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  place-items: center;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: grab;
+}
+
+.defect-card-grip:hover {
+  color: var(--text);
+  background: var(--surface-muted);
 }
 
 .defect-card-header h3 {
@@ -665,6 +1189,244 @@
   height: auto;
 }
 
+/* 사진을 눌러 크게 볼 수 있다는 것이 보이게, 버튼 티는 내지 않는다. */
+.defect-card-photo-button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+}
+
+.defect-card-photo-button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/*
+ * 증거 사진 확대 창.
+ *
+ * 배율은 class로만 준다(CSP `style-src 'self'`). 이동은 확대된 상자를 담은
+ * `.defect-photo-scroll`의 스크롤로 한다.
+ */
+.defect-photo-backdrop {
+  position: fixed;
+  z-index: 200;
+  inset: 0;
+  display: grid;
+  /* 여백을 줄인 만큼 사진이 커진다. */
+  padding: clamp(8px, 1.5vw, 18px);
+  /*
+   * 창을 화면 높이에 맞춰 늘린다(가운데 정렬로 두면 안 된다). 높이가 내용에 따라
+   * 늘어나면 사진 상자가 1400px까지 자라 화면 밖으로 나가고, 상자 안에서 스크롤되지
+   * 않아 확대한 사진을 끌어서 볼 수 없다.
+   */
+  justify-items: center;
+  /*
+   * 행 높이를 못박는다. grid 기본값 `auto`에서는 자식의 `height: 100%`가 내용 기준으로
+   * 되돌아 계산돼(순환) 창이 그대로 늘어난다.
+   */
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  background: rgb(15 18 16 / 72%);
+}
+
+.defect-photo-panel {
+  display: grid;
+  /* 가운데 줄만 남는 높이를 갖고, 그 줄 안에서 스크롤한다. */
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  width: min(1500px, 100%);
+  height: 100%;
+  min-height: 0;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.defect-photo-header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.defect-photo-code {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.defect-photo-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.defect-photo-control {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  place-items: center;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.defect-photo-control:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.defect-photo-zoom-label {
+  min-width: 48px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.defect-photo-reset {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.defect-photo-scroll {
+  overflow: auto;
+  border-radius: 12px;
+  /*
+   * 사진 비율과 상자 비율이 달라 남는 자리(letterbox)가 생긴다. 밝은 배경이면 "카드가
+   * 비어 있다"로 읽혀 사진이 작아 보이므로, 사진 뷰어답게 어둡게 깐다.
+   */
+  background: rgb(23 26 24);
+  /* 확대 전에는 끌 것이 없다. 커서로 그것을 알린다. */
+  cursor: default;
+  overscroll-behavior: contain;
+}
+
+.defect-photo-scroll.is-dragging {
+  cursor: grabbing;
+}
+
+.defect-photo-frame {
+  position: relative;
+  /* 끌어서 이동할 때 사진 대신 글자·이미지가 선택되지 않게 한다. */
+  user-select: none;
+}
+
+/*
+ * 사진은 상자 안에 비율을 지키며 담는다(`contain`). 상자를 꽉 채우게 두면 기준 배율에서
+ * 화면을 최대한 쓸 수 있고, 배율 계산에 사진 크기를 몰라도 된다.
+ *
+ * <p>bbox 오버레이도 같은 비율로 여백을 둬야 겹친다. `DefectBoundingBox`가 `aspect`를
+ * 받으면 `meet`으로 맞춘다.
+ */
+.defect-photo-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/*
+ * 배율 단계. `defectPhotoZoom.ts`의 `PHOTO_ZOOM_STEPS`와 짝이며, 한쪽만 늘리면
+ * 그 단계는 기준 배율로 보인다(단위 시험이 이 짝을 확인한다).
+ *
+ * <p>기준 배율(100)은 상자와 같은 크기 = 사진 전체가 보이는 가장 큰 크기다.
+ */
+.defect-photo-zoom-100 {
+  width: 100%;
+  height: 100%;
+}
+
+.defect-photo-zoom-120 {
+  width: 120%;
+  height: 120%;
+}
+
+.defect-photo-zoom-140 {
+  width: 140%;
+  height: 140%;
+}
+
+.defect-photo-zoom-160 {
+  width: 160%;
+  height: 160%;
+}
+
+.defect-photo-zoom-180 {
+  width: 180%;
+  height: 180%;
+}
+
+.defect-photo-zoom-200 {
+  width: 200%;
+  height: 200%;
+}
+
+.defect-photo-zoom-240 {
+  width: 240%;
+  height: 240%;
+}
+
+.defect-photo-zoom-280 {
+  width: 280%;
+  height: 280%;
+}
+
+.defect-photo-zoom-320 {
+  width: 320%;
+  height: 320%;
+}
+
+.defect-photo-zoom-360 {
+  width: 360%;
+  height: 360%;
+}
+
+.defect-photo-zoom-400 {
+  width: 400%;
+  height: 400%;
+}
+
+/* 확대된 상태에서만 끌어서 이동할 수 있다. */
+.defect-photo-scroll:has(.defect-photo-frame:not(.defect-photo-zoom-100)) {
+  cursor: grab;
+}
+
+.defect-photo-title {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.defect-photo-hint {
+  display: flex;
+  gap: 4px;
+  margin: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.defect-photo-hint kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface-muted);
+  font-size: 11px;
+}
+
 .defect-bbox {
   position: absolute;
   inset: 0;
@@ -683,26 +1445,6 @@
   margin: -4px 0 0;
   color: var(--text-muted, #6f6a5e);
   font-size: 0.75rem;
-}
-
-.defect-stream-status {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 10px;
-  border-radius: 999px;
-  margin: 0;
-  background: var(--surface-muted, #f2f1ec);
-  color: var(--text-muted, #6f6a5e);
-  font-size: 0.78rem;
-  gap: 6px;
-}
-
-.defect-stream-connected {
-  color: #2f6b45;
-}
-
-.defect-stream-reconnecting {
-  color: #a3341f;
 }
 
 .defect-toast {
@@ -835,6 +1577,24 @@
   font-size: 0.82rem;
 }
 
+/*
+ * 갱신 중 표시. 지도를 덮지 않는다 — 실시간 알림이 올 때마다 전면이 덮이면 깜빡임으로
+ * 읽힌다. 자리는 축척 바(왼쪽 아래)와 겹치지 않게 왼쪽 위로 잡았다.
+ */
+.defect-map-refreshing {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  margin: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
 .defect-map-loading {
   position: absolute;
   inset: 0;
@@ -861,22 +1621,140 @@
   font-size: 13px;
 }
 
-.defect-sort-button {
+/*
+ * 값 하나를 고르는 목록(`DefectSelectMenu`). 네이티브 `<select>`를 직접 그린 것으로
+ * 바꿨다 — 목록 정렬과 상세 카드의 처리 상태·처리 결과가 함께 쓴다.
+ *
+ * <p>`is-pill`은 카드 머리줄에 놓는 좁은 알약, `is-block`은 폼 칸처럼 가로를 다 쓰는
+ * 모양이다. 목록 카드는 필터 패널과 같은 결로 둔다.
+ */
+.defect-select {
+  position: relative;
+}
+
+.defect-select-trigger {
   display: inline-flex;
   gap: 6px;
   height: 36px;
   padding: 0 12px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 999px;
   align-items: center;
-  color: var(--text-muted);
-  background: #fff;
+  color: var(--text);
+  background: var(--surface);
+  font-size: 13px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
-.defect-sort-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
+/* 폼 칸 모양. 값이 왼쪽, 화살표가 오른쪽 끝에 붙는다. */
+.defect-select-trigger.is-block {
+  display: flex;
+  width: 100%;
+  height: 40px;
+  border-radius: 10px;
+  justify-content: space-between;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.defect-select-trigger.is-block .defect-select-value {
+  flex: 1;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+}
+
+/* 아직 고르지 않았다는 것이 값처럼 읽히면 안 된다. */
+.defect-select-trigger.is-placeholder .defect-select-value {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.defect-select-trigger:hover:not(:disabled),
+.defect-select-trigger.is-open {
+  border-color: var(--nb-gold);
+}
+
+.defect-select-trigger.is-open {
+  background: var(--brand-soft);
+}
+
+.defect-select-trigger:disabled {
+  color: var(--text-muted);
+  background: var(--surface-muted);
+}
+
+.defect-select-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 20;
+  display: grid;
+  /* 항목이 많아도 카드를 다 먹지 않는다. 넘치면 목록 안에서 스크롤한다. */
+  max-height: 240px;
+  min-width: 100%;
+  overflow-y: auto;
+  margin: 0;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  list-style: none;
+}
+
+/* 버튼의 어느 쪽 끝에 맞출지. 오른쪽 끝에 놓인 버튼(정렬)은 `end`다. */
+.defect-select-panel.align-start {
+  left: 0;
+}
+
+.defect-select-panel.align-end {
+  right: 0;
+}
+
+/*
+ * 아래에 자리가 모자라면 위로 뒤집는다. 상세 카드는 스스로 스크롤해서, 카드 바닥 쪽
+ * 버튼이 아래로 펼치면 목록이 잘린다.
+ */
+.defect-select-panel.is-above {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+.defect-select-option {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  align-items: center;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* 마우스로 훑는 자리와 키보드로 짚는 자리가 같은 표시를 쓴다. */
+.defect-select-option.is-active {
+  background: var(--surface-muted);
+}
+
+.defect-select-option.is-selected {
+  color: var(--brand-strong);
+  font-weight: 800;
+}
+
+/*
+ * 체크 표시 자리는 늘 잡아둔다. 고른 줄에만 아이콘을 넣고 나머지를 비우면 글자가
+ * 좌우로 흔들린다.
+ */
+.defect-select-check {
+  flex: none;
+  visibility: hidden;
+}
+
+.defect-select-option.is-selected .defect-select-check {
+  visibility: visible;
 }
 
 .defect-table {
@@ -885,11 +1763,45 @@
   overflow: hidden;
 }
 
+/*
+ * 8열(코드·유형·심각도·위치·최근 관측·반복·신뢰도·상태)이다. 예전에는 fr 6개만 적어
+ * 유형·심각도가 1.4fr씩 가져가고 신뢰도·상태는 암묵 열로 밀려났다. 값 폭이 정해진 열은
+ * px로 못박고 **남는 폭은 위치가 받는다.** 위치가 가장 길고 잘리면 곤란한 값이다.
+ *
+ * 각 폭은 "가장 긴 값 + 여유"다. 딱 맞게 잡으면 글꼴이 조금만 달라져도 옆 열 글자에
+ * 달라붙어 두 열이 한 덩어리로 읽힌다.
+ */
 .defect-table-row {
   display: grid;
-  grid-template-columns: 90px 1.4fr 1.4fr 1.1fr 0.8fr 0.6fr;
-  gap: 12px;
-  padding: 12px 16px;
+  grid-template-columns:
+    146px 72px 58px minmax(0, 1fr) 96px 44px 46px 106px;
+  gap: 18px;
+  padding: 12px 18px;
+}
+
+.defect-table-row > span {
+  /* 기본값 auto면 긴 위치 값이 열을 밀어낸다. 0이어야 ellipsis가 걸린다. */
+  min-width: 0;
+  /*
+   * 넘치는 값은 반드시 자기 칸 안에서 잘려야 한다. nowrap만 주고 이걸 빼면 넘친
+   * 글자가 옆 칸 위에 그대로 그려져 두 열이 겹쳐 보인다.
+   */
+  overflow: hidden;
+  align-self: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * 병합 선택 체크박스. 브라우저 기본(13px)은 표에서 너무 작아 눌러 맞추기 어렵다.
+ * 색은 필터 쪽 체크박스와 같은 값을 쓴다.
+ */
+.defect-table-row input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--brand);
+  cursor: pointer;
 }
 
 .defect-table-head {
@@ -897,6 +1809,150 @@
   background: var(--surface-muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+/* 위치가 두 줄까지 늘어나므로 한 줄짜리 행도 같은 높이로 맞춰 둔다.
+   두 줄 높이(1.35 × 14px × 2 + 위아래 padding 24px ≈ 62px)보다 조금 크게 잡아
+   반올림 차이로 행마다 1px씩 흔들리지 않게 한다. */
+.defect-table-body-row {
+  min-height: 64px;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.defect-table-body-row:hover {
+  background: var(--surface-muted);
+}
+
+.defect-table-body-row:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* 선택된 행은 상세 카드에 열려 있는 행이다. 배경만으로는 스크롤 중에 놓친다. */
+.defect-table-body-row.is-selected {
+  box-shadow: inset 3px 0 0 var(--nb-gold);
+  background: var(--brand-soft);
+}
+
+/* `INC-20260805-000123` 19자가 들어가야 한다. 본문보다 한 단 작게, 자리수를 고정해
+   폭을 140px에 맞춘다. */
+.defect-cell-code {
+  font-size: 13px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+/*
+ * 남는 폭을 받는 열이지만 1280px 화면에서는 120px 남짓이라 한 줄로는 8자밖에 못 넣는다.
+ * 두 줄까지 허용해 이름을 끝까지 보여준다. `keep-all`은 한국어 단어 중간에서 줄이
+ * 끊기지 않게 한다.
+ */
+/* `.defect-table-row > span`의 nowrap을 이겨야 하므로 자식 선택자까지 붙인다. */
+.defect-table-row > .defect-cell-location {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--text-muted);
+  line-height: 1.35;
+  white-space: normal;
+  word-break: keep-all;
+}
+
+/* 좌표·시각·비율은 자리수가 흔들리면 세로로 훑을 수 없다. */
+.defect-cell-number {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.defect-cell-status {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/*
+ * 심각도·상태는 `<em>`이라 스타일이 없으면 기울어진 맨 텍스트로 나온다. 색이 있는
+ * 배지로 만들어 훑을 때 눈에 걸리게 한다. 색 배합은 report.css의 상태 배지와 맞췄다.
+ */
+.defect-risk,
+.defect-status,
+.defect-review-flag {
+  display: inline-flex;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 800;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.defect-risk-low {
+  color: #4b5563;
+  border-color: #d1d5db;
+  background: #f3f4f6;
+}
+
+.defect-risk-medium {
+  color: #87570d;
+  border-color: #f4c56a;
+  background: #fff6df;
+}
+
+.defect-risk-high {
+  color: #9a4f16;
+  border-color: #f0b483;
+  background: #fff1e6;
+}
+
+.defect-risk-critical {
+  color: #a23636;
+  border-color: #efb0b0;
+  background: #fff0f0;
+}
+
+.defect-status-new {
+  color: #87570d;
+  border-color: #f4c56a;
+  background: #fff6df;
+}
+
+.defect-status-accepted {
+  color: #1f5673;
+  border-color: #a9cfe0;
+  background: #eaf5fb;
+}
+
+.defect-status-in_progress {
+  color: var(--brand-strong);
+  border-color: #f0d68a;
+  background: var(--brand-soft);
+}
+
+.defect-status-resolved {
+  color: #17643d;
+  border-color: #9ad4b4;
+  background: #e8f7ef;
+}
+
+.defect-status-false_positive,
+.defect-status-rejected {
+  color: #4b5563;
+  border-color: #d1d5db;
+  background: #f3f4f6;
+}
+
+/* 검토 필요는 상태와 함께 붙으므로 채우지 않고 테두리만 준다. */
+.defect-review-flag {
+  color: #a23636;
+  border-color: #efb0b0;
+  background: none;
 }
 
 .defect-table-empty {
@@ -918,6 +1974,12 @@
   gap: 16px;
   align-items: start;
   justify-content: space-between;
+}
+
+.table-heading-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
 
 .status-badge {
@@ -1321,6 +2383,26 @@
   cursor: pointer;
 }
 
+.defect-pagination {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  justify-content: center;
+}
+
+.defect-pagination span {
+  min-width: 64px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.defect-pagination .secondary-button {
+  min-height: 36px;
+  cursor: pointer;
+}
+
 .admin-create-card {
   padding: 18px 22px;
 }
@@ -1605,14 +2687,49 @@
 }
 
 @media (max-width: 820px) {
+  .app-frame {
+    --app-content-gutter: 20px;
+  }
+
   .app-shell {
     grid-template-columns: 1fr;
   }
 
-  .nb-sidebar {
+  .app-shell.is-sidebar-collapsed {
+    grid-template-columns: 1fr;
+  }
+
+  .nb-sidebar-layer {
     position: static;
     height: auto;
+  }
+
+  .nb-sidebar {
+    height: auto;
     padding: 16px;
+  }
+
+  .nb-sidebar.is-collapsed {
+    padding: 16px;
+  }
+
+  .nb-sidebar.is-collapsed .nb-brand {
+    justify-content: flex-start;
+  }
+
+  .nb-sidebar.is-collapsed .nb-brand-text,
+  .nb-sidebar.is-collapsed .nb-nav-label {
+    display: block;
+  }
+
+  .nb-sidebar.is-collapsed .nb-nav-item {
+    gap: 12px;
+    padding: 10px 12px;
+    justify-content: flex-start;
+  }
+
+  .nb-sidebar-toggle {
+    display: none;
   }
 
   .nb-nav {
@@ -1625,18 +2742,20 @@
     flex: 0 0 auto;
   }
 
-  .nb-nav-icon,
-  .nb-footer {
+  .nb-nav-icon {
     display: none;
   }
 
+  .app-shell {
+    --topbar-height: 78px;
+  }
+
   .topbar {
-    min-height: 78px;
-    padding: 16px 20px;
+    padding: 16px var(--app-content-gutter);
   }
 
   .main-content {
-    padding: 28px 18px 44px;
+    padding: 28px var(--app-content-gutter) 44px;
   }
 
   .summary-grid {
@@ -1644,7 +2763,6 @@
   }
 
   .filter-bar,
-  .defect-layout,
   .settings-grid,
   .admin-master-detail,
   .admin-role-layout,
@@ -1664,6 +2782,11 @@
 
   .defect-table-row {
     grid-template-columns: 1fr;
+  }
+
+  /* 조건 줄이 아래로 내려오면 검색창이 한 줄을 혼자 쓴다. 그때는 폭을 다 준다. */
+  .defect-search-bar {
+    width: 100%;
   }
 }
 
@@ -1727,7 +2850,7 @@
   color: #fff;
   background:
     radial-gradient(circle at 85% 20%, rgba(240, 161, 40, 0.2), transparent 34%),
-    linear-gradient(155deg, #123c29 0%, #1b583b 54%, #143f2c 100%);
+    linear-gradient(155deg, #0b1f3a 0%, #17365d 54%, #102947 100%);
 }
 
 .auth-intro::after {
@@ -1784,6 +2907,7 @@
   z-index: 1;
   max-width: 480px;
   margin: auto 0;
+  transform: translateY(-30px);
 }
 
 .auth-intro-icon {
@@ -1791,11 +2915,9 @@
   width: 52px;
   height: 52px;
   margin-bottom: 22px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 16px;
   place-items: center;
   color: #f1d58c;
-  background: rgba(255, 255, 255, 0.08);
+  transform: translateY(15px);
 }
 
 .auth-intro .eyebrow {
@@ -1807,21 +2929,6 @@
   font-size: clamp(34px, 4.2vw, 58px);
   line-height: 1.13;
   letter-spacing: -0.055em;
-}
-
-.auth-intro-copy > p:last-child {
-  max-width: 440px;
-  margin: 0;
-  color: rgba(255, 255, 255, 0.72);
-  line-height: 1.75;
-}
-
-.auth-storage-note {
-  position: relative;
-  z-index: 1;
-  margin: 0;
-  color: rgba(255, 255, 255, 0.58);
-  font-size: 12px;
 }
 
 .auth-main {
@@ -1837,7 +2944,7 @@
   border: 1px solid var(--line);
   border-radius: 24px;
   background: var(--surface);
-  box-shadow: 0 24px 70px rgba(21, 80, 53, 0.1);
+  box-shadow: 0 24px 70px rgba(14, 36, 67, 0.12);
 }
 
 .auth-card-wide {
@@ -1869,6 +2976,16 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 15px;
+}
+
+.auth-form-columns .form-field {
+  grid-template-rows: auto 48px minmax(18px, auto);
+  align-content: start;
+}
+
+.auth-form-columns .form-field > input {
+  height: 48px;
+  min-height: 48px;
 }
 
 .form-field {
@@ -1903,6 +3020,14 @@
   border-color: var(--brand);
   outline: none;
   box-shadow: 0 0 0 3px rgba(31, 107, 69, 0.12);
+}
+
+.auth-shell .form-field input {
+  border-color: #cbd4e0;
+}
+
+.auth-shell .form-field input:focus {
+  box-shadow: 0 0 0 3px rgba(23, 54, 93, 0.16);
 }
 
 .field-hint,
@@ -1966,9 +3091,9 @@
 }
 
 .form-notice-success {
-  border: 1px solid #bfe1ca;
+  border: 1px solid #b9dcf4;
   color: var(--brand-strong);
-  background: #edf8f1;
+  background: #e8f5ff;
 }
 
 .input-action-row {
@@ -2037,7 +3162,7 @@
 .auth-mode-tabs button.is-active {
   color: var(--brand-strong);
   background: #fff;
-  box-shadow: 0 4px 12px rgba(20, 63, 44, 0.08);
+  box-shadow: 0 4px 12px rgba(14, 36, 67, 0.1);
 }
 
 .totp-input,
@@ -2082,6 +3207,11 @@
   border-top-color: var(--brand);
   border-radius: 50%;
   animation: auth-spin 700ms linear infinite;
+}
+
+.auth-shell .loading-spinner {
+  border-color: #cbd4e0;
+  border-top-color: var(--brand);
 }
 
 @keyframes auth-spin {
@@ -2356,10 +3486,6 @@ button:disabled {
     font-size: 36px;
   }
 
-  .auth-storage-note {
-    display: none;
-  }
-
   .auth-main {
     padding: 32px 20px 56px;
   }
@@ -2370,7 +3496,6 @@ button:disabled {
     margin: 36px 0 12px;
   }
 
-  .auth-intro-copy > p:last-child,
   .auth-intro-icon {
     display: none;
   }
@@ -2409,6 +3534,12 @@ button:disabled {
   .loading-spinner {
     animation-duration: 1400ms;
   }
+
+  /* 떠오르는 카드는 멀미를 준다. 어두워지는 것만 남긴다. */
+  .defect-filter-modal-backdrop,
+  .defect-filter-modal {
+    animation: none;
+  }
 }
 
 .safe-report-text {
@@ -2416,11 +3547,98 @@ button:disabled {
   white-space: pre-wrap;
 }
 
-/* 결함 수정 모달 — 상세 카드 위에 겹친다. CSP가 인라인 스타일을 막으므로 전부 클래스로 둔다. */
+/*
+ * 상세 필터 모달. 뒤 화면을 **살짝** 어둡게만 덮는다 — 지도에 무엇이 걸려 있었는지
+ * 보이는 채로 조건을 고치는 것이 목적이라, 수정·병합 모달(55%)만큼 어두우면 안 된다.
+ */
+.defect-filter-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  padding: 24px;
+  place-items: center;
+  background: rgb(26 26 26 / 32%);
+  animation: defect-filter-modal-fade 140ms ease-out;
+}
+
+.defect-filter-modal {
+  display: grid;
+  gap: 4px;
+  width: min(520px, 100%);
+  max-height: min(84vh, 760px);
+  overflow-y: auto;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: 0 24px 60px rgb(26 26 26 / 24%);
+  animation: defect-filter-modal-rise 160ms ease-out;
+}
+
+.defect-filter-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.defect-filter-modal-header h3 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.defect-filter-modal-body {
+  display: grid;
+  gap: 24px;
+  padding-top: 20px;
+}
+
+.defect-filter-modal-body h4 {
+  margin: 0;
+}
+
+/*
+ * 카드가 스크롤돼도 버튼은 바닥에 붙어 있다. 조건이 길어지면 "적용하기"가 스크롤
+ * 밖으로 나가는데, 그러면 고르고 나서 적용하는 길을 못 찾는다.
+ */
+.defect-filter-modal-actions {
+  position: sticky;
+  bottom: -24px;
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 10px;
+  margin: 0 -24px -24px;
+  padding: 16px 24px 24px;
+  background: var(--surface);
+}
+
+@keyframes defect-filter-modal-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes defect-filter-modal-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/*
+ * 결함 수정·병합 모달. CSP가 인라인 스타일을 막으므로 전부 클래스로 둔다.
+ *
+ * <p>**z-index는 고정된 상단 바(50)와 왼쪽 바(40)보다 높아야 한다.** 40이던 시절에는
+ * 창이 상단 바 **뒤로** 깔려 제목에 잘리고, 화면을 덮는 어두운 막이 상단 바만 비껴가
+ * 그 줄만 환하게 남았다. 화면 전체를 덮는 것이 이 막의 뜻이므로 두 바보다 위에 둔다.
+ *
+ * <p>이 화면의 층 순서: 왼쪽 바 40 → 상단 바 50 → 필터 모달 60 → 이 창 150 →
+ * 사진 확대 창 200.
+ */
 .defect-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: 150;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2459,6 +3677,242 @@ button:disabled {
   justify-content: flex-end;
 }
 
+/*
+ * 결함 수정 창. 네이티브 `<select>`·맨 `<input>`을 걷어내고 필터 모달과 같은 결로 맞췄다.
+ * 여백·모서리·제목 크기가 그쪽과 같아야 두 창이 같은 화면의 것으로 읽힌다.
+ */
+.defect-edit-modal {
+  gap: 0;
+  width: min(30rem, 100%);
+  max-height: min(88vh, 780px);
+  padding: 24px;
+  border-radius: 20px;
+  box-shadow: 0 24px 60px rgb(26 26 26 / 24%);
+  animation: defect-edit-rise 160ms ease-out;
+}
+
+.defect-edit-modal .defect-modal-header h3 {
+  font-size: 20px;
+}
+
+@keyframes defect-edit-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .defect-edit-modal {
+    animation: none;
+  }
+}
+
+.defect-edit-body {
+  display: grid;
+  gap: 22px;
+  padding-top: 20px;
+}
+
+.defect-edit-section {
+  display: grid;
+  gap: 10px;
+}
+
+.defect-edit-section h4 {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* 구역·위치 설명은 짝이라 한 줄에 둔다. 좁아지면 아래로 접힌다. */
+.defect-edit-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 7rem) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.defect-edit-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.defect-edit-field > span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* 맨 `<input>`은 브라우저 기본 테두리라 이 화면의 다른 것들과 결이 어긋났다. */
+.defect-text-input {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  background: var(--surface);
+  font-size: 14px;
+}
+
+.defect-text-input::placeholder {
+  color: var(--text-muted);
+}
+
+.defect-text-input:focus-visible {
+  border-color: var(--focus);
+}
+
+.defect-text-input:disabled {
+  color: var(--text-muted);
+  background: var(--surface-muted);
+}
+
+.defect-edit-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.defect-edit-required {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.defect-edit-required label::after {
+  content: ' *';
+  color: #a23636;
+}
+
+.defect-edit-counter {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * 재검토 필요 스위치. 요소는 체크박스 그대로이고 네모만 감춘다 — 켜짐·꺼짐이 손잡이
+ * 위치로 보이는 편이 작은 네모 하나보다 훨씬 빨리 읽힌다.
+ */
+.defect-switch {
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  align-items: center;
+  background: var(--surface-muted);
+}
+
+.defect-switch input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+}
+
+.defect-switch-track {
+  position: relative;
+  width: 40px;
+  height: 24px;
+  flex: none;
+  border-radius: 999px;
+  background: #cfc9ba;
+  transition: background-color 140ms ease;
+}
+
+/* 손잡이. `::before`라 요소를 더 만들지 않는다. */
+.defect-switch-track::before {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(26 26 26 / 25%);
+  content: '';
+  transition: transform 140ms ease;
+}
+
+.defect-switch:has(input:checked) .defect-switch-track {
+  background: var(--nb-gold);
+}
+
+.defect-switch:has(input:checked) .defect-switch-track::before {
+  transform: translateX(16px);
+}
+
+.defect-switch:focus-within .defect-switch-track {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.defect-switch:has(input:disabled) {
+  color: var(--text-muted);
+}
+
+.defect-switch-text {
+  display: grid;
+  gap: 2px;
+}
+
+.defect-switch-text strong {
+  font-size: 14px;
+}
+
+.defect-switch-text small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/*
+ * 버튼 줄. 창이 스크롤돼도 바닥에 붙어 있어야 긴 폼에서 저장을 찾을 수 있다.
+ * 왼쪽에는 저장이 막힌 이유를 둔다.
+ */
+.defect-edit-actions {
+  position: sticky;
+  bottom: -24px;
+  display: flex;
+  gap: 12px;
+  margin: 0 -24px -24px;
+  padding: 14px 24px 24px;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.defect-edit-status {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.defect-edit-buttons {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+@media (max-width: 520px) {
+  .defect-edit-pair {
+    grid-template-columns: 1fr;
+  }
+
+  .defect-edit-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
 .defect-card-checkbox {
   display: flex;
   align-items: center;
@@ -2468,7 +3922,8 @@ button:disabled {
 
 /* 병합 다중 선택 — 체크박스 열은 권한이 있을 때만 붙으므로 modifier로 분리한다. */
 .defect-table.is-selectable .defect-table-row {
-  grid-template-columns: 32px 90px 1.4fr 1.4fr 1.1fr 0.8fr 0.6fr;
+  grid-template-columns:
+    38px 146px 72px 58px minmax(0, 1fr) 96px 44px 46px 106px;
 }
 
 .defect-merge-bar {
@@ -2481,6 +3936,14 @@ button:disabled {
   border-radius: 12px;
   background: var(--surface-muted);
   font-size: 14px;
+}
+
+/*
+ * 선택이 없을 때. `display: none`이 아니라 `visibility: hidden`이어야 자리를 지켜
+ * 아래 목록이 움직이지 않는다.
+ */
+.defect-merge-bar.is-hidden {
+  visibility: hidden;
 }
 
 .defect-merge-bar-actions {
@@ -2566,14 +4029,137 @@ button:disabled {
   cursor: pointer;
 }
 
-.defect-cluster-received {
-  background: #6f6a5e;
+.defect-cluster-damaged {
+  background: var(--defect-damaged);
 }
 
-.defect-cluster-progress {
-  background: #b8863b;
+.defect-cluster-missing {
+  background: var(--defect-missing);
 }
 
-.defect-cluster-done {
-  background: #7a5c0c;
+.defect-cluster-installation-invalid {
+  background: var(--defect-installation-invalid);
+}
+
+.defect-cluster-unknown-anomaly {
+  background: var(--defect-unknown-anomaly);
+}
+
+.defect-cluster-mixed {
+  background: var(--defect-mixed);
+}
+
+/*
+ * 묶음을 눌러 편 구성원 목록. 상세 카드(`.defect-card`)가 오른쪽이라 왼쪽에 둔다 —
+ * 줄을 눌러 카드를 열어도 목록이 가려지지 않아 형제 결함을 이어서 훑을 수 있다.
+ */
+.defect-cluster-list {
+  position: absolute;
+  /* 상세 카드와 같은 이유로 지도 **왼쪽 위 모서리에 붙인다**(`.defect-card` 주석 참고). */
+  top: 0;
+  left: 0;
+  z-index: 6;
+  display: flex;
+  /* 건수만큼만 차지한다. 세 건인데 지도 높이를 다 쓰면 빈 카드가 지도를 가린다. */
+  max-height: calc(100% - 16px);
+  width: min(300px, calc(100% - 32px));
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgb(23 34 28 / 18%);
+}
+
+.defect-cluster-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.defect-cluster-list-header h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.defect-cluster-list-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.defect-cluster-list-item {
+  display: flex;
+  width: 100%;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  align-items: center;
+  text-align: left;
+  background: none;
+}
+
+.defect-cluster-list-item:hover {
+  background: var(--surface-muted);
+}
+
+/* 지금 카드가 열려 있는 줄. 지도 마커의 선택 표시와 짝이다. */
+.defect-cluster-list-item.is-selected {
+  border-color: var(--nb-gold);
+  background: var(--brand-soft);
+}
+
+.defect-cluster-list-photo {
+  display: grid;
+  width: 56px;
+  height: 56px;
+  flex: none;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 8px;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+}
+
+.defect-cluster-list-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 조회가 끝날 때까지의 자리표시. 크기가 미리 잡혀 있어야 줄이 덜컥이지 않는다. */
+.defect-cluster-list-photo-loading {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    var(--surface-muted) 0%,
+    var(--line) 50%,
+    var(--surface-muted) 100%
+  );
+}
+
+.defect-cluster-list-text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.defect-cluster-list-text strong {
+  font-size: 13px;
+}
+
+.defect-cluster-list-location {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

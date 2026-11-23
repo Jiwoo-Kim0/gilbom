@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.gilbom.audit.AuditRequestContext;
 import com.gilbom.auth.AuthenticatedUserIdResolver;
+import com.gilbom.defect.DefectDtos.DefectClusterDetailsResponse;
 import com.gilbom.defect.DefectDtos.DefectDetailResponse;
 import com.gilbom.defect.DefectDtos.DefectExportAcceptedResponse;
 import com.gilbom.defect.DefectDtos.DefectExportRequest;
@@ -42,6 +43,7 @@ import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Size;
 
 /**
@@ -133,6 +135,30 @@ public class DefectController {
                         robotId,
                         minConfidence,
                         bbox));
+    }
+
+    /**
+     * 지도에서 묶음을 눌렀을 때 펴는 목록의 재료를 한 번에 준다.
+     *
+     * <p>화면이 결함마다 상세와 이미지 URL을 따로 부르면 열 건짜리 묶음 하나에 스무 개가
+     * 한꺼번에 나간다. 그중 하나만 401이어도 전역 처리가 로그인을 끊었다.
+     *
+     * <p>읽기라서 GET이다 — POST로 두면 변경 계열의 CSRF 절차를 읽기가 지고, 캐시·재시도
+     * 규칙도 어긋난다. id는 쉼표로 이어 보낸다({@code ?defectIds=a,b,c}).
+     */
+    @GetMapping("/cluster-details")
+    @PreAuthorize("hasAuthority('DEFECT_STATUS_VIEW')")
+    public DefectClusterDetailsResponse findClusterDetails(
+            /*
+             * 상한은 이 요청이 만드는 일을 묶어두기 위한 것이다. 화면의 묶음 목록 상한은
+             * 10건이지만, 그 값이 조금 바뀌어도 400이 나지 않을 만큼 여유를 둔다.
+             */
+            @RequestParam @NotEmpty @Size(max = 50) List<UUID> defectIds,
+            Authentication authentication
+    ) {
+        return queryService.findClusterDetails(
+                userIdResolver.require(authentication),
+                defectIds);
     }
 
     @GetMapping

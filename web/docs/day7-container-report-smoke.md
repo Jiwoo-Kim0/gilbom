@@ -35,7 +35,7 @@ PostgreSQL host port는 만들지 않는다. `ec2` profile의 Secure
 
 1. Backend·Frontend 운영 image를 빌드하며 image 내부 test와 production build를
    통과한다.
-2. 새 PostgreSQL volume에서 34개 Flyway migration이 모두 성공했고 보고서가
+2. 새 PostgreSQL volume에서 41개 Flyway migration이 모두 성공했고 보고서가
    0건인지 확인한다.
 3. 완료 Mission 1건, 결함·관측 1건과 연결 evidence를 transaction으로 넣는다.
 4. Bootstrap 작성자가 최초 비밀번호를 바꾸고 TOTP를 등록한다.
@@ -79,6 +79,11 @@ REPORT_SMOKE_SKIP_BUILD=true sh scripts/container-report-smoke.sh
 `.artifacts/docker-bind-work` 아래에 생성한다. Jenkins의 Docker client와 DinD
 daemon이 공유하는 workspace를 사용하므로 container 전용 `/tmp` 경로 차이로
 bind mount가 실패하지 않는다.
+
+Smoke 환경은 운영 Compose의 필수 공개 URL 계약을 검증하기 위해
+`GILBOM_STORAGE_UPLOAD_URL=https://report-smoke.example.invalid/api/v1/images`를
+주입한다. `.invalid` 주소는 외부 업로드에 사용하지 않고 Compose 렌더링과
+Backend 설정 계약을 위한 고정 fixture다.
 
 성공 출력에는 Secret, password, CSRF/TOTP, session cookie, 보고서 본문을
 포함하지 않는다. 실패 시에도 고정 오류 코드와 제한된 container log만 사용한다.

@@ -70,7 +70,10 @@ for label in \
   'Archive SHA-256:' \
   'Cosign Signature:' \
   'Cosign Public Key SHA-256:' \
-  'Cosign Bundle SHA-256:' \
+  'Cosign Image Bundle SHA-256:' \
+  'Cosign Manifest Bundle SHA-256:' \
+  'Source Archive SHA-256:' \
+  'Compose SHA-256:' \
   'Critical:' \
   'High:' \
   '적용 예정 Flyway Migration:' \
@@ -107,6 +110,9 @@ assert_contains infra/scripts/gilbom-deploy-preflight.sh \
 assert_contains infra/scripts/gilbom-deploy-preflight.sh \
   '"$COSIGN_BIN" verify-blob' \
   "deployment preflight does not verify the Cosign Blob signature"
+assert_contains infra/scripts/gilbom-deploy-preflight.sh \
+  'source: {' \
+  "deployment preflight does not expose source archive evidence"
 assert_contains scripts/verify-production-deploy-job-host.sh \
   'COSIGN_PUBLIC_KEY' \
   "host contract does not pin the release verification public key"
@@ -116,6 +122,9 @@ assert_contains infra/scripts/gilbom-deploy.sh \
 assert_contains infra/scripts/gilbom-deploy.sh \
   'approval: $deploy_approval[0]' \
   "approver identity and time are not written to the release manifest"
+assert_contains scripts/verify-production-release-evidence.sh \
+  '.source.sha256 == $preflight[0].source.sha256' \
+  "release evidence does not bind the activated source tree to preflight"
 assert_contains infra/scripts/gilbom-record-deploy-approval.sh \
   'source: "jenkins-production-deploy-approval"' \
   "Jenkins migration approval provenance is missing"

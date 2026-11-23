@@ -28,6 +28,7 @@ public final class StatisticsDtos {
 
     public enum DefectType {
         DAMAGED,
+        MISSING,
         INSTALLATION_INVALID,
         UNKNOWN_ANOMALY
     }

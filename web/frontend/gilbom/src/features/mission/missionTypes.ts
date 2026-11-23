@@ -1,3 +1,9 @@
+import type {
+  DefectType,
+  RiskLevel,
+  WorkflowStatus,
+} from '../defect/defectTypes'
+
 export type MissionStatus =
   | 'CREATED'
   | 'READY'
@@ -22,6 +28,7 @@ export type GeoJsonMultiPolygon = {
 }
 
 export type PatrolAreaBoundary = GeoJsonPolygon | GeoJsonMultiPolygon
+export type PatrolAreaLifecycleStatus = 'ACTIVE' | 'INACTIVE' | 'ARCHIVED'
 
 export type MissionFilters = {
   robotId: string
@@ -141,12 +148,28 @@ export type MissionMapResponse = {
   currentPosition: MissionMapCurrentPosition | null
 }
 
+export type MissionDefectMapItem = {
+  defectId: string
+  incidentCode: string
+  defectType: DefectType
+  riskLevel: RiskLevel
+  workflowStatus: WorkflowStatus
+  longitude: number
+  latitude: number
+  latestConfidence: number | null
+}
+
+export type MissionDefectMapResponse = {
+  missionId: string
+  defects: MissionDefectMapItem[]
+}
+
 export type PatrolArea = {
   patrolAreaId: string
   areaCode: string
   areaName: string
   boundary: PatrolAreaBoundary
-  lifecycleStatus: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED'
+  lifecycleStatus: PatrolAreaLifecycleStatus
   createdAt: string
   updatedAt: string
 }
@@ -156,6 +179,12 @@ export type PatrolAreaCreateInput = {
   areaName: string
   boundary: PatrolAreaBoundary
   lifecycleStatus: 'ACTIVE' | 'INACTIVE'
+}
+
+export type PatrolAreaUpdateInput = {
+  areaCode?: string
+  areaName?: string
+  boundary?: PatrolAreaBoundary
 }
 
 export type PatrolAreaListResponse = {

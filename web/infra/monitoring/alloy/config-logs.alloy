@@ -84,58 +84,63 @@ loki.source.journal "host" {
 // 민감값은 Loki에 들어가기 전에 지운다. 저장된 뒤에 지우는 것은 사실상 불가능하다.
 // 여기 빠진 항목이 곧 유출 경로이므로, 새 비밀 형식이 생기면 이 목록을 함께 늘린다.
 loki.process "redact" {
+	// stage.replace는 캡처 그룹만 치환한다. 그래서 그룹은 값 하나만 잡고 replace에는
+	// 대체 문자열만 둔다. 템플릿 문법(${1})을 쓰면 그대로 로그에 박힌다.
+	//
+	// 구분자로 = 또는 : 를 요구한다. 이것이 없으면 URL 경로의 "csrf-token" 같은
+	// 평범한 문자열까지 비밀값으로 오인해 지운다.
 	stage.replace {
-		expression = "(?i)((?:password|passwd|pwd)[\"'=: ]+)([^\\s\",;}]+)"
-		replace    = "${1}[REDACTED]"
+		expression = "(?i)(?:password|passwd|pwd)\"?\\s*[=:]\\s*\"?([^\\s\",;}]+)"
+		replace    = "[REDACTED]"
 	}
 
 	stage.replace {
-		expression = "(?i)((?:proxy-)?authorization[\"'=: ]+)([^\\s\",;}]+)"
-		replace    = "${1}[REDACTED]"
+		expression = "(?i)(?:proxy-)?authorization\"?\\s*[=:]\\s*\"?([^\\r\\n\",;}]+)"
+		replace    = "[REDACTED]"
 	}
 
 	stage.replace {
-		expression = "(?i)((?:set-)?cookie[\"'=: ]+)([^\\r\\n]+)"
-		replace    = "${1}[REDACTED]"
+		expression = "(?i)(?:set-)?cookie\"?\\s*[=:]\\s*\"?([^\\r\\n]+)"
+		replace    = "[REDACTED]"
 	}
 
 	// Session cookie는 헤더 이름 없이 값만 찍히는 경우가 있어 이름으로 한 번 더 지운다.
 	stage.replace {
-		expression = "(?i)((?:__Host-)?GILBOM_SESSION|JSESSIONID)=([^;\\s\"]+)"
-		replace    = "${1}=[REDACTED]"
+		expression = "(?i)(?:__Host-)?(?:GILBOM_SESSION|JSESSIONID)=([^;\\s\"]+)"
+		replace    = "[REDACTED]"
 	}
 
 	stage.replace {
-		expression = "(?i)((?:x-)?csrf[_-]?token[\"'=: ]+)([^\\s\",;}]+)"
-		replace    = "${1}[REDACTED]"
+		expression = "(?i)(?:x-)?csrf[_-]?token\"?\\s*[=:]\\s*\"?([^\\s\",;}]+)"
+		replace    = "[REDACTED]"
 	}
 
 	stage.replace {
-		expression = "(?i)((?:api[_-]?key|secret|token)[\"'=: ]+)([^\\s\",;}]+)"
-		replace    = "${1}[REDACTED]"
+		expression = "(?i)(?:api[_-]?key|apikey|secret|token)\"?\\s*[=:]\\s*\"?([^\\s\",;}]+)"
+		replace    = "[REDACTED]"
 	}
 
 	// 이미지 서명 URL은 query string 전체가 비밀이다.
 	stage.replace {
-		expression = "([?&](?:expires|signature|sig|token|key)=)([^&\\s\"]+)"
-		replace    = "${1}[REDACTED]"
+		expression = "[?&](?:expires|signature|sig|token|key)=([^&\\s\"]+)"
+		replace    = "[REDACTED]"
 	}
 
 	// GitLab personal access token과 OpenAI 계열 key는 형식만으로 식별된다.
 	stage.replace {
-		expression = "(glpat-)[A-Za-z0-9_\\-]{16,}"
-		replace    = "${1}[REDACTED]"
+		expression = "glpat-([A-Za-z0-9_\\-]{16,})"
+		replace    = "[REDACTED]"
 	}
 
 	stage.replace {
-		expression = "(sk-)[A-Za-z0-9_\\-]{16,}"
-		replace    = "${1}[REDACTED]"
+		expression = "sk-([A-Za-z0-9_\\-]{16,})"
+		replace    = "[REDACTED]"
 	}
 
 	// TOTP keyring 항목은 "1=<base64>" 형식이라 값만 지운다.
 	stage.replace {
-		expression = "(?i)(totp[_-]?keyring[\"'=: ]+)([^\\s\",;}]+)"
-		replace    = "${1}[REDACTED]"
+		expression = "(?i)totp[_-]?keyring\"?\\s*[=:]\\s*\"?([^\\s\",;}]+)"
+		replace    = "[REDACTED]"
 	}
 
 	forward_to = [loki.write.local.receiver]

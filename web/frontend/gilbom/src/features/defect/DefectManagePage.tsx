@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
-import { DefectFilter } from './DefectFilter'
+import { DefectFilterBar } from './DefectFilterBar'
 import { DefectList } from './DefectList'
 import { DefectMap } from './DefectMap'
+import type { DefectMapCenterRequest } from './DefectMap'
 import { DefectMergeModal } from './DefectMergeModal'
+import { DefectSearchBar } from './DefectSearchBar'
 import { getDefects } from './defectApi'
 import { useDefectRealtime } from './useDefectRealtime'
 import { useAuthentication } from '../auth/authenticationContext'
@@ -35,7 +37,8 @@ function readFilters(params: URLSearchParams): DefectFilters {
     ...EMPTY_DEFECT_FILTERS,
     q: params.get('q') ?? '',
     from: params.get('from') ?? '',
-    to: params.get('to') ?? '',
+    // 종료 시각(to)은 화면에서 받지 않으므로 URL에서도 읽지 않는다. 필터 패널에
+    // 보이지 않는 상한이 링크에 남아 "왜 안 나오지"가 되는 것을 막는다.
     // 상태 조건이 없으면 첫 진입이다. 종결된 결함은 조치할 것이 없어 지도와
     // 목록을 가리기만 하므로 기본으로는 빼둔다. 사용자가 체크를 전부 풀면
     // writeFilters가 allStatus 표식을 남기고, 그때는 진짜 전체를 보여준다.
@@ -64,9 +67,6 @@ function writeFilters(
   if (filters.from.length > 0) {
     params.set('from', filters.from)
   }
-  if (filters.to.length > 0) {
-    params.set('to', filters.to)
-  }
   if (filters.workflowStatuses.length === 0) {
     // "아직 안 고름"과 "전부 풀었음"을 구분한다. 이 표식이 없으면 체크를 전부
     // 푼 순간 첫 진입으로 오인돼 기본값이 다시 걸리고, 전체 보기가 불가능해진다.
@@ -92,13 +92,23 @@ export function DefectManagePage() {
 
   const filters = useMemo(() => readFilters(searchParams), [searchParams])
   const page = Number(searchParams.get('page') ?? '0')
-  const sort = searchParams.get('sort') ?? DEFAULT_SORT
+  const requestedSort = searchParams.get('sort') ?? DEFAULT_SORT
+  // 이전 링크의 내림차순 값도 화면 라벨의 의미대로 오래된 최초 발견부터 정렬한다.
+  const sort = requestedSort === 'firstSeenAt,desc'
+    ? 'firstSeenAt,asc'
+    : requestedSort
 
   const [selectedDefectId, setSelectedDefectId] = useState<string | null>(null)
+  /** 지도에 "이 좌표를 가운데로" 보내는 요청. 목록 표에서 고를 때만 만든다. */
+  const [centerRequest, setCenterRequest] =
+    useState<DefectMapCenterRequest | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
   const [checkedIds, setCheckedIds] = useState<string[]>([])
   const [merging, setMerging] = useState(false)
   const [mergeNotice, setMergeNotice] = useState<string | null>(null)
+  const mapCardRef = useRef<HTMLElement | null>(null)
+  /** 늘려서 검색창을 새로 마운트하는 표식. 아래 `key` 주석 참고. */
+  const [searchResetToken, setSearchResetToken] = useState(0)
 
   const { user } = useAuthentication()
   const canMerge = hasPermission(user?.permissions ?? [], DEFECT_MERGE)
@@ -160,6 +170,39 @@ export function DefectManagePage() {
     setReloadToken((token) => token + 1)
   }, [])
 
+  /**
+   * 목록에서 고른 결함의 상세 카드는 **지도 위에** 뜬다. 목록은 지도 아래에 있어
+   * 행을 눌러도 카드가 화면 밖일 수 있으니 지도까지 올려주고, 그 결함의 마커를
+   * 지도 가운데로 옮긴다 — 카드만 떠도 마커가 화면 밖이면 어디 일인지 알 수 없다.
+   *
+   * 지도 마커로 고를 때는 이 함수를 쓰지 않는다. 이미 지도를 보고 있으므로 화면이
+   * 움직일 이유가 없다.
+   */
+  const selectFromList = useCallback((defectId: string) => {
+    setSelectedDefectId(defectId)
+    const location = snapshot?.result?.content.find(
+      (defect) => defect.defectId === defectId,
+    )?.location
+    if (location != null) {
+      // token을 올려 같은 행을 다시 눌렀을 때도 가운데로 되돌아오게 한다.
+      setCenterRequest((previous) => ({
+        latitude: location.latitude,
+        longitude: location.longitude,
+        token: (previous?.token ?? 0) + 1,
+        // 지도가 이웃과의 거리를 잴 때 자기 자신을 빼려면 이 값이 필요하다.
+        defectId,
+      }))
+    }
+    // 접근성 설정을 켠 사용자에게 긴 스크롤 애니메이션은 멀미를 준다.
+    const reduceMotion = window.matchMedia(
+      '(prefers-reduced-motion: reduce)',
+    ).matches
+    mapCardRef.current?.scrollIntoView({
+      behavior: reduceMotion ? 'auto' : 'smooth',
+      block: 'start',
+    })
+  }, [snapshot])
+
   const toggleCheck = useCallback((defectId: string) => {
     setCheckedIds((previous) =>
       previous.includes(defectId)
@@ -178,7 +221,20 @@ export function DefectManagePage() {
   )
 
   // 실시간 알림은 "다시 읽어라"만 알려준다. 데이터는 목록·지도가 각자 다시 읽는다.
-  const { status: streamStatus, lastEvent } = useDefectRealtime(refresh)
+  const { lastEvent } = useDefectRealtime(refresh)
+
+  /**
+   * 새로 탐지된 결함을 지도에 알린다. 지도는 그 결함이 **화면 밖일 때만** 그 위치로
+   * 옮긴다 — 판단은 지도가 한다(지금 보이는 범위를 아는 쪽이 지도다).
+   *
+   * <p>`lastEvent`가 바뀔 때마다 새 객체가 되므로 같은 결함이 다시 들어와도 전달된다.
+   */
+  const revealRequest = useMemo(
+    () => (lastEvent?.eventType === 'defect.created'
+      ? { defectId: lastEvent.defectId }
+      : null),
+    [lastEvent],
+  )
 
   const changeSort = useCallback(
     (next: string) => {
@@ -195,24 +251,29 @@ export function DefectManagePage() {
   )
 
   return (
-    <section className="page-stack" aria-labelledby="defect-page-title">
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">DEFECTS</p>
-          <h2 id="defect-page-title">실시간 결함 상태 모니터링</h2>
-          <p>시스템에서 감지된 최신 결함 목록 및 위치 현황입니다.</p>
-        </div>
-        {/*
-          연결이 끊긴 채 조용히 있으면 "결함이 없다"로 오해한다. 상태를 항상 보여준다.
-        */}
-        <p
-          className={`defect-stream-status defect-stream-${streamStatus}`}
-          role="status"
-        >
-          {streamStatus === 'connected' && '실시간 연결됨'}
-          {streamStatus === 'connecting' && '실시간 연결 중…'}
-          {streamStatus === 'reconnecting' && '연결이 끊겨 재연결 중…'}
-        </p>
+    <section className="page-stack" aria-label="실시간 결함 상태 모니터링">
+      {/*
+        검색과 조건이 한 줄이다. 검색창은 결함 코드(`INC-20260805-000001`) 한 줄이
+        들어갈 만큼만 차지하고, 남는 폭은 조건 알약들이 쓴다.
+
+        key를 바꿔 초기화 때 검색창을 새로 마운트한다. 검색어를 비우는 것만으로는
+        부족하다 — 이미 비어 있던 상태에서 무언가 치다가 초기화를 누르면 `value`가
+        그대로 ''라 컴포넌트가 변화를 알 수 없고, 디바운스 대기 중이던 입력이
+        300ms 뒤에 되살아난다.
+      */}
+      <div className="content-card defect-toolbar">
+        <DefectSearchBar
+          key={searchResetToken}
+          value={filters.q}
+          onChange={(q) => applyFilters({ ...filters, q })}
+          disabled={loading && result === null}
+        />
+        <DefectFilterBar
+          filters={filters}
+          onChange={applyFilters}
+          disabled={loading && result === null}
+          onReset={() => setSearchResetToken((token) => token + 1)}
+        />
       </div>
 
       {lastEvent !== null && lastEvent.eventType === 'defect.created' && (
@@ -222,28 +283,40 @@ export function DefectManagePage() {
           {RISK_LEVEL_LABELS[lastEvent.riskLevel] ?? lastEvent.riskLevel}
         </p>
       )}
-      <div className="defect-layout">
-        <DefectFilter
-          filters={filters}
-          onChange={applyFilters}
-          disabled={loading && result === null}
-        />
-        {/* 지도는 목록 페이지와 별개로 뷰포트 bbox 기준의 GeoJSON을 직접 조회한다.
-            목록 20건에 묶이지 않고 화면에 보이는 범위 전체를 그린다. */}
-        <DefectMap
-          filters={filters}
-          selectedDefectId={selectedDefectId}
-          onSelect={setSelectedDefectId}
-          onChanged={refresh}
-        />
-      </div>
-      {canMerge && checkedVisible.length > 0 && (
-        <div className="defect-merge-bar" role="status">
+      {/* 조건이 위 툴바로 올라가면서 지도가 가로 폭을 전부 쓴다. 지도는 목록 페이지와
+          별개로 뷰포트 bbox 기준의 GeoJSON을 직접 조회한다 — 목록 20건에 묶이지 않고
+          화면에 보이는 범위 전체를 그린다. */}
+      <DefectMap
+        filters={filters}
+        selectedDefectId={selectedDefectId}
+        onSelect={setSelectedDefectId}
+        onChanged={refresh}
+        cardRef={mapCardRef}
+        centerRequest={centerRequest}
+        revealRequest={revealRequest}
+        // SSE로 새 결함이 오면 목록과 함께 지도도 다시 읽어야 마커가 올라온다.
+        reloadToken={reloadToken}
+      />
+      {/*
+        선택이 없어도 자리는 남겨둔다. 조건부로 렌더하면 체크할 때마다 이 줄이 생겼다
+        사라지며 아래 목록이 위아래로 움직여, 방금 누른 행이 손가락 밑에서 달아난다.
+        보이지 않을 때는 `visibility: hidden`이라 포커스·스크린리더에서도 빠지지만,
+        버튼도 함께 `disabled`로 잠근다.
+      */}
+      {canMerge && (
+        <div
+          className={`defect-merge-bar${
+            checkedVisible.length === 0 ? ' is-hidden' : ''
+          }`}
+          role="status"
+          aria-hidden={checkedVisible.length === 0}
+        >
           <span>{checkedVisible.length}건 선택됨</span>
           <div className="defect-merge-bar-actions">
             <button
               type="button"
               className="secondary-button"
+              disabled={checkedVisible.length === 0}
               onClick={() => setCheckedIds([])}
             >
               선택 해제
@@ -251,7 +324,7 @@ export function DefectManagePage() {
             <button
               type="button"
               className="primary-button"
-              // 한 건만 고르면 합칠 상대가 없다.
+              // 한 건만 고르면 합칠 상대가 없다. 0건도 여기서 함께 막힌다.
               disabled={checkedVisible.length < 2}
               onClick={() => setMerging(true)}
             >
@@ -277,7 +350,7 @@ export function DefectManagePage() {
         checkedIds={checkedVisible}
         onSortChange={changeSort}
         onPageChange={changePage}
-        onSelect={setSelectedDefectId}
+        onSelect={selectFromList}
         onToggleCheck={toggleCheck}
         onRetry={() => setReloadToken((token) => token + 1)}
       />

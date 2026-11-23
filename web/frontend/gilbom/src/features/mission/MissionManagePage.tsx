@@ -7,13 +7,12 @@ import {
   ClipboardList,
   Filter,
   History,
-  MapPinned,
   Plus,
-  RefreshCw,
   RotateCcw,
   Route,
   Timer,
   Trash2,
+  X,
 } from 'lucide-react'
 import {
   useCallback,
@@ -23,8 +22,9 @@ import {
   useState,
   type FormEvent,
 } from 'react'
-import { NavLink } from 'react-router'
+import { Link } from 'react-router'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
+import { lockBodyScroll } from '../../shared/dom/bodyScrollLock'
 import { useAuthentication } from '../auth/authenticationContext'
 import { MISSION_MANAGE } from '../auth/permissions'
 import { getRobotMap } from '../robot/robotApi'
@@ -67,7 +67,7 @@ const PAGE_SIZE = 20
 const emptyFilters: MissionFilters = {
   robotId: '',
   patrolAreaId: '',
-  scope: 'ACTIVE',
+  scope: 'ALL',
   status: '',
   startedFrom: '',
   startedTo: '',
@@ -79,8 +79,8 @@ const statusPresentation: Record<
 > = {
   CREATED: { label: '생성됨', tone: 'neutral' },
   READY: { label: '준비', tone: 'ready' },
-  RUNNING: { label: '진행 중', tone: 'running' },
-  PAUSED: { label: '일시정지', tone: 'paused' },
+  RUNNING: { label: '진행', tone: 'running' },
+  PAUSED: { label: '정지', tone: 'paused' },
   COMPLETED: { label: '완료', tone: 'completed' },
   CANCELLED: { label: '취소', tone: 'cancelled' },
   FAILED: { label: '실패', tone: 'failed' },
@@ -182,6 +182,8 @@ export function MissionManagePage() {
   const requestedDetailIdRef = useRef<string | null>(null)
   const catalogRequestedRef = useRef(false)
   const realtimeRefreshTimerRef = useRef<number | null>(null)
+  const createTriggerRef = useRef<HTMLButtonElement>(null)
+  const detailTriggerRef = useRef<HTMLButtonElement | null>(null)
   const [draftFilters, setDraftFilters] = useState<MissionFilters>(emptyFilters)
   const [appliedFilters, setAppliedFilters] = useState<MissionFilters>(emptyFilters)
   const [missions, setMissions] = useState<MissionListResponse | null>(null)
@@ -198,6 +200,7 @@ export function MissionManagePage() {
   const [plannedDurationMinutes, setPlannedDurationMinutes] = useState('60')
   const [scheduledStartAt, setScheduledStartAt] = useState('')
   const [createExpanded, setCreateExpanded] = useState(false)
+  const [detailOpen, setDetailOpen] = useState(false)
   const [listLoading, setListLoading] = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
   const [catalogLoading, setCatalogLoading] = useState(true)
@@ -407,6 +410,44 @@ export function MissionManagePage() {
   }, [])
 
   useEffect(() => {
+    if (!createExpanded) {
+      return undefined
+    }
+
+    const releaseBodyScroll = lockBodyScroll()
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !submitting) {
+        setCreateExpanded(false)
+        window.requestAnimationFrame(() => createTriggerRef.current?.focus())
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      releaseBodyScroll()
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [createExpanded, submitting])
+
+  useEffect(() => {
+    if (!detailOpen) {
+      return undefined
+    }
+
+    const releaseBodyScroll = lockBodyScroll()
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && missionAction === null) {
+        setDetailOpen(false)
+        window.requestAnimationFrame(() => detailTriggerRef.current?.focus())
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      releaseBodyScroll()
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [detailOpen, missionAction])
+
+  useEffect(() => {
     if (createAreaId.length === 0) {
       const timer = window.setTimeout(() => {
         setAutonomousRouteId('')
@@ -457,7 +498,12 @@ export function MissionManagePage() {
     }
   }, [createAreaId])
 
-  function selectMission(missionId: string) {
+  function selectMission(
+    missionId: string,
+    trigger: HTMLButtonElement,
+  ) {
+    detailTriggerRef.current = trigger
+    setDetailOpen(true)
     if (selectedMissionId === missionId) {
       return
     }
@@ -468,6 +514,14 @@ export function MissionManagePage() {
     setDetailError(null)
     setActionError(null)
     setNotice(null)
+  }
+
+  function closeDetailModal() {
+    if (missionAction !== null) {
+      return
+    }
+    setDetailOpen(false)
+    window.requestAnimationFrame(() => detailTriggerRef.current?.focus())
   }
 
   function handleFilter(event: FormEvent<HTMLFormElement>) {
@@ -511,6 +565,20 @@ export function MissionManagePage() {
     }
   }
 
+  function openCreateModal() {
+    setFormError(null)
+    setCreateExpanded(true)
+    void loadCatalogs()
+  }
+
+  function closeCreateModal() {
+    if (submitting) {
+      return
+    }
+    setCreateExpanded(false)
+    window.requestAnimationFrame(() => createTriggerRef.current?.focus())
+  }
+
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!canManage) {
@@ -522,7 +590,7 @@ export function MissionManagePage() {
       || autonomousRouteId.length === 0
     ) {
       setFormError(new Error(
-        'Robot과 순찰 구역을 선택하고 내부 경로 설정을 확인해주세요.',
+        '로봇과 순찰 구역을 선택하고 내부 경로 설정을 확인해주세요.',
       ))
       return
     }
@@ -559,6 +627,7 @@ export function MissionManagePage() {
       setPlannedDurationMinutes('60')
       setScheduledStartAt('')
       setCreateExpanded(false)
+      window.requestAnimationFrame(() => createTriggerRef.current?.focus())
       setDraftFilters({ ...emptyFilters })
       setAppliedFilters({ ...emptyFilters })
       setPage(0)
@@ -635,6 +704,7 @@ export function MissionManagePage() {
       requestedDetailIdRef.current = null
       setSelectedMissionId(null)
       setSelectedMission(null)
+      setDetailOpen(false)
       setHistory([])
       setDetailError(null)
       setPage(0)
@@ -651,43 +721,7 @@ export function MissionManagePage() {
   }
 
   return (
-    <section className="page-stack" aria-labelledby="mission-page-title">
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">PATROL MISSION</p>
-          <h2 id="mission-page-title">순찰 임무 관리</h2>
-          <p>배정된 Robot의 임무를 생성하고 진행 상태와 전이 이력을 확인합니다.</p>
-        </div>
-        <div className="mission-page-actions">
-          <button
-            className="secondary-button button-with-icon"
-            type="button"
-            onClick={refresh}
-            disabled={listLoading}
-          >
-            <RefreshCw size={17} aria-hidden="true" />
-            새로고침
-          </button>
-          <NavLink
-            className="secondary-button button-with-icon"
-            to="/patrol-areas"
-          >
-            <MapPinned size={17} aria-hidden="true" />
-            구역 관리
-          </NavLink>
-          {canManage ? (
-            <button
-              className="primary-button button-with-icon"
-              type="button"
-              onClick={() => setCreateExpanded(true)}
-            >
-              <Plus size={17} aria-hidden="true" />
-              새 임무
-            </button>
-          ) : null}
-        </div>
-      </div>
-
+    <section className="page-stack" aria-label="순찰 임무 관리">
       <div className="summary-grid" aria-label="현재 임무 현황">
         <article className="summary-card">
           <span>조회된 전체 임무</span>
@@ -697,33 +731,54 @@ export function MissionManagePage() {
         <article className="summary-card">
           <span>현재 페이지 진행 중</span>
           <strong>{missions === null ? '—' : pageRunningCount}</strong>
-          <small>RUNNING 상태</small>
+          <small>진행 상태</small>
         </article>
         <article className="summary-card">
           <span>확인 필요</span>
           <strong>{missions === null ? '—' : pageAttentionCount}</strong>
-          <small>PAUSED·FAILED 상태</small>
+          <small>정지·실패 상태</small>
         </article>
       </div>
 
       {canManage ? (
-        <details
-          className="content-card mission-create-card"
-          open={createExpanded}
-          onToggle={(event) => {
-            const nextOpen = event.currentTarget.open
-            setCreateExpanded(nextOpen)
-            if (nextOpen) {
-              void loadCatalogs()
+        createExpanded ? (
+        <div
+          className="mission-create-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeCreateModal()
             }
           }}
         >
-          <summary>
-            <Plus size={17} aria-hidden="true" />
-            순찰 임무 생성
-          </summary>
-          <p className="mission-create-description">
-            활성 Robot과 순찰 구역, 계획 시간을 설정합니다. 경로는 로봇이
+          <section
+            className="mission-create-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mission-create-modal-title"
+            aria-describedby="mission-create-modal-description"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+          <div className="mission-create-modal-heading">
+            <div>
+              <p className="eyebrow">PATROL MISSION REGISTRATION</p>
+              <h3 id="mission-create-modal-title">순찰 임무 생성</h3>
+            </div>
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="새 임무 창 닫기"
+              onClick={closeCreateModal}
+              disabled={submitting}
+            >
+              <X size={18} aria-hidden="true" />
+            </button>
+          </div>
+          <p
+            id="mission-create-modal-description"
+            className="mission-create-description"
+          >
+            활성 로봇과 순찰 구역, 계획 시간을 설정합니다. 경로는 로봇이
             구역 안에서 자율 결정하며 임무 코드는 서버에서 자동 생성됩니다.
           </p>
           {catalogError ? (
@@ -737,57 +792,55 @@ export function MissionManagePage() {
             </div>
           ) : null}
           <form className="mission-create-form" onSubmit={handleCreate}>
-            <label className="admin-form-field" htmlFor="mission-create-robot">
-              Robot
-              <select
-                id="mission-create-robot"
-                value={createRobotId}
-                onChange={(event) => setCreateRobotId(event.target.value)}
-                disabled={catalogLoading || submitting}
-                required
-              >
-                <option value="">
-                  {catalogLoading ? 'Robot 불러오는 중…' : 'Robot 선택'}
-                </option>
-                {activeRobots.map((robot) => (
-                  <option key={robot.robotId} value={robot.robotId}>
-                    {robot.robotName} ({robot.mqttId})
+            <div className="mission-create-selection-fields">
+              <label className="admin-form-field" htmlFor="mission-create-robot">
+                로봇
+                <select
+                  id="mission-create-robot"
+                  autoFocus
+                  value={createRobotId}
+                  onChange={(event) => setCreateRobotId(event.target.value)}
+                  disabled={catalogLoading || submitting}
+                  required
+                >
+                  <option value="">
+                    {catalogLoading ? '로봇 불러오는 중…' : '로봇 선택'}
                   </option>
-                ))}
-              </select>
-              <small>
-                ACTIVE 상태이며 CREATED·READY·RUNNING·PAUSED 임무가 없는
-                Robot만 표시됩니다. 완료·취소·실패 후에는 다시 선택할 수 있습니다.
-                Credential은 Robot 관리에서 발급·회전합니다.
-              </small>
-            </label>
-            <label className="admin-form-field" htmlFor="mission-create-area">
-              순찰 구역
-              <select
-                id="mission-create-area"
-                value={createAreaId}
-                onChange={(event) => {
-                  setCreateAreaId(event.target.value)
-                  setAutonomousRouteId('')
-                }}
-                disabled={catalogLoading || submitting}
-                required
-              >
-                <option value="">
-                  {catalogLoading ? '구역 불러오는 중…' : '활성 구역 선택'}
-                </option>
-                {activeAreas.map((area) => (
-                  <option key={area.patrolAreaId} value={area.patrolAreaId}>
-                    {area.areaName} ({area.areaCode})
-                  </option>
-                ))}
-              </select>
-              <small>
-                등록된 ACTIVE 구역만 표시됩니다. 새 구역은{' '}
-                <NavLink to="/patrol-areas">순찰 구역 관리</NavLink>에서
-                등록하세요.
-              </small>
-            </label>
+                  {activeRobots.map((robot) => (
+                    <option key={robot.robotId} value={robot.robotId}>
+                      {robot.robotName} ({robot.mqttId})
+                    </option>
+                  ))}
+                </select>
+                <small>
+                  온라인 상태이며 임무가 부여되지 않은 로봇만 선택할 수 있습니다.
+                </small>
+              </label>
+              <label className="admin-form-field" htmlFor="mission-create-area">
+                순찰 구역
+                <select
+                  id="mission-create-area"
+                  value={createAreaId}
+                  onChange={(event) => {
+                    setCreateAreaId(event.target.value)
+                    setAutonomousRouteId('')
+                  }}
+                  disabled={catalogLoading || submitting}
+                  required
+                >
+                  {catalogLoading ? (
+                    <option value="">구역 불러오는 중…</option>
+                  ) : (
+                    <option value="" disabled hidden />
+                  )}
+                  {activeAreas.map((area) => (
+                    <option key={area.patrolAreaId} value={area.patrolAreaId}>
+                      {area.areaName} ({area.areaCode})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
             {selectedCreateArea ? (
               <PatrolAreaSelectionPreview
                 area={selectedCreateArea}
@@ -807,7 +860,6 @@ export function MissionManagePage() {
                 disabled={submitting}
                 required
               />
-              <small>진행률과 예상 완료 시각 계산의 기준입니다.</small>
             </label>
             <label className="admin-form-field" htmlFor="mission-create-schedule">
               예약 시작 시각
@@ -818,7 +870,6 @@ export function MissionManagePage() {
                 onChange={(event) => setScheduledStartAt(event.target.value)}
                 disabled={submitting}
               />
-              <small>선택 사항 · 즉시 생성 시 비워두세요.</small>
             </label>
             <button
               className="primary-button mission-create-submit"
@@ -837,7 +888,9 @@ export function MissionManagePage() {
               {submitting ? '생성 중…' : '임무 생성'}
             </button>
           </form>
-        </details>
+          </section>
+        </div>
+        ) : null
       ) : (
         <div className="mission-view-only" role="note">
           조회 전용 권한입니다. 임무 생성은 <code>MISSION_MANAGE</code> 권한이
@@ -853,7 +906,7 @@ export function MissionManagePage() {
 
       <form className="content-card mission-filter-grid" onSubmit={handleFilter}>
         <label className="admin-form-field" htmlFor="mission-filter-robot">
-          Robot
+          로봇
           <select
             id="mission-filter-robot"
             value={draftFilters.robotId}
@@ -862,7 +915,7 @@ export function MissionManagePage() {
               robotId: event.target.value,
             }))}
           >
-            <option value="">전체 Robot</option>
+            <option value="">전체 로봇</option>
             {robots.map((robot) => (
               <option key={robot.robotId} value={robot.robotId}>
                 {robot.robotName} ({robot.mqttId})
@@ -899,9 +952,9 @@ export function MissionManagePage() {
               status: '',
             }))}
           >
+            <option value="ALL">전체 임무</option>
             <option value="ACTIVE">진행 중·대기 임무</option>
             <option value="TERMINAL">종료된 임무</option>
-            <option value="ALL">전체 임무</option>
           </select>
         </label>
         <label className="admin-form-field" htmlFor="mission-filter-status">
@@ -928,7 +981,7 @@ export function MissionManagePage() {
           </select>
         </label>
         <label className="admin-form-field" htmlFor="mission-filter-from">
-          시작 시각 From
+          시작
           <input
             id="mission-filter-from"
             type="datetime-local"
@@ -940,7 +993,7 @@ export function MissionManagePage() {
           />
         </label>
         <label className="admin-form-field" htmlFor="mission-filter-to">
-          시작 시각 To
+          종료
           <input
             id="mission-filter-to"
             type="datetime-local"
@@ -980,7 +1033,20 @@ export function MissionManagePage() {
               <h3>임무 목록</h3>
               <p>최근 생성된 임무부터 표시합니다.</p>
             </div>
-            <span className="status-badge">{missions?.totalElements ?? 0}건</span>
+            <div className="table-heading-actions">
+              <span className="status-badge">{missions?.totalElements ?? 0}건</span>
+              {canManage ? (
+                <button
+                  ref={createTriggerRef}
+                  className="primary-button button-with-icon"
+                  type="button"
+                  onClick={openCreateModal}
+                >
+                  <Plus size={17} aria-hidden="true" />
+                  새 임무
+                </button>
+              ) : null}
+            </div>
           </div>
 
           {listLoading && missions === null ? (
@@ -1002,7 +1068,7 @@ export function MissionManagePage() {
                 <thead>
                   <tr>
                     <th scope="col">임무</th>
-                    <th scope="col">Robot</th>
+                    <th scope="col">로봇</th>
                     <th scope="col">순찰 구역</th>
                     <th scope="col">상태</th>
                     <th scope="col">진행률</th>
@@ -1052,7 +1118,10 @@ export function MissionManagePage() {
                         <button
                           className="mission-select-button"
                           type="button"
-                          onClick={() => selectMission(mission.missionId)}
+                          onClick={(event) => selectMission(
+                            mission.missionId,
+                            event.currentTarget,
+                          )}
                           disabled={missionAction !== null}
                           aria-label={`${mission.missionCode} 상세 보기`}
                         >
@@ -1093,11 +1162,54 @@ export function MissionManagePage() {
           </div>
         </div>
 
+        {detailOpen ? (
+        <div
+          className="mission-detail-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeDetailModal()
+            }
+          }}
+        >
         <aside
-          className="content-card mission-detail-card"
+          className="content-card mission-detail-card mission-detail-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="mission-detail-modal-title"
           aria-live="polite"
           data-testid="mission-detail"
+          onMouseDown={(event) => event.stopPropagation()}
         >
+          <div className="mission-detail-modal-heading">
+            <div>
+              <p className="eyebrow">PATROL MISSION DETAIL</p>
+              <h3 id="mission-detail-modal-title">
+                {selectedMission?.missionCode ?? '임무 상세'}
+              </h3>
+            </div>
+            <div className="mission-detail-modal-heading-actions">
+              {selectedMission ? (
+                <Link
+                  className="secondary-button button-with-icon mission-detail-robot-link"
+                  to={`/robots/${encodeURIComponent(selectedMission.robotId)}`}
+                  aria-label={`로봇 상세 페이지로 이동: ${selectedMission.robotName}`}
+                >
+                  <Bot size={16} aria-hidden="true" />
+                  로봇 상세
+                </Link>
+              ) : null}
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="임무 상세 창 닫기"
+                onClick={closeDetailModal}
+                disabled={missionAction !== null}
+              >
+                <X size={18} aria-hidden="true" />
+              </button>
+            </div>
+          </div>
           {detailLoading && selectedMission === null ? (
             <div className="admin-loading" role="status">
               <span className="loading-spinner" aria-hidden="true" />
@@ -1123,6 +1235,28 @@ export function MissionManagePage() {
                   {getApiErrorMessage(detailError)}
                 </div>
               ) : null}
+
+              <div className="mission-detail-map-primary">
+                <MissionMap
+                  missionId={selectedMission.missionId}
+                  missionCode={selectedMission.missionCode}
+                  patrolAreaName={selectedMission.patrolAreaName}
+                />
+              </div>
+
+              {(
+                selectedMission.status === 'READY'
+                || selectedMission.status === 'RUNNING'
+                || selectedMission.status === 'PAUSED'
+              ) ? (
+                <MissionCommandActions
+                  key={`${selectedMission.missionId}-${selectedMission.status}`}
+                  mission={selectedMission}
+                  realtimeRevision={commandRealtimeRevision}
+                  onCommandCreated={refresh}
+                />
+              ) : null}
+
               <div className="mission-detail-heading">
                 <div>
                   <MissionStatusBadge status={selectedMission.status} />
@@ -1162,19 +1296,6 @@ export function MissionManagePage() {
                 <div className="page-alert mission-action-alert" role="alert">
                   {getApiErrorMessage(actionError)}
                 </div>
-              ) : null}
-
-              {(
-                selectedMission.status === 'READY'
-                || selectedMission.status === 'RUNNING'
-                || selectedMission.status === 'PAUSED'
-              ) ? (
-                <MissionCommandActions
-                  key={`${selectedMission.missionId}-${selectedMission.status}`}
-                  mission={selectedMission}
-                  realtimeRevision={commandRealtimeRevision}
-                  onCommandCreated={refresh}
-                />
               ) : null}
 
               <div
@@ -1229,15 +1350,9 @@ export function MissionManagePage() {
                 </div>
               </div>
 
-              <MissionMap
-                missionId={selectedMission.missionId}
-                missionCode={selectedMission.missionCode}
-                patrolAreaName={selectedMission.patrolAreaName}
-              />
-
               <dl className="mission-detail-grid">
                 <div>
-                  <dt><Bot size={14} aria-hidden="true" /> Robot</dt>
+                  <dt><Bot size={14} aria-hidden="true" /> 로봇</dt>
                   <dd>{selectedMission.robotName}</dd>
                 </div>
                 <div>
@@ -1311,6 +1426,8 @@ export function MissionManagePage() {
             </>
           )}
         </aside>
+        </div>
+        ) : null}
       </div>
     </section>
   )

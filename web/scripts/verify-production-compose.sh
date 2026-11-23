@@ -4,6 +4,7 @@ set -eu
 
 COMPOSE_FILE=${COMPOSE_FILE:-compose.prod.yaml}
 BUILD_COMPOSE_FILE=${BUILD_COMPOSE_FILE:-compose.build.yaml}
+SMOKE_COMPOSE_FILE=${SMOKE_COMPOSE_FILE:-compose.smoke.yaml}
 ENV_FILE=${ENV_FILE:-}
 RUNTIME_ENV_FILE=${RUNTIME_ENV_FILE:-}
 IMAGE_ENV_FILE=${IMAGE_ENV_FILE:-}
@@ -83,6 +84,23 @@ build_compose() {
   fi
 }
 
+smoke_compose() {
+  if [ -n "$ENV_FILE" ]; then
+    docker compose \
+      --env-file "$ENV_FILE" \
+      -f "$COMPOSE_FILE" \
+      -f "$SMOKE_COMPOSE_FILE" \
+      "$@"
+  else
+    docker compose \
+      --env-file "$RUNTIME_ENV_FILE" \
+      --env-file "$IMAGE_ENV_FILE" \
+      -f "$COMPOSE_FILE" \
+      -f "$SMOKE_COMPOSE_FILE" \
+      "$@"
+  fi
+}
+
 compose config --quiet
 compose --profile certificate config --quiet
 compose --profile certificate config > "$CHECK_DIR/full.yaml"
@@ -95,6 +113,23 @@ GILBOM_LLM_API_KEY_SECRET_FILE=/dev/null \
   compose config > "$CHECK_DIR/no-llm-secret.yaml"
 assert_contains "$CHECK_DIR/no-llm-secret.yaml" "file: /dev/null" \
   "disabled LLM deployment must resolve without a real API key file"
+assert_contains "$CHECK_DIR/no-llm-secret.yaml" "GILBOM_LLM_ENABLED: \"true\"" \
+  "production Compose must keep the LLM feature gate enabled"
+assert_contains "$CHECK_DIR/no-llm-secret.yaml" "GILBOM_LLM_PROMPT_VERSION: report-v3" \
+  "production Compose must select the current report-v3 prompt"
+assert_contains "$CHECK_DIR/no-llm-secret.yaml" "GILBOM_LLM_IMAGE_INPUT_ENABLED: \"true\"" \
+  "production Compose must enable report image input"
+assert_contains "$CHECK_DIR/no-llm-secret.yaml" "GILBOM_LLM_IMAGE_DEIDENTIFICATION_APPROVED: \"true\"" \
+  "production Compose must carry the approved image policy"
+GILBOM_LLM_ENABLED=false \
+GILBOM_LLM_API_KEY_SECRET_FILE=/dev/null \
+  smoke_compose config > "$CHECK_DIR/smoke-no-llm.yaml"
+assert_contains "$CHECK_DIR/smoke-no-llm.yaml" "GILBOM_LLM_ENABLED: \"false\"" \
+  "report smoke must be able to disable the production LLM feature gate"
+GILBOM_LLM_ENABLED=true \
+  smoke_compose config > "$CHECK_DIR/smoke-llm-canary.yaml"
+assert_contains "$CHECK_DIR/smoke-llm-canary.yaml" "GILBOM_LLM_ENABLED: \"true\"" \
+  "report smoke must be able to enable the explicit GMS canary"
 
 extract_service() {
   service=$1
@@ -170,6 +205,12 @@ assert_contains "$CHECK_DIR/backend.yaml" "condition: service_healthy" \
 assert_contains "$CHECK_DIR/backend.yaml" \
   "GILBOM_HEALTH_READINESS_COMPONENTS: readinessState,db,flywayReadiness,storageReadiness" \
   "Backend readiness must include DB, Flyway, and writable storage"
+assert_contains "$CHECK_DIR/backend.yaml" \
+  "GILBOM_STORAGE_UPLOAD_URL: https://" \
+  "Backend must receive the public HTTPS image upload URL"
+assert_not_contains "$CHECK_DIR/backend.yaml" \
+  "GILBOM_STORAGE_UPLOAD_URL: http://localhost" \
+  "Production image upload URL must not point Jetson to localhost"
 for llm_runtime_setting in \
   GILBOM_LLM_CONNECT_TIMEOUT \
   GILBOM_LLM_READ_TIMEOUT \

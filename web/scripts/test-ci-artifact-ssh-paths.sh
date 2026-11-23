@@ -56,10 +56,14 @@ printf 'frontend-vulnerabilities\n' \
 printf '{"status":"PASS"}\n' \
   > "$RELEASE_DIR/vulnerabilities/policy-summary.json"
 printf 'images\n' > "$RELEASE_DIR/images.tar.zst"
+printf 'source\n' \
+  > "$RELEASE_DIR/gilbom-web-$RELEASE_SHA.tar.zst"
 printf '{"fixture":"cosign-bundle"}\n' \
   > "$RELEASE_DIR/images.tar.zst.sigstore.json"
 printf '{"releaseSha":"%s"}\n' "$RELEASE_SHA" \
   > "$RELEASE_DIR/build-metadata.json"
+printf 'services:\n  backend:\n    image: gilbom-backend:%s\n' \
+  "$RELEASE_SHA" > "$RELEASE_DIR/compose.prod.yaml"
 (
   cd "$RELEASE_DIR"
   sha256sum images.tar.zst > images.tar.zst.sha256
@@ -67,6 +71,8 @@ printf '{"releaseSha":"%s"}\n' "$RELEASE_SHA" \
     | LC_ALL=C sort -z \
     | xargs -0 sha256sum > SHA256SUMS
 )
+printf '{"fixture":"manifest-cosign-bundle"}\n' \
+  > "$RELEASE_DIR/SHA256SUMS.sigstore.json"
 
 cp "$SCRIPT_DIR/test-ci-artifact-ssh-paths.sh" "$FAKE_BIN/ssh"
 cp "$SCRIPT_DIR/test-ci-artifact-ssh-paths.sh" "$FAKE_BIN/scp"

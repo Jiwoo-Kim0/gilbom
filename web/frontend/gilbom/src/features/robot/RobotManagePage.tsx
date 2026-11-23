@@ -1,7 +1,6 @@
 import {
   Filter,
   Plus,
-  RefreshCw,
   RotateCcw,
   Search,
   X,
@@ -58,9 +57,6 @@ function toRobotStatus(robot: RobotListItem): RobotStatus {
   ) {
     return 'warning'
   }
-  if (robot.charging === true) {
-    return 'charging'
-  }
   return 'online'
 }
 
@@ -70,7 +66,6 @@ function toFleetItem(robot: RobotListItem): RobotFleetItem {
     name: robot.robotName,
     mqttId: robot.mqttId,
     serialNumber: robot.serialNumber,
-    status: toRobotStatus(robot),
     connectivityStatus: robot.connectivityStatus,
     batteryPercent: robot.batteryPercent,
     jetsonTempC: robot.jetsonTempC,
@@ -102,6 +97,7 @@ function toMarker(
     lng: robot.longitude,
     headingDeg: robot.headingDeg,
     missionStatus: robot.missionStatus,
+    connectivityStatus: robot.connectivityStatus,
     status: listItem === undefined
       ? robot.connectivityStatus === 'ONLINE' ? 'online' : 'offline'
       : toRobotStatus(listItem),
@@ -218,10 +214,6 @@ export function RobotManagePage() {
       .map((robot) => toMarker(robot, listById.get(robot.robotId)))
       .filter((robot): robot is RobotMarker => robot !== null)
   }, [mapRobots, robots])
-  const attentionCount = summary === null
-    ? null
-    : summary.warningRobots + summary.criticalRobots
-
   function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const normalizedSearch = searchDraft.trim()
@@ -282,36 +274,7 @@ export function RobotManagePage() {
   }
 
   return (
-    <section className="page-stack" aria-labelledby="robot-page-title">
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">FLEET</p>
-          <h2 id="robot-page-title">로봇 상태 모니터링</h2>
-          <p>권한 범위 내 로봇의 최신 위치 및 운영 데이터를 추적합니다.</p>
-        </div>
-        <div className="robot-page-actions">
-          {canRegister ? (
-            <button
-              className="primary-button button-with-icon"
-              type="button"
-              onClick={openRegistration}
-            >
-              <Plus size={16} aria-hidden="true" />
-              로봇 등록
-            </button>
-          ) : null}
-          <button
-            className="secondary-button"
-            type="button"
-            onClick={() => void loadSnapshot()}
-            disabled={loading}
-          >
-            <RefreshCw size={16} aria-hidden="true" />
-            새로고침
-          </button>
-        </div>
-      </div>
-
+    <section className="page-stack" aria-label="로봇 상태 모니터링">
       {registrationNotice ? (
         <div className="page-alert page-alert-success" role="status">
           {registrationNotice}
@@ -324,27 +287,10 @@ export function RobotManagePage() {
           {streamStatusLabel[streamStatus]}
         </span>
         <span>서버 90초 기준 ONLINE/OFFLINE</span>
-        <span>정본 갱신 {formatDateTime(lastSyncedAt)}</span>
+        <span>전체 현황 갱신 {formatDateTime(lastSyncedAt)}</span>
         <span>Heartbeat {formatDateTime(lastHeartbeatAt)}</span>
       </div>
 
-      <div className="summary-grid" aria-label="로봇 현황">
-        <article className="summary-card">
-          <span>전체 로봇</span>
-          <strong>{summary?.totalRobots ?? '—'}</strong>
-          <small>현재 사용자 조회 범위</small>
-        </article>
-        <article className="summary-card">
-          <span>온라인</span>
-          <strong>{summary?.onlineRobots ?? '—'}</strong>
-          <small>오프라인 {summary?.offlineRobots ?? '—'}대</small>
-        </article>
-        <article className="summary-card">
-          <span>확인 필요</span>
-          <strong>{attentionCount ?? '—'}</strong>
-          <small>경고·심각 상태 합계</small>
-        </article>
-      </div>
 
       <form className="content-card robot-filter-bar" onSubmit={handleSearch}>
         <label htmlFor="robot-search">
@@ -384,9 +330,22 @@ export function RobotManagePage() {
         </div>
       ) : null}
 
-      <RobotMap markers={markerItems} />
+      <RobotMap markers={markerItems} summary={summary} />
 
-      <RobotFleetGrid robots={fleetItems} loading={loading} />
+      <RobotFleetGrid
+        robots={fleetItems}
+        loading={loading}
+        headingAction={canRegister ? (
+          <button
+            className="primary-button button-with-icon"
+            type="button"
+            onClick={openRegistration}
+          >
+            <Plus size={16} aria-hidden="true" />
+            로봇 등록
+          </button>
+        ) : null}
+      />
 
       <div className="pagination" aria-label="로봇 목록 페이지">
         <button

@@ -18,6 +18,7 @@ type CommandStep = {
   label: string
   reason?: string
   safetyConfirmation?: boolean
+  immediate?: boolean
 }
 
 const COMMAND_STEPS: readonly CommandStep[] = [
@@ -28,7 +29,7 @@ const COMMAND_STEPS: readonly CommandStep[] = [
   {
     commandType: 'PAUSE_MISSION',
     label: '일시정지',
-    reason: '정상 왕복 일시정지',
+    immediate: true,
   },
   {
     commandType: 'RESUME_MISSION',
@@ -38,7 +39,7 @@ const COMMAND_STEPS: readonly CommandStep[] = [
   {
     commandType: 'EMERGENCY_STOP',
     label: '긴급정지',
-    reason: '정상 왕복 긴급정지',
+    immediate: true,
   },
   {
     commandType: 'CLEAR_EMERGENCY_STOP',
@@ -85,28 +86,30 @@ test('긴급정지 복구를 포함한 일곱 명령이 정상 왕복한다', as
       exact: true,
     })
     await expect(commandButton).toBeEnabled({ timeout: 15_000 })
+    const responsePromise = page.waitForResponse((response) => (
+      response.request().method() === 'POST'
+      && response.url().endsWith(`/api/v1/robots/${robotId}/commands`)
+    ))
     await commandButton.click()
 
     const dialog = page.getByRole('dialog', {
       name: `${step.label} 확인`,
     })
-    await expect(dialog).toBeVisible()
-
-    if (step.reason !== undefined) {
-      await dialog.getByLabel('명령 사유').fill(step.reason)
+    if (step.immediate === true) {
+      await expect(dialog).toHaveCount(0)
+    } else {
+      await expect(dialog).toBeVisible()
+      if (step.reason !== undefined) {
+        await dialog.getByLabel('명령 사유').fill(step.reason)
+      }
+      if (step.safetyConfirmation === true) {
+        await dialog.locator('input[type="checkbox"]').check()
+      }
+      await dialog.getByRole('button', {
+        name: `${step.label} 실행`,
+        exact: true,
+      }).click()
     }
-    if (step.safetyConfirmation === true) {
-      await dialog.locator('input[type="checkbox"]').check()
-    }
-
-    const responsePromise = page.waitForResponse((response) => (
-      response.request().method() === 'POST'
-      && response.url().endsWith(`/api/v1/robots/${robotId}/commands`)
-    ))
-    await dialog.getByRole('button', {
-      name: `${step.label} 실행`,
-      exact: true,
-    }).click()
     const response = await responsePromise
     expect(response.status()).toBe(201)
     const command = await response.json() as {
@@ -116,12 +119,19 @@ test('긴급정지 복구를 포함한 일곱 명령이 정상 왕복한다', as
     expect(command.commandType).toBe(step.commandType)
     commandIds.push(command.commandId)
 
-    const created = dialog.locator('.command-created-result')
-    await expect(created).toContainText(command.commandId)
-    await dialog.getByRole('button', {
-      name: '닫기',
-      exact: true,
-    }).click()
+    if (step.immediate === true) {
+      await expect(page.getByText(
+        `${step.label} 명령을 즉시 발행했습니다.`,
+        { exact: true },
+      )).toBeVisible()
+    } else {
+      const created = dialog.locator('.command-created-result')
+      await expect(created).toContainText(command.commandId)
+      await dialog.getByRole('button', {
+        name: '닫기',
+        exact: true,
+      }).click()
+    }
 
     const completedRow = page.locator(
       `[data-command-id="${command.commandId}"]`
@@ -142,8 +152,8 @@ test('긴급정지 복구를 포함한 일곱 명령이 정상 왕복한다', as
     await expect(
       detail.locator('[data-result-status="COMPLETED"]'),
     ).toBeVisible()
-    await expect(detail.getByText('Robot 수신 ACK')).toBeVisible()
-    await expect(detail.getByText('최종 Result')).toBeVisible()
+    await expect(detail.getByText('로봇 수신 확인')).toBeVisible()
+    await expect(detail.getByText('최종 결과')).toBeVisible()
     await detail.getByRole('button', {
       name: '명령 상세 닫기',
     }).click()

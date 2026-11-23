@@ -150,7 +150,7 @@ class ReportGenerationDataRepositoryIntegrationTest {
         assertThat(snapshot.aggregate().observationCount())
                 .isEqualTo(1);
         assertThat(snapshot.statusCounts()).hasSize(6);
-        assertThat(snapshot.typeCounts()).hasSize(3);
+        assertThat(snapshot.typeCounts()).hasSize(4);
         assertThat(snapshot.riskCounts()).hasSize(4);
         assertThat(snapshot.evidence()).singleElement()
                 .satisfies(evidence -> {
@@ -200,7 +200,7 @@ class ReportGenerationDataRepositoryIntegrationTest {
                 service.prepare(ADMIN_ID, llmRequest(DEFECT_ID));
 
         assertThat(prepared.pipelineRequest().templateTitle())
-                .isEqualTo("INC-20260703-000001 결함 보고서");
+                .isEqualTo("INC-20260703-000001 보고서");
         assertThat(prepared.pipelineRequest().input().defectEvidence())
                 .singleElement()
                 .satisfies(evidence ->

@@ -7,6 +7,7 @@ umask 077
 # 이 root entrypoint의 모든 운영 경로는 고정값이다. deploy 호출자는 인자나
 # 환경변수로 Artifact, Compose, 환경 파일, Secret, backup 위치를 바꿀 수 없다.
 ARTIFACT_ROOT=/opt/gilbom/artifacts
+DEPLOY_PARENT=/opt/gilbom
 DEPLOY_ROOT=/opt/gilbom/deploy
 COMPOSE_PATH="$DEPLOY_ROOT/compose.prod.yaml"
 RUNTIME_ENV_PATH="$DEPLOY_ROOT/runtime.env"
@@ -31,6 +32,9 @@ SAFE_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 rollback_armed=false
 approved_rollback_armed=false
 handling_deploy_failure=false
+source_stage_dir=""
+source_previous_dir=""
+source_tree_swapped=false
 
 fail() {
   reason="$1"
@@ -91,7 +95,7 @@ export PATH HOME
 unset CDPATH ENV BASH_ENV GIT_DIR GIT_WORK_TREE
 
 for command in \
-  awk basename bash chown chmod cmp cp cut date dirname docker find flock \
+  awk basename bash cat chown chmod cmp cp cut date dirname docker find flock \
   grep install jq mktemp mv printenv rm sed sha256sum sleep stat tail tar tr \
   wc zstd
 do
@@ -130,6 +134,19 @@ verify_release_signature() {
       --key "$COSIGN_PUBLIC_KEY" \
       --bundle "$bundle" \
       "$archive" >/dev/null
+}
+
+verify_release_manifest_signature() {
+  directory="$1"
+  manifest="$directory/SHA256SUMS"
+  bundle="$directory/SHA256SUMS.sigstore.json"
+  [ -f "$manifest" ] && [ ! -L "$manifest" ] && [ -s "$manifest" ] \
+    && [ -f "$bundle" ] && [ ! -L "$bundle" ] && [ -s "$bundle" ] \
+    && "$COSIGN_BIN" verify-blob \
+      --insecure-ignore-tlog \
+      --key "$COSIGN_PUBLIC_KEY" \
+      --bundle "$bundle" \
+      "$manifest" >/dev/null
 }
 
 assert_root_readonly_tree() {
@@ -180,6 +197,15 @@ chmod 0600 "$LOCK_PATH"
 work_dir="$(mktemp -d "/var/tmp/gilbom-deploy-$release_sha.XXXXXX")"
 image_env_temp=""
 cleanup() {
+  if [ "$source_tree_swapped" = true ]; then
+    restore_deploy_source_tree >/dev/null 2>&1 || true
+  fi
+  if [ -n "$source_stage_dir" ] && [ -d "$source_stage_dir" ]; then
+    rm -r -- "$source_stage_dir" >/dev/null 2>&1 || true
+  fi
+  if [ -n "$source_previous_dir" ] && [ -d "$source_previous_dir" ]; then
+    rm -r -- "$source_previous_dir" >/dev/null 2>&1 || true
+  fi
   if [ -n "$image_env_temp" ] && [ -f "$image_env_temp" ]; then
     rm -f -- "$image_env_temp" >/dev/null 2>&1 || true
   fi
@@ -190,6 +216,10 @@ trap cleanup EXIT HUP INT TERM
 # 4-6. 입력 SHA에서 Artifact 경로를 내부 생성하고 모든 고정 입력 경계를
 # 검증한다.
 artifact_dir="$ARTIFACT_ROOT/$release_sha"
+candidate_compose_path="$artifact_dir/compose.prod.yaml"
+source_archive_name="gilbom-web-$release_sha.tar.zst"
+source_archive_path="$artifact_dir/$source_archive_name"
+assert_root_directory "$DEPLOY_PARENT"
 assert_root_directory "$DEPLOY_ROOT"
 assert_root_directory "$SECRET_ROOT"
 assert_root_directory "$BACKUP_ROOT"
@@ -224,14 +254,17 @@ assert_root_file "$COSIGN_PUBLIC_KEY"
 [ -d "$artifact_dir" ] && [ ! -L "$artifact_dir" ] \
   || fail "promoted release artifact is missing or symlinked"
 assert_root_readonly_tree "$artifact_dir"
-[ "$(find "$artifact_dir" -type f | wc -l | tr -d ' ')" -eq 10 ] \
-  || fail "promoted release artifact must contain exactly ten files"
+[ "$(find "$artifact_dir" -type f | wc -l | tr -d ' ')" -eq 13 ] \
+  || fail "promoted release artifact must contain exactly thirteen files"
 
 for relative_path in \
   SHA256SUMS \
+  SHA256SUMS.sigstore.json \
+  compose.prod.yaml \
   images.tar.zst \
   images.tar.zst.sigstore.json \
   images.tar.zst.sha256 \
+  "$source_archive_name" \
   build-metadata.json \
   sbom/backend.sbom.json \
   sbom/frontend.sbom.json \
@@ -244,7 +277,10 @@ do
     || fail "required promoted artifact is missing, empty, or unsafe: $relative_path"
 done
 
-# 7. 승격 디렉터리 전체와 image archive 전용 checksum을 모두 검사한다.
+# 7. 서명된 전체 manifest를 먼저 검증한 뒤 디렉터리 전체와 image archive
+# 전용 checksum을 모두 검사한다.
+verify_release_manifest_signature "$artifact_dir" \
+  || fail "promoted complete release manifest signature verification failed"
 (
   cd "$artifact_dir"
   sha256sum -c SHA256SUMS
@@ -259,6 +295,12 @@ frontend_image="gilbom-frontend:$release_sha"
 cosign_public_key_sha256="$(
   sha256sum "$COSIGN_PUBLIC_KEY" | awk '{print $1}'
 )"
+candidate_compose_sha256="$(
+  sha256sum "$candidate_compose_path" | awk '{print $1}'
+)"
+source_archive_sha256="$(
+  sha256sum "$source_archive_path" | awk '{print $1}'
+)"
 
 # 8. metadata의 release SHA, image tag/ID, Flyway 증거를 검증한다.
 jq -e \
@@ -266,6 +308,9 @@ jq -e \
   --arg backend_image "$backend_image" \
   --arg frontend_image "$frontend_image" \
   --arg cosign_public_key_sha256 "$cosign_public_key_sha256" \
+  --arg compose_sha256 "$candidate_compose_sha256" \
+  --arg source_archive_name "$source_archive_name" \
+  --arg source_archive_sha256 "$source_archive_sha256" \
   '
     .schemaVersion == 1
     and .releaseSha == $release_sha
@@ -284,6 +329,10 @@ jq -e \
       .artifacts.images.signature.bundle.path
       == "images.tar.zst.sigstore.json"
     )
+    and .artifacts.source.path == $source_archive_name
+    and .artifacts.source.sha256 == $source_archive_sha256
+    and .artifacts.compose.path == "compose.prod.yaml"
+    and .artifacts.compose.sha256 == $compose_sha256
     and (.flyway.migrations | type == "array" and length > 0)
     and all(
       .flyway.migrations[];
@@ -296,6 +345,18 @@ jq -e \
 jq -e '.status == "PASS"' \
   "$artifact_dir/vulnerabilities/policy-summary.json" >/dev/null \
   || fail "release vulnerability policy is not PASS"
+
+# 후보 Compose는 현재 운영 파일을 건드리기 전에 서버 전용 runtime.env와
+# target full-SHA image 값을 사용해 완전히 렌더링되어야 한다. 필수 runtime
+# 변수가 빠졌거나 Compose가 손상되었으면 image load 전 여기서 차단한다.
+BACKEND_IMAGE="$backend_image" \
+FRONTEND_IMAGE="$frontend_image" \
+docker compose \
+  --env-file "$RUNTIME_ENV_PATH" \
+  --env-file "$IMAGE_ENV_PATH" \
+  --file "$candidate_compose_path" \
+  config --quiet \
+  || fail "signed release Compose configuration is invalid or runtime.env is incomplete"
 
 metadata_migrations="$work_dir/metadata-migrations.tsv"
 jq -r \
@@ -320,6 +381,8 @@ last_metadata_version="$(tail -n 1 "$metadata_migrations" | cut -f1)"
 # 9. Cosign 검증을 통과한 archive의 압축 stream 전체를 독립 검사한다.
 zstd --quiet --test "$artifact_dir/images.tar.zst" \
   || fail "release image archive failed zstd integrity testing"
+zstd --quiet --test "$source_archive_path" \
+  || fail "release source archive failed zstd integrity testing"
 
 # 10. pipefail이 적용된 정확한 zstd -dc | docker load 경로로 image를 적재한다.
 load_output="$work_dir/docker-load.txt"
@@ -482,6 +545,164 @@ write_image_env() {
     && mv -T -- "$target_temp" "$IMAGE_ENV_PATH"
 }
 
+install_compose_file() {
+  source="$1"
+  [ -f "$source" ] && [ ! -L "$source" ] && [ -s "$source" ] \
+    || return 1
+  target_temp="$(mktemp "$DEPLOY_ROOT/.compose.prod.yaml.XXXXXX")" \
+    || return 1
+  cp -- "$source" "$target_temp" \
+    && chown root:root "$target_temp" \
+    && chmod 0644 "$target_temp" \
+    && mv -T -- "$target_temp" "$COMPOSE_PATH"
+}
+
+snapshot_compose_file() {
+  destination="$1"
+  if [ -e "$destination" ]; then
+    assert_root_file "$destination"
+    cmp -s "$COMPOSE_PATH" "$destination"
+    return
+  fi
+  snapshot_temp="$(mktemp "$(dirname -- "$destination")/.compose-snapshot.XXXXXX")" \
+    || return 1
+  cp -- "$COMPOSE_PATH" "$snapshot_temp" \
+    && chown root:root "$snapshot_temp" \
+    && chmod 0440 "$snapshot_temp" \
+    && mv -T -- "$snapshot_temp" "$destination"
+}
+
+prepare_release_source_tree() {
+  [ -z "$source_stage_dir" ] || return 1
+  source_stage_dir="$(
+    mktemp -d "$DEPLOY_PARENT/.deploy-source-$release_sha.XXXXXX"
+  )" || return 1
+  chmod 0700 "$source_stage_dir" || return 1
+
+  # The complete manifest signature and SHA256SUMS were verified before this
+  # extraction. Extract into a sibling staging directory so an incomplete tree
+  # can never become /opt/gilbom/deploy. git archive records directories as
+  # 0775; normalize them through umask instead of preserving group-write bits.
+  if ! bash -o pipefail -c \
+    'umask 022
+     zstd --quiet -dc "$1" \
+      | tar --extract --file - --directory "$2" \
+          --no-same-owner --no-same-permissions' \
+      gilbom-source-extract "$source_archive_path" "$source_stage_dir"; then
+    echo "Release source staging rejected: archive extraction failed" >&2
+    return 1
+  fi
+
+  if [ ! -f "$source_stage_dir/compose.monitoring.yaml" ] \
+      || [ ! -f "$source_stage_dir/infra/scripts/install-day10-host.sh" ] \
+      || [ ! -f "$source_stage_dir/compose.prod.yaml" ]; then
+    echo "Release source staging rejected: required deployment file is missing" >&2
+    return 1
+  fi
+  if ! cmp -s \
+      "$source_stage_dir/compose.prod.yaml" "$candidate_compose_path"; then
+    echo "Release source staging rejected: Compose artifacts differ" >&2
+    return 1
+  fi
+  if [ -e "$source_stage_dir/runtime.env" ] \
+      || [ -e "$source_stage_dir/image.env" ]; then
+    echo "Release source staging rejected: runtime state is present" >&2
+    return 1
+  fi
+  unsafe_source_entry="$(find "$source_stage_dir" -type l -print -quit)"
+  if [ -n "$unsafe_source_entry" ]; then
+    echo \
+      "Release source staging rejected: symlink is present: $unsafe_source_entry" \
+      >&2
+    return 1
+  fi
+  unsafe_source_entry="$(
+    find "$source_stage_dir" -mindepth 1 \
+      ! -type f ! -type d -print -quit
+  )"
+  if [ -n "$unsafe_source_entry" ]; then
+    echo \
+      "Release source staging rejected: special entry is present: $unsafe_source_entry" \
+      >&2
+    return 1
+  fi
+  unsafe_source_entry="$(
+    find "$source_stage_dir" -perm /7022 -print -quit
+  )"
+  if [ -n "$unsafe_source_entry" ]; then
+    echo \
+      "Release source staging rejected: unsafe mode: $unsafe_source_entry" \
+      >&2
+    return 1
+  fi
+  if [ -d "$source_stage_dir/secrets" ] \
+      && [ -n "$(
+        find "$source_stage_dir/secrets" -type f \
+          ! -name .gitignore -print -quit
+      )" ]; then
+    echo "Release source staging rejected: Secret payload is present" >&2
+    return 1
+  fi
+
+  chown -R root:root "$source_stage_dir" \
+    && find "$source_stage_dir" -type d -exec chmod go-w {} + \
+    && find "$source_stage_dir" -type f -exec chmod go-w {} + \
+    || {
+      echo "Release source staging rejected: ownership normalization failed" >&2
+      return 1
+    }
+}
+
+activate_release_source_tree() {
+  [ -n "$source_stage_dir" ] && [ -d "$source_stage_dir" ] \
+    || return 1
+  [ "$source_tree_swapped" = false ] || return 1
+
+  # runtime.env and image.env are host state, not release content. Copy their
+  # current values into the staged tree immediately before the atomic switch.
+  install -o root -g root -m 0600 \
+    "$RUNTIME_ENV_PATH" "$source_stage_dir/runtime.env" \
+    && install -o root -g root -m 0600 \
+      "$IMAGE_ENV_PATH" "$source_stage_dir/image.env" \
+    && install -o root -g root -m 0644 \
+      "$candidate_compose_path" "$source_stage_dir/compose.prod.yaml" \
+    || return 1
+  printf '%s\n' "$release_sha" > "$source_stage_dir/.release-source.sha" \
+    && chown root:root "$source_stage_dir/.release-source.sha" \
+    && chmod 0440 "$source_stage_dir/.release-source.sha" \
+    || return 1
+  assert_root_secure_tree "$source_stage_dir"
+
+  source_previous_dir="$DEPLOY_PARENT/.deploy-previous-$release_sha.$$"
+  [ ! -e "$source_previous_dir" ] || return 1
+  mv -T -- "$DEPLOY_ROOT" "$source_previous_dir" || return 1
+  if mv -T -- "$source_stage_dir" "$DEPLOY_ROOT"; then
+    source_stage_dir=""
+    source_tree_swapped=true
+    return 0
+  fi
+  mv -T -- "$source_previous_dir" "$DEPLOY_ROOT" >/dev/null 2>&1 || true
+  source_previous_dir=""
+  return 1
+}
+
+restore_deploy_source_tree() {
+  [ "$source_tree_swapped" = true ] || return 0
+  [ -n "$source_previous_dir" ] && [ -d "$source_previous_dir" ] \
+    || return 1
+  failed_source_dir="$DEPLOY_PARENT/.deploy-failed-$release_sha.$$"
+  [ ! -e "$failed_source_dir" ] || return 1
+  mv -T -- "$DEPLOY_ROOT" "$failed_source_dir" || return 1
+  if mv -T -- "$source_previous_dir" "$DEPLOY_ROOT"; then
+    rm -r -- "$failed_source_dir" >/dev/null 2>&1 || true
+    source_previous_dir=""
+    source_tree_swapped=false
+    return 0
+  fi
+  mv -T -- "$failed_source_dir" "$DEPLOY_ROOT" >/dev/null 2>&1 || true
+  return 1
+}
+
 capture_failure_logs() {
   destination="$release_record_dir/deploy-failure-logs.txt"
   [ ! -e "$destination" ] || return 0
@@ -523,6 +744,10 @@ ensure_rollback_images() {
       && [ -s "$target_artifact/$relative_path" ] \
       || return 1
   done
+  if [ -e "$target_artifact/SHA256SUMS.sigstore.json" ]; then
+    verify_release_manifest_signature "$target_artifact" \
+      || return 1
+  fi
   (
     cd "$target_artifact"
     sha256sum -c SHA256SUMS >/dev/null
@@ -740,6 +965,8 @@ automatic_rollback_without_migration() {
   flyway_after="$2"
   compose stop frontend >/dev/null 2>&1 || true
   ensure_rollback_images "$current_sha" || return 1
+  install_compose_file "$release_record_dir/previous-compose.prod.yaml" \
+    || return 1
   write_image_env "$current_sha" || return 1
   compose config --quiet || return 1
   compose up --detach --no-build --no-deps backend || return 1
@@ -767,6 +994,11 @@ automatic_rollback_without_migration() {
 handle_deployment_failure() {
   failure_reason="$1"
   rollback_armed=false
+  restore_deploy_source_tree \
+    || {
+      echo "Signed source tree rollback failed" >&2
+      return 1
+    }
   flyway_after_failure=""
   if queried_version="$(query_flyway_version 2>/dev/null)" \
       && printf '%s\n' "$queried_version" \
@@ -835,6 +1067,13 @@ perform_approved_manual_rollback() {
   approved_rollback_armed=true
   compose stop frontend \
     || fail "could not stop Frontend before approved rollback"
+  rollback_compose_snapshot="$failed_record_dir/previous-compose.prod.yaml"
+  [ -f "$rollback_compose_snapshot" ] \
+    && [ ! -L "$rollback_compose_snapshot" ] \
+    && [ -s "$rollback_compose_snapshot" ] \
+    || fail "approved rollback Compose snapshot is missing or unsafe"
+  install_compose_file "$rollback_compose_snapshot" \
+    || fail "could not restore approved rollback Compose"
   write_image_env "$release_sha" \
     || fail "could not restore approved rollback image.env"
   compose config --quiet \
@@ -984,6 +1223,9 @@ handle_approved_rollback_failure() {
     || return 1
   echo "Approved rollback failed; Frontend remains stopped: $manifest" >&2
 }
+
+prepare_release_source_tree \
+  || fail "release source archive could not be safely staged"
 
 compose config --quiet \
   || fail "fixed production Compose configuration is invalid"
@@ -1238,12 +1480,18 @@ artifact_manifest_sha256="$(
 signature_bundle_sha256="$(
   sha256sum "$artifact_dir/images.tar.zst.sigstore.json" | awk '{print $1}'
 )"
+manifest_signature_bundle_sha256="$(
+  sha256sum "$artifact_dir/SHA256SUMS.sigstore.json" | awk '{print $1}'
+)"
 jq -e \
   --arg release_sha "$release_sha" \
   --arg current_sha "$current_sha" \
   --arg artifact_manifest_sha256 "$artifact_manifest_sha256" \
   --arg cosign_public_key_sha256 "$cosign_public_key_sha256" \
   --arg signature_bundle_sha256 "$signature_bundle_sha256" \
+  --arg manifest_signature_bundle_sha256 \
+    "$manifest_signature_bundle_sha256" \
+  --arg compose_sha256 "$candidate_compose_sha256" \
   --arg migration_plan_sha256 "$migration_plan_sha256" \
   --argjson current_version "$current_version" \
   --argjson target_version "$latest_version" \
@@ -1264,6 +1512,12 @@ jq -e \
       .artifact.signature.bundleSha256
       == $signature_bundle_sha256
     )
+    and (
+      .artifact.signature.manifestBundleSha256
+      == $manifest_signature_bundle_sha256
+    )
+    and .compose.path == "compose.prod.yaml"
+    and .compose.sha256 == $compose_sha256
     and .flyway.currentVersion == $current_version
     and .flyway.targetVersion == $target_version
     and .flyway.migrationPlanSha256 == $migration_plan_sha256
@@ -1363,6 +1617,13 @@ flyway_before_transition="$(query_flyway_version)" \
   || fail "Flyway changed before the approved image transition"
 current_version="$flyway_before_transition"
 
+# 서명된 후보 Compose로 전환하기 직전에 현재 운영 Compose를 immutable
+# release record에 보관한다. 자동/수동 rollback은 image.env와 이 snapshot을
+# 같은 경계에서 함께 복원한다.
+previous_compose_snapshot="$release_record_dir/previous-compose.prod.yaml"
+snapshot_compose_file "$previous_compose_snapshot" \
+  || fail "could not create immutable previous production Compose snapshot"
+
 # 17. 승인 때 고정한 current.sha를 previous.sha로 원자 기록한다. 기존 설치의
 # bootstrap state도 이 시점에만 생성한다.
 if [ "$current_sha_bootstrap" = true ]; then
@@ -1372,10 +1633,13 @@ if [ "$current_sha_bootstrap" = true ]; then
 fi
 atomic_line "$PREVIOUS_SHA_PATH" "$current_sha" 0440
 
-# 18. 새 full-SHA image.env를 같은 filesystem에서 원자 교체한다.
+# 18. 서명된 후보 Compose와 새 full-SHA image.env를 각각 같은 filesystem에서
+# 원자 교체한다.
 # 이 지점부터 실패하면 배포 직전/실패 직후 Flyway를 비교하여 A 또는 C
 # 정책을 반드시 실행한다.
 rollback_armed=true
+install_compose_file "$candidate_compose_path" \
+  || fail "could not atomically install signed production Compose"
 image_env_temp="$(mktemp "$DEPLOY_ROOT/.image.env.XXXXXX")"
 {
   printf 'BACKEND_IMAGE=%s\n' "$backend_image"
@@ -1468,7 +1732,14 @@ cmp -s \
   "$work_dir/expected-applied-migrations.txt" \
   || fail "applied Flyway scripts differ from release metadata"
 
-# 25. Secret 원문 없이 artifact, image, migration, backup, health 결과를
+# 25. 모든 runtime 검증이 끝난 뒤 서명된 source tree를 교체한다. 서버 상태인
+# runtime.env와 image.env는 보존되며, 이후 단계가 실패하면 기존 tree도 rollback된다.
+activate_release_source_tree \
+  || fail "signed release source tree could not be activated"
+[ "$(cat "$DEPLOY_ROOT/.release-source.sha")" = "$release_sha" ] \
+  || fail "active source tree release marker differs from the release SHA"
+
+# 26. Secret 원문 없이 artifact, source, image, migration, backup, health 결과를
 # immutable release manifest로 기록한다.
 manifest_path="$release_record_dir/release-manifest.json"
 [ ! -e "$manifest_path" ] \
@@ -1486,6 +1757,11 @@ jq -n \
   --arg cosign_version "$COSIGN_VERSION" \
   --arg cosign_public_key_sha256 "$cosign_public_key_sha256" \
   --arg signature_bundle_sha256 "$signature_bundle_sha256" \
+  --arg manifest_signature_bundle_sha256 \
+    "$manifest_signature_bundle_sha256" \
+  --arg source_archive_name "$source_archive_name" \
+  --arg source_archive_sha256 "$source_archive_sha256" \
+  --arg source_tree_marker "$DEPLOY_ROOT/.release-source.sha" \
   --arg compose_sha256 "$(sha256sum "$COMPOSE_PATH" | awk '{print $1}')" \
   --arg backend_image "$backend_image" \
   --arg backend_image_id "$actual_backend_id" \
@@ -1515,10 +1791,21 @@ jq -n \
           status: "PASS",
           cosignVersion: $cosign_version,
           publicKeySha256: $cosign_public_key_sha256,
-          bundleSha256: $signature_bundle_sha256
+          bundleSha256: $signature_bundle_sha256,
+          manifestBundleSha256: $manifest_signature_bundle_sha256
         }
       },
+      source: {
+        archive: $source_archive_name,
+        sha256: $source_archive_sha256,
+        activeTreeMarker: $source_tree_marker
+      },
       composeSha256: $compose_sha256,
+      compose: {
+        path: "compose.prod.yaml",
+        sha256: $compose_sha256,
+        previousSnapshot: "previous-compose.prod.yaml"
+      },
       images: {
         backend: {
           name: $backend_image,
@@ -1554,9 +1841,10 @@ chown root:root "$manifest_temp"
 chmod 0440 "$manifest_temp"
 mv -T -- "$manifest_temp" "$manifest_path"
 
-# 26. 모든 검증과 manifest 기록이 끝난 성공 경로에서만 current.sha를 바꾼다.
+# 27. 모든 검증과 manifest 기록이 끝난 성공 경로에서만 current.sha를 바꾼다.
 atomic_line "$CURRENT_SHA_PATH" "$release_sha" 0440
 rollback_armed=false
+source_tree_swapped=false
 
 echo "Production release manifest: $manifest_path"
 echo "Production deploy boundary: PASS ($release_sha)"

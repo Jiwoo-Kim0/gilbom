@@ -3,6 +3,8 @@ import {
   Bot,
   CircleDot,
   ClipboardList,
+  ChevronsLeft,
+  ChevronsRight,
   FileClock,
   MapPinned,
   ShieldCheck,
@@ -20,16 +22,10 @@ import {
   type FrontendPermission,
 } from './auth/permissions'
 
-export interface NavigationBarUser {
-  name: string
-  title: string
-  role: string
-  permissions: readonly string[]
-  avatarUrl?: string
-}
-
 interface NavigationBarProps {
-  user: NavigationBarUser
+  collapsed: boolean
+  onToggle: () => void
+  permissions: readonly string[]
 }
 
 type NavigationItem = {
@@ -66,7 +62,7 @@ const navigationItems: readonly NavigationItem[] = [
   },
   {
     to: '/reports',
-    label: '리포트',
+    label: '보고서 관리',
     icon: BarChart3,
     requiredPermission: REPORT_VIEW,
   },
@@ -90,57 +86,62 @@ const navigationItems: readonly NavigationItem[] = [
   },
 ] as const
 
-export function NavigationBar({ user }: NavigationBarProps) {
-  const initials = user.name.slice(0, 1)
+export function NavigationBar({
+  collapsed,
+  onToggle,
+  permissions,
+}: NavigationBarProps) {
   const visibleNavigationItems = navigationItems.filter((item) => (
     item.requiredPermission === null
-    || hasPermission(user.permissions, item.requiredPermission)
+    || hasPermission(permissions, item.requiredPermission)
   ))
 
   return (
-    <aside className="nb-sidebar">
-      <NavLink className="nb-brand" to="/defects" aria-label="길봄 홈">
-        <span className="nb-brand-badge" aria-hidden="true">
-          <img className="nb-brand-logo" src={gilbomLogo} alt="" />
-        </span>
-        <span className="nb-brand-text">
-          <strong>길봄</strong>
-          <small>점자 보도블록 모니터링</small>
-        </span>
-      </NavLink>
-
-      <nav className="nb-nav" aria-label="주요 메뉴">
-        {visibleNavigationItems.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            className={({ isActive }) => `nb-nav-item${isActive ? ' nb-nav-item-active' : ''}`}
-          >
-            <span className="nb-nav-icon" aria-hidden="true">
-              <Icon size={16} />
-            </span>
-            <span>{label}</span>
-          </NavLink>
-        ))}
-      </nav>
-
-      <div className="nb-footer">
-        <div className="nb-profile">
-          {user.avatarUrl ? (
-            <img className="nb-avatar" src={user.avatarUrl} alt="" />
-          ) : (
-            <span className="nb-avatar nb-avatar-fallback" aria-hidden="true">
-              {initials}
-            </span>
-          )}
-          <span className="nb-profile-text">
-            <strong>
-              {user.name}{user.title ? ` ${user.title}` : ''}
-            </strong>
-            <small>{user.role}</small>
+    <div className="nb-sidebar-layer">
+      <aside className={`nb-sidebar${collapsed ? ' is-collapsed' : ''}`}>
+        <NavLink className="nb-brand" to="/defects" aria-label="길봄 홈">
+          <span className="nb-brand-badge" aria-hidden="true">
+            <img className="nb-brand-logo" src={gilbomLogo} alt="" />
           </span>
-        </div>
-      </div>
-    </aside>
+          <span className="nb-brand-text">
+            <strong>길봄</strong>
+            <small>점자 보도블록 모니터링</small>
+          </span>
+        </NavLink>
+
+        <nav className="nb-nav" id="primary-navigation" aria-label="주요 메뉴">
+          {visibleNavigationItems.map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              aria-label={label}
+              title={collapsed ? label : undefined}
+              className={({ isActive }) => `nb-nav-item${isActive ? ' nb-nav-item-active' : ''}`}
+            >
+              <span className="nb-nav-icon" aria-hidden="true">
+                <Icon size={16} />
+              </span>
+              <span className="nb-nav-label">{label}</span>
+            </NavLink>
+          ))}
+        </nav>
+      </aside>
+
+      <button
+        className="nb-sidebar-toggle"
+        type="button"
+        aria-controls="primary-navigation"
+        aria-expanded={!collapsed}
+        aria-label={collapsed ? '네비게이션 펼치기' : '네비게이션 접기'}
+        title={collapsed ? '네비게이션 펼치기' : '네비게이션 접기'}
+        onClick={onToggle}
+      >
+        {collapsed ? (
+          <ChevronsRight size={18} aria-hidden="true" />
+        ) : (
+          <ChevronsLeft size={18} aria-hidden="true" />
+        )}
+      </button>
+    </div>
   )
 }

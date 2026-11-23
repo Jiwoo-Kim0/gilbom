@@ -65,6 +65,8 @@
 | V38 | 종료 Mission 논리 삭제·정상 종료 명령 | COMPLETED·CANCELLED·FAILED Mission은 실행 증거를 보존한 채 목록에서 숨기고, `COMPLETE_MISSION`을 명령 제약에 추가 |
 | V39 | 컨설턴트 MANAGER 검증 계정 | 고정된 외부 검증 계정 한 개를 `MANAGER`로 추가하고 해당 계정에 한해서만 MFA 예외를 허용하도록 DB 제약과 고유 인덱스로 제한 |
 | V40 | 컨설턴트 MANAGER 로봇 범위 보강 | V39 검증 계정에 배포 시점의 기존 로봇을 `OWNER`로 명시 배정해 로봇·파생 결함이 0건으로 필터링되는 문제를 해결하되, 일반 비관리자에게 시스템 `ADMIN`의 전체 객체 범위를 확장하지 않음 |
+| V41 | 이미지 API Key 애플리케이션 발급 권한 | MQTT Credential 통합 Provisioning에서 `storage.robot_image_api_key` 해시 행을 추가할 수 있도록 Runtime 애플리케이션 역할에 INSERT 권한 부여 |
+| V42 | 미설치 이미지 Incident 수신 | `MISSING` 결함 유형을 추가하고, 객체가 없는 미설치 판단의 nullable confidence·bbox를 관측과 검토 대기열에 저장하도록 확장 |
 
 ### V26 결함 통계 Query 인덱스
 
@@ -274,6 +276,16 @@ Telemetry·Event·Command·상태 이력을 삭제하지 않은 채 일반 조�
 `robot.robot_command.command_type`에는 정상 완료용 `COMPLETE_MISSION`을
 추가해 취소용 `CANCEL_MISSION`과 상태 전이 의미를 분리한다.
 
+### V42 미설치 이미지 Incident 수신
+
+파일:
+`backend/src/main/resources/db/migration/V42__accept_missing_incident_images.sql`
+
+`defect`, `defect_observation`, `incident_ingestion_issue`의 유형 CHECK에 `MISSING`을
+추가한다. 미설치는 검출 객체가 없어 AI 점수와 bbox가 없을 수 있으므로 관측과 검토
+대기열의 `confidence`를 nullable로 확장한다. 이미지 원본과 `image_id` 연결 구조는
+변경하지 않으며 기존 행을 수정하지 않는다.
+
 시스템 Role `ADMIN`, `MANAGER`, `OPERATOR`와 18개 세부 permission 및
 role-permission 관계는 결정적인 UUID로 seed한다. 실제
 관리자 계정은 password hash와 MFA 등록 절차가 필요하므로 migration에서 만들지 않는다.
@@ -288,7 +300,7 @@ docker compose up --build --detach
 docker compose logs backend
 ```
 
-Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V38이
+Flyway가 정상 적용되면 `flyway_history.flyway_schema_history`에 V1~V42가
 순서대로 `success=true`로 기록된다.
 
 ## 재실행 가능한 검증

@@ -97,6 +97,7 @@ python tools/mock-robot/mock_robot.py `
   --battery-step-percent 0.2 `
   --position-step-m 1.5 `
   --position-update-interval 20 `
+  --normal-detection-step 1 `
   --speed-mps 0.8
 ```
 
@@ -141,9 +142,16 @@ python -u tools/mock-robot/mock_robot.py `
 ```
 
 Safety 주기는 네 Event Type을, Battery 주기는 다섯 Event Type을 순서대로
-순환한다. Incident 주기는 새로운 `event_id`의 점자블록 파손 탐지를 발행하므로
-로컬 DB에 테스트 결함 관측이 계속 추가된다. 각 Event 주기에 `0`을 주면 해당
-계열만 비활성화한다.
+순환한다. Incident 주기는 새로운 `event_id`로 점자블록 `DAMAGED`(파손)와
+`MISSING`(미설치)을 번갈아 발행하므로 로컬 DB에 두 유형의 테스트 결함 관측이
+추가된다. Incident는 Mission이 `RUNNING`일 때만 발행하며, 성공적으로 발행한
+메시지만 활성 Mission의 `incident_count`에 더한다. 각 Event 주기에 `0`을 주면
+해당 계열만 비활성화한다.
+
+정상 설치 점자블록은 결함 Event나 개별 마커로 발행하지 않는다. PATROLLING 중 GPS
+위치가 실제로 한 단계 바뀔 때마다 `--normal-detection-step`만큼 중복 제거된 정상
+관측으로 간주해 로컬 집계하고, Mission 종료 Event의 `normal_detection_count`로
+전송한다. 기본값은 `1`이며 `0`이면 정상 관측 집계를 끈다.
 
 Mission 시작·일시정지·재개·취소 명령이 성공하면 각각 대응하는 Mission Event를
 발행한다. 로컬 완료 흐름이 필요하면 `--mission-auto-complete-sec`에 양수를

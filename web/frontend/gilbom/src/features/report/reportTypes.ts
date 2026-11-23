@@ -24,6 +24,7 @@ export type DefectWorkflowStatus =
 
 export type DefectType =
   | 'DAMAGED'
+  | 'MISSING'
   | 'INSTALLATION_INVALID'
   | 'UNKNOWN_ANOMALY'
 
@@ -169,9 +170,16 @@ export type ReportVersionSummary = {
   createdAt: string
 }
 
+export type ReportEvidenceSnapshot = {
+  defectIds: string[]
+  missionIds: string[]
+  patrolAreaIds: string[]
+}
+
 export type ReportVersion = ReportVersionSummary & {
   content: string
   statistics: ReportStatisticsSnapshot
+  evidenceSnapshot: ReportEvidenceSnapshot
 }
 
 export type ReportVersionListResponse = {
@@ -196,6 +204,8 @@ export type ReportListFilters = {
   size?: number
   search?: string
   statuses?: ReportStatus[]
+  periodFrom?: string
+  periodTo?: string
   reportType?: ReportType
   generationMethod?: ReportGenerationMethod
   sort?: ReportSort

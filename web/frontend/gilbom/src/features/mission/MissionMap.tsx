@@ -4,6 +4,7 @@ import {
   Radio,
   RefreshCw,
   Route,
+  ShieldAlert,
   TriangleAlert,
 } from 'lucide-react'
 import {
@@ -13,16 +14,31 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import carMarkerImage from '../../assets/car.png'
 import { loadNaverMapsScript } from '../../lib/naverMaps'
 import { getApiErrorMessage } from '../../shared/api/apiClient'
+import { useAuthentication } from '../auth/authenticationContext'
+import { DEFECT_STATUS_VIEW } from '../auth/permissions'
+import { DefectDetailCard } from '../defect/DefectDetailCard'
+import { defectTypeTone } from '../defect/defectMapState'
+import {
+  DEFECT_TYPE_LABELS,
+  RISK_LEVEL_LABELS,
+  WORKFLOW_STATUS_LABELS,
+} from '../defect/defectTypes'
 import { useRobotRealtime } from '../robot/useRobotRealtime'
-import { getMissionMap } from './missionApi'
+import { getMissionDefects, getMissionMap } from './missionApi'
 import type {
+  MissionDefectMapItem,
   MissionMapCurrentPosition,
   MissionMapResponse,
   MissionTrajectoryPoint,
   PatrolAreaBoundary,
 } from './missionTypes'
+import {
+  useMissionDefectRealtime,
+  type MissionDefectRealtimeEvent,
+} from './useMissionDefectRealtime'
 import './mission-map.css'
 
 type Coordinate = [longitude: number, latitude: number]
@@ -36,12 +52,36 @@ const FALLBACK_WIDTH = 800
 const FALLBACK_HEIGHT = 360
 const FALLBACK_PADDING = 30
 const DEFAULT_MAP_CENTER: Coordinate = [128.3446, 36.1195]
+const DEFECT_MARKER_BOX_SIZE = 34
 
 const streamStatusLabel = {
   connecting: '연결 중',
   connected: '실시간 연결',
   reconnecting: '재연결 중',
 } as const
+
+function createMissionDefectMarkerIcon(
+  maps: typeof naver.maps,
+  defect: MissionDefectMapItem,
+  selected: boolean,
+): naver.maps.MarkerIcon {
+  const classes = [
+    'defect-marker',
+    `defect-marker-${defectTypeTone(defect.defectType)}`,
+    selected ? 'is-selected' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+  return {
+    content:
+      '<div class="defect-marker-box">'
+      + `<span class="${classes}"></span></div>`,
+    anchor: new maps.Point(
+      DEFECT_MARKER_BOX_SIZE / 2,
+      DEFECT_MARKER_BOX_SIZE / 2,
+    ),
+  }
+}
 
 function isCoordinate(value: number[]): value is Coordinate {
   return value.length >= 2
@@ -254,7 +294,7 @@ function createMissionMapOverlay(
     private areaPaths: SVGPathElement[] = []
     private trajectoryLine: SVGPolylineElement | null = null
     private markerGroup: SVGGElement | null = null
-    private markerDirection: SVGPathElement | null = null
+    private markerDirection: SVGImageElement | null = null
 
     constructor() {
       super()
@@ -387,17 +427,19 @@ function createMissionMapOverlay(
           'data-testid',
           'mission-current-position',
         )
-        const circle = document.createElementNS(
-          'http://www.w3.org/2000/svg',
-          'circle',
-        )
-        circle.setAttribute('r', '15')
         this.markerDirection = document.createElementNS(
           'http://www.w3.org/2000/svg',
-          'path',
+          'image',
         )
-        this.markerDirection.setAttribute('d', 'M 0 -10 L 5 7 L 0 4 L -5 7 Z')
-        this.markerGroup.append(circle, this.markerDirection)
+        this.markerDirection.classList.add('mission-map-current-car')
+        this.markerDirection.setAttribute('data-testid', 'mission-current-car')
+        this.markerDirection.setAttribute('href', carMarkerImage)
+        this.markerDirection.setAttribute('x', '-16')
+        this.markerDirection.setAttribute('y', '-23')
+        this.markerDirection.setAttribute('width', '32')
+        this.markerDirection.setAttribute('height', '46')
+        this.markerDirection.setAttribute('preserveAspectRatio', 'xMidYMid meet')
+        this.markerGroup.append(this.markerDirection)
       } else if (this.snapshot.currentPosition === null) {
         this.markerGroup?.remove()
         this.markerGroup = null
@@ -417,9 +459,17 @@ function createMissionMapOverlay(
 
 function MissionNaverMap({
   snapshot,
+  defects,
+  selectedDefectId,
+  onSelectDefect,
+  detailOverlay,
   fallback,
 }: {
   snapshot: MissionMapResponse
+  defects: MissionDefectMapItem[]
+  selectedDefectId: string | null
+  onSelectDefect: (defectId: string) => void
+  detailOverlay: ReactNode
   fallback: ReactNode
 }) {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
@@ -572,6 +622,41 @@ function MissionNaverMap({
     }
     const { maps } = window.naver
     const map = mapRef.current
+    const markers = defects.map((defect) => {
+      const marker = new maps.Marker({
+        position: new maps.LatLng(defect.latitude, defect.longitude),
+        map,
+        icon: createMissionDefectMarkerIcon(
+          maps,
+          defect,
+          defect.defectId === selectedDefectId,
+        ),
+        title: `${defect.incidentCode} · `
+          + `${DEFECT_TYPE_LABELS[defect.defectType]} · `
+          + `${RISK_LEVEL_LABELS[defect.riskLevel]} · `
+          + WORKFLOW_STATUS_LABELS[defect.workflowStatus],
+        zIndex: defect.defectId === selectedDefectId ? 100 : 20,
+      })
+      const listener = maps.Event.addListener(marker, 'click', () => {
+        onSelectDefect(defect.defectId)
+      })
+      return { marker, listener }
+    })
+
+    return () => {
+      markers.forEach(({ marker, listener }) => {
+        maps.Event.removeListener(listener)
+        marker.setMap(null)
+      })
+    }
+  }, [defects, onSelectDefect, selectedDefectId, status])
+
+  useEffect(() => {
+    if (status !== 'ready' || mapRef.current === null || !window.naver) {
+      return
+    }
+    const { maps } = window.naver
+    const map = mapRef.current
     let redrawFrame: number | null = null
 
     const scheduleOverlayRedraw = () => {
@@ -621,11 +706,24 @@ function MissionNaverMap({
       {status === 'loading' ? (
         <p className="mission-map-loading">네이버 지도를 불러오는 중입니다…</p>
       ) : null}
+      {detailOverlay}
     </div>
   )
 }
 
-function MissionFallbackMap({ snapshot }: { snapshot: MissionMapResponse }) {
+function MissionFallbackMap({
+  snapshot,
+  defects,
+  selectedDefectId,
+  onSelectDefect,
+  detailOverlay,
+}: {
+  snapshot: MissionMapResponse
+  defects: MissionDefectMapItem[]
+  selectedDefectId: string | null
+  onSelectDefect: (defectId: string) => void
+  detailOverlay: ReactNode
+}) {
   const polygons = areaPolygons(snapshot.patrolAreaBoundary)
   const boundaryPoints = boundaryCoordinates(snapshot.patrolAreaBoundary)
   const trackPoints = trajectoryCoordinates(snapshot.trajectory)
@@ -636,6 +734,9 @@ function MissionFallbackMap({ snapshot }: { snapshot: MissionMapResponse }) {
     ...(current === null
       ? []
       : [[current.longitude, current.latitude] as Coordinate]),
+    ...defects.map(
+      (defect) => [defect.longitude, defect.latitude] as Coordinate,
+    ),
   ]
   if (allPoints.length === 0) {
     return (
@@ -740,24 +841,62 @@ function MissionFallbackMap({ snapshot }: { snapshot: MissionMapResponse }) {
         ) : null}
         {current !== null && currentPoint !== null ? (
           <g
-            className="mission-map-current"
+            className={`mission-map-current${
+              current.connectivityStatus === 'ONLINE' ? '' : ' is-offline'
+            }`}
             transform={`translate(${currentPoint.x} ${currentPoint.y})`}
             data-testid="mission-current-position"
             data-latitude={current.latitude}
             data-longitude={current.longitude}
             data-heading={current.headingDeg ?? ''}
           >
-            <circle r="13" />
-            <path
-              d="M 0 -9 L 5 6 L 0 3 L -5 6 Z"
+            <image
+              className="mission-map-current-car"
+              href={carMarkerImage}
+              x="-16"
+              y="-23"
+              width="32"
+              height="46"
+              preserveAspectRatio="xMidYMid meet"
               transform={`rotate(${current.headingDeg ?? 0})`}
+              data-testid="mission-current-car"
             />
           </g>
         ) : null}
+        {defects.map((defect) => {
+          const point = project([defect.longitude, defect.latitude])
+          const selected = defect.defectId === selectedDefectId
+          const openDetail = () => onSelectDefect(defect.defectId)
+          return (
+            <g
+              key={defect.defectId}
+              className={`mission-map-defect-pin mission-map-defect-pin-${
+                defectTypeTone(defect.defectType)
+              }${selected ? ' is-selected' : ''}`}
+              transform={`translate(${point.x} ${point.y})`}
+              role="button"
+              tabIndex={0}
+              aria-label={`${defect.incidentCode} 결함 상세 보기`}
+              data-testid="mission-defect-marker"
+              data-defect-id={defect.defectId}
+              onClick={openDetail}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  openDetail()
+                }
+              }}
+            >
+              <path d="M 0 -12 C -7 -12 -11 -7 -11 -1 C -11 7 0 14 0 14 C 0 14 11 7 11 -1 C 11 -7 7 -12 0 -12 Z" />
+              <circle r="3" cy="-2" />
+            </g>
+          )
+        })}
       </svg>
       <span className="mission-map-fallback-label">
         Naver Maps를 불러오지 못해 좌표 Layer로 표시 중
       </span>
+      {detailOverlay}
     </div>
   )
 }
@@ -771,11 +910,20 @@ export function MissionMap({
   missionCode: string
   patrolAreaName: string
 }) {
+  const { user } = useAuthentication()
+  const canViewDefects = user?.permissions.includes(DEFECT_STATUS_VIEW) ?? false
   const requestSequenceRef = useRef(0)
+  const defectRequestSequenceRef = useRef(0)
   const refreshTimerRef = useRef<number | null>(null)
   const [snapshot, setSnapshot] = useState<MissionMapResponse | null>(null)
+  const [defectSnapshot, setDefectSnapshot] = useState<{
+    missionId: string
+    defects: MissionDefectMapItem[]
+  } | null>(null)
+  const [selectedDefectId, setSelectedDefectId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<unknown>(null)
+  const [defectError, setDefectError] = useState<unknown>(null)
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null)
 
   const loadSnapshot = useCallback(async () => {
@@ -800,6 +948,45 @@ export function MissionMap({
     }
   }, [missionId])
 
+  const loadDefects = useCallback(async (
+    focusDefectId: string | null = null,
+  ) => {
+    if (!canViewDefects) {
+      return
+    }
+    const sequence = defectRequestSequenceRef.current + 1
+    defectRequestSequenceRef.current = sequence
+    setDefectError(null)
+    try {
+      const result = await getMissionDefects(missionId)
+      if (defectRequestSequenceRef.current !== sequence) {
+        return
+      }
+      setDefectSnapshot(result)
+      setSelectedDefectId((previous) => {
+        if (
+          focusDefectId !== null
+          && result.defects.some(
+            (defect) => defect.defectId === focusDefectId,
+          )
+        ) {
+          return focusDefectId
+        }
+        if (
+          previous !== null
+          && result.defects.some((defect) => defect.defectId === previous)
+        ) {
+          return previous
+        }
+        return null
+      })
+    } catch (nextError) {
+      if (defectRequestSequenceRef.current === sequence) {
+        setDefectError(nextError)
+      }
+    }
+  }, [canViewDefects, missionId])
+
   const scheduleSnapshot = useCallback(() => {
     if (refreshTimerRef.current !== null) {
       window.clearTimeout(refreshTimerRef.current)
@@ -812,6 +999,28 @@ export function MissionMap({
 
   const { status: streamStatus } = useRobotRealtime(scheduleSnapshot)
 
+  const displayedSnapshot = snapshot?.missionId === missionId
+    ? snapshot
+    : null
+  const displayedDefects = defectSnapshot?.missionId === missionId
+    ? defectSnapshot.defects
+    : []
+
+  const handleDefectEvent = useCallback((event: MissionDefectRealtimeEvent) => {
+    // SSE는 변경 알림이고 Mission ID를 포함하지 않는다. 즉시 Mission 전용 조회로
+    // 확인한 뒤 실제 이 Mission에 속한 결함일 때만 마커와 상세 카드를 연다.
+    void loadDefects(event.defectId)
+  }, [loadDefects])
+  const handleDefectConnected = useCallback(() => {
+    void loadDefects()
+  }, [loadDefects])
+  const defectStreamStatus = useMissionDefectRealtime({
+    enabled: canViewDefects && displayedSnapshot !== null,
+    patrolAreaId: displayedSnapshot?.patrolAreaId ?? null,
+    onEvent: handleDefectEvent,
+    onConnected: handleDefectConnected,
+  })
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadSnapshot()
@@ -819,21 +1028,39 @@ export function MissionMap({
     return () => window.clearTimeout(timer)
   }, [loadSnapshot])
 
+  useEffect(() => {
+    if (!canViewDefects) {
+      return
+    }
+    const timer = window.setTimeout(() => {
+      void loadDefects()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [canViewDefects, loadDefects])
+
   useEffect(() => () => {
     if (refreshTimerRef.current !== null) {
       window.clearTimeout(refreshTimerRef.current)
     }
   }, [])
 
-  const displayedSnapshot = snapshot?.missionId === missionId
-    ? snapshot
-    : null
   const positionInside = displayedSnapshot?.currentPosition === null
     || displayedSnapshot === null
     ? null
     : isInsideBoundary(
       displayedSnapshot.currentPosition,
       displayedSnapshot.patrolAreaBoundary,
+    )
+  const detailOverlay = selectedDefectId === null
+    ? null
+    : (
+      <DefectDetailCard
+        key={selectedDefectId}
+        defectId={selectedDefectId}
+        onClose={() => setSelectedDefectId(null)}
+        onChanged={() => void loadDefects(selectedDefectId)}
+        onSelectDefect={setSelectedDefectId}
+      />
     )
 
   return (
@@ -852,7 +1079,10 @@ export function MissionMap({
         <button
           className="mission-map-refresh"
           type="button"
-          onClick={() => void loadSnapshot()}
+          onClick={() => {
+            void loadSnapshot()
+            void loadDefects()
+          }}
           disabled={loading}
           aria-label="임무 지도 새로고침"
         >
@@ -861,10 +1091,20 @@ export function MissionMap({
       </div>
 
       <div className="mission-map-livebar" aria-live="polite">
-        <span className={`mission-map-stream mission-map-stream-${streamStatus}`}>
-          <Radio size={13} aria-hidden="true" />
-          {streamStatusLabel[streamStatus]}
-        </span>
+        <div className="mission-map-streams">
+          <span className={`mission-map-stream mission-map-stream-${streamStatus}`}>
+            <Radio size={13} aria-hidden="true" />
+            위치 {streamStatusLabel[streamStatus]}
+          </span>
+          {canViewDefects ? (
+            <span className={`mission-map-stream mission-map-stream-${
+              defectStreamStatus
+            }`}>
+              <ShieldAlert size={13} aria-hidden="true" />
+              결함 {streamStatusLabel[defectStreamStatus]}
+            </span>
+          ) : null}
+        </div>
         <span>지도 갱신 {formatObservedAt(lastSyncedAt)}</span>
       </div>
 
@@ -878,10 +1118,22 @@ export function MissionMap({
           실제 궤적 ({displayedSnapshot?.trajectory.length ?? 0})
         </span>
         <span className="mission-map-legend-current">
-          <span aria-hidden="true" />
+          <img src={carMarkerImage} alt="" aria-hidden="true" />
           현재 위치
         </span>
+        {canViewDefects ? (
+          <span className="mission-map-legend-defect">
+            <span aria-hidden="true" />
+            결함 ({displayedDefects.length})
+          </span>
+        ) : null}
       </div>
+
+      {defectError ? (
+        <div className="mission-map-defect-error" role="alert">
+          결함 위치를 불러오지 못했습니다. {getApiErrorMessage(defectError)}
+        </div>
+      ) : null}
 
       {error ? (
         <div className="page-alert" role="alert">
@@ -896,7 +1148,19 @@ export function MissionMap({
         <>
           <MissionNaverMap
             snapshot={displayedSnapshot}
-            fallback={<MissionFallbackMap snapshot={displayedSnapshot} />}
+            defects={displayedDefects}
+            selectedDefectId={selectedDefectId}
+            onSelectDefect={setSelectedDefectId}
+            detailOverlay={detailOverlay}
+            fallback={(
+              <MissionFallbackMap
+                snapshot={displayedSnapshot}
+                defects={displayedDefects}
+                selectedDefectId={selectedDefectId}
+                onSelectDefect={setSelectedDefectId}
+                detailOverlay={detailOverlay}
+              />
+            )}
           />
           <div className="mission-map-summary">
             <span>

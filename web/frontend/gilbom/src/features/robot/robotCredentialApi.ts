@@ -1,6 +1,8 @@
 import { apiJson, jsonBody } from '../../shared/api/apiClient'
 
 export type IssuedMqttCredential = {
+  robotId: string
+  mqttId: string
   credentialId: string
   credentialType: string
   mqtt: {
@@ -8,6 +10,10 @@ export type IssuedMqttCredential = {
     username: string
     password: string
     clientId: string
+  }
+  imageUpload: {
+    url: string
+    apiKey: string
   }
   expiresAt: string | null
 }

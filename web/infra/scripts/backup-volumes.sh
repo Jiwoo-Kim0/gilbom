@@ -137,7 +137,7 @@ esac
 
 # 서비스를 멈추기 전에 암호화 수단을 확인한다. 멈춘 뒤에 실패하면 정지 시간만 늘어난다.
 gilbom_backup_require_gpg
-recipient_fingerprint="$(gilbom_backup_recipient_fingerprint)"
+recipient_fingerprints="$(gilbom_backup_recipient_fingerprints)"
 
 cd "$PROJECT_DIR"
 compose config --quiet
@@ -306,7 +306,7 @@ chmod 0600 "$bundle/SHA256SUMS"
 gilbom_backup_write_manifest \
   "$bundle/bundle.manifest.json" \
   "$BACKUP_NAME" \
-  "$recipient_fingerprint" \
+  "$recipient_fingerprints" \
   "$bundle/SHA256SUMS" \
   "$bundle/database.content.sha256" \
   "$bundle/robot_images.summary" \

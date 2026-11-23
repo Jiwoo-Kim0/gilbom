@@ -72,3 +72,6 @@ infra/mosquitto/*.bak
 
 # 결함 이미지·DB 스냅샷 (scripts/backup-defect-images.sh). 원본 데이터라 저장소에 올리지 않는다.
 backups/
+
+# GPG signature files
+*.asc

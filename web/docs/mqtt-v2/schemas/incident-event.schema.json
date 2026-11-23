@@ -51,8 +51,7 @@
       "required": [
         "asset_type",
         "block_type",
-        "defect_type",
-        "confidence"
+        "defect_type"
       ],
       "properties": {
         "asset_type": {
@@ -67,10 +66,17 @@
           ]
         },
         "defect_type": {
-          "const": "DAMAGED"
+          "type": "string",
+          "enum": [
+            "DAMAGED",
+            "MISSING"
+          ]
         },
         "confidence": {
-          "type": "number",
+          "type": [
+            "number",
+            "null"
+          ],
           "minimum": 0,
           "maximum": 1
         },
@@ -97,8 +103,7 @@
         "image_id",
         "captured_at",
         "image_width",
-        "image_height",
-        "bbox_norm"
+        "image_height"
       ],
       "properties": {
         "image_id": {
@@ -123,14 +128,21 @@
           "minimum": 1
         },
         "bbox_norm": {
-          "type": "array",
-          "minItems": 4,
-          "maxItems": 4,
-          "items": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 1
-          }
+          "anyOf": [
+            {
+              "type": "array",
+              "minItems": 4,
+              "maxItems": 4,
+              "items": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },

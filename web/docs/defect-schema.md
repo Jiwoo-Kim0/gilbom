@@ -1,5 +1,9 @@
 # 결함(defect) 스키마
 
+> 운영 규칙(상태 전이·자동 병합·심각도 산정·유형 교정)은
+> [defect-operations-guide.md](defect-operations-guide.md)에 있다. 이 문서는 테이블과
+> 제약만 다룬다.
+
 ## 1. 범위와 원칙
 
 이 문서는 `docs/길봄_DB.pdf`(길봄 DB Specification v1.0) 7장에 정의된 `defect` 스키마 중
@@ -29,7 +33,7 @@ V12 migration(`V12__create_defect_schema.sql`)으로 실제 반영한 부분을 
 |---|---|
 | `incident_code` | 외부 표시 코드. UNIQUE. `INC-YYYYMMDD-NNNNNN`. 날짜는 `occurred_at`의 Asia/Seoul 일자이며 일자별 DB Counter가 순번을 원자적으로 발급한다 |
 | `risk_level` / `risk_score` | 서버가 계산하는 `LOW`/`MEDIUM`/`HIGH`/`CRITICAL`과 0~100 점수. V1은 `damage_ratio × 100`이며 25/50/75를 등급 경계로 사용하고 `risk_rule_version=DAMAGE_RATIO_V1`을 남긴다 |
-| `workflow_status` | `NEW → ACCEPTED → IN_PROGRESS → RESOLVED`, 또는 `FALSE_POSITIVE`/`REJECTED`. 관리자 REST 처리로만 전이된다 |
+| `workflow_status` | 권장 흐름은 `NEW → ACCEPTED → IN_PROGRESS → RESOLVED`, 또는 `FALSE_POSITIVE`/`REJECTED`. **전이는 단계에 묶지 않는다** — 관리자는 `NEW`를 뺀 다섯 상태 사이를 자유롭게 바꿀 수 있고 종결된 결함도 되살릴 수 있다. `NEW`는 적재 시점에만 붙고 되돌릴 수 없다. 관리자 REST 처리로만 전이된다 |
 | `resolution` | `RESOLVED` 등으로 종결할 때의 처리 결과. `REPAIRED`, `CLEANED`, `DUPLICATE`, `REINSPECTION_REQUIRED`, `NOT_APPLICABLE` |
 | `location` | 대표 위치(`GEOMETRY(POINT,4326)`). 개별 관측 위치가 아니라 결함의 대표 좌표 |
 | `zone_id` | `patrol_area.area_code`에서 전달된 불투명 구역 코드. 서버는 문자열 형식을 해석하지 않으며 구역 실체는 `patrol_area_id` FK가 담당한다 |

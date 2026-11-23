@@ -45,7 +45,7 @@ groups:
       - alert: DockerStorageFillingUp
         expr: >-
           predict_linear(gilbom_path_usage_bytes{path="docker"}[6h], 7 * 24 * 3600)
-            > scalar(gilbom_filesystem_size_bytes{mountpoint="/"}) * 0.5
+            > scalar(max(gilbom_filesystem_size_bytes{mountpoint="/"})) * 0.5
         for: 30m
         labels:
           severity: warning

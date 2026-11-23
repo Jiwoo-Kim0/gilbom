@@ -1,0 +1,14 @@
+{
+  "classes": [
+    "normal",
+    "defect_full",
+    "defect_partial"
+  ],
+  "imgsz": [
+    960,
+    960
+  ],
+  "decision_rule": "band_argmax",
+  "defect_conf": 0.35,
+  "source_weights": "c:\\Users\\SSAFY\\Desktop\\Jumja\\runs\\y26_final_960\\weights\\best.pt"
+}

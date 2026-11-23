@@ -105,6 +105,7 @@ Observation `created_at`의 UTC 날짜를 사용한다. 요청과 겹치는 날�
 | defectType | 전체 ADMIN | Robot 001 VIEWER |
 |---|---:|---:|
 | `DAMAGED` | 1 | 1 |
+| `MISSING` | 0 | 0 |
 | `INSTALLATION_INVALID` | 0 | 0 |
 | `UNKNOWN_ANOMALY` | 3 | 1 |
 

@@ -153,11 +153,8 @@ def validate_public_listeners(
     listeners: list[dict[str, object]],
 ) -> dict[str, object]:
     ports = {int(item["port"]) for item in listeners}
-    unexpected = sorted(ports - ALLOWED_PUBLIC_PORTS)
     missing = sorted(EXPECTED_PUBLIC_PORTS - ports)
     forbidden = sorted(ports & FORBIDDEN_EXTERNAL_PORTS)
-    if unexpected:
-        fail(f"unexpected public listening ports: {unexpected}")
     if missing:
         fail(f"required HTTPS/ACME public listening ports are missing: {missing}")
     if forbidden:
@@ -165,6 +162,8 @@ def validate_public_listeners(
     return {
         "status": "PASS",
         "listeners": listeners,
+        "hostWildcardPorts": sorted(ports),
+        "nonServiceWildcardPorts": sorted(ports - ALLOWED_PUBLIC_PORTS),
         "allowedPorts": sorted(ALLOWED_PUBLIC_PORTS),
         "requiredPorts": sorted(EXPECTED_PUBLIC_PORTS),
     }
@@ -216,6 +215,7 @@ def validate_security_groups(
     world = {"0.0.0.0/0", "::/0"}
     public_80 = False
     public_443 = False
+    allowed_tcp_ports: set[int] = set()
     normalized: list[dict[str, object]] = []
     for group in groups:
         if not isinstance(group, dict):
@@ -246,8 +246,25 @@ def validate_security_groups(
                         f"group={group.get('GroupId')}, ports={start}-{end}"
                     )
             world_open = bool(world & set(rule_sources))
-            if protocol == "-1" and world_open:
-                fail("AWS Security Group allows all protocols from the Internet")
+            if protocol == "-1" and rule_sources:
+                fail("AWS Security Group allows all protocols from an inbound source")
+            if protocol not in {"tcp", "6", "-1"} and rule_sources:
+                fail(
+                    "AWS Security Group has an unauthorized non-TCP inbound rule: "
+                    f"protocol={protocol}"
+                )
+            if protocol in {"tcp", "6"} and rule_sources:
+                if (
+                    not isinstance(start, int)
+                    or not isinstance(end, int)
+                    or start != end
+                    or start not in ALLOWED_PUBLIC_PORTS
+                ):
+                    fail(
+                        "AWS Security Group has an unauthorized inbound TCP range: "
+                        f"{start}-{end}"
+                    )
+                allowed_tcp_ports.add(start)
             if world_open:
                 if protocol not in {"tcp", "6"} or not isinstance(start, int) or not isinstance(end, int):
                     fail("AWS Security Group has a world-open non-TCP or unbounded rule")
@@ -264,9 +281,75 @@ def validate_security_groups(
         "status": "PASS",
         "attachedGroupIds": sorted(attached_group_ids),
         "rules": normalized,
+        "allowedInboundTcpPorts": sorted(allowed_tcp_ports),
         "worldOpenAllowedPorts": [80, 443],
         "forbiddenPorts": sorted(FORBIDDEN_EXTERNAL_PORTS),
     }
+
+
+def correlate_external_ports(
+    host_evidence: dict[str, object],
+    security_group_evidence: dict[str, object],
+) -> dict[str, object]:
+    host_ports = {
+        int(port)
+        for port in host_evidence.get("hostWildcardPorts", [])
+        if isinstance(port, int)
+    }
+    inbound_ports = {
+        int(port)
+        for port in security_group_evidence.get("allowedInboundTcpPorts", [])
+        if isinstance(port, int)
+    }
+    externally_reachable = sorted(host_ports & inbound_ports)
+    unauthorized = sorted(set(externally_reachable) - ALLOWED_PUBLIC_PORTS)
+    if unauthorized:
+        fail(f"unauthorized externally reachable TCP ports: {unauthorized}")
+    if not EXPECTED_PUBLIC_PORTS <= set(externally_reachable):
+        fail("TCP/80 and TCP/443 are not both listener-and-SG reachable")
+    result = dict(host_evidence)
+    result.update(
+        {
+            "status": "PASS",
+            "sgAllowedTcpPorts": sorted(inbound_ports),
+            "externallyReachableTcpPorts": externally_reachable,
+            "hostBoundButSgBlockedTcpPorts": sorted(host_ports - inbound_ports),
+            "sgAllowedWithoutHostListenerTcpPorts": sorted(inbound_ports - host_ports),
+        }
+    )
+    return result
+
+
+def unverified_security_group_evidence(
+    attached_group_ids: list[str],
+) -> dict[str, object]:
+    return {
+        "status": "NOT_VERIFIED",
+        "reason": (
+            "EC2 has no AWS API authentication; IMDSv2 exposes attached "
+            "Security Group IDs but not their inbound rules"
+        ),
+        "attachedGroupIds": sorted(attached_group_ids),
+        "rules": None,
+    }
+
+
+def uncorrelated_external_ports(
+    host_evidence: dict[str, object],
+) -> dict[str, object]:
+    result = dict(host_evidence)
+    result.update(
+        {
+            "status": "PARTIAL",
+            "externallyReachableTcpPorts": None,
+            "hostBoundButSgBlockedTcpPorts": None,
+            "reason": (
+                "host wildcard listeners were verified, but effective external "
+                "reachability requires AWS Security Group rules or an off-host probe"
+            ),
+        }
+    )
+    return result
 
 
 def imds_request(path: str, token: str | None = None, method: str = "GET") -> str:
@@ -618,7 +701,9 @@ def collect(args: argparse.Namespace) -> dict[str, object]:
     run(["sha256sum", "--check", "SHA256SUMS"], cwd=latest_backup, timeout=120)
 
     listener_output = run(["ss", "-H", "-lnt"])
-    port_evidence = validate_public_listeners(parse_public_listeners(listener_output))
+    host_port_evidence = validate_public_listeners(
+        parse_public_listeners(listener_output)
+    )
 
     status, headers, body = https_request("GET", "/")
     if status != 200 or b'<div id="root"></div>' not in body:
@@ -629,20 +714,36 @@ def collect(args: argparse.Namespace) -> dict[str, object]:
     tls = tls_evidence(PRODUCTION_HOST)
 
     instance_id, region, group_ids = ec2_identity()
-    security_group_document = fetch_security_groups(
-        args.aws_security_groups,
-        region,
-        group_ids,
-    )
-    aws_security_groups = validate_security_groups(
-        security_group_document,
-        group_ids,
-    )
+    if args.skip_aws_security_groups:
+        aws_security_groups = unverified_security_group_evidence(group_ids)
+        port_evidence = uncorrelated_external_ports(host_port_evidence)
+        overall_status = "PARTIAL"
+        unverified_items = [
+            "AWS_SECURITY_GROUP_INBOUND",
+            "EFFECTIVE_EXTERNAL_PORT_REACHABILITY",
+        ]
+    else:
+        security_group_document = fetch_security_groups(
+            args.aws_security_groups,
+            region,
+            group_ids,
+        )
+        aws_security_groups = validate_security_groups(
+            security_group_document,
+            group_ids,
+        )
+        port_evidence = correlate_external_ports(
+            host_port_evidence,
+            aws_security_groups,
+        )
+        overall_status = "PASS"
+        unverified_items = []
 
     captured_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
     return {
         "schemaVersion": 1,
-        "status": "PASS",
+        "status": overall_status,
+        "unverifiedItems": unverified_items,
         "capturedAtUtc": captured_at.isoformat().replace("+00:00", "Z"),
         "mode": "READ_ONLY_NON_DESTRUCTIVE",
         "productionOrigin": PRODUCTION_ORIGIN,
@@ -718,12 +819,21 @@ def collect(args: argparse.Namespace) -> dict[str, object]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
+    security_group_source = parser.add_mutually_exclusive_group()
+    security_group_source.add_argument(
         "--aws-security-groups",
         type=Path,
         help=(
             "Optional AWS describe-security-groups JSON. When omitted, the "
             "collector uses EC2 IMDSv2 and the read-only AWS CLI."
+        ),
+    )
+    security_group_source.add_argument(
+        "--skip-aws-security-groups",
+        action="store_true",
+        help=(
+            "Collect every other check and emit PARTIAL evidence when this EC2 "
+            "has neither AWS API credentials nor supplied Security Group JSON."
         ),
     )
     args = parser.parse_args()

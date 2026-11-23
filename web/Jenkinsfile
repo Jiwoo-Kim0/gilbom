@@ -8,8 +8,9 @@ pipeline {
         MFA_TOTP_SECRET_ACTIVE_KEY_VERSION = '1'
     }
 
-    // Stage 15: source 변경 감지는 CI Job에만 둔다. 운영 배포·Rollback은
-    // full SHA 입력과 인증 사용자 승인 없이는 시작되지 않는다.
+    // Stage 15: source 변경 감지는 CI Job에만 둔다. 수동 운영 배포·Rollback은
+    // 인증 사용자 승인을 유지하고, 운영 자동 배포는 이 CI가 승격한 full SHA와
+    // root preflight의 무마이그레이션 보안 gate를 모두 통과해야 시작된다.
     triggers {
         pollSCM('H/5 * * * *')
     }
@@ -474,7 +475,7 @@ pipeline {
             }
         }
 
-        stage('Flyway V1-V40') {
+        stage('Flyway V1-V42') {
             steps {
                 dir(env.APP_DIR) {
                     sh '''
@@ -484,15 +485,15 @@ pipeline {
                             psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
                                 --no-password --tuples-only --no-align --command "
                                     SELECT (
-                                        COUNT(*) = 40
+                                        COUNT(*) = 42
                                         AND MIN(version::INTEGER) = 1
-                                        AND MAX(version::INTEGER) = 40
+                                        AND MAX(version::INTEGER) = 42
                                         AND BOOL_AND(success)
                                     )::int
                                     FROM flyway_history.flyway_schema_history;
                                 "
                         ' | grep -qx 1
-                        sh scripts/record-ci-result.sh flyway-v1-v40
+                        sh scripts/record-ci-result.sh flyway-v1-v42
                     '''
                 }
             }
@@ -759,12 +760,43 @@ pipeline {
             }
         }
 
+        stage('Create release source archive') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        sh scripts/create-release-source-archive.sh
+                    '''
+                }
+            }
+        }
+
         stage('Build metadata and release integrity') {
             steps {
                 dir(env.APP_DIR) {
                     sh '''
                         set -eu
                         sh scripts/generate-build-metadata.sh
+                    '''
+                    withCredentials([
+                        file(
+                                credentialsId: 'gilbom-cosign-private-key',
+                                variable: 'COSIGN_PRIVATE_KEY'
+                        ),
+                        string(
+                                credentialsId: 'gilbom-cosign-password',
+                                variable: 'COSIGN_PASSWORD'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
+                            sh scripts/sign-release-manifest.sh
+                            sh scripts/record-ci-result.sh cosign-release-manifest
+                        '''
+                    }
+                    sh '''
+                        set -eu
                         sh scripts/verify-release-artifacts.sh
                         sh scripts/record-ci-result.sh artifact-checksum
                     '''
@@ -778,8 +810,9 @@ pipeline {
         }
 
         // Stage 9: 검증된 release/만 불변 incoming 경계로 전송한 뒤
-        // root-owned helper가 자동으로 원자적 승격한다. 이 단계는 운영 배포가
-        // 아니며, 운영 배포와 조건부 Rollback의 Jenkins 승인은 계속 유지한다.
+        // root-owned helper가 자동으로 원자적 승격한다. 이 단계 자체는 운영
+        // 배포가 아니다. 수동 운영 Job은 기존 사용자 승인을 유지하고, 자동
+        // 운영 Job은 CI 성공·무마이그레이션 gate를 요구한다.
         stage('Upload release artifacts to incoming') {
             steps {
                 dir(env.APP_DIR) {
@@ -875,6 +908,35 @@ pipeline {
                         JENKINS_LOG_SECURITY_OUTPUT_DIR=.artifacts/jenkins-log-security \
                             sh scripts/verify-jenkins-console-secret.sh
                         sh scripts/record-ci-result.sh jenkins-log-secret
+                    '''
+                }
+            }
+        }
+
+        stage('Trigger automatic production deployment') {
+            when {
+                expression {
+                    return env.GILBOM_PRODUCTION_AUTO_CD_ENABLED == 'true'
+                }
+            }
+            steps {
+                script {
+                    build(
+                            job: 'gilbom-production-auto-deploy',
+                            parameters: [
+                                string(
+                                        name: 'FULL_COMMIT_SHA',
+                                        value: env.RELEASE_SHA
+                                )
+                            ],
+                            wait: false,
+                            propagate: false
+                    )
+                }
+                dir(env.APP_DIR) {
+                    sh '''
+                        sh scripts/record-ci-result.sh \
+                            production-auto-deploy-trigger
                     '''
                 }
             }

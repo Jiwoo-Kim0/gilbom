@@ -97,6 +97,9 @@ grep -Fq 'engineId: $backend_engine_id' \
 grep -Fq 'verify_release_signature "$artifact_dir"' \
   infra/scripts/gilbom-deploy.sh \
   || fail "root deployment does not verify Cosign before docker load"
+grep -Fq 'verify_release_manifest_signature "$artifact_dir"' \
+  infra/scripts/gilbom-deploy.sh \
+  || fail "root deployment does not verify the signed complete manifest"
 signature_line="$(
   grep -nF 'verify_release_signature "$artifact_dir"' \
     infra/scripts/gilbom-deploy.sh | cut -d: -f1
@@ -107,9 +110,30 @@ load_line="$(
 )"
 [ "$signature_line" -lt "$load_line" ] \
   || fail "Cosign verification must happen before docker load"
+manifest_signature_line="$(
+  grep -nF 'verify_release_manifest_signature "$artifact_dir"' \
+    infra/scripts/gilbom-deploy.sh | cut -d: -f1
+)"
+[ "$manifest_signature_line" -lt "$load_line" ] \
+  || fail "complete manifest verification must happen before docker load"
 grep -Fq 'verify_release_signature "$target_artifact"' \
   infra/scripts/gilbom-deploy.sh \
   || fail "automatic rollback archive is not verified with Cosign"
+grep -Fq 'install_compose_file "$candidate_compose_path"' \
+  infra/scripts/gilbom-deploy.sh \
+  || fail "signed candidate Compose is not atomically installed"
+grep -Fq 'prepare_release_source_tree' \
+  infra/scripts/gilbom-deploy.sh \
+  || fail "signed source archive is not safely staged"
+grep -Fq 'activate_release_source_tree' \
+  infra/scripts/gilbom-deploy.sh \
+  || fail "signed source tree is not activated"
+grep -Fq 'restore_deploy_source_tree' \
+  infra/scripts/gilbom-deploy.sh \
+  || fail "source tree activation is not rollback-safe"
+grep -Fq 'previous-compose.prod.yaml' \
+  infra/scripts/gilbom-deploy.sh \
+  || fail "previous Compose snapshot and rollback are missing"
 
 sh scripts/test-production-deploy-boundary.sh
 echo "Production deploy contract verification: PASS"

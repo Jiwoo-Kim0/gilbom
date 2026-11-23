@@ -50,18 +50,22 @@ public final class PatrolCatalogDtos {
     }
 
     public record PatrolAreaUpdateRequest(
+            @Size(min = 1, max = 50) String areaCode,
             @Size(min = 1, max = 100) String areaName,
             JsonNode boundary
     ) {
 
         public PatrolAreaUpdateRequest {
+            areaCode = normalize(areaCode);
             areaName = normalize(areaName);
         }
 
         @AssertTrue(message = "at least one patrol area field must be provided")
         @JsonIgnore
         public boolean isPatchPresent() {
-            return areaName != null || boundary != null;
+            return areaCode != null
+                    || areaName != null
+                    || boundary != null;
         }
     }
 

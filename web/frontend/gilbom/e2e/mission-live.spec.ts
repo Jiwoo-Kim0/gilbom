@@ -25,6 +25,7 @@ test('Mission Mock 전체 흐름이 TLS MQTT부터 React까지 이어진다', as
   context,
   page,
 }, testInfo) => {
+  test.setTimeout(60_000)
   await context.addCookies([{
     name: 'GILBOM_SESSION',
     value: sessionCookie!,
@@ -35,9 +36,19 @@ test('Mission Mock 전체 흐름이 TLS MQTT부터 React까지 이어진다', as
   }])
   await page.route('https://oapi.map.naver.com/**', (route) => route.abort())
   await page.goto('/missions')
+  await page.getByRole('combobox', { name: '목록 범위' }).selectOption({
+    label: '전체 임무',
+  })
+  await page.getByRole('button', { name: '조회' }).click()
+
+  await page.getByRole('button', {
+    name: `${missionCode} 상세 보기`,
+  }).click()
 
   const detail = page.getByTestId('mission-detail')
-  await expect(detail.getByText(missionCode!, { exact: true })).toBeVisible()
+  await expect(page.locator('#mission-detail-modal-title')).toHaveText(
+    missionCode!,
+  )
   await expect(
     detail.locator('.mission-status[data-status="CREATED"]'),
   ).toBeVisible()
@@ -100,6 +111,12 @@ test('Mission Mock 전체 흐름이 TLS MQTT부터 React까지 이어진다', as
   await expect(
     detail.locator('.mission-status[data-status="RUNNING"]'),
   ).toBeVisible({ timeout: 10_000 })
+  await expect(
+    page.getByTestId('mission-defect-marker').first(),
+  ).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByRole('complementary', {
+    name: '결함 상세',
+  })).toBeVisible()
   await expect.poll(async () => {
     const snapshot = await missionSnapshot()
     return snapshot.status === 'RUNNING'
@@ -144,6 +161,41 @@ test('Mission Mock 전체 흐름이 TLS MQTT부터 React까지 이어진다', as
   expect(completed.completionReason).toBe(
     'MOCK_PLANNED_DURATION_REACHED',
   )
+
+  await expect.poll(async () => {
+    const response = await page.request.get(
+      `/api/v1/missions/${missionId}/defects`,
+    )
+    if (!response.ok()) {
+      return []
+    }
+    const payload = await response.json() as {
+      defects: Array<{ defectType: string }>
+    }
+    return [...new Set(payload.defects.map((item) => item.defectType))].sort()
+  }, { timeout: 10_000 }).toEqual(['DAMAGED', 'MISSING'])
+
+  const defectsResponse = await page.request.get(
+    `/api/v1/missions/${missionId}/defects`,
+  )
+  expect(defectsResponse.ok()).toBeTruthy()
+  const defectsPayload = await defectsResponse.json() as {
+    defects: Array<{ defectId: string; defectType: string }>
+  }
+  const missingDefect = defectsPayload.defects.find(
+    (item) => item.defectType === 'MISSING',
+  )
+  expect(missingDefect).toBeDefined()
+  const missingMarker = page.locator(
+    `[data-testid="mission-defect-marker"]` +
+    `[data-defect-id="${missingDefect!.defectId}"]`,
+  )
+  await missingMarker.focus()
+  await missingMarker.press('Enter')
+  await expect(
+    page.getByRole('complementary', { name: '결함 상세' })
+      .getByRole('heading', { name: '미설치' }),
+  ).toBeVisible()
 
   const historyResponse = await page.request.get(
     `/api/v1/missions/${missionId}/history`,

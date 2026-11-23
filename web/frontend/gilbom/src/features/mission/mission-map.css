@@ -54,6 +54,13 @@
   font-size: 11px;
 }
 
+.mission-map-streams {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
 .mission-map-stream {
   display: inline-flex;
   gap: 5px;
@@ -98,20 +105,35 @@
   background: #e36b2c;
 }
 
-.mission-map-legend-current > span {
-  width: 9px !important;
-  height: 9px !important;
-  background: #175c4c;
+.mission-map-legend-current > img {
+  width: 12px;
+  height: 18px;
+  object-fit: contain;
+}
+
+.mission-map-legend-defect > span {
+  width: 10px !important;
+  height: 10px !important;
+  border: 2px solid #fff;
+  border-radius: 50% 50% 50% 0 !important;
+  background: var(--defect-damaged);
+  box-shadow: 0 1px 3px rgb(23 34 28 / 25%);
+  transform: rotate(-45deg);
 }
 
 .mission-map-canvas-wrap,
 .mission-map-fallback-wrap {
   position: relative;
+  isolation: isolate;
   min-height: 280px;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: #eef4ef;
+}
+
+.mission-map .defect-card {
+  z-index: 40;
 }
 
 .mission-map-canvas {
@@ -171,20 +193,61 @@
   vector-effect: non-scaling-stroke;
 }
 
-.mission-map-current circle {
-  fill: #175c4c;
-  stroke: #fff;
-  stroke-width: 4;
-  vector-effect: non-scaling-stroke;
+.mission-map-current-car {
   filter: drop-shadow(0 3px 5px rgb(15 23 42 / 30%));
 }
 
-.mission-map-current.is-offline circle {
-  fill: #6b7280;
+.mission-map-current.is-offline .mission-map-current-car {
+  filter: grayscale(1) drop-shadow(0 3px 5px rgb(15 23 42 / 25%));
+  opacity: 0.7;
 }
 
-.mission-map-current path {
+.mission-map-defect-pin {
+  cursor: pointer;
+}
+
+.mission-map-defect-pin path {
+  stroke: #fff;
+  stroke-width: 2;
+  filter: drop-shadow(0 2px 3px rgb(23 34 28 / 35%));
+  vector-effect: non-scaling-stroke;
+}
+
+.mission-map-defect-pin circle {
   fill: #fff;
+  pointer-events: none;
+}
+
+.mission-map-defect-pin-damaged path {
+  fill: var(--defect-damaged);
+}
+
+.mission-map-defect-pin-missing path {
+  fill: var(--defect-missing);
+}
+
+.mission-map-defect-pin-installation-invalid path {
+  fill: var(--defect-installation-invalid);
+}
+
+.mission-map-defect-pin-unknown-anomaly path {
+  fill: var(--defect-unknown-anomaly);
+}
+
+.mission-map-defect-pin.is-selected path,
+.mission-map-defect-pin:focus-visible path {
+  stroke: #17221c;
+  stroke-width: 4;
+}
+
+.mission-map-defect-error {
+  padding: 9px 11px;
+  border: 1px solid #fdba74;
+  border-radius: 10px;
+  color: #9a3412;
+  background: #fff7ed;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .mission-map-fallback-label {

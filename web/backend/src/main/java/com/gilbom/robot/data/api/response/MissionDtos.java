@@ -170,6 +170,29 @@ public final class MissionDtos {
         }
     }
 
+    /** 임무에서 수신한 결함 이벤트로 연결된 지도 마커 정보다. */
+    public record MissionDefectMapItem(
+            UUID defectId,
+            String incidentCode,
+            String defectType,
+            String riskLevel,
+            String workflowStatus,
+            double longitude,
+            double latitude,
+            BigDecimal latestConfidence
+    ) {
+    }
+
+    public record MissionDefectMapResponse(
+            UUID missionId,
+            List<MissionDefectMapItem> defects
+    ) {
+
+        public MissionDefectMapResponse {
+            defects = List.copyOf(defects);
+        }
+    }
+
     public record MissionStatusHistoryItem(
             UUID historyId,
             String transitionSource,

@@ -27,9 +27,9 @@
   align-items: end;
 }
 
-.report-period-contract-gap {
+.report-period-filter {
   display: flex;
-  grid-column: 1 / span 2;
+  grid-column: 1 / span 3;
   gap: 8px;
   min-width: 0;
   margin: 0;
@@ -38,30 +38,86 @@
   align-items: center;
 }
 
-.report-period-contract-gap legend {
+.report-period-filter legend {
+  display: flex;
   width: 100%;
+  gap: 6px;
   margin-bottom: 7px;
+  align-items: center;
   color: var(--text);
   font-size: 13px;
   font-weight: 750;
+  white-space: nowrap;
 }
 
-.report-period-contract-gap input {
+.report-period-info {
+  display: inline-grid;
+  position: relative;
+  width: 17px;
+  height: 17px;
+  align-self: flex-start;
+  place-items: center;
+  color: var(--text-muted);
+  cursor: help;
+  transform: translateY(-1px);
+}
+
+.report-period-info:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.report-period-tooltip {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 10px);
+  left: -58px;
+  width: max-content;
+  max-width: calc(100vw - 48px);
+  padding: 8px 11px;
+  border-radius: 8px;
+  color: #fff;
+  background: #252a28;
+  box-shadow: 0 8px 24px rgba(17, 37, 28, 0.2);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    visibility 140ms ease;
+  visibility: hidden;
+  white-space: nowrap;
+}
+
+.report-period-tooltip::after {
+  position: absolute;
+  top: 100%;
+  left: 63px;
+  width: 8px;
+  height: 8px;
+  background: #252a28;
+  content: '';
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.report-period-info:hover .report-period-tooltip,
+.report-period-info:focus-visible .report-period-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+}
+
+.report-period-filter input {
   min-width: 0;
   min-height: 42px;
   padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface-muted);
-}
-
-.report-contract-note {
-  grid-column: 3;
-  align-self: center;
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.5;
 }
 
 .report-filter-actions {
@@ -79,29 +135,54 @@
 }
 
 .report-table-wrap {
-  margin: 20px -10px 0;
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
   overflow-x: auto;
 }
 
 .report-table {
   width: 100%;
   min-width: 880px;
-  border-collapse: collapse;
+  border-spacing: 0;
+  border-collapse: separate;
 }
 
 .report-table th,
 .report-table td {
-  padding: 15px 12px;
-  border-bottom: 1px solid var(--line);
+  padding: 12px 18px;
   text-align: left;
   vertical-align: middle;
 }
 
 .report-table th {
+  border-bottom: 1px solid var(--line);
   color: var(--text-muted);
   background: var(--surface-muted);
   font-size: 12px;
+  font-weight: 700;
   letter-spacing: 0.02em;
+}
+
+.report-table td {
+  height: 64px;
+  font-size: 14px;
+}
+
+.report-table th:nth-child(2),
+.report-table td:nth-child(2) {
+  min-width: 230px;
+  white-space: nowrap;
+}
+
+.report-table th:nth-child(5),
+.report-table td:nth-child(5) {
+  min-width: 180px;
+  white-space: nowrap;
+}
+
+.report-table tbody tr + tr td {
+  border-top: 1px solid var(--line);
 }
 
 .report-table tbody tr {
@@ -116,6 +197,7 @@
   display: grid;
   gap: 4px;
   color: var(--text);
+  font-size: 14px;
   text-decoration: none;
 }
 
@@ -125,6 +207,7 @@
 
 .report-title-link small {
   color: var(--text-muted);
+  font-size: 13px;
   font-weight: 500;
 }
 
@@ -329,27 +412,139 @@
   line-height: 1.85;
 }
 
-.report-metric-grid {
+.safe-report-document {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
+  gap: 14px;
+  overflow-wrap: anywhere;
 }
 
-.report-metric-grid > div {
+.safe-report-document h4,
+.safe-report-document h5,
+.safe-report-document h6,
+.safe-report-document p,
+.safe-report-document ul {
+  margin: 0;
+}
+
+.safe-report-document h4 {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 18px;
+  line-height: 1.45;
+}
+
+.safe-report-document h5 {
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.safe-report-document h6 {
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.safe-report-document p {
+  color: var(--text);
+  font-weight: 400;
+  white-space: pre-wrap;
+}
+
+.safe-report-document ul {
   display: grid;
+  gap: 9px;
+  padding-left: 1.35rem;
+}
+
+.safe-report-document li {
+  padding-left: 3px;
+  font-weight: 400;
+}
+
+.safe-report-document li::marker {
+  color: var(--brand-strong);
+}
+
+.safe-report-structured-item {
+  display: grid;
+  gap: 5px;
+}
+
+.safe-report-document li.safe-report-structured-list-item {
+  padding-left: 0;
+  list-style: none;
+}
+
+.safe-report-structured-field,
+.safe-report-structured-body {
+  display: block;
+}
+
+.safe-report-structured-field {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
   gap: 7px;
-  padding: 15px;
+  font-weight: 400;
+}
+
+.safe-report-structured-field::before {
+  color: var(--brand-strong);
+  content: '•';
+}
+
+.safe-report-structured-body {
+  margin-top: 3px;
+  padding-left: 17px;
+  line-height: 1.75;
+}
+
+.report-evidence-section {
+  margin: 28px 0 1.85em;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.report-evidence-section h4 {
+  margin: 0 0 14px;
+  font-size: 16px;
+}
+
+.report-evidence-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.report-evidence-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.report-evidence-figure {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface-muted);
 }
 
-.report-metric-grid span {
+.report-evidence-figure img {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  background: #111;
+}
+
+.report-evidence-figure figcaption {
+  padding: 9px 12px;
   color: var(--text-muted);
   font-size: 12px;
 }
 
-.report-metric-grid strong {
-  font-size: 21px;
+.report-evidence-gallery + .report-evidence-note {
+  margin-top: 10px;
 }
 
 .report-current-state {
@@ -637,10 +832,9 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .report-period-contract-gap,
-  .report-contract-note,
+  .report-period-filter,
   .report-filter-actions {
-    grid-column: auto;
+    grid-column: 1 / -1;
   }
 
   .report-detail-grid,
@@ -664,12 +858,11 @@
   .report-filter-grid,
   .report-form-grid,
   .report-method-options,
-  .report-metadata-grid,
-  .report-metric-grid {
+  .report-metadata-grid {
     grid-template-columns: 1fr;
   }
 
-  .report-period-contract-gap,
+  .report-period-filter,
   .report-pdf-card {
     grid-template-columns: 1fr;
   }

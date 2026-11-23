@@ -10,12 +10,12 @@ SELECT (
         WHERE extname = 'postgis'
     )
     AND (
-        SELECT COUNT(*) = 40
+        SELECT COUNT(*) = 42
                AND COUNT(*) FILTER (WHERE NOT success) = 0
                AND COUNT(*) FILTER (
-                   WHERE version::INTEGER BETWEEN 1 AND 40
+                   WHERE version::INTEGER BETWEEN 1 AND 42
                      AND success
-               ) = 40
+               ) = 42
         FROM flyway_history.flyway_schema_history
     )
     AND (

@@ -19,6 +19,7 @@ import { useAuthentication } from '../auth/authenticationContext'
 import { ROBOT_COMMAND_VIEW } from '../auth/permissions'
 import { CommandControlPage } from '../command/CommandControlPage'
 import { getRobot } from './robotApi'
+import { getRobotStatusLabel } from './robotStatusPresentation'
 import { RobotTelemetryStatisticsCard } from './RobotTelemetryStatisticsCard'
 import type {
   RobotDetail,
@@ -171,25 +172,25 @@ export function RobotDetailPage() {
                   robot.connectivityStatus === 'ONLINE' ? 'online' : 'offline'
                 }`}
               >
-                {robot.connectivityStatus}
+                {getRobotStatusLabel(robot.connectivityStatus)}
               </span>
             </div>
             <dl className="robot-detail-grid">
               <div>
                 <dt>운영 상태</dt>
-                <dd>{robot.operationalStatus}</dd>
+                <dd>{getRobotStatusLabel(robot.operationalStatus)}</dd>
               </div>
               <div>
                 <dt>전체 상태</dt>
-                <dd>{robot.overallHealthStatus}</dd>
+                <dd>{getRobotStatusLabel(robot.overallHealthStatus)}</dd>
               </div>
               <div>
                 <dt>로봇 모드</dt>
-                <dd>{robot.robotMode ?? '—'}</dd>
+                <dd>{getRobotStatusLabel(robot.robotMode)}</dd>
               </div>
               <div>
                 <dt>임무 상태</dt>
-                <dd>{robot.missionStatus ?? '—'}</dd>
+                <dd>{getRobotStatusLabel(robot.missionStatus)}</dd>
               </div>
               <div>
                 <dt>배터리</dt>

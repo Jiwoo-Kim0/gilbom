@@ -127,8 +127,8 @@ sequenceDiagram
     Provisioner->>Broker: passwd 반영·Reload
     Broker-->>Provisioner: 반영 결과
     Provisioner-->>API: Broker 반영 성공
-    API->>DB: Credential ACTIVE + Robot ACTIVE + 감사 로그
-    API-->>UI: username, password 원문 1회 응답
+    API->>DB: MQTT Credential ACTIVE + 이미지 API Key ACTIVE + Robot ACTIVE + 감사 로그
+    API-->>UI: robotId, MQTT 정보, 이미지 업로드 URL과 두 Secret 원문 1회 응답
     UI-->>Admin: 복사·다운로드 후 재조회 불가
 
     Admin->>Robot: Broker 주소·username·password·CA 설정
@@ -209,13 +209,16 @@ Backend와 Provisioner 처리:
    `ACTIVE`로 저장하고 `ROBOT_CREDENTIAL_ROTATED`를 기록한다.
 10. 최초 발급의 DB 트랜잭션이 실패하면 추가한 Broker 계정을 제거한다. 회전의 DB
     트랜잭션이 실패하면 교체 전 password hash를 복구한다.
-11. 원문을 제외한 결과만 멱등성 저장소에 기록한다.
-12. 마지막으로 원문 비밀번호를 한 번만 응답한다.
+11. 로봇 이미지 업로드 API Key를 생성해 기존 활성 Key를 회수하고 새 해시를 저장한다.
+12. 두 Secret 원문을 제외한 결과만 멱등성 저장소에 기록한다.
+13. 마지막으로 Robot UUID, MQTT 정보, 이미지 업로드 URL과 두 Secret을 한 번만 응답한다.
 
 성공 Response 예:
 
 ```json
 {
+  "robotId": "f59c163e-f080-40ee-81ca-94b9d8f235bf",
+  "mqttId": "RBT-001",
   "credentialId": "42ba8e8c-bb29-4f86-a53b-d17fa9321106",
   "credentialType": "MQTT_PASSWORD",
   "mqtt": {
@@ -223,6 +226,10 @@ Backend와 Provisioner 처리:
     "username": "RBT-001",
     "password": "<이번 응답에서만 제공되는 원문>",
     "clientId": "RBT-001"
+  },
+  "imageUpload": {
+    "url": "https://example.com/api/v1/images",
+    "apiKey": "<이번 응답에서만 제공되는 gik_ 원문>"
   },
   "expiresAt": "2027-01-23T04:00:00Z"
 }
@@ -235,7 +242,7 @@ Cache-Control: no-store
 Pragma: no-cache
 ```
 
-Frontend는 비밀번호를 `localStorage`, `sessionStorage`, Redux 영속 저장소, URL,
+Frontend는 두 Secret을 `localStorage`, `sessionStorage`, Redux 영속 저장소, URL,
 Analytics에 넣지 않는다. 화면을 닫으면 같은 원문을 다시 조회할 수 없다.
 
 ### 5.4 Credential 조회·폐기 API
@@ -277,16 +284,20 @@ Mosquitto passwd 행
 Credential 발급 후 임베디드팀이 다음 설정을 로봇에 입력한다.
 
 ```text
+ROBOT_UUID=f59c163e-f080-40ee-81ca-94b9d8f235bf
+MQTT_ID=RBT-001
 MQTT_BROKER=ssl://mqtt.example.com:8883
 MQTT_USERNAME=RBT-001
 MQTT_PASSWORD=<발급받은 비밀번호>
 MQTT_CLIENT_ID=RBT-001
 MQTT_CA_CERT=/secure/path/ca.pem
+UPLOAD_URL=https://example.com/api/v1/images
+UPLOAD_API_KEY=<발급받은 이미지 API Key>
 ```
 
 보관 규칙:
 
-- Git, Docker Image, 일반 설정 예제에 실제 비밀번호를 넣지 않는다.
+- Git, Docker Image, 일반 설정 예제에 실제 MQTT 비밀번호나 이미지 API Key를 넣지 않는다.
 - Jetson의 전용 서비스 계정만 읽을 수 있는 Secret 파일을 사용한다.
 - 파일 권한은 최소 `0600` 수준으로 제한한다.
 - 애플리케이션 시작 로그에 username은 필요 시 마스킹하여 남길 수 있지만

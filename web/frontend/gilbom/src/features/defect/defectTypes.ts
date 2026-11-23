@@ -9,7 +9,7 @@ export type { PageResponse }
 
 // ---------------------------------------------------------------- enum
 
-/** `DefectWorkflow`의 상태. 전이 규칙은 {@link ALLOWED_TRANSITIONS} 참고. */
+/** `DefectWorkflow`의 상태. 전이 규칙은 {@link allowedTransitions} 참고. */
 export const WORKFLOW_STATUSES = [
   'NEW',
   'ACCEPTED',
@@ -26,6 +26,7 @@ export type RiskLevel = (typeof RISK_LEVELS)[number]
 /** 서버 `DefectFilter.DEFECT_TYPES`와 같아야 한다. */
 export const DEFECT_TYPES = [
   'DAMAGED',
+  'MISSING',
   'INSTALLATION_INVALID',
   'UNKNOWN_ANOMALY',
 ] as const
@@ -49,19 +50,31 @@ export const CATEGORIES = ['BRAILLE_BLOCK'] as const
 export type Category = (typeof CATEGORIES)[number]
 
 /**
- * 서버 `DefectWorkflow.ALLOWED_TRANSITIONS`를 그대로 옮긴 것이다.
- * 화면은 허용된 다음 상태만 보여주고, 최종 판정은 서버가 409로 한다.
+ * 사람이 지정할 수 있는 처리 상태. 서버 `DefectWorkflow.ASSIGNABLE_STATUSES`와 같다.
+ *
+ * <p>`NEW`는 결함이 적재될 때 시스템이 매기는 상태라 빠져 있다. 되돌리면 관측 이력과
+ * 어긋나고, 서버도 409로 막는다.
  */
-export const ALLOWED_TRANSITIONS: Record<WorkflowStatus, WorkflowStatus[]> = {
-  NEW: ['ACCEPTED', 'FALSE_POSITIVE', 'REJECTED'],
-  ACCEPTED: ['IN_PROGRESS', 'FALSE_POSITIVE', 'REJECTED'],
-  IN_PROGRESS: ['RESOLVED', 'FALSE_POSITIVE', 'REJECTED'],
-  RESOLVED: [],
-  FALSE_POSITIVE: [],
-  REJECTED: [],
+export const ASSIGNABLE_STATUSES: WorkflowStatus[] = [
+  'ACCEPTED',
+  'IN_PROGRESS',
+  'RESOLVED',
+  'FALSE_POSITIVE',
+  'REJECTED',
+]
+
+/**
+ * 지금 상태에서 고를 수 있는 다음 상태.
+ *
+ * <p>단계에 묶지 않는다(서버 `DefectWorkflow` 주석 참고). 현장 처리가 순서대로
+ * 흐르지 않아서, 접수 없이 바로 완료하거나 완료한 뒤 처리 중으로 되돌리는 일이 있다.
+ * 지금과 같은 상태만 뺀다. 최종 판정은 서버가 409로 한다.
+ */
+export function allowedTransitions(from: WorkflowStatus): WorkflowStatus[] {
+  return ASSIGNABLE_STATUSES.filter((status) => status !== from)
 }
 
-/** 종결 상태는 더 전이하지 않고 내용 수정도 막힌다. */
+/** 종결 상태는 내용 수정이 막힌다. 처리 상태 변경은 막지 않는다. */
 export const TERMINAL_STATUSES: WorkflowStatus[] = [
   'RESOLVED',
   'FALSE_POSITIVE',
@@ -92,6 +105,7 @@ export const RISK_LEVEL_LABELS: Record<RiskLevel, string> = {
 
 export const DEFECT_TYPE_LABELS: Record<DefectType, string> = {
   DAMAGED: '파손',
+  MISSING: '미설치',
   INSTALLATION_INVALID: '설치 이상',
   UNKNOWN_ANOMALY: '기타 이상',
 }
@@ -238,6 +252,26 @@ export type DefectImageUrl = {
   bboxNorm: number[] | null
 }
 
+/**
+ * 지도 묶음 목록 한 줄. 지도 GeoJSON에 없는 값(위치 이름, 사진)만 담는다.
+ *
+ * <p>`imageUrl`은 사진이 아직 연결되지 않았거나 저장소를 쓸 수 없으면 null이다 —
+ * 목록의 사진 한 칸이 비는 것은 오류가 아니다.
+ */
+export type DefectClusterItem = {
+  defectId: string
+  incidentCode: string
+  locationLabel: string | null
+  zoneId: string | null
+  imageUrl: string | null
+  imageUrlExpiresAt: string | null
+}
+
+export type DefectClusterDetails = {
+  /** 보이지 않는 결함은 404가 아니라 여기서 빠진다. */
+  items: DefectClusterItem[]
+}
+
 export type DefectMergeResult = {
   targetDefectId: string
   mergedDefectIds: string[]
@@ -250,7 +284,15 @@ export type DefectMergeResult = {
 
 export type DefectFilters = {
   q: string
+  /**
+   * 서버가 `last_seen_at >= from`으로 거는 하한이다. 필터 패널은 날짜만 받지만
+   * 값은 datetime-local 문자열(`2026-08-05T00:00`)로 들고 다닌다.
+   */
   from: string
+  /**
+   * 상한. 결함 필터 패널은 노출하지 않는다(상한은 늘 "지금"이다).
+   * 요약처럼 기간을 못박아 조회하는 쪽에서만 채운다.
+   */
   to: string
   workflowStatuses: WorkflowStatus[]
   defectTypes: DefectType[]
@@ -289,10 +331,52 @@ export const EMPTY_DEFECT_FILTERS: DefectFilters = {
   bbox: '',
 }
 
+/**
+ * "초기화"가 되돌아가는 자리. **첫 진입과 같은 화면**이어야 한다 — 조건을 다 풀어
+ * 종결까지 쏟아지는 목록은 아무도 원하지 않는다.
+ *
+ * <p>`EMPTY_DEFECT_FILTERS`와 다른 점은 처리 상태뿐이다. 그쪽은 "조건 없음"(전체 조회)을
+ * 뜻하는 값이라 URL에 `allStatus` 표식으로 실린다. 초기화에 그것을 쓰면 안 된다.
+ */
+export const DEFAULT_DEFECT_FILTERS: DefectFilters = {
+  ...EMPTY_DEFECT_FILTERS,
+  workflowStatuses: [...DEFAULT_WORKFLOW_STATUSES],
+}
+
+function sameSelection(left: string[], right: string[]): boolean {
+  return (
+    left.length === right.length
+    && [...left].sort().join() === [...right].sort().join()
+  )
+}
+
+/**
+ * 기본값과 달라진 조건 묶음의 수. "필터" 버튼 배지에 찍힌다.
+ *
+ * <p>조건이 전부 모달 안으로 들어가면서 화면에 무엇이 걸렸는지 보여줄 것이 이 숫자
+ * 하나뿐이다. 그래서 **고른 항목 수가 아니라 손댄 조건 수**를 센다 — 심각도 넷을 고른
+ * 것도 "조건 하나 걸림"이다. 검색어는 검색창에 그대로 보이므로 세지 않는다.
+ *
+ * <p>기준은 {@link DEFAULT_DEFECT_FILTERS}다. 첫 진입의 처리 상태 셋은 손댄 것이 아니다.
+ */
+export function countActiveFilterGroups(filters: DefectFilters): number {
+  const changed = [
+    filters.from !== DEFAULT_DEFECT_FILTERS.from,
+    !sameSelection(
+      filters.workflowStatuses,
+      DEFAULT_DEFECT_FILTERS.workflowStatuses,
+    ),
+    filters.defectTypes.length > 0,
+    filters.severities.length > 0,
+    filters.minConfidence !== null,
+  ]
+  return changed.filter(Boolean).length
+}
+
 /** 서버 `DefectFilter.SORTABLE_COLUMNS`가 허용하는 키만 노출한다. */
 export const DEFECT_SORT_OPTIONS = [
   { value: 'lastSeenAt,desc', label: '최근 관측순' },
-  { value: 'firstSeenAt,desc', label: '최초 발견순' },
+  { value: 'firstSeenAt,asc', label: '최초 발견순' },
   { value: 'riskScore,desc', label: '위험도순' },
   { value: 'observationCount,desc', label: '반복 관측순' },
   { value: 'latestConfidence,desc', label: '신뢰도순' },

@@ -1,0 +1,379 @@
+pipeline {
+    agent any
+
+    parameters {
+        string(
+                name: 'FULL_COMMIT_SHA',
+                defaultValue: '',
+                description: '성공한 CI Job이 승격한 동일 40자리 master SHA'
+        )
+    }
+
+    environment {
+        PRODUCTION_DEPLOY_HOST = 'host.docker.internal'
+        PRODUCTION_DEPLOY_SSH_PORT = '22'
+        PRODUCTION_BASE_URL = 'https://i15d101.p.ssafy.io'
+    }
+
+    options {
+        disableConcurrentBuilds(abortPrevious: false)
+        skipDefaultCheckout(true)
+        timestamps()
+        timeout(time: 45, unit: 'MINUTES')
+    }
+
+    stages {
+        stage('Checkout trusted production deployment code') {
+            steps {
+                deleteDir()
+                checkout scm
+                script {
+                    def requestedSha =
+                            params.FULL_COMMIT_SHA
+                                    ? params.FULL_COMMIT_SHA.trim()
+                                    : ''
+                    if (!(requestedSha ==~ /^[0-9a-f]{40}$/)) {
+                        error(
+                                'FULL_COMMIT_SHA is missing or invalid. '
+                                        + 'For a newly created Pipeline Job, '
+                                        + 'the first build only seeds the '
+                                        + 'Declarative parameter; rerun the '
+                                        + 'upstream gilbom-ci-baseline Job.'
+                        )
+                    }
+                    env.FULL_COMMIT_SHA = requestedSha
+                    env.APP_DIR = fileExists(
+                            'web/Jenkinsfile.production-auto'
+                    ) ? 'web' : '.'
+                }
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        test -n "$FULL_COMMIT_SHA"
+                        test "$(git rev-parse --is-shallow-repository)" = false
+                        git cat-file -e "$FULL_COMMIT_SHA^{commit}"
+                        git merge-base --is-ancestor \
+                            "$FULL_COMMIT_SHA" origin/master
+                        mkdir -p .artifacts/production-auto-deploy
+                    '''
+                }
+            }
+        }
+
+        stage('Authorize automatic production chain') {
+            steps {
+                script {
+                    if (env.GILBOM_PRODUCTION_AUTO_CD_ENABLED != 'true') {
+                        error('Production automatic CD is disabled')
+                    }
+                    def upstreamCauses = currentBuild.getBuildCauses(
+                            'org.jenkinsci.plugins.workflow.support.steps.build.BuildUpstreamCause'
+                    )
+                    echo(
+                            'Detected Jenkins upstream causes: '
+                                    + upstreamCauses.size()
+                    )
+                    def ciCause = upstreamCauses.find { cause ->
+                        def projectName = cause.upstreamProject
+                        if (projectName == null) {
+                            return false
+                        }
+                        return projectName.toString().trim() == 'gilbom-ci-baseline'
+                    }
+                    if (ciCause == null) {
+                        error(
+                                'Production automatic CD accepts only an '
+                                        + 'upstream gilbom-ci-baseline build'
+                        )
+                    }
+                }
+            }
+        }
+
+        stage('Collect strict production automatic preflight') {
+            steps {
+                dir(env.APP_DIR) {
+                    withCredentials([
+                        sshUserPrivateKey(
+                                credentialsId: 'gilbom-artifact-upload-ssh',
+                                keyFileVariable: 'ARTIFACT_SSH_IDENTITY',
+                                usernameVariable: 'ARTIFACT_SSH_USER'
+                        ),
+                        file(
+                                credentialsId: 'gilbom-artifact-known-hosts',
+                                variable: 'ARTIFACT_KNOWN_HOSTS'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
+                            KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                            SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                            SSH_PORT="$PRODUCTION_DEPLOY_SSH_PORT" \
+                                sh scripts/run-production-deploy-preflight-remote.sh \
+                                    "$FULL_COMMIT_SHA" \
+                                    "$ARTIFACT_SSH_USER@$PRODUCTION_DEPLOY_HOST" \
+                                    > .artifacts/production-auto-deploy/preflight.json
+                            jq -e \
+                                --arg sha "$FULL_COMMIT_SHA" \
+                                '
+                                  .releaseSha == $sha
+                                  and .artifact.directory
+                                    == ("/opt/gilbom/artifacts/" + $sha)
+                                  and .artifact.signature.status == "PASS"
+                                  and (
+                                    .artifact.signature.manifestBundleSha256
+                                    | test("^[0-9a-f]{64}$")
+                                  )
+                                  and .source.archive
+                                    == ("gilbom-web-" + $sha + ".tar.zst")
+                                  and (
+                                    .source.sha256
+                                    | test("^[0-9a-f]{64}$")
+                                  )
+                                  and .compose.path == "compose.prod.yaml"
+                                  and (
+                                    .compose.sha256
+                                    | test("^[0-9a-f]{64}$")
+                                  )
+                                  and .vulnerabilities.critical == 0
+                                  and .vulnerabilities.unapprovedHigh == 0
+                                  and .flyway.compatibility
+                                    == "COMPATIBLE_NO_SCHEMA_CHANGE"
+                                  and (.flyway.pendingMigrations | length) == 0
+                                ' \
+                                .artifacts/production-auto-deploy/preflight.json \
+                                >/dev/null
+                            sh scripts/render-production-deploy-approval.sh \
+                                .artifacts/production-auto-deploy/preflight.json \
+                                > .artifacts/production-auto-deploy/preflight-summary.txt
+                            sha256sum \
+                                .artifacts/production-auto-deploy/preflight.json \
+                                | awk '{print $1}' \
+                                > .artifacts/production-auto-deploy/preflight.sha256
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Record automatic production approval') {
+            steps {
+                dir(env.APP_DIR) {
+                    withCredentials([
+                        sshUserPrivateKey(
+                                credentialsId: 'gilbom-artifact-upload-ssh',
+                                keyFileVariable: 'ARTIFACT_SSH_IDENTITY',
+                                usernameVariable: 'ARTIFACT_SSH_USER'
+                        ),
+                        file(
+                                credentialsId: 'gilbom-artifact-known-hosts',
+                                variable: 'ARTIFACT_KNOWN_HOSTS'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
+                            jq -n \
+                                --arg approvedBy \
+                                    jenkins-production-auto-cd \
+                                --arg approvedAtUtc \
+                                    "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+                                '{
+                                  approvedBy: $approvedBy,
+                                  approvedAtUtc: $approvedAtUtc
+                                }' \
+                                > .artifacts/production-auto-deploy/approval-input.json
+                            preflight_sha256="$(
+                                cat \
+                                  .artifacts/production-auto-deploy/preflight.sha256
+                            )"
+                            KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                            SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                            SSH_PORT="$PRODUCTION_DEPLOY_SSH_PORT" \
+                                sh scripts/record-production-deploy-approval-remote.sh \
+                                    "$FULL_COMMIT_SHA" \
+                                    "$preflight_sha256" \
+                                    .artifacts/production-auto-deploy/approval-input.json \
+                                    "$ARTIFACT_SSH_USER@$PRODUCTION_DEPLOY_HOST" \
+                                    > .artifacts/production-auto-deploy/approval-record.json
+                            jq -e \
+                                '.approvedBy == "jenkins-production-auto-cd"' \
+                                .artifacts/production-auto-deploy/approval-record.json \
+                                >/dev/null
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Run locked root production deploy') {
+            steps {
+                dir(env.APP_DIR) {
+                    withCredentials([
+                        sshUserPrivateKey(
+                                credentialsId: 'gilbom-production-deploy',
+                                keyFileVariable: 'DEPLOY_SSH_IDENTITY',
+                                usernameVariable: 'DEPLOY_SSH_USER'
+                        ),
+                        file(
+                                credentialsId: 'gilbom-artifact-known-hosts',
+                                variable: 'DEPLOY_KNOWN_HOSTS'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
+                            test "$DEPLOY_SSH_USER" = deploy
+                            KNOWN_HOSTS_FILE="$DEPLOY_KNOWN_HOSTS" \
+                            SSH_IDENTITY_FILE="$DEPLOY_SSH_IDENTITY" \
+                            SSH_PORT="$PRODUCTION_DEPLOY_SSH_PORT" \
+                                sh scripts/run-production-deploy-remote.sh \
+                                    "$FULL_COMMIT_SHA" \
+                                    "$DEPLOY_SSH_USER@$PRODUCTION_DEPLOY_HOST"
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Production external HTTPS smoke') {
+            steps {
+                dir(env.APP_DIR) {
+                    sh '''
+                        set -eu
+                        python3 scripts/verify-external-https-smoke.py \
+                            "$PRODUCTION_BASE_URL" \
+                            .artifacts/production-auto-deploy/external-https-smoke.json
+                    '''
+                }
+            }
+        }
+
+        stage('Verify automatic production release evidence') {
+            steps {
+                dir(env.APP_DIR) {
+                    withCredentials([
+                        sshUserPrivateKey(
+                                credentialsId: 'gilbom-artifact-upload-ssh',
+                                keyFileVariable: 'ARTIFACT_SSH_IDENTITY',
+                                usernameVariable: 'ARTIFACT_SSH_USER'
+                        ),
+                        file(
+                                credentialsId: 'gilbom-artifact-known-hosts',
+                                variable: 'ARTIFACT_KNOWN_HOSTS'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
+                            KNOWN_HOSTS_FILE="$ARTIFACT_KNOWN_HOSTS" \
+                            SSH_IDENTITY_FILE="$ARTIFACT_SSH_IDENTITY" \
+                            SSH_PORT="$PRODUCTION_DEPLOY_SSH_PORT" \
+                                sh scripts/fetch-production-release-manifest.sh \
+                                    "$FULL_COMMIT_SHA" \
+                                    "$ARTIFACT_SSH_USER@$PRODUCTION_DEPLOY_HOST" \
+                                    > .artifacts/production-auto-deploy/release-manifest.json
+                            sh scripts/verify-production-release-evidence.sh \
+                                .artifacts/production-auto-deploy/preflight.json \
+                                .artifacts/production-auto-deploy/approval-record.json \
+                                .artifacts/production-auto-deploy/release-manifest.json \
+                                .artifacts/production-auto-deploy/external-https-smoke.json
+                            jq -e \
+                                --arg sha "$FULL_COMMIT_SHA" \
+                                '
+                                  .releaseSha == $sha
+                                  and .approval.approvedBy
+                                    == "jenkins-production-auto-cd"
+                                  and .flyway.migrationCount == 0
+                                  and .flyway.approvalRequired == false
+                                  and .artifact.signature.status == "PASS"
+                                  and (
+                                    .artifact.signature.manifestBundleSha256
+                                    | test("^[0-9a-f]{64}$")
+                                  )
+                                  and .source.archive
+                                    == ("gilbom-web-" + $sha + ".tar.zst")
+                                  and (
+                                    .source.sha256
+                                    | test("^[0-9a-f]{64}$")
+                                  )
+                                  and .source.activeTreeMarker
+                                    == "/opt/gilbom/deploy/.release-source.sha"
+                                  and .compose.path == "compose.prod.yaml"
+                                  and .compose.sha256 == .composeSha256
+                                  and .health.backendReadiness == "PASS"
+                                  and .health.frontend == "PASS"
+                                  and .health.frontendToBackend == "PASS"
+                                  and .health.mqtt == "PASS"
+                                ' \
+                                .artifacts/production-auto-deploy/release-manifest.json \
+                                >/dev/null
+                        '''
+                    }
+                    archiveArtifacts(
+                            artifacts: '.artifacts/production-auto-deploy/**',
+                            allowEmptyArchive: false,
+                            fingerprint: true
+                    )
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                if (env.APP_DIR) {
+                    dir(env.APP_DIR) {
+                        script {
+                            env.CICD_BUILD_RESULT =
+                                    currentBuild.currentResult
+                                            ? currentBuild.currentResult
+                                            : 'NOT_BUILT'
+                        }
+                        sh '''
+                            set -eu
+                            python3 scripts/generate-cicd-notification.py \
+                                --pipeline production-auto-deploy \
+                                --result "$CICD_BUILD_RESULT"
+                        '''
+                        script {
+                            try {
+                                withCredentials([
+                                    string(
+                                            credentialsId: 'gilbom-mattermost-webhook',
+                                            variable: 'MATTERMOST_WEBHOOK_URL'
+                                    )
+                                ]) {
+                                    sh '''
+                                        set +x
+                                        python3 \
+                                            scripts/send-mattermost-notification.py \
+                                            .artifacts/cicd-notification/mattermost-payload.json
+                                    '''
+                                }
+                                writeFile(
+                                        file: '.artifacts/cicd-notification/delivery.status',
+                                        text: 'PASS\n'
+                                )
+                            } catch (Exception ignored) {
+                                echo 'Mattermost production auto notification skipped'
+                                writeFile(
+                                        file: '.artifacts/cicd-notification/delivery.status',
+                                        text: 'SKIPPED\n'
+                                )
+                            }
+                        }
+                        archiveArtifacts(
+                                artifacts: '.artifacts/production-auto-deploy/**,'
+                                        + '.artifacts/cicd-notification/**',
+                                allowEmptyArchive: true,
+                                fingerprint: true
+                        )
+                    }
+                }
+            }
+        }
+    }
+}

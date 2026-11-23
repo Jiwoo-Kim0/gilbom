@@ -112,7 +112,7 @@ test('완료 확인문은 로봇 정지 전 절차를 과거 완료형으로 오
 
   assert.ok(definition)
   assert.equal(definition.requiresSafetyConfirmation, true)
-  assert.match(definition.impact, /완료 Event/)
+  assert.match(definition.impact, /완료 이벤트/)
   assert.match(definition.safetyMessage ?? '', /완료 명령 후/)
   assert.doesNotMatch(definition.safetyMessage ?? '', /정지했고/)
 })

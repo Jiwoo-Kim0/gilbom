@@ -46,6 +46,30 @@ loopback bind로 굳혀 둔 것과 정면으로 어긋난다.
 잃은 것: container별 network·disk I/O 상세, cgroup 단위 정밀도. 이번 알람 목록에는
 쓰이지 않는다.
 
+### port 발행에는 비-internal network가 하나 필요하다
+
+**Docker 28부터 `internal: true` network만 가진 container는 port 발행이 적용되지 않는다.**
+`docker inspect`에는 `HostConfig.PortBindings`가 그대로 보이는데 host에서는 실제로 열리지
+않아서, 설정만 봐서는 원인을 찾기 어렵다. `ss -ltnp`에 해당 port가 없는 것으로만 드러난다.
+
+Day 8은 monitoring stack을 `internal: true` 하나에만 두었고 당시 Docker 버전에서는
+발행이 동작했다. 이 EC2가 Docker 29로 올라오면서 Prometheus·Loki·Grafana·Alloy의
+loopback port가 전부 닫혔다.
+
+그래서 발행 경로 전용 bridge network(`loopback-publish`)를 하나 두고 이 넷을 붙인다.
+**노출 경계는 그대로 `127.0.0.1` bind다** — 이 network에 있다고 해서 밖에서 닿지 않는다.
+`verify-day10-observability.sh`가 "port를 발행하는 service는 비-internal network를 가진다"를
+검사하므로 같은 실수가 다시 나면 정적 검사에서 걸린다.
+
+### textfile은 파일이 달라도 metric 이름이 같으면 HELP·TYPE이 일치해야 한다
+
+두 파일이 같은 metric 이름을 선언하는데 `# HELP`·`# TYPE` 문구가 다르면(한쪽이 아예
+없는 경우 포함) **collector가 한쪽 시계열을 통째로 버린다.** 더 나쁜 것은
+`node_textfile_scrape_error`가 **0으로 남는다**는 점이다. 오류 표시 없이 값만 사라진다.
+
+`backup-common.sh`가 두 backup 종류의 metric을 같은 함수로 찍는 것은 이 때문이다.
+새 textfile을 손으로 추가할 때는 기존 파일의 HELP·TYPE 문구를 그대로 복사한다.
+
 ### PostgreSQL·Mosquitto Exporter를 쓰지 않는다
 
 connection pool은 Micrometer의 HikariCP metric으로 이미 보인다. MQTT는
@@ -56,9 +80,74 @@ DB 계정과 broker 계정이 하나씩 더 생기는데, 그만큼 얻는 것�
 
 ## 1. Host 준비
 
+### 먼저 — 배포 SHA와 source tree SHA가 같은지 확인한다
+
+현재 CI는 exact commit의 `gilbom-web-<sha>.tar.zst`를 열세 번째 release
+Artifact로 만들고 전체 `SHA256SUMS`와 함께 서명한다. 운영 배포기는 archive를
+sibling directory에 검증·전개하고 모든 runtime health가 성공한 뒤
+`/opt/gilbom/deploy`를 교체한다. `runtime.env`와 `image.env`는 host 상태로
+따로 보존된다.
+
+`/opt/gilbom`과 `/var/lib/gilbom`은 root 전용이다. 일반 운영 계정은
+`/opt/gilbom/deploy`로 `cd`할 수 없으므로 아래 명령은 현재 directory에 의존하지
+않는 절대 경로와 `sudo`를 사용한다. `cd` 실패 뒤 상대 경로 검사를 계속하면 배포
+tree가 아니라 checkout tree를 검사해 거짓 `PASS`가 날 수 있다.
+
 ```sh
-cd /opt/gilbom/deploy
-sudo sh infra/scripts/install-day10-host.sh
+release_sha="$(sudo cat /var/lib/gilbom/releases/current.sha)"
+sudo ls "/opt/gilbom/artifacts/$release_sha"
+```
+
+목록에 `gilbom-web-<sha>.tar.zst`가 있어야 한다. archive에는 Git이 추적하는 파일만
+들어 있어 `runtime.env`, `image.env`, `/opt/gilbom/secrets`, named volume은 보존된다.
+
+아래로 배포본과 source tree가 같은 revision인지 확인한다.
+
+```sh
+sudo test "$(sudo cat /opt/gilbom/deploy/.release-source.sha)" = "$release_sha"
+sudo test -f \
+  "/opt/gilbom/artifacts/$release_sha/gilbom-web-$release_sha.tar.zst"
+sudo test -f /opt/gilbom/deploy/infra/scripts/install-day10-host.sh \
+  || echo "이 release에는 Day 10이 없다. master 기준으로 CI를 다시 돌려야 한다."
+sudo sh /opt/gilbom/deploy/scripts/verify-day10-observability.sh
+sudo docker compose --project-directory /opt/gilbom/deploy \
+  --env-file /opt/gilbom/deploy/runtime.env \
+  --env-file /opt/gilbom/deploy/image.env \
+  -f /opt/gilbom/deploy/compose.prod.yaml \
+  config --quiet && echo "운영 compose 정상"
+```
+
+`.release-source.sha`가 없으면 구 열두 파일 배포기가 아직 설치된 host다. source
+archive를 임의로 풀지 말고 [`cd-automation.md`](cd-automation.md)의
+“새 Artifact 형식 최초 반영”대로 승격 helper와 배포 entrypoint를 한 번 먼저
+갱신한 후 CI·CD를 다시 실행한다. 새 계약에서는 수동 SFTP 우회를 사용하지 않는다.
+
+> **배포 뒤에는 monitoring stack을 재생성한다.** 배포기가 `/opt/gilbom/deploy`를
+> 통째로 교체하면 디렉터리가 새 inode가 되는데, container의 bind mount는 기동 시점
+> inode에 고정돼 있다. 그래서 그 뒤로 container는 **떨어져 나간 옛 디렉터리를 계속 본다.**
+>
+> 증상이 고약하다 — Prometheus는 정상 기동하고 로그에도 오류가 없는데 alert rule이
+> **0개**가 된다. host에서 `ls`하면 파일이 다 있고 `promtool check rules`도 통과한다.
+> container 안에서만 비어 있다. Grafana 대시보드도 같은 방식으로 사라진다.
+>
+> ```sh
+> sudo sh -c 'cd /opt/gilbom/deploy && docker compose \
+>   --project-name gilbom-monitoring \
+>   --env-file /opt/gilbom/monitoring/monitoring.env \
+>   -f compose.monitoring.yaml up --detach --force-recreate --wait'
+> ```
+>
+> 확인은 container 안에서 한다. host에서 보는 것은 의미가 없다.
+>
+> ```sh
+> sudo docker exec gilbom-monitoring-prometheus-1 ls /etc/prometheus/rules/
+> curl -s http://127.0.0.1:9090/api/v1/rules | jq '[.data.groups[].rules[]] | length'
+> ```
+
+### 설치
+
+```sh
+sudo sh /opt/gilbom/deploy/infra/scripts/install-day10-host.sh
 ```
 
 이 스크립트가 하는 일:
@@ -76,7 +165,7 @@ sudo diff /opt/gilbom/monitoring/monitoring.env \
   /opt/gilbom/deploy/infra/monitoring/monitoring.env.example
 ```
 
-새로 필요한 항목은 넷이다.
+새로 필요한 항목은 다섯이다.
 
 ```
 ALERTMANAGER_PORT=9093
@@ -101,16 +190,41 @@ docker network ls --filter name=_app --format '{{.Name}}'
 
 > **`monitoring.env`를 갱신하기 전에는 Day 8 보조 검사가 실패한다.**
 > `verify-day8-auxiliary-runtime.sh`가 이 env 파일로 `docker compose config`를 돌리는데,
-> `ALERTMANAGER_WEBHOOK_SECRET_FILE`이 없으면 필수 변수 누락으로 멈춘다. 위 네 줄을 먼저 넣는다.
+> `ALERTMANAGER_WEBHOOK_SECRET_FILE`이 없으면 필수 변수 누락으로 멈춘다. 위 다섯 줄을 먼저 넣는다.
+> 이 스크립트는 Monitoring만 보지 않는다. Jenkins와 DinD도 함께 검사하므로 Jenkins가
+> 내려가 있으면 Monitoring이 정상이어도 실패한다.
 
 Mattermost webhook을 Secret 파일로 넣는다. 값은 저장소에 남기지 않는다.
+이미 다른 운영자가 연동한 비어 있지 않은 파일은 덮어쓰지 않고 그대로 사용한다.
 
 ```sh
-sudo install -d -m 0700 /opt/gilbom/secrets
-printf '%s\n' '<Mattermost incoming webhook URL>' \
-  | sudo tee /opt/gilbom/secrets/alertmanager_mattermost_webhook >/dev/null
+sudo install -d -o root -g root -m 0700 /opt/gilbom/secrets
+if sudo test -s /opt/gilbom/secrets/alertmanager_mattermost_webhook; then
+  echo "기존 Mattermost webhook을 보존한다."
+else
+  read -r -s -p 'Mattermost webhook URL: ' webhook_url
+  printf '\n'
+  printf '%s\n' "$webhook_url" \
+    | sudo tee /opt/gilbom/secrets/alertmanager_mattermost_webhook >/dev/null
+  unset webhook_url
+fi
+sudo chown root:root /opt/gilbom/secrets/alertmanager_mattermost_webhook
 sudo chmod 0400 /opt/gilbom/secrets/alertmanager_mattermost_webhook
+sudo stat -c '%a %U:%G' /opt/gilbom/secrets/alertmanager_mattermost_webhook
 ```
+
+`400 root:root`가 나와야 한다. `read -s`를 쓰므로 URL은 화면에도 명령 이력에도 남지 않는다.
+
+> **Alertmanager는 UID 0으로 돈다.** 이 image의 기본 사용자는 `nobody`인데, 그러면 root
+> 소유 `0400` secret을 읽지 못한다. 실제로 그 상태에서 알람이 한 번도 전달되지 않은 적이
+> 있고, Prometheus·Alertmanager 화면은 정상으로 보여서 알아채기 어려웠다.
+>
+> host 파일 소유자를 container 사용자로 맞추는 방법은 보안 정리가 지나갈 때마다 무너진다.
+> Compose는 파일 secret의 `uid`·`gid`·`mode`를 무시한다. `0444`로 여는 것은 host의 모든
+> 사용자에게 webhook URL을 주는 것이라 더 나쁘다.
+>
+> 그래서 UID 0으로 돌리되 `cap_drop: ALL`과 read-only rootfs를 유지한다. 이 container는
+> secret 파일 하나와 자기 데이터 volume 외에는 아무것도 마운트하지 않는다.
 
 ---
 
@@ -118,7 +232,10 @@ sudo chmod 0400 /opt/gilbom/secrets/alertmanager_mattermost_webhook
 
 **개인키는 이 서버에 두지 않는다.** EC2가 통째로 털려도 반출본을 열 수 없어야 한다.
 
-키 보관자의 PC에서 (한 번만):
+**보관자는 최소 두 명이다.** 한 명만 두면 그 사람이 빠질 때 모든 backup을 열 수 없다.
+각자 자기 키를 만들고 **공개키만** 보내며, 개인키는 서로 오가지 않는다.
+
+각 보관자의 PC에서 (한 번만):
 
 ```sh
 gpg --full-generate-key            # RSA 4096 또는 ed25519
@@ -128,8 +245,8 @@ gpg --armor --export <키 ID> > backup-recipient-public.asc
 공개키만 서버로 올려 등록한다.
 
 ```sh
-cd /opt/gilbom/deploy
-sudo sh infra/scripts/prepare-backup-encryption.sh ~/backup-recipient-public.asc
+sudo sh /opt/gilbom/deploy/infra/scripts/prepare-backup-encryption.sh \
+  /home/ubuntu/backup-recipient-public.asc
 ```
 
 출력된 지문을 **키 보관자와 육성으로 대조한다.** 지문이 다르면 아무도 열 수 없는 backup만
@@ -144,20 +261,41 @@ sudo sh infra/scripts/prepare-backup-encryption.sh ~/backup-recipient-public.asc
 ## 3. Monitoring stack 재기동과 확인
 
 ```sh
-cd /opt/gilbom/deploy
 sudo docker compose \
   --project-name gilbom-monitoring \
   --env-file /opt/gilbom/monitoring/monitoring.env \
-  -f compose.monitoring.yaml \
+  --project-directory /opt/gilbom/deploy \
+  -f /opt/gilbom/deploy/compose.monitoring.yaml \
   up --detach --wait --wait-timeout 180
 ```
 
 Backend는 새 image가 필요하다(Micrometer registry가 들어갔다). Day 8 배포 절차로
-새 revision을 올린 뒤 아래를 확인한다.
+새 revision을 올린다.
+
+### 첫 검사 전에 metric을 한 번씩 만들어 둔다
+
+timer는 주기가 와야 처음 돈다. 그전에 검사하면 **정상인데도 실패한다.**
 
 ```sh
-cd /opt/gilbom/deploy
-sudo sh scripts/verify-day10-runtime.sh
+# host metric을 즉시 한 번 생성 (timer의 첫 주기를 기다리지 않는다)
+sudo systemctl start gilbom-host-metrics.service
+
+# backup metric도 한 번 실행해야 생긴다
+sudo /usr/local/sbin/gilbom-backup database
+```
+
+volume backup은 Frontend·Backend·Mosquitto를 잠시 멈춘다. **시연 시간에는 실행하지 않는다.**
+유지보수 시간에 따로 돌린다. 그전까지는 검사에서 `backup volumes` 항목이 실패하는 것이 정상이다.
+
+```sh
+sudo /usr/local/sbin/gilbom-backup volumes
+```
+
+### 검사
+
+```sh
+sudo sh /opt/gilbom/deploy/scripts/verify-day8-auxiliary-runtime.sh
+sudo sh /opt/gilbom/deploy/scripts/verify-day10-runtime.sh
 ```
 
 수집 대상 전부 up, alert rule 20개 이상, Alertmanager ready, Loki에 `compose_service`
@@ -231,12 +369,15 @@ done
 ### 5.1 Backend Down
 
 ```sh
-cd /opt/gilbom/deploy
-sudo docker compose --env-file runtime.env --env-file image.env \
-  -f compose.prod.yaml stop backend
+sudo docker compose --project-directory /opt/gilbom/deploy \
+  --env-file /opt/gilbom/deploy/runtime.env \
+  --env-file /opt/gilbom/deploy/image.env \
+  -f /opt/gilbom/deploy/compose.prod.yaml stop backend
 # 2분 뒤 BackendDown critical 수신 확인
-sudo docker compose --env-file runtime.env --env-file image.env \
-  -f compose.prod.yaml start backend
+sudo docker compose --project-directory /opt/gilbom/deploy \
+  --env-file /opt/gilbom/deploy/runtime.env \
+  --env-file /opt/gilbom/deploy/image.env \
+  -f /opt/gilbom/deploy/compose.prod.yaml start backend
 # 해제 메시지(send_resolved)까지 확인
 ```
 

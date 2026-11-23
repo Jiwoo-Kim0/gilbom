@@ -44,6 +44,30 @@ groups:
         annotations:
           summary: "readiness 구성요소 {{ $labels.component }}가 DOWN이다"
 
+      # 위 규칙들은 시계열이 있어야 발화한다. 시계열이 아예 없으면 == 0을 만족하는 표본이
+      # 없어 조용히 통과한다. 실제로 db gauge가 누락된 채로 배포돼 있었고, DB가 죽어도
+      # ReadinessComponentDown이 뜨지 않는 상태였다. 감시 대상이 사라진 것을 감시한다.
+      - alert: HealthComponentMetricsMissing
+        expr: >-
+          (
+            count(
+              count by (component) (
+                gilbom_health_component_status{
+                  component=~"db|flywayReadiness|storageReadiness|mqttConnection"
+                }
+              )
+            ) or vector(0)
+          ) < 4
+          and on() (up{job="backend"} == 1)
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: health 구성요소 지표가 빠져 있다
+          description: >-
+            Backend는 응답하는데 db·flywayReadiness·storageReadiness·mqttConnection 중
+            일부 gauge가 없다. 그 구성요소는 지금 아무도 감시하지 않는다.
+
       - alert: MqttConnectionDown
         expr: gilbom_health_component_status{component="mqttConnection"} == 0
         for: 10m

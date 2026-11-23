@@ -28,6 +28,11 @@ public class StorageProperties {
     private String localRootDirectory = "./data/robot-images";
 
     /**
+     * Jetson에 전달할 이미지 업로드 전체 URL.
+     */
+    private String uploadUrl = "http://localhost:3000/api/v1/images";
+
+    /**
      * 발급한 이미지 조회 URL의 유효 시간.
      */
     private Duration urlTtl = Duration.ofMinutes(5);
@@ -47,6 +52,14 @@ public class StorageProperties {
 
     public void setLocalRootDirectory(String localRootDirectory) {
         this.localRootDirectory = localRootDirectory;
+    }
+
+    public String getUploadUrl() {
+        return uploadUrl;
+    }
+
+    public void setUploadUrl(String uploadUrl) {
+        this.uploadUrl = uploadUrl;
     }
 
     public Duration getUrlTtl() {

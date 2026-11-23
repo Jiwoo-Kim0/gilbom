@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
+import carMarkerImage from '../../assets/car.png'
 import { loadNaverMapsScript } from '../../lib/naverMaps'
-import type { RobotMarker, RobotStatus } from './robotTypes'
+import type { RobotMarker, RobotStatus, RobotSummary } from './robotTypes'
 
 interface RobotMapProps {
   markers?: RobotMarker[]
+  summary?: RobotSummary | null
 }
 
-const legendItems: { tone: RobotStatus; label: string }[] = [
+const legendItems: { tone: 'total' | RobotStatus; label: string }[] = [
+  { tone: 'total', label: '전체' },
   { tone: 'online', label: '온라인' },
-  { tone: 'warning', label: '경고' },
-  { tone: 'charging', label: '충전 중' },
   { tone: 'offline', label: '오프라인' },
+  { tone: 'warning', label: '경고' },
 ]
 
 // 구미시청 인근 — 로봇 위치 API가 연결되기 전까지 사용하는 기본 뷰포트.
@@ -19,14 +21,12 @@ const DEFAULT_ZOOM = 14
 
 const naverMapClientId = import.meta.env.VITE_NAVER_MAP_CLIENT_ID
 
-const HEADING_ARROWS = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'] as const
-
-function headingArrow(headingDeg: number | null): string {
+function headingIndex(headingDeg: number | null): number {
   if (headingDeg === null || !Number.isFinite(headingDeg)) {
-    return HEADING_ARROWS[0]
+    return 0
   }
   const normalized = ((headingDeg % 360) + 360) % 360
-  return HEADING_ARROWS[Math.round(normalized / 45) % HEADING_ARROWS.length]
+  return Math.round(normalized / 45) % 8
 }
 
 function createMarkerIcon(
@@ -34,19 +34,20 @@ function createMarkerIcon(
   status: RobotStatus,
   headingDeg: number | null,
 ): naver.maps.MarkerIcon {
-  // Nginx CSP가 style-src 'self'를 유지하므로 Marker HTML에도 style 속성을
-  // 넣지 않는다. 방향은 8방위 문자로 표현하고 정확한 각도는 title에 남긴다.
+  const direction = headingIndex(headingDeg)
   return {
     content:
       `<span class="robot-map-marker robot-map-marker-${status}">`
-      + `<span class="robot-map-marker-arrow">${headingArrow(headingDeg)}</span>`
+      + `<img class="robot-map-marker-car robot-map-marker-heading-${direction}" `
+      + `src="${carMarkerImage}" alt="">`
+      + '<span class="robot-map-marker-status" aria-hidden="true"></span>'
       + '</span>',
-    size: new maps.Size(28, 28),
-    anchor: new maps.Point(14, 14),
+    size: new maps.Size(44, 44),
+    anchor: new maps.Point(22, 22),
   }
 }
 
-export function RobotMap({ markers = [] }: RobotMapProps) {
+export function RobotMap({ markers = [], summary = null }: RobotMapProps) {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<naver.maps.Map | null>(null)
   const hasCenteredOnRobotRef = useRef(false)
@@ -106,10 +107,17 @@ export function RobotMap({ markers = [] }: RobotMapProps) {
     }
   }, [markers, mapStatus])
 
-  const countByStatus = (tone: RobotStatus) =>
-    markers.filter((marker) => marker.status === tone).length
-  const alertCount = countByStatus('warning')
-  const activeCount = markers.filter((marker) => marker.status !== 'offline').length
+  const statusCounts: Record<'total' | RobotStatus, number> = {
+    total: summary?.totalRobots ?? markers.length,
+    online: summary?.onlineRobots
+      ?? markers.filter((marker) => marker.connectivityStatus === 'ONLINE').length,
+    offline: summary?.offlineRobots
+      ?? markers.filter((marker) => marker.connectivityStatus === 'OFFLINE').length,
+    warning: summary === null
+      ? markers.filter((marker) => marker.status === 'warning').length
+      : summary.warningRobots + summary.criticalRobots,
+  }
+  const statusCountReady = summary !== null || mapStatus === 'ready'
 
   return (
     <article className="content-card robot-map-card" aria-label="로봇 위치 지도">
@@ -117,7 +125,7 @@ export function RobotMap({ markers = [] }: RobotMapProps) {
         {legendItems.map(({ tone, label }) => (
           <span key={tone} className={`robot-legend-item robot-legend-item-${tone}`}>
             <span className="robot-status-dot" aria-hidden="true" />
-            {label} ({mapStatus === 'ready' ? countByStatus(tone) : '—'})
+            {label} ({statusCountReady ? statusCounts[tone] : '—'})
           </span>
         ))}
       </div>
@@ -133,20 +141,6 @@ export function RobotMap({ markers = [] }: RobotMapProps) {
       ) : (
         <div className="robot-map-canvas-wrap">
           <div className="robot-map-canvas" ref={mapElementRef} />
-          {mapStatus === 'ready' && (
-            <div className="robot-map-overlay" aria-live="polite">
-              <span className="robot-map-overlay-live">
-                <span className="robot-map-overlay-dot" aria-hidden="true" />
-                라이브 함대 데이터
-              </span>
-              <span className="robot-map-overlay-stat">
-                활성 로봇<strong>{activeCount}</strong>
-              </span>
-              <span className="robot-map-overlay-stat">
-                경고 알림<strong>{alertCount}</strong>
-              </span>
-            </div>
-          )}
           {mapStatus === 'loading' && (
             <p className="robot-map-loading">지도를 불러오는 중입니다…</p>
           )}

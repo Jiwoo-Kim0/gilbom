@@ -59,6 +59,20 @@ class LlmPolicyGateTest {
     }
 
     @Test
+    void allowsCurrentReportV3AndRejectsUnknownPromptVersion() {
+        LlmProperties properties = approvedProperties();
+        properties.setPromptVersion("report-v3");
+
+        assertThat(gate.evaluate(properties).enabled()).isTrue();
+
+        properties.setPromptVersion("report-v4");
+        assertThat(gate.evaluate(properties).violations())
+                .contains(
+                        LlmPolicyViolation
+                                .PROMPT_VERSION_NOT_ALLOWED);
+    }
+
+    @Test
     void rejectsUnapprovedModelTimeoutAndOutputLimit() {
         LlmProperties properties = approvedProperties();
         properties.setModel("gpt-5.5-pro");

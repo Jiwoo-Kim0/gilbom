@@ -1,7 +1,6 @@
 import {
   KeyRound,
   LogOut,
-  RefreshCw,
   ShieldCheck,
   UserRound,
 } from 'lucide-react'
@@ -136,24 +135,7 @@ export function MyPage() {
   }
 
   return (
-    <section className="page-stack" aria-labelledby="my-page-title">
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">ACCOUNT</p>
-          <h2 id="my-page-title">내 계정</h2>
-          <p>프로필을 확인하고 비밀번호와 현재 세션을 안전하게 관리합니다.</p>
-        </div>
-        <button
-          className="secondary-button button-with-icon"
-          type="button"
-          onClick={() => void handleLogout()}
-          disabled={loggingOut}
-        >
-          <LogOut size={17} />
-          {loggingOut ? '로그아웃 중…' : '로그아웃'}
-        </button>
-      </div>
-
+    <section className="page-stack" aria-label="마이페이지">
       {logoutError ? (
         <div className="page-alert" role="alert">
           {getApiErrorMessage(logoutError)}
@@ -170,13 +152,13 @@ export function MyPage() {
               <h3>프로필</h3>
             </div>
             <button
-              className="icon-button"
+              className="secondary-button button-with-icon"
               type="button"
-              onClick={() => void loadProfile()}
-              disabled={loadingProfile}
-              aria-label="프로필 새로고침"
+              onClick={() => void handleLogout()}
+              disabled={loggingOut}
             >
-              <RefreshCw size={17} />
+              <LogOut size={17} aria-hidden="true" />
+              {loggingOut ? '로그아웃 중…' : '로그아웃'}
             </button>
           </div>
 

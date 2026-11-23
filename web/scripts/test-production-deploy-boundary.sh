@@ -104,6 +104,24 @@ grep -Fq 'atomic_line "$PREVIOUS_SHA_PATH"' "$DEPLOY_SCRIPT" \
   || fail "previous SHA atomic recording is missing"
 grep -Fq 'compose up --detach --no-build' "$DEPLOY_SCRIPT" \
   || fail "offline production Compose update is missing"
+grep -Fq 'verify_release_manifest_signature "$artifact_dir"' "$DEPLOY_SCRIPT" \
+  || fail "complete release manifest signature verification is missing"
+grep -Fq 'install_compose_file "$candidate_compose_path"' "$DEPLOY_SCRIPT" \
+  || fail "signed production Compose installation is missing"
+grep -Fq 'prepare_release_source_tree' "$DEPLOY_SCRIPT" \
+  || fail "signed release source staging is missing"
+grep -Fq 'umask 022' "$DEPLOY_SCRIPT" \
+  || fail "Git archive directory modes are not normalized during extraction"
+grep -Fq -- '--no-same-owner --no-same-permissions' "$DEPLOY_SCRIPT" \
+  || fail "root tar extraction still preserves unsafe archive permissions"
+grep -Fq 'activate_release_source_tree' "$DEPLOY_SCRIPT" \
+  || fail "signed release source activation is missing"
+grep -Fq 'restore_deploy_source_tree' "$DEPLOY_SCRIPT" \
+  || fail "release source rollback is missing"
+grep -Fq '.release-source.sha' "$DEPLOY_SCRIPT" \
+  || fail "active source release marker is missing"
+grep -Fq 'previous-compose.prod.yaml' "$DEPLOY_SCRIPT" \
+  || fail "production Compose rollback snapshot is missing"
 for evidence in \
   'Backend readiness is not UP' \
   'Frontend health check failed' \
