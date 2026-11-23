@@ -120,6 +120,17 @@ public class MqttReplayProtectionService {
                     ErrorCode.MQTT_ID_MISMATCH,
                     "boot_id is already assigned to another robot");
         }
+        if (isHistoricalEvent(
+                sequenceKind,
+                currentBootId,
+                bootId,
+                session,
+                newSession)) {
+            // EVENT is immutable and idempotent by event_id. A broker-delayed
+            // event from a known previous boot may therefore be ingested, but
+            // it must never move the robot's current boot or sequence backward.
+            return ClaimResult.ACCEPTED;
+        }
         if (!"ONLINE".equals(session.status())) {
             reject(
                     topicType,
@@ -172,6 +183,21 @@ public class MqttReplayProtectionService {
                 currentBootId == null
                         || !currentBootId.equals(bootId));
         return ClaimResult.ACCEPTED;
+    }
+
+    private boolean isHistoricalEvent(
+            SequenceKind sequenceKind,
+            UUID currentBootId,
+            UUID messageBootId,
+            BootSession session,
+            boolean newSession
+    ) {
+        if (sequenceKind != SequenceKind.EVENT || newSession) {
+            return false;
+        }
+        return !"ONLINE".equals(session.status())
+                || currentBootId != null
+                && !currentBootId.equals(messageBootId);
     }
 
     private ClaimResult resolveExistingClaim(

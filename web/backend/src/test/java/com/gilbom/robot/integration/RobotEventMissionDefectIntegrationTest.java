@@ -376,6 +376,13 @@ class RobotEventMissionDefectIntegrationTest {
                 UUID.class,
                 valid.messageId());
         assertThat(storedMissionId).isEqualTo(MISSION_ID);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT mission_id
+                FROM telemetry.robot_current_state
+                WHERE robot_id = ?
+                """,
+                UUID.class,
+                ROBOT_ID)).isEqualTo(MISSION_ID);
 
         assertThatThrownBy(() -> telemetryIngestionService.ingest(
                 new TelemetryIngestionCommand(
@@ -404,6 +411,7 @@ class RobotEventMissionDefectIntegrationTest {
                         null),
                 "{\"event_type\":\"MISSION_STARTED\"}",
                 BASE_TIME.plusSeconds(2));
+        markRobotOnline();
         TelemetryPayload telemetry = telemetryPayload(
                 UUID.fromString(
                         "23000000-0000-4000-8000-000000000204"),
@@ -445,6 +453,7 @@ class RobotEventMissionDefectIntegrationTest {
                         null),
                 "{\"event_type\":\"MISSION_PAUSED\"}",
                 BASE_TIME.plusSeconds(3));
+        markRobotOnline();
 
         telemetryIngestionService.ingest(new TelemetryIngestionCommand(
                 telemetryPayload(
@@ -467,12 +476,14 @@ class RobotEventMissionDefectIntegrationTest {
                         null),
                 "{\"event_type\":\"MISSION_RESUMED\"}",
                 BASE_TIME.plusSeconds(5));
+        UUID completionCommandId = createCompletionCommand();
         missionIngestionService.ingest(
                 missionEvent(
                         UUID.fromString(
                                 "23000000-0000-4000-8000-000000000218"),
                         5,
                         MissionEventPayload.EventType.MISSION_COMPLETED,
+                        completionCommandId,
                         new MissionEventPayload.Result(
                                 5,
                                 0,
@@ -483,6 +494,39 @@ class RobotEventMissionDefectIntegrationTest {
 
         assertThat(missionStatus()).isEqualTo("COMPLETED");
         assertThat(missionProgress()).isEqualTo(100.0);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT causation_command_id
+                FROM telemetry.robot_event
+                WHERE event_type = 'MISSION_COMPLETED'
+                """,
+                UUID.class)).isEqualTo(completionCommandId);
+
+        assertThatThrownBy(() -> eventIngestionService.ingest(
+                missionEvent(
+                        UUID.fromString(
+                                "23000000-0000-4000-8000-000000000219"),
+                        6,
+                        MissionEventPayload.EventType.MISSION_COMPLETED,
+                        completionCommandId,
+                        new MissionEventPayload.Result(
+                                5,
+                                0,
+                                0,
+                                "PLANNED_DURATION_REACHED")),
+                MissionEventPayload.EventType.MISSION_COMPLETED,
+                "{\"event_type\":\"MISSION_COMPLETED\"}",
+                BASE_TIME.plusSeconds(7)))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception -> assertThat(exception.errorCode())
+                                .isEqualTo(ErrorCode.MQTT_EVENT_CONFLICT));
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM telemetry.robot_event
+                WHERE causation_command_id = ?
+                """,
+                Integer.class,
+                completionCommandId)).isEqualTo(1);
     }
 
     @Test
@@ -530,7 +574,7 @@ class RobotEventMissionDefectIntegrationTest {
     }
 
     @Test
-    void rejectsEventFromPreviousBootWithoutEventSideEffects() {
+    void acceptsEventFromPreviousBootWithoutChangingCurrentBoot() {
         UUID newBootId = UUID.fromString(
                 "23000000-0000-4000-8000-000000000207");
         telemetryIngestionService.ingest(new TelemetryIngestionCommand(
@@ -552,7 +596,7 @@ class RobotEventMissionDefectIntegrationTest {
                 "{}",
                 BASE_TIME.plusSeconds(3)));
 
-        assertThatThrownBy(() -> eventIngestionService.ingest(
+        RobotEventIngestionResult result = eventIngestionService.ingest(
                 missionEvent(
                         BOOT_ID,
                         UUID.fromString(
@@ -562,14 +606,10 @@ class RobotEventMissionDefectIntegrationTest {
                         null),
                 MissionEventPayload.EventType.MISSION_STARTED,
                 "{}",
-                BASE_TIME.plusSeconds(4)))
-                .isInstanceOfSatisfying(
-                        BusinessException.class,
-                        exception -> assertThat(exception.errorCode())
-                                .isEqualTo(
-                                        ErrorCode.MQTT_REPLAY_REJECTED));
+                BASE_TIME.plusSeconds(4));
 
-        assertThat(count("telemetry.robot_event")).isZero();
+        assertThat(result.inserted()).isTrue();
+        assertThat(count("telemetry.robot_event")).isEqualTo(1);
         assertThat(jdbcTemplate.queryForObject("""
                 SELECT session_status
                 FROM telemetry.robot_boot_session
@@ -577,6 +617,20 @@ class RobotEventMissionDefectIntegrationTest {
                 """,
                 String.class,
                 BOOT_ID)).isEqualTo("OFFLINE");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT current_boot_id
+                FROM telemetry.robot_current_state
+                WHERE robot_id = ?
+                """,
+                UUID.class,
+                ROBOT_ID)).isEqualTo(newBootId);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT last_seen_seq
+                FROM telemetry.robot_boot_session
+                WHERE boot_id = ?
+                """,
+                Long.class,
+                BOOT_ID)).isEqualTo(1L);
     }
 
     @Test
@@ -917,6 +971,29 @@ class RobotEventMissionDefectIntegrationTest {
     }
 
     private static MissionEventPayload missionEvent(
+            UUID eventId,
+            long sequence,
+            MissionEventPayload.EventType eventType,
+            UUID causationCommandId,
+            MissionEventPayload.Result result
+    ) {
+        return new MissionEventPayload(
+                "2.0",
+                eventId,
+                eventType,
+                "RBT-EVENT-001",
+                BOOT_ID,
+                sequence,
+                EventSource.MISSION,
+                BASE_TIME.plusSeconds(sequence - 1),
+                BASE_TIME.plusSeconds(sequence),
+                300,
+                "MIS-20260728-001",
+                causationCommandId,
+                result);
+    }
+
+    private static MissionEventPayload missionEvent(
             UUID bootId,
             UUID eventId,
             long sequence,
@@ -1240,5 +1317,69 @@ class RobotEventMissionDefectIntegrationTest {
                 ROUTE_ID,
                 ADMIN_ID,
                 ADMIN_ID);
+    }
+
+    private static void markRobotOnline() {
+        jdbcTemplate.update("""
+                UPDATE telemetry.robot_current_state
+                SET connectivity_status = 'ONLINE'
+                WHERE robot_id = ?
+                """,
+                ROBOT_ID);
+    }
+
+    private static UUID createCompletionCommand() {
+        UUID commandId = UUID.fromString(
+                "23000000-0000-4000-8000-000000000219");
+        jdbcTemplate.update("""
+                INSERT INTO robot.robot_command (
+                    command_id,
+                    schema_version,
+                    robot_id,
+                    mission_id,
+                    patrol_area_id,
+                    command_type,
+                    command_status,
+                    parameters,
+                    requested_by_type,
+                    requested_by_user_id,
+                    issued_at,
+                    expires_at,
+                    sent_at
+                ) VALUES (
+                    ?,
+                    '2.0',
+                    ?,
+                    ?,
+                    ?,
+                    'COMPLETE_MISSION',
+                    'SENT',
+                    JSONB_BUILD_OBJECT(
+                        'mission_id',
+                        'MIS-20260728-001',
+                        'completion_reason',
+                        'PLANNED_DURATION_REACHED'
+                    ),
+                    'SYSTEM',
+                    NULL,
+                    ?,
+                    ?,
+                    ?
+                )
+                """,
+                commandId,
+                ROBOT_ID,
+                MISSION_ID,
+                AREA_ID,
+                java.time.OffsetDateTime.ofInstant(
+                        BASE_TIME.plusSeconds(4),
+                        java.time.ZoneOffset.UTC),
+                java.time.OffsetDateTime.ofInstant(
+                        BASE_TIME.plusSeconds(34),
+                        java.time.ZoneOffset.UTC),
+                java.time.OffsetDateTime.ofInstant(
+                        BASE_TIME.plusSeconds(4),
+                        java.time.ZoneOffset.UTC));
+        return commandId;
     }
 }

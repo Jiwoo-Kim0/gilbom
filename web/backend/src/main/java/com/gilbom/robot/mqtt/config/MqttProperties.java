@@ -29,13 +29,12 @@ public class MqttProperties {
     private String password;
     @NotBlank
     private String subscribeTopic;
-    @NotBlank
-    private String publishTopic;
     @Min(0)
     @Max(2)
     private int qos;
     private boolean logPayload;
     private Duration reconnectMaxDelay = Duration.ofSeconds(5);
+    private Duration sessionExpiry = Duration.ofHours(1);
     private Duration connectCompletionTimeout = Duration.ofSeconds(10);
     private Duration disconnectCompletionTimeout = Duration.ofSeconds(5);
 
@@ -99,14 +98,6 @@ public class MqttProperties {
                 .toArray(String[]::new);
     }
 
-    public String getPublishTopic() {
-        return publishTopic;
-    }
-
-    public void setPublishTopic(String publishTopic) {
-        this.publishTopic = publishTopic;
-    }
-
     public int getQos() {
         return qos;
     }
@@ -136,6 +127,23 @@ public class MqttProperties {
                             + "and " + Integer.MAX_VALUE + " milliseconds");
         }
         this.reconnectMaxDelay = reconnectMaxDelay;
+    }
+
+    public Duration getSessionExpiry() {
+        return sessionExpiry;
+    }
+
+    public void setSessionExpiry(Duration sessionExpiry) {
+        if (sessionExpiry == null
+                || sessionExpiry.isZero()
+                || sessionExpiry.isNegative()
+                || sessionExpiry.getNano() != 0
+                || sessionExpiry.getSeconds() > 0xFFFF_FFFFL) {
+            throw new IllegalArgumentException(
+                    "mqtt.session-expiry must be a whole number of seconds "
+                            + "between 1 and 4294967295");
+        }
+        this.sessionExpiry = sessionExpiry;
     }
 
     public Duration getConnectCompletionTimeout() {

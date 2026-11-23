@@ -172,6 +172,9 @@ gilbom:
       # State는 30초마다 발행하므로 3회 주기 동안 아무 메시지도 없으면 Offline으로 판정한다.
       offline-timeout: ${GILBOM_ROBOT_OFFLINE_TIMEOUT:90s}
       offline-scan-interval: ${GILBOM_ROBOT_OFFLINE_SCAN_INTERVAL:30s}
+    mission:
+      # 완료 명령 직전 Robot Mission 상태를 신뢰할 수 있는 Telemetry 최대 나이다.
+      completion-telemetry-max-age: ${GILBOM_MISSION_COMPLETION_TELEMETRY_MAX_AGE:15s}
   security:
     cors:
       # Nginx의 /api same-origin proxy가 기본이다. 교차 Origin이 필요한 환경만 명시적으로 연다.
@@ -233,8 +236,9 @@ mqtt:
   password: ${MQTT_PASSWORD}
   # Comma-separated MQTT topic filters.
   subscribe-topic: "${MQTT_SUBSCRIBE_TOPIC:tbs/v2/robots/+/presence,tbs/v2/robots/+/state,tbs/v2/robots/+/telemetry,tbs/v2/robots/+/events/#,tbs/v2/robots/+/commands/result}"
-  publish-topic: ${MQTT_PUBLISH_TOPIC:tbs/v2/robots/robot-test/commands/request}
   qos: ${MQTT_QOS:1}
+  # Broker-side session retention for QoS 1 messages received while this stable clientId is disconnected.
+  session-expiry: ${MQTT_SESSION_EXPIRY:1h}
   # Paho exponential backoff의 상한이다. Broker 복구 뒤 다음 재연결이 오래 지연되지 않게 한다.
   reconnect-max-delay: ${MQTT_RECONNECT_MAX_DELAY:5s}
   # Broker 장애 중에도 container의 graceful shutdown 상한 전에 연결 정리를 끝낸다.

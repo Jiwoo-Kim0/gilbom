@@ -1082,11 +1082,12 @@ tbs/v2/robots/{mqtt_id}/events/mission
   "sent_at": "2026-07-26T06:20:00.120Z",
   "ttl_sec": 300,
   "mission_id": "MIS-20260726-001",
+  "causation_command_id": "7b53b753-bd52-4bd2-9909-e347d13df916",
   "result": {
     "duration_sec": 4182,
     "incident_count": 7,
     "normal_detection_count": 143,
-    "completion_reason": "ROUTE_COMPLETED"
+    "completion_reason": "PLANNED_DURATION_REACHED"
   }
 }
 ```
@@ -1114,6 +1115,7 @@ tbs/v2/robots/{mqtt_id}/events/mission
 | 멤버 | 타입 | 필수 | 값·용도 |
 |---|---|:---:|---|
 | Event 공통 Envelope | Object Members | O | 7장 공통 규칙 |
+| `causation_command_id` | UUID String | 조건부 | Command로 발생한 `MISSION_COMPLETED`의 원인 Command |
 | `result` | Object | 조건부 | 완료·취소·실패 Event에서 사용 |
 | `result.duration_sec` | Integer | 조건부 | 실제 미션 수행시간 |
 | `result.incident_count` | Integer | 조건부 | 확정 발행한 Incident Event 수 |
@@ -1236,7 +1238,7 @@ tbs/v2/robots/{mqtt_id}/commands/request
 | `START_MISSION` | `mission_id`, `zone_id`(불투명 구역 코드) | 60초 |
 | `PAUSE_MISSION` | `reason` | 30초 |
 | `RESUME_MISSION` | 빈 Object | 30초 |
-| `COMPLETE_MISSION` | 빈 Object | 30초 |
+| `COMPLETE_MISSION` | `mission_id`, `completion_reason` | 30초 |
 | `CANCEL_MISSION` | `mission_id`, `reason` | 30초 |
 | `EMERGENCY_STOP` | `reason` | 10초 |
 | `CLEAR_EMERGENCY_STOP` | `reason` | 30초 |
@@ -1253,7 +1255,12 @@ Mission이 있으면 `mode=PAUSED`, `mission.state=PAUSED`를 유지하고, 관�
 
 `COMPLETE_MISSION`은 `mission.state=RUNNING`에서만 허용한다. `PAUSED` 또는
 `mode=SAFE_STOP`에서는 거부하며, 긴급정지는 해제 후 명시적으로 재개한 다음 정상
-완료해야 한다. `CANCEL_MISSION`은 `READY`·`RUNNING`·`PAUSED`에서 허용하고,
+완료해야 한다. `mission_id`는 Robot의 활성 Mission과 일치해야 하며 자동 완료는
+`PLANNED_DURATION_REACHED`, 관리자 완료는 `OPERATOR_COMPLETED`를
+`completion_reason`으로 보낸다. Robot은 실제 `IDLE` 도달 후 같은 사유와 원인
+`command_id`를 `MISSION_COMPLETED` Event에 넣는다.
+
+`CANCEL_MISSION`은 `READY`·`RUNNING`·`PAUSED`에서 허용하고,
 `SAFE_STOP` 중 취소하더라도 Mission만 `CANCELLED`로 종료하며 로봇의 안전 정지는
 해제하지 않는다. Backend는 취소 대상의 Wire `mission_id`를 반드시 함께 보내며,
 Robot의 로컬 Mission 보관함이 유실됐더라도 해당 ID로 `MISSION_CANCELLED` Event를

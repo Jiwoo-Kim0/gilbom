@@ -2299,6 +2299,7 @@ paths:
         같은 사용자와 Idempotency-Key의 동일 요청은 기존 commandId를 반환하고 다시 발행하지 않습니다.
         Mission 명령의 현재 상태가 명령 전제조건과 다르면 MISSION_STATE_CONFLICT를 반환합니다.
         COMPLETE_MISSION은 RUNNING에서만 허용하며 PAUSED에서는 재개 후 다시 요청해야 합니다.
+        완료 명령 발행 전 Robot ONLINE·최신 Telemetry·실행 Mission 일치를 검증합니다.
       x-required-permission: ROBOT_COMMAND_EXECUTE
       security:
         - serverSession: []
@@ -7070,6 +7071,10 @@ components:
           type: string
           maxLength: 500
           nullable: true
+        completionReason:
+          type: string
+          maxLength: 100
+          nullable: true
 
     RobotCommandCreateRequest:
       type: object
@@ -7082,7 +7087,8 @@ components:
           $ref: "#/components/schemas/RobotCommandParameters"
       description: |
         START_MISSION은 missionId와 zoneId가 필수입니다.
-        RESUME_MISSION과 COMPLETE_MISSION은 빈 parameters 객체를 사용합니다.
+        RESUME_MISSION과 COMPLETE_MISSION REST 요청은 빈 parameters 객체를 사용합니다.
+        서버는 COMPLETE_MISSION 저장·MQTT 발행 시 대상 Mission 코드와 완료 사유를 보강합니다.
         나머지 명령은 reason이 필수입니다.
 
     RobotCommandResponse:

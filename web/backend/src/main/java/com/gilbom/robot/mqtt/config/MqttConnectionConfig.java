@@ -37,7 +37,10 @@ public class MqttConnectionConfig {
         options.setAutomaticReconnect(true);
         options.setMaxReconnectDelay(Math.toIntExact(
                 properties.getReconnectMaxDelay().toMillis()));
-        options.setCleanStart(true);  //연결할 때마다 이전 세션 상태를 버리고 완전히 새로 시작(LIVE)//FALSE로하면 안버리고 누적해서 받기 가능
+        // Keep the broker-side subscription session so QoS 1 messages published
+        // during a short backend disconnect can be delivered after reconnect.
+        options.setCleanStart(false);
+        options.setSessionExpiryInterval(properties.getSessionExpiry().getSeconds());
         options.setConnectionTimeout(10);
         options.setKeepAliveInterval(30);
         return options;
@@ -98,7 +101,9 @@ public class MqttConnectionConfig {
             MqttProperties properties
     ) {
         Mqttv5PahoMessageHandler handler = new Mqttv5PahoMessageHandler(clientManager);
-        handler.setDefaultTopic(properties.getPublishTopic());
+        // Deliberately do not configure a default topic. Every application
+        // publish must supply MqttHeaders.TOPIC for the target robot; otherwise
+        // it must fail instead of silently falling back to robot-test.
         handler.setDefaultQos(properties.getQos());
         handler.setAsync(true);
         return handler;

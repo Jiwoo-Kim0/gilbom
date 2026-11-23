@@ -281,16 +281,45 @@ class MockRobotMissionTest(unittest.TestCase):
                 {"mission_id": mission_id, "zone_id": "AREA-MOCK-E2E"},
             )
         )
-        self.robot.handle_command(command("COMPLETE_MISSION", {}))
+        complete = command("COMPLETE_MISSION", {
+            "mission_id": mission_id,
+            "completion_reason": "OPERATOR_COMPLETED",
+        })
+        self.robot.handle_command(complete)
 
         event = self.published_json("/events/mission")[-1]
         self.assertEqual(event["event_type"], "MISSION_COMPLETED")
         self.assertEqual(event["mission_id"], mission_id)
         self.assertEqual(
             event["result"]["completion_reason"],
-            "MOCK_COMMAND_COMPLETED",
+            "OPERATOR_COMPLETED",
         )
+        self.assertEqual(event["causation_command_id"], complete["command_id"])
         self.assertIsNone(self.robot.mission_id)
+
+    def test_complete_rejects_a_different_target_mission(self) -> None:
+        mission_id = "MIS-MOCK-E2E-TARGET"
+        self.robot.handle_command(
+            command(
+                "START_MISSION",
+                {"mission_id": mission_id, "zone_id": "AREA-MOCK-E2E"},
+            )
+        )
+
+        complete = command("COMPLETE_MISSION", {
+            "mission_id": "MIS-OTHER",
+            "completion_reason": "OPERATOR_COMPLETED",
+        })
+        self.robot.handle_command(complete)
+
+        results = [
+            result
+            for result in self.published_json("/commands/result")
+            if result["command_id"] == complete["command_id"]
+        ]
+        self.assertEqual(results[-1]["status"], "REJECTED")
+        self.assertEqual(results[-1]["reason_code"], "MISSION_MISMATCH")
+        self.assertEqual(self.robot.mission_id, mission_id)
 
     def test_complete_while_paused_is_rejected_and_keeps_mission(self) -> None:
         mission_id = "MIS-MOCK-E2E-PAUSED"

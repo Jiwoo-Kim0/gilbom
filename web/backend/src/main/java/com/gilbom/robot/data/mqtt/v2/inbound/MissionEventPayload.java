@@ -29,8 +29,39 @@ public record MissionEventPayload(
         @NotNull Instant sentAt,
         @NotNull @Positive @Min(60) @Max(300) Integer ttlSec,
         @NotBlank String missionId,
+        UUID causationCommandId,
         @Valid Result result
 ) implements MqttEventPayload {
+
+    public MissionEventPayload(
+            String schemaVersion,
+            UUID eventId,
+            EventType eventType,
+            String mqttId,
+            UUID bootId,
+            Long seq,
+            EventSource sourceComponent,
+            Instant occurredAt,
+            Instant sentAt,
+            Integer ttlSec,
+            String missionId,
+            Result result
+    ) {
+        this(
+                schemaVersion,
+                eventId,
+                eventType,
+                mqttId,
+                bootId,
+                seq,
+                sourceComponent,
+                occurredAt,
+                sentAt,
+                ttlSec,
+                missionId,
+                null,
+                result);
+    }
 
     private static final EnumSet<EventType> FINAL_EVENTS = EnumSet.of(
             EventType.MISSION_COMPLETED,
@@ -49,6 +80,15 @@ public record MissionEventPayload(
             return true;
         }
         return FINAL_EVENTS.contains(eventType) == (result != null);
+    }
+
+    @AssertTrue(
+            message = "causation_command_id is only valid for mission completion"
+    )
+    public boolean isCausationValid() {
+        return causationCommandId == null
+                || eventType == null
+                || eventType == EventType.MISSION_COMPLETED;
     }
 
     public record Result(

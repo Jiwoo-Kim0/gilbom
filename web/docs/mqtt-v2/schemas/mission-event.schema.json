@@ -43,6 +43,9 @@
     "mission_id": {
       "$ref": "common.schema.json#/definitions/nonBlankString"
     },
+    "causation_command_id": {
+      "$ref": "common.schema.json#/definitions/uuidV4"
+    },
     "result": {
       "type": "object",
       "additionalProperties": false,
@@ -96,6 +99,22 @@
         "not": {
           "required": [
             "result"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "MISSION_COMPLETED"
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "required": [
+            "causation_command_id"
           ]
         }
       }

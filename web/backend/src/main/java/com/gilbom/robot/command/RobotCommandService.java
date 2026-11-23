@@ -63,7 +63,8 @@ public class RobotCommandService {
                 new CommandRequestPayload.Parameters(
                         command.parameters().missionId(),
                         command.parameters().zoneId(),
-                        command.parameters().reason()));
+                        command.parameters().reason(),
+                        command.parameters().completionReason()));
         try {
             mqttPublisher.publishCommand(command.mqttId(), payload);
             command = lifecycleService.markSent(

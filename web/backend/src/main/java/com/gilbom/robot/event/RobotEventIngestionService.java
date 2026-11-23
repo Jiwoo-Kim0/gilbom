@@ -45,6 +45,11 @@ public class RobotEventIngestionService {
     ) {
         UUID robotId = findRobotId(payload.mqttId());
         UUID missionId = findMissionId(robotId, payload.missionId());
+        UUID causationCommandId = causationCommandId(payload);
+        requireMatchingCausation(
+                robotId,
+                missionId,
+                causationCommandId);
         OffsetDateTime occurredAt = utc(payload.occurredAt());
 
         ExistingEvent existing = findByEventId(payload.eventId());
@@ -55,6 +60,7 @@ public class RobotEventIngestionService {
                     eventType,
                     robotId,
                     missionId,
+                    causationCommandId,
                     occurredAt);
             return new RobotEventIngestionResult(
                     payload.eventId(),
@@ -62,6 +68,9 @@ public class RobotEventIngestionService {
                     missionId,
                     false);
         }
+        requireUnusedCausation(
+                causationCommandId,
+                payload.eventId());
 
         ClaimResult claim = replayProtectionService.claim(
                 eventTopic(payload),
@@ -85,6 +94,7 @@ public class RobotEventIngestionService {
                     eventType,
                     robotId,
                     missionId,
+                    causationCommandId,
                     occurredAt);
             return new RobotEventIngestionResult(
                     payload.eventId(),
@@ -103,6 +113,7 @@ public class RobotEventIngestionService {
                         boot_id,
                         seq,
                         mission_id,
+                        causation_command_id,
                         event_type,
                         source_component,
                         occurred_at,
@@ -110,6 +121,7 @@ public class RobotEventIngestionService {
                         received_at,
                         raw_payload
                     ) VALUES (
+                        ?,
                         ?,
                         ?,
                         ?,
@@ -131,6 +143,7 @@ public class RobotEventIngestionService {
                     payload.bootId(),
                     payload.seq(),
                     missionId,
+                    causationCommandId,
                     eventType.name(),
                     payload.sourceComponent().value(),
                     occurredAt,
@@ -138,6 +151,11 @@ public class RobotEventIngestionService {
                     utc(receivedAt),
                     rawPayload);
         } catch (DuplicateKeyException exception) {
+            if (isCompletionCausationConflict(exception)) {
+                throw new BusinessException(
+                        ErrorCode.MQTT_EVENT_CONFLICT,
+                        exception);
+            }
             throw new BusinessException(
                     ErrorCode.MQTT_SEQUENCE_CONFLICT,
                     exception);
@@ -154,6 +172,7 @@ public class RobotEventIngestionService {
                     eventType,
                     robotId,
                     missionId,
+                    causationCommandId,
                     occurredAt);
             return new RobotEventIngestionResult(
                     payload.eventId(),
@@ -216,6 +235,7 @@ public class RobotEventIngestionService {
                             boot_id,
                             seq,
                             mission_id,
+                            causation_command_id,
                             event_type,
                             source_component,
                             occurred_at
@@ -232,6 +252,9 @@ public class RobotEventIngestionService {
                             resultSet.getObject("boot_id", UUID.class),
                             resultSet.getLong("seq"),
                             resultSet.getObject("mission_id", UUID.class),
+                            resultSet.getObject(
+                                    "causation_command_id",
+                                    UUID.class),
                             resultSet.getString("event_type"),
                             resultSet.getString("source_component"),
                             resultSet.getObject(
@@ -247,6 +270,7 @@ public class RobotEventIngestionService {
             Enum<?> eventType,
             UUID robotId,
             UUID missionId,
+            UUID causationCommandId,
             OffsetDateTime occurredAt
     ) {
         boolean same = existing.schemaVersion().equals(
@@ -257,6 +281,9 @@ public class RobotEventIngestionService {
                 && java.util.Objects.equals(
                         existing.missionId(),
                         missionId)
+                && java.util.Objects.equals(
+                        existing.causationCommandId(),
+                        causationCommandId)
                 && existing.eventType().equals(eventType.name())
                 && existing.sourceComponent().equals(
                         payload.sourceComponent().value())
@@ -265,6 +292,72 @@ public class RobotEventIngestionService {
         if (!same) {
             throw eventConflict();
         }
+    }
+
+    private UUID causationCommandId(MqttEventPayload payload) {
+        if (payload instanceof MissionEventPayload missionEvent) {
+            return missionEvent.causationCommandId();
+        }
+        return null;
+    }
+
+    private void requireMatchingCausation(
+            UUID robotId,
+            UUID missionId,
+            UUID causationCommandId
+    ) {
+        if (causationCommandId == null) {
+            return;
+        }
+        Boolean matches = jdbcTemplate.query("""
+                        SELECT
+                            command.robot_id = ?
+                            AND command.mission_id = ?
+                            AND command.command_type = 'COMPLETE_MISSION'
+                        FROM robot.robot_command command
+                        WHERE command.command_id = ?
+                        """,
+                resultSet -> resultSet.next()
+                        ? resultSet.getBoolean(1)
+                        : Boolean.FALSE,
+                robotId,
+                missionId,
+                causationCommandId);
+        if (!Boolean.TRUE.equals(matches)) {
+            throw eventConflict();
+        }
+    }
+
+    private void requireUnusedCausation(
+            UUID causationCommandId,
+            UUID eventId
+    ) {
+        if (causationCommandId == null) {
+            return;
+        }
+        UUID existingEventId = jdbcTemplate.query("""
+                        SELECT event_id
+                        FROM telemetry.robot_event
+                        WHERE causation_command_id = ?
+                        """,
+                resultSet -> resultSet.next()
+                        ? resultSet.getObject("event_id", UUID.class)
+                        : null,
+                causationCommandId);
+        if (existingEventId != null
+                && !existingEventId.equals(eventId)) {
+            throw eventConflict();
+        }
+    }
+
+    private boolean isCompletionCausationConflict(
+            DuplicateKeyException exception
+    ) {
+        Throwable cause = exception.getMostSpecificCause();
+        return cause != null
+                && cause.getMessage() != null
+                && cause.getMessage().contains(
+                        "uq_robot_event_completion_causation");
     }
 
     private BusinessException eventConflict() {
@@ -299,6 +392,7 @@ public class RobotEventIngestionService {
             UUID bootId,
             long sequence,
             UUID missionId,
+            UUID causationCommandId,
             String eventType,
             String sourceComponent,
             OffsetDateTime occurredAt

@@ -58,6 +58,10 @@ import './command.css'
 
 const PAGE_SIZE = 20
 const MISSION_PAGE_SIZE = 100
+const IMMEDIATE_COMMAND_REASONS: Partial<Record<CommandType, string>> = {
+  PAUSE_MISSION: '운영자 즉시 일시정지',
+  EMERGENCY_STOP: '운영자 즉시 긴급정지',
+}
 
 const commandIcons = {
   START_MISSION: Play,
@@ -423,6 +427,19 @@ export function CommandControlPage({
       {missionError ? (
         <div className="page-alert" role="alert">
           임무 정보를 불러오지 못했습니다. {getApiErrorMessage(missionError)}
+        </div>
+      ) : null}
+      {immediateCommandError !== null ? (
+        <div className="page-alert command-immediate-feedback" role="alert">
+          {immediateCommandError}
+        </div>
+      ) : null}
+      {immediateCommandNotice !== null ? (
+        <div
+          className="command-immediate-feedback success"
+          role="status"
+        >
+          {immediateCommandNotice}
         </div>
       ) : null}
       {immediateCommandError !== null ? (

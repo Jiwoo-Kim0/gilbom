@@ -398,6 +398,14 @@ class RobotCommandLifecycleIntegrationTest {
                 WHERE mission_id = ?
                 """,
                 missionId);
+        markCompletionReady(missionId, Instant.now());
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT progress_percent
+                FROM robot.mission
+                WHERE mission_id = ?
+                """,
+                Double.class,
+                missionId)).isZero();
 
         RobotCommandResponse command = create(
                 new RobotCommandCreateRequest(
@@ -418,6 +426,28 @@ class RobotCommandLifecycleIntegrationTest {
         assertThat(stored.get("mission_id")).isEqualTo(missionId);
         assertThat(stored.get("patrol_area_id")).isNotNull();
         assertThat(stored.get("command_type")).isEqualTo("COMPLETE_MISSION");
+        assertThat(command.parameters().missionId())
+                .isEqualTo("MIS-" + missionId);
+        assertThat(command.parameters().completionReason())
+                .isEqualTo("OPERATOR_COMPLETED");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT progress_percent
+                FROM robot.mission
+                WHERE mission_id = ?
+                """,
+                Double.class,
+                missionId)).isZero();
+        verify(mqttPublisher).publishCommand(
+                eq(mqttId),
+                argThat(payload ->
+                        payload.commandType()
+                                == CommandRequestPayload.CommandType
+                                        .COMPLETE_MISSION
+                                && ("MIS-" + missionId).equals(
+                                        payload.parameters().missionId())
+                                && "OPERATOR_COMPLETED".equals(
+                                        payload.parameters()
+                                                .completionReason())));
     }
 
     @Test
@@ -498,6 +528,7 @@ class RobotCommandLifecycleIntegrationTest {
                         detectedAt.minusSeconds(3601),
                         java.time.ZoneOffset.UTC),
                 dueMissionId);
+        markCompletionReady(dueMissionId, detectedAt);
 
         assertThat(completionCommandDispatcher.dispatchDueMissions(detectedAt))
                 .isOne();
@@ -509,8 +540,11 @@ class RobotCommandLifecycleIntegrationTest {
                                         .COMPLETE_MISSION
                                 && payload.requestedBy().actorType()
                                 == CommandRequestPayload.ActorType.SYSTEM
-                                && payload.parameters().missionId() == null
-                                && payload.parameters().reason() == null));
+                                && ("MIS-" + dueMissionId).equals(
+                                        payload.parameters().missionId())
+                                && "PLANNED_DURATION_REACHED".equals(
+                                        payload.parameters()
+                                                .completionReason())));
         assertThat(jdbcTemplate.queryForMap("""
                 SELECT
                     command_type,
@@ -561,6 +595,43 @@ class RobotCommandLifecycleIntegrationTest {
                 pausedMissionId);
         assertThat(completionCommandDispatcher.dispatchDueMissions(detectedAt))
                 .isZero();
+    }
+
+    @Test
+    void automaticCompletionWaitsForOnlineFreshMatchingRobotState() {
+        UUID missionId = createPausedMission();
+        Instant detectedAt = Instant.now();
+        jdbcTemplate.update("""
+                UPDATE robot.mission
+                SET status = 'RUNNING',
+                    started_at = ?
+                WHERE mission_id = ?
+                """,
+                java.time.OffsetDateTime.ofInstant(
+                        detectedAt.minusSeconds(3601),
+                        java.time.ZoneOffset.UTC),
+                missionId);
+
+        assertThat(completionCommandDispatcher.dispatchDueMissions(detectedAt))
+                .isZero();
+
+        markCompletionReady(missionId, detectedAt.minusSeconds(16));
+        assertThat(completionCommandDispatcher.dispatchDueMissions(detectedAt))
+                .isZero();
+
+        markCompletionReady(missionId, detectedAt);
+        jdbcTemplate.update("""
+                UPDATE telemetry.robot_current_state
+                SET mission_id = NULL
+                WHERE robot_id = ?
+                """,
+                robotId);
+        assertThat(completionCommandDispatcher.dispatchDueMissions(detectedAt))
+                .isZero();
+
+        markCompletionReady(missionId, detectedAt);
+        assertThat(completionCommandDispatcher.dispatchDueMissions(detectedAt))
+                .isOne();
     }
 
     @Test
@@ -774,6 +845,49 @@ class RobotCommandLifecycleIntegrationTest {
                 USER_ID,
                 USER_ID);
         return missionId;
+    }
+
+    private void markCompletionReady(UUID missionId, Instant observedAt) {
+        jdbcTemplate.update("""
+                INSERT INTO telemetry.robot_current_state (
+                    robot_id,
+                    connectivity_status,
+                    robot_mode,
+                    mission_id,
+                    mission_status,
+                    telemetry_sampled_at,
+                    telemetry_received_at,
+                    updated_at
+                ) VALUES (
+                    ?,
+                    'ONLINE',
+                    'PATROLLING',
+                    ?,
+                    'RUNNING',
+                    ?,
+                    ?,
+                    ?
+                )
+                ON CONFLICT (robot_id) DO UPDATE
+                SET connectivity_status = EXCLUDED.connectivity_status,
+                    robot_mode = EXCLUDED.robot_mode,
+                    mission_id = EXCLUDED.mission_id,
+                    mission_status = EXCLUDED.mission_status,
+                    telemetry_sampled_at = EXCLUDED.telemetry_sampled_at,
+                    telemetry_received_at = EXCLUDED.telemetry_received_at,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                robotId,
+                missionId,
+                java.time.OffsetDateTime.ofInstant(
+                        observedAt,
+                        java.time.ZoneOffset.UTC),
+                java.time.OffsetDateTime.ofInstant(
+                        observedAt,
+                        java.time.ZoneOffset.UTC),
+                java.time.OffsetDateTime.ofInstant(
+                        observedAt,
+                        java.time.ZoneOffset.UTC));
     }
 
     private CommandResultPayload result(

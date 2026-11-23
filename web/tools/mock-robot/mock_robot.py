@@ -846,6 +846,7 @@ class MockRobot:
         *,
         duration_sec: int | None = None,
         completion_reason: str | None = None,
+        causation_command_id: str | None = None,
         incident_count: int | None = None,
         normal_detection_count: int | None = None,
     ) -> dict[str, Any]:
@@ -884,6 +885,8 @@ class MockRobot:
                 "normal_detection_count": max(0, normal_detection_count),
                 "completion_reason": completion_reason,
             }
+        if causation_command_id is not None:
+            event["causation_command_id"] = causation_command_id
         return event
 
     def publish_mission_event(
@@ -893,6 +896,7 @@ class MockRobot:
         *,
         duration_sec: int | None = None,
         completion_reason: str | None = None,
+        causation_command_id: str | None = None,
         incident_count: int | None = None,
         normal_detection_count: int | None = None,
     ) -> None:
@@ -901,6 +905,7 @@ class MockRobot:
             mission_id,
             duration_sec=duration_sec,
             completion_reason=completion_reason,
+            causation_command_id=causation_command_id,
             incident_count=incident_count,
             normal_detection_count=normal_detection_count,
         )
@@ -1170,11 +1175,19 @@ class MockRobot:
                     duration_sec=duration_sec,
                     completion_reason=(
                         (
-                            "MOCK_COMMAND_COMPLETED"
+                            command.get("parameters", {}).get(
+                                "completion_reason",
+                                "OPERATOR_COMPLETED",
+                            )
                             if event_type == "MISSION_COMPLETED"
                             else "MOCK_COMMAND_CANCELLED"
                         )
                         if terminal
+                        else None
+                    ),
+                    causation_command_id=(
+                        command_id
+                        if event_type == "MISSION_COMPLETED"
                         else None
                     ),
                     incident_count=(incident_count_before if terminal else None),
@@ -1253,6 +1266,22 @@ class MockRobot:
             if command_type == "COMPLETE_MISSION":
                 if self.mission_id is None:
                     return "FAILED", "NO_ACTIVE_MISSION"
+                target_mission_id = parameters.get("mission_id")
+                completion_reason = parameters.get("completion_reason")
+                has_target = target_mission_id is not None
+                has_reason = completion_reason is not None
+                if has_target != has_reason:
+                    return "REJECTED", "INVALID_PARAMETERS"
+                if has_target:
+                    if (
+                        not isinstance(target_mission_id, str)
+                        or not target_mission_id.strip()
+                        or not isinstance(completion_reason, str)
+                        or not completion_reason.strip()
+                    ):
+                        return "REJECTED", "INVALID_PARAMETERS"
+                    if target_mission_id != self.mission_id:
+                        return "REJECTED", "MISSION_MISMATCH"
                 if self.mode == "SAFE_STOP":
                     return "REJECTED", "SAFETY_CONDITION_NOT_CLEARED"
                 if self.mission_state != "RUNNING":

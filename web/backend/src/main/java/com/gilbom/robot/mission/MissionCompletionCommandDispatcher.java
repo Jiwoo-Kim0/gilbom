@@ -49,7 +49,11 @@ public class MissionCompletionCommandDispatcher {
                 new CommandRequestPayload.RequestedBy(
                         CommandRequestPayload.ActorType.SYSTEM,
                         SYSTEM_ACTOR_ID),
-                new CommandRequestPayload.Parameters(null, null, null));
+                new CommandRequestPayload.Parameters(
+                        command.parameters().missionId(),
+                        command.parameters().zoneId(),
+                        command.parameters().reason(),
+                        command.parameters().completionReason()));
         try {
             mqttPublisher.publishCommand(command.mqttId(), payload);
             lifecycleService.markSent(command.commandId(), attemptedAt);

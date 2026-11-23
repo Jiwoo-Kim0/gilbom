@@ -27,6 +27,7 @@ class MqttConnectionConfigTest {
         properties.setUsername("backend");
         properties.setPassword("secret");
         properties.setReconnectMaxDelay(Duration.ofSeconds(5));
+        properties.setSessionExpiry(Duration.ofHours(1));
 
         MqttSecurityStrategy strategy = new MqttSecurityStrategy() {
             @Override
@@ -53,6 +54,8 @@ class MqttConnectionConfigTest {
 
         assertThat(options.isAutomaticReconnect()).isTrue();
         assertThat(options.getMaxReconnectDelay()).isEqualTo(5_000);
+        assertThat(options.isCleanStart()).isFalse();
+        assertThat(options.getSessionExpiryInterval()).isEqualTo(3_600L);
     }
 
     @Test

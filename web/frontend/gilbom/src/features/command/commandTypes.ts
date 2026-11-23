@@ -28,6 +28,7 @@ export type CommandParameters = {
   missionId: string | null
   zoneId: string | null
   reason: string | null
+  completionReason: string | null
 }
 
 type StartMissionCommandCreateRequest = {

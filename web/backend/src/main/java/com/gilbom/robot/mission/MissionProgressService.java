@@ -45,8 +45,11 @@ public class MissionProgressService {
                             )
                         ) AS progress_percent
                     FROM robot.mission mission
+                    JOIN telemetry.robot_current_state current_state
+                      ON current_state.robot_id = mission.robot_id
                     WHERE mission.mission_id = ?
                       AND mission.status IN ('RUNNING', 'PAUSED')
+                      AND current_state.connectivity_status = 'ONLINE'
                       AND mission.started_at IS NOT NULL
                       AND ? >= mission.started_at
                       AND NOT EXISTS (

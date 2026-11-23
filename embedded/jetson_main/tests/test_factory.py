@@ -657,8 +657,12 @@ def test_mission_completed_has_result(factory):
         incident_count=7,
         normal_detection_count=143,
         completion_reason="ROUTE_COMPLETED",
+        causation_command_id="7b53b753-bd52-4bd2-9909-e347d13df916",
     )
     assert payload["source_component"] == "mission"
+    assert payload["causation_command_id"] == (
+        "7b53b753-bd52-4bd2-9909-e347d13df916"
+    )
     assert payload["result"] == {
         "duration_sec": 4182,
         "incident_count": 7,

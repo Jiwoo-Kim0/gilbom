@@ -13,6 +13,7 @@ import com.gilbom.defect.IncidentEventIngestionService;
 import com.gilbom.robot.event.RobotEventIngestionService;
 import com.gilbom.robot.mission.MissionEventIngestionService;
 import com.gilbom.robot.mqtt.topic.MqttTopicType;
+import com.gilbom.robot.mqtt.receipt.IngestReceiptCoordinator;
 import com.gilbom.robot.status.RobotStatusIngestionService;
 import com.gilbom.robot.telemetry.TelemetryIngestionService;
 import org.junit.jupiter.api.Test;
@@ -35,13 +36,17 @@ class MqttTopicMessageHandlerRegistrationTest {
                 new TelemetryMqttMessageHandler(
                         mock(TelemetryIngestionService.class)),
                 new IncidentEventMqttMessageHandler(
-                        mock(IncidentEventIngestionService.class)),
+                        mock(IncidentEventIngestionService.class),
+                        mock(IngestReceiptCoordinator.class)),
                 new BatteryEventMqttMessageHandler(
-                        mock(RobotEventIngestionService.class)),
+                        mock(RobotEventIngestionService.class),
+                        mock(IngestReceiptCoordinator.class)),
                 new SafetyEventMqttMessageHandler(
-                        mock(RobotEventIngestionService.class)),
+                        mock(RobotEventIngestionService.class),
+                        mock(IngestReceiptCoordinator.class)),
                 new MissionEventMqttMessageHandler(
-                        mock(MissionEventIngestionService.class)),
+                        mock(MissionEventIngestionService.class),
+                        mock(IngestReceiptCoordinator.class)),
                 new CommandResultMqttMessageHandler(
                         mock(RobotCommandResultIngestionService.class))
         );
